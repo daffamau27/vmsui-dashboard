@@ -1,0 +1,161 @@
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+
+function safeJsonParse(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+export function getAccessToken() {
+  if (typeof localStorage === "undefined") return null;
+  return localStorage.getItem("accessToken");
+}
+
+export function getRefreshToken() {
+  if (typeof localStorage === "undefined") return null;
+  return localStorage.getItem("refreshToken");
+}
+
+export function saveAuthTokens(data) {
+  const accessToken =
+    data?.accessToken ||
+    data?.token ||
+    data?.jwt ||
+    data?.data?.accessToken ||
+    data?.data?.token ||
+    null;
+
+  const refreshToken =
+    data?.refreshToken ||
+    data?.data?.refreshToken ||
+    null;
+
+  if (accessToken) {
+    localStorage.setItem("accessToken", accessToken);
+  }
+
+  if (refreshToken) {
+    localStorage.setItem("refreshToken", refreshToken);
+  }
+
+  return { accessToken, refreshToken };
+}
+
+export function clearAuthStorage() {
+  if (typeof localStorage === "undefined") return;
+
+  localStorage.removeItem("accessToken");
+  localStorage.removeItem("refreshToken");
+  localStorage.removeItem("currentUser");
+}
+
+export async function apiRequest(path, options = {}) {
+  const token = getAccessToken();
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {})
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers
+  });
+
+  const text = await response.text();
+  const data = safeJsonParse(text);
+
+  if (!response.ok) {
+    const message =
+      data?.message ||
+      data?.error ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(message);
+  }
+
+  return data;
+}
+
+export async function loginApi({ username, password }) {
+  const response = await apiRequest("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password })
+  });
+
+  saveAuthTokens(response);
+
+  return response;
+}
+
+export async function logoutApi() {
+  try {
+    await apiRequest("/auth/logout", {
+      method: "POST"
+    });
+  } finally {
+    clearAuthStorage();
+  }
+}
+
+export async function refreshTokenApi() {
+  const refreshToken = getRefreshToken();
+
+  if (!refreshToken) {
+    throw new Error("Refresh token tidak tersedia.");
+  }
+
+  const response = await apiRequest("/auth/refresh", {
+    method: "POST",
+    body: JSON.stringify({ refreshToken })
+  });
+
+  saveAuthTokens(response);
+
+  return response;
+}
+
+export async function getCurrentUserApi() {
+  return await apiRequest("/users/current-user", {
+    method: "GET"
+  });
+}
+
+export async function downloadApiFile(path, fileName = "download.xlsx") {
+  const token = localStorage.getItem("accessToken") || localStorage.getItem("token");
+
+  const baseUrl =
+    import.meta.env.VITE_API_BASE_URL ||
+    import.meta.env.VITE_BACKEND_BASE_URL ||
+    "";
+
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "GET",
+    headers: {
+      Authorization: token ? `Bearer ${token}` : ""
+    }
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(text || `Download gagal. Status ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  window.URL.revokeObjectURL(url);
+}

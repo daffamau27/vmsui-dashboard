@@ -1,0 +1,8 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Vessel Marker</title>
+  <desc>Default vessel marker icon facing north/up for map heading rotation.</desc>
+  <path
+    d="M32 5 L54 56 L34 44 L30 44 L10 56 Z"
+    fill="#111111"
+  />
+</svg>

@@ -1,0 +1,226 @@
+import { apiRequest } from "$lib/api/authApi.js";
+
+function toNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function normalizeEngine(item) {
+  return {
+    id: item?.id,
+    vesselId: item?.vesselId,
+    engineKeyThingsboard: item?.engineKeyThingsboard || "",
+    engineName: item?.engineName || "-",
+
+    // Alias agar mudah dipakai di halaman report
+    key: item?.engineKeyThingsboard || "",
+    name: item?.engineName || "-"
+  };
+}
+
+function normalizeFleetVessel(item) {
+  return {
+    id: String(item?.id ?? item?.vesselId),
+    vesselId: item?.id ?? item?.vesselId,
+    dbId: item?.id ?? item?.vesselId,
+
+    deviceId: item?.deviceId || "",
+
+    name:
+      item?.vesselName ||
+      item?.deviceName ||
+      item?.name ||
+      "-",
+
+    vesselName:
+      item?.vesselName ||
+      item?.deviceName ||
+      item?.name ||
+      "-",
+
+    deviceName:
+      item?.deviceName ||
+      item?.vesselName ||
+      item?.name ||
+      "-",
+
+    companyId: item?.companyId ?? null,
+    companyName: item?.companyName || "-",
+
+    lat: toNumber(item?.latitude ?? item?.lat, 0),
+    lng: toNumber(item?.longitude ?? item?.lng, 0),
+    latitude: toNumber(item?.latitude ?? item?.lat, 0),
+    longitude: toNumber(item?.longitude ?? item?.lng, 0),
+
+    speed: toNumber(item?.speed, 0),
+    heading: toNumber(item?.heading, 0),
+    online:
+      item?.online === true
+        ? true
+        : item?.online === false
+          ? false
+          : null,
+
+    hireStatus: item?.hireStatus || "-",
+    lastUpdated: item?.lastUpdated || "-",
+    lastConnectTime: item?.lastConnectTime || "-",
+    lastDisconnectTime: item?.lastDisconnectTime || "-",
+
+    voyageProgress: item?.voyageProgress || null,
+    engines: Array.isArray(item?.engines) ? item.engines : [],
+    weather: item?.weather || null,
+    oceanCurrent: item?.oceanCurrent || null,
+
+    raw: item
+  };
+}
+
+export async function getFleetVessels() {
+  const response = await apiRequest("/users/my-vessels", {
+    method: "GET"
+  });
+
+  const rows = Array.isArray(response)
+    ? response
+    : Array.isArray(response?.data)
+      ? response.data
+      : Array.isArray(response?.vessels)
+        ? response.vessels
+        : [];
+
+  return rows.map(normalizeFleetVessel);
+}
+
+function normalizeLiveVessel(item) {
+  const vesselId = item?.vesselId ?? item?.id;
+
+  return {
+    id: String(vesselId),
+    vesselId,
+    dbId: vesselId,
+
+    name: item?.vesselName || item?.name || "-",
+    vesselName: item?.vesselName || item?.name || "-",
+    deviceId: item?.deviceId || "",
+
+    companyName: item?.companyName || "-",
+
+    latitude: toNumber(item?.latitude, null),
+    longitude: toNumber(item?.longitude, null),
+    lat: toNumber(item?.latitude, null),
+    lng: toNumber(item?.longitude, null),
+
+    speed: toNumber(item?.speed, null),
+    heading: toNumber(item?.heading, null),
+    online: item?.online === undefined || item?.online === null ? null : Boolean(item.online),
+
+    hireStatus: item?.hireStatus || "-",
+    lastConnectTime: item?.lastConnectTime || "-",
+    lastDisconnectTime: item?.lastDisconnectTime || "-",
+    lastUpdated: item?.lastUpdated || "-",
+
+    voyageProgress: item?.voyageProgress || null,
+
+    // Ini engine live RPM dari ThingsBoard
+    liveEngines: Array.isArray(item?.engines) ? item.engines : [],
+
+    weather: item?.weather || null,
+    oceanCurrent: item?.oceanCurrent || null,
+
+    rawLive: item
+  };
+}
+
+export async function getFleetVesselLiveDetail(vesselId) {
+  if (!vesselId) {
+    throw new Error("vesselId wajib diisi.");
+  }
+
+  const response = await apiRequest(`/fleet/vessels/${vesselId}`, {
+    method: "GET"
+  });
+
+  const data = response?.data || response?.vessel || response;
+
+  return normalizeLiveVessel(data);
+}
+
+export async function getFleetVesselDetail(vesselId) {
+  const response = await apiRequest(`/vessels/${vesselId}`, {
+    method: "GET"
+  });
+
+  const data = response?.data || response;
+
+  return normalizeFleetVessel(data);
+}
+
+export async function getFleetVesselsWithEngines() {
+  const vessels = await getFleetVessels();
+
+  const rows = await Promise.all(
+    vessels.map(async (vessel) => {
+      try {
+        const detail = await getFleetVesselLiveDetail(vessel.vesselId);
+
+        return {
+          ...vessel,
+          ...detail,
+
+          id: String(vessel.vesselId),
+          vesselId: vessel.vesselId,
+          dbId: vessel.dbId ?? vessel.vesselId,
+
+          deviceId: detail?.deviceId || vessel.deviceId,
+          name: detail?.vesselName || vessel.vesselName || vessel.name,
+          vesselName: detail?.vesselName || vessel.vesselName || vessel.name,
+
+          engines: Array.isArray(detail?.engines)
+            ? detail.engines
+            : Array.isArray(vessel?.engines)
+              ? vessel.engines
+              : [],
+
+          raw: {
+            vessel,
+            detail
+          }
+        };
+      } catch (error) {
+        console.error("[FLEET_API][LIVE_DETAIL_ERROR]", vessel, error);
+        return vessel;
+      }
+    })
+  );
+
+  return rows;
+}
+
+export async function getFleetAssets() {
+  const response = await apiRequest("/fleet/assets", {
+    method: "GET"
+  });
+
+  const rows = Array.isArray(response)
+    ? response
+    : Array.isArray(response?.data)
+      ? response.data
+      : Array.isArray(response?.assets)
+        ? response.assets
+        : [];
+
+  return rows.map((item) => ({
+    id: String(item.id || item.assetId),
+    dbId: item.id,
+    assetId: item.assetId || "",
+    name: item.assetName || item.name || "-",
+    assetName: item.assetName || item.name || "-",
+    latitude: Number(item.latitude ?? item.lat ?? 0),
+    longitude: Number(item.longitude ?? item.lng ?? 0),
+    lat: Number(item.latitude ?? item.lat ?? 0),
+    lng: Number(item.longitude ?? item.lng ?? 0),
+    type: item.type || item.assetType || "Asset",
+    description: item.description || "",
+    raw: item
+  }));
+}
