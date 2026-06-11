@@ -55,32 +55,56 @@ export async function apiRequest(path, options = {}) {
   const token = getAccessToken();
 
   const headers = {
-    "Content-Type": "application/json",
     ...(options.headers || {})
   };
 
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
+  const isFormData = options.body instanceof FormData;
+
+  if (!isFormData && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
   }
 
+  if (token) {
+    headers.Authorization = token.startsWith("Bearer ")
+      ? token
+      : `Bearer ${token}`;
+  }
+
+  const { rawResponse, ...fetchOptions } = options;
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
+    ...fetchOptions,
     headers
   });
 
-  const text = await response.text();
-  const data = safeJsonParse(text);
-
   if (!response.ok) {
+    const text = await response.text();
+    const data = safeJsonParse(text);
+
     const message =
       data?.message ||
       data?.error ||
+      text ||
       `Request failed with status ${response.status}`;
 
     throw new Error(message);
   }
 
-  return data;
+  if (rawResponse) {
+    return response;
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  const text = await response.text();
+
+  if (!text) {
+    return null;
+  }
+
+  return safeJsonParse(text);
 }
 
 export async function loginApi({ username, password }) {
@@ -127,6 +151,32 @@ export async function getCurrentUserApi() {
   });
 }
 
+export async function getMyVesselsApi() {
+  return await apiRequest("/users/my-vessels", {
+    method: "GET"
+  });
+}
+
+export async function getMyAssetsApi() {
+  return await apiRequest("/users/my-assets", {
+    method: "GET"
+  });
+}
+
+export async function updateCurrentUserApi(payload) {
+  return await apiRequest("/users/current-user", {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function changePasswordApi(payload) {
+  return await apiRequest("/users/change-password", {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
 export async function downloadApiFile(path, fileName = "download.xlsx") {
   const token = localStorage.getItem("accessToken") || localStorage.getItem("token");
 
@@ -138,7 +188,11 @@ export async function downloadApiFile(path, fileName = "download.xlsx") {
   const response = await fetch(`${baseUrl}${path}`, {
     method: "GET",
     headers: {
-      Authorization: token ? `Bearer ${token}` : ""
+      Authorization: token
+        ? token.startsWith("Bearer ")
+          ? token
+          : `Bearer ${token}`
+        : ""
     }
   });
 

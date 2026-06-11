@@ -20,15 +20,60 @@
   let vesselLoading = $state(false);
   let vesselError = $state("");
 
+  let permissionLoading = $state(true);
+  let permissionMode = $state("selected");
+  let permissions = $state([]);
+
   const vesselMenus = [
-    { label: "Dashboard", key: "dashboard" },
-    { label: "Daily Report", key: "daily-report" },
-    { label: "Monthly Report", key: "monthly-report" },
-    { label: "Periodical Report", key: "periodical-report" },
-    { label: "Voyage Plan", key: "voyage-plan" },
-    { label: "Trace", key: "trace" },
-    { label: "Data Log", key: "data-log" }
+    {
+      label: "Dashboard",
+      key: "dashboard",
+      permissions: ["access_dashboard"]
+    },
+    {
+      label: "Daily Report",
+      key: "daily-report",
+      permissions: ["access_daily_report"]
+    },
+    {
+      label: "Monthly Report",
+      key: "monthly-report",
+      permissions: ["access_monthly_report"]
+    },
+    {
+      label: "Periodical Report",
+      key: "periodical-report",
+      permissions: ["access_periodical_report"]
+    },
+    {
+      label: "Voyage Plan",
+      key: "voyage-plan",
+      // view_voyage_plan_vessel mengikuti request.
+      // access_voyage_plan dipertahankan sebagai alias karena masih muncul pada contoh response API.
+      permissions: ["view_voyage_plan_vessel", "access_voyage_plan"]
+    },
+    {
+      label: "Trace",
+      key: "trace",
+      permissions: ["access_trace"]
+    },
+    {
+      label: "Data Log",
+      key: "data-log",
+      permissions: ["access_data_log"]
+    }
   ];
+
+  function hasPermission(permissionKeys = []) {
+    if (permissionMode === "all") return true;
+    if (!Array.isArray(permissionKeys) || !permissionKeys.length) return true;
+
+    return permissionKeys.some((permissionKey) => permissions.includes(permissionKey));
+  }
+
+  let visibleVesselMenus = $derived(
+    vesselMenus.filter((menu) => hasPermission(menu.permissions))
+  );
 
   function normalizeMyVessel(item) {
     return {
@@ -65,9 +110,52 @@
     return rows.map(normalizeMyVessel);
   }
 
+  async function loadCurrentUserPermissions() {
+    permissionLoading = true;
+
+    try {
+      const response = await apiRequest("/users/current-user", {
+        method: "GET"
+      });
+
+      const permissionAccess = response?.data?.permissionAccess || {};
+
+      permissionMode = permissionAccess?.mode || "selected";
+      permissions = Array.isArray(permissionAccess?.permissions)
+        ? permissionAccess.permissions
+        : [];
+
+      console.log("[NAVBAR][CURRENT_USER_PERMISSION]", {
+        mode: permissionMode,
+        permissions
+      });
+    } catch (err) {
+      console.error("[NAVBAR][CURRENT_USER_PERMISSION][ERROR]", err);
+      permissionMode = "selected";
+      permissions = [];
+    } finally {
+      permissionLoading = false;
+    }
+  }
+
   let activeMenu = $derived(
-    vesselMenus.find((menu) => menu.key === $activeVesselMenu)?.label || "Dashboard"
+    visibleVesselMenus.find((menu) => menu.key === $activeVesselMenu)?.label ||
+      visibleVesselMenus[0]?.label ||
+      (permissionLoading ? "Loading..." : "No Access")
   );
+
+  $effect(() => {
+    if (permissionLoading) return;
+    if (!visibleVesselMenus.length) return;
+
+    const activeMenuStillAllowed = visibleVesselMenus.some(
+      (menu) => menu.key === $activeVesselMenu
+    );
+
+    if (!activeMenuStillAllowed) {
+      setActiveVesselMenu(visibleVesselMenus[0].key);
+    }
+  });
 
   let selectedVessel = $derived(
     $selectedVesselInfo?.vesselName ||
@@ -115,6 +203,8 @@
   }
 
   function selectMenu(menu) {
+    if (!hasPermission(menu.permissions)) return;
+
     dropdownOpen = false;
     setActiveVesselMenu(menu.key);
   }
@@ -134,6 +224,7 @@
       Ini penting kalau Navbar dirender segera setelah login.
     */
     setTimeout(() => {
+      loadCurrentUserPermissions();
       loadNavbarVessels();
     }, 150);
   });
@@ -149,15 +240,21 @@
 
       {#if dropdownOpen}
         <div class="dropdown-menu">
-          {#each vesselMenus as menu}
-            <button
-              class="dropdown-item"
-              class:active-item={$activeVesselMenu === menu.key}
-              onclick={() => selectMenu(menu)}
-            >
-              {menu.label}
-            </button>
-          {/each}
+          {#if permissionLoading}
+            <div class="dropdown-empty">Loading menu...</div>
+          {:else if visibleVesselMenus.length}
+            {#each visibleVesselMenus as menu}
+              <button
+                class="dropdown-item"
+                class:active-item={$activeVesselMenu === menu.key}
+                onclick={() => selectMenu(menu)}
+              >
+                {menu.label}
+              </button>
+            {/each}
+          {:else}
+            <div class="dropdown-empty">Tidak ada akses menu.</div>
+          {/if}
         </div>
       {/if}
     </div>
@@ -292,6 +389,14 @@
     text-align: left;
     cursor: pointer;
     font-size: 13px;
+  }
+
+  .dropdown-empty {
+    padding: 10px 14px;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
   }
 
   .dropdown-item:hover {

@@ -6,6 +6,7 @@
   import VesselPage from "$lib/pages/VesselPage.svelte";
   import AllVesselSummaryPage from "$lib/pages/AllVesselSummaryPage.svelte";
   import AlarmPage from "$lib/pages/AlarmPage.svelte";
+  import AuditLogPage from "$lib/pages/AuditLogPage.svelte";
   import VoyagePlansPage from "$lib/pages/VoyagePlansPage.svelte";
 </script>
 
@@ -43,6 +44,13 @@
     class:active-page={$activeMenu === "alarm"}
   >
     <AlarmPage />
+  </section>
+
+  <section
+    class="keep-page scroll-page"
+    class:active-page={$activeMenu === "audit-log"}
+  >
+    <AuditLogPage />
   </section>
 
   <section
@@ -99,7 +107,8 @@
   /* Root halaman sidebar harus mengisi tinggi parent */
   .scroll-page :global(.page-shell),
   .scroll-page :global(.placeholder-page),
-  .scroll-page :global(.avs-page) {
+  .scroll-page :global(.avs-page),
+  .scroll-page :global(.audit-log-page) {
     min-height: 100%;
     box-sizing: border-box;
   }

@@ -26,7 +26,7 @@ export async function getVesselTrace({
   }
 
   const response = await apiRequest(
-    `/dashboard/vessels/${vesselId}/trace?${params.toString()}`,
+    `/trace/vessels/${vesselId}?${params.toString()}`,
     {
       method: "GET"
     }

@@ -1,5 +1,4 @@
 <script>
-  import { onMount } from "svelte";
   import RpmCard from "$lib/RpmCard.svelte";
   import VesselMap from "$lib/VesselMap.svelte";
   import {
@@ -8,14 +7,69 @@
   } from "$lib/stores/selectedVessel.svelte.js";
   import { getVesselDashboard } from "$lib/api/dashboardApi.js";
   import { getFleetVesselLiveDetail } from "$lib/api/fleetApi.js";
+  import { apiRequest } from "$lib/api/authApi.js";
 
   let loading = $state(false);
   let error = $state("");
   let dashboardData = $state(null);
   let liveVesselDetail = $state(null);
 
+  let currentUser = $state(null);
+  let currentUserLoading = $state(false);
+  let currentUserError = $state("");
+
   let { active = false } = $props();
   let loadedKeys = $state({});
+
+
+  async function loadCurrentUser() {
+    if (currentUser || currentUserLoading) return currentUser;
+
+    currentUserLoading = true;
+    currentUserError = "";
+
+    try {
+      const response = await apiRequest("/users/current-user", {
+        method: "GET"
+      });
+
+      currentUser = response?.data || response?.user || response || null;
+
+      console.log("[CURRENT_USER_PERMISSION_DASHBOARD]", currentUser);
+
+      return currentUser;
+    } catch (err) {
+      console.error("[CURRENT_USER_PERMISSION_DASHBOARD_ERROR]", err);
+      currentUserError = err?.message || "Gagal memuat permission user.";
+      currentUser = null;
+      return null;
+    } finally {
+      currentUserLoading = false;
+    }
+  }
+
+  function hasPermissionForUser(user, permissionKey) {
+    if (!permissionKey) return true;
+
+    const permissionAccess = user?.permissionAccess || {};
+    const mode = permissionAccess?.mode;
+
+    if (mode === "all") return true;
+
+    if (mode === "selected") {
+      const permissions = Array.isArray(permissionAccess?.permissions)
+        ? permissionAccess.permissions
+        : [];
+
+      return permissions.includes(permissionKey);
+    }
+
+    return false;
+  }
+
+  function hasPermission(permissionKey) {
+    return hasPermissionForUser(currentUser, permissionKey);
+  }
 
   function normalizeEngineName(value) {
     return String(value || "")
@@ -52,7 +106,8 @@
 
     const found = liveEngines.find((item) => {
       const liveName = normalizeEngineName(item?.name || item?.engineName);
-      return liveName === configName || liveName.includes(configName);
+      if (!configName || !liveName) return false;
+      return liveName === configName || liveName.includes(configName) || configName.includes(liveName);
     });
 
     const rpm = Number(found?.rpm ?? found?.value ?? found?.latestRpm);
@@ -60,17 +115,41 @@
     return Number.isFinite(rpm) ? rpm : null;
   }
 
-  function formatOnlineStatus(value) {
+  function isMissingValue(value) {
+    return value === null || value === undefined || value === "" || value === "-";
+  }
+
+  function formatOnlineStatus(value, fallbackData = null) {
     if (value === true) return true;
     if (value === false) return false;
-    return false;
+
+    const receivedMinutes = Number(fallbackData?.dataReceivedStats?.received_minutes);
+    if (Number.isFinite(receivedMinutes) && receivedMinutes > 0) return true;
+
+    return Boolean(fallbackData?.updatedAt || fallbackData?.localTime || fallbackData?.vesselLocalTime);
   }
-  const cctvItems = [
-    { name: "CCTV 1", status: "Live", location: "Front Deck" },
-    { name: "CCTV 2", status: "Live", location: "Engine Room" },
-    { name: "CCTV 3", status: "Live", location: "Port Side" },
-    { name: "CCTV 4", status: "Offline", location: "STBD Side" }
-  ];
+
+  function normalizeCctvList(value) {
+    const rawList = Array.isArray(value)
+      ? value
+      : Array.isArray(value?.items)
+        ? value.items
+        : Array.isArray(value?.cameras)
+          ? value.cameras
+          : [];
+
+    return rawList.map((item, index) => {
+      const statusText = String(item?.status || (item?.online === false ? "Offline" : "Live"));
+
+      return {
+        name: item?.name || item?.cameraName || `CCTV ${index + 1}`,
+        status: statusText,
+        location: item?.location || item?.position || "-",
+        url: item?.url || item?.streamUrl || item?.snapshotUrl || "",
+        online: item?.online !== false && statusText.toLowerCase() !== "offline"
+      };
+    });
+  }
 
   function toNumber(value, fallback = 0) {
     const number = Number(value);
@@ -153,7 +232,8 @@
     heading: toNumber(currentVessel?.heading, null),
 
     online: formatOnlineStatus(
-      dashboardData?.online ?? currentVessel?.online
+      dashboardData?.online ?? currentVessel?.online,
+      dashboardData
     ),
 
     vesselLocalTime:
@@ -181,17 +261,29 @@
       ? `${formatNumber(dashboardData.weatherForecast.current.temp_c, 1)}°C · ${dashboardData.weatherForecast.current.condition || "-"}`
       : currentVessel?.weather?.current
         ? `${formatNumber(currentVessel.weather.current.temp_c, 1)}°C · ${currentVessel.weather.current.condition || "-"}`
-        : "-"
+        : "-",
+
+    weatherDetail: dashboardData?.weatherForecast?.current || currentVessel?.weather?.current || null,
+    weatherTomorrow: dashboardData?.weatherForecast?.tomorrow || null,
+    weatherDayAfter: dashboardData?.weatherForecast?.day_after || null,
+    dataReceivedStats: dashboardData?.dataReceivedStats || null,
+    oceanCurrent: dashboardData?.oceanCurrent || null
   });
 
   let rpmCards = $derived(
-    getConfigEnginesFromVessel(currentVessel).map((engine) => {
-      const dashboardEngine = getDashboardEngineByConfig(engine);
+    (getConfigEnginesFromVessel(currentVessel).length
+      ? getConfigEnginesFromVessel(currentVessel)
+      : Array.isArray(dashboardData?.engines)
+        ? dashboardData.engines
+        : []
+    ).map((engine) => {
+      const dashboardEngine = getDashboardEngineByConfig(engine) || engine;
       const liveRpm = getLiveRpmByConfigEngine(currentVessel, engine);
 
       const lastRpm = Number(
         dashboardEngine?.last_rpm ??
           dashboardEngine?.lastRpm ??
+          dashboardEngine?.rpm ??
           liveRpm
       );
 
@@ -221,7 +313,25 @@
   );
 
   let fodUsage = $derived(dashboardData?.fodUsage || {});
-  let consumptionFms = $derived(toNumber(dashboardData?.consumptionFms, 0));
+  let cctvItems = $derived(normalizeCctvList(dashboardData?.cctv));
+
+  let dataReceivedSummary = $derived({
+    receivedMinutes: dashboardData?.dataReceivedStats?.received_minutes ?? 0,
+    totalMinutes: dashboardData?.dataReceivedStats?.total_minutes ?? 1440,
+    percentage: dashboardData?.dataReceivedStats?.percentage ?? 0
+  });
+
+  let weatherSummary = $derived({
+    current: dashboardData?.weatherForecast?.current || null,
+    tomorrow: dashboardData?.weatherForecast?.tomorrow || null,
+    dayAfter: dashboardData?.weatherForecast?.day_after || null
+  });
+
+  let oceanCurrentSummary = $derived({
+    current: dashboardData?.oceanCurrent?.current || null,
+    tomorrow: dashboardData?.oceanCurrent?.tomorrow || null,
+    dayAfter: dashboardData?.oceanCurrent?.day_after || null
+  });
 
   let speedSummary = $derived({
     topSpeed:
@@ -257,13 +367,100 @@
 
     return dashboardEngines.find((item) => {
       const dashboardName = normalizeEngineName(item?.name || item?.engineName);
-      return dashboardName === configName || dashboardName.includes(configName);
+      if (!configName || !dashboardName) return false;
+      return dashboardName === configName || dashboardName.includes(configName) || configName.includes(dashboardName);
     });
   }
 
+
+  let canAccessDashboard = $derived(
+    hasPermission("access_dashboard") || hasPermission("access_daily_report")
+  );
+
+  let canViewDailyPathMap = $derived(
+    hasPermission("view_daily_path_map")
+  );
+
+  let canViewEngineRpmStatsTable = $derived(
+    hasPermission("view_engine_rpm_stats_table")
+  );
+
+  let canViewSpeedStatsTable = $derived(
+    hasPermission("view_speed_stats_table")
+  );
+
+  let canViewTravelDistanceTable = $derived(
+    hasPermission("view_travel_distance_table")
+  );
+
+  let canViewFuelConsumptionTable = $derived(
+    hasPermission("view_fuel_consumption_table")
+  );
+
+  let canViewFuelEcu = $derived(
+    hasPermission("view_fuel_ecu")
+  );
+
+  let canViewFuelFms = $derived(
+    hasPermission("view_fuel_fms")
+  );
+
+  let canViewFuelFod = $derived(
+    hasPermission("view_fuel_fod")
+  );
+
+  let canViewFuelEmsInternal = $derived(
+    hasPermission("view_fuel_ems_internal")
+  );
+
+  let canViewFuelEmsExternal = $derived(
+    hasPermission("view_fuel_ems_external")
+  );
+
+  let canViewFuelEngineMaker = $derived(
+    hasPermission("view_fuel_engine_maker")
+  );
+
+  let canShowFuelEmsInternal = $derived(
+    canViewFuelEmsInternal && !isMissingValue(dashboardData?.consumptionEmsInternal ?? dashboardData?.consumptionEms)
+  );
+
+  let canShowFuelEmsExternal = $derived(
+    canViewFuelEmsExternal && !isMissingValue(dashboardData?.consumptionEmsExternal)
+  );
+
+  let canShowFuelFms = $derived(
+    canViewFuelFms && !isMissingValue(dashboardData?.consumptionFms)
+  );
+
+  let canShowFuelEcu = $derived(
+    canViewFuelEcu && !isMissingValue(dashboardData?.consumptionEcu)
+  );
+
+  let hasVisibleFuelSource = $derived(
+    canShowFuelEmsInternal ||
+      canShowFuelEmsExternal ||
+      canShowFuelFms ||
+      canShowFuelEcu
+  );
+
+  let canShowFodUsage = $derived(
+    canViewFuelFod && Boolean(dashboardData?.fodUsage)
+  );
+
+  let canShowRob = $derived(
+    canViewFuelEngineMaker || canViewFuelFod || canViewFuelConsumptionTable
+  );
+
   let fuelSummary = $derived({
-    ems: formatLiter(dashboardData?.consumptionEms ?? 0),
-    fms: formatLiter(dashboardData?.consumptionFms ?? 0),
+    emsInternal: formatLiter(dashboardData?.consumptionEmsInternal ?? dashboardData?.consumptionEms ?? 0),
+    emsExternal: formatLiter(dashboardData?.consumptionEmsExternal ?? 0),
+    fms: isMissingValue(dashboardData?.consumptionFms)
+      ? "-"
+      : formatLiter(dashboardData?.consumptionFms),
+    ecu: isMissingValue(dashboardData?.consumptionEcu)
+      ? "-"
+      : formatLiter(dashboardData?.consumptionEcu),
     latestRob:
       dashboardData?.latestRob !== null &&
       dashboardData?.latestRob !== undefined
@@ -285,7 +482,8 @@
     try {
       const [dashboardResult, liveResult] = await Promise.all([
         getVesselDashboard($selectedVesselId),
-        getFleetVesselLiveDetail($selectedVesselId)
+        getFleetVesselLiveDetail($selectedVesselId),
+        loadCurrentUser()
       ]);
 
       dashboardData = dashboardResult?.data || dashboardResult || null;
@@ -323,11 +521,20 @@
 <section class="dashboard-content">
   <section class="hero-grid">
     <div class="monitoring-card cctv-section">
-      <div class="cctv-grid">
+      <div class="cctv-grid" class:empty-cctv={cctvItems.length === 0}>
+        {#if cctvItems.length === 0}
+          <div class="cctv-empty">
+            <div class="cctv-icon">▣</div>
+            <strong>CCTV belum tersedia</strong>
+            <span>Endpoint mengirim nilai CCTV kosong.</span>
+          </div>
+        {/if}
+
         {#each cctvItems as cctv}
-          <div class:offline={cctv.status === "Offline"} class="cctv-box">
+          <div class:offline={!cctv.online} class="cctv-box">
             <div class="cctv-top">
               <span class="camera-dot" title={cctv.status}></span>
+              <span class="cctv-status-text">{cctv.online ? "Live" : "Offline"}</span>
             </div>
 
             <div class="cctv-content">
@@ -340,29 +547,44 @@
       </div>
     </div>
 
-    <div class="monitoring-card map-section">
-      <div class="map-box">
-        <VesselMap
-          latitude={vesselInfo.latitude}
-          longitude={vesselInfo.longitude}
-          heading={vesselInfo.heading}
-          vesselName={vesselInfo.vesselName}
-          speed={vesselInfo.currentSpeed}
-          lastUpdate={vesselInfo.localTime}
-          iconUrl="/assets/vessel-marker.svg"
-          zoom={12}
-        />
+    {#if canViewDailyPathMap}
+      <div class="monitoring-card map-section">
+        <div class="map-box">
+          <VesselMap
+            latitude={vesselInfo.latitude}
+            longitude={vesselInfo.longitude}
+            heading={vesselInfo.heading}
+            vesselName={vesselInfo.vesselName}
+            speed={vesselInfo.currentSpeed}
+            lastUpdate={vesselInfo.localTime}
+            iconUrl="/assets/vessel-marker.svg"
+            zoom={12}
+          />
+        </div>
       </div>
-    </div>
+    {:else}
+      <div class="monitoring-card permission-empty">
+        <strong>Map tidak ditampilkan</strong>
+        <span>User belum memiliki permission view_daily_path_map.</span>
+      </div>
+    {/if}
   </section>
 
-  {#if loading}
+  {#if loading || currentUserLoading}
     <div class="dashboard-status loading-box">
       Loading dashboard data...
     </div>
   {:else if error}
     <div class="dashboard-status error-box">
       {error}
+    </div>
+  {:else if currentUserError}
+    <div class="dashboard-status error-box">
+      {currentUserError}
+    </div>
+  {:else if !canAccessDashboard}
+    <div class="dashboard-status error-box">
+      User belum memiliki permission access_dashboard atau access_daily_report.
     </div>
   {/if}
 
@@ -409,60 +631,144 @@
           <span class="info-label">Weather</span>
           <strong>{vesselInfo.weatherForecast}</strong>
         </article>
+
+        <article class="compact-info-card">
+          <span class="info-label">Data Received</span>
+          <strong>{dataReceivedSummary.receivedMinutes}/{dataReceivedSummary.totalMinutes} min · {formatNumber(dataReceivedSummary.percentage, 1, "0.0")}%</strong>
+        </article>
+
+        <article class="compact-info-card">
+          <span class="info-label">Ocean Current</span>
+          <strong>
+            {#if oceanCurrentSummary.current}
+              {formatNumber(oceanCurrentSummary.current.speed_kph, 1, "0.0")} kph · {oceanCurrentSummary.current.direction_to || "-"}
+            {:else}
+              -
+            {/if}
+          </strong>
+        </article>
       </div>
     </section>
 
-    <section class="rpm-panel">
-      <div class="panel-header">
-        <div>
-          <span class="section-kicker">Engine Monitoring</span>
-          <h2>RPM Overview</h2>
+    {#if canViewEngineRpmStatsTable}
+      <section class="rpm-panel">
+        <div class="panel-header">
+          <div>
+            <span class="section-kicker">Engine Monitoring</span>
+            <h2>RPM Overview</h2>
+          </div>
+
+          <span class="rpm-count">{rpmCards.length} engines</span>
         </div>
 
-        <span class="rpm-count">{rpmCards.length} engines</span>
-      </div>
-
-      <div class="rpm-grid">
-        {#each rpmCards as card}
-          <RpmCard
-            title={card.title}
-            status={card.status}
-            lastData={card.lastData}
-            value={card.value}
-            avg={card.avg}
-            top={card.top}
-            max={2200}
-          />
-        {/each}
-      </div>
-    </section>
+        <div class="rpm-grid">
+          {#each rpmCards as card}
+            <RpmCard
+              title={card.title}
+              status={card.status}
+              lastData={card.lastData}
+              value={card.value}
+              avg={card.avg}
+              top={card.top}
+              max={2200}
+            />
+          {/each}
+        </div>
+      </section>
+    {:else}
+      <section class="rpm-panel permission-empty">
+        <strong>RPM Overview tidak ditampilkan</strong>
+        <span>User belum memiliki permission view_engine_rpm_stats_table.</span>
+      </section>
+    {/if}
   </section>
 
   <section class="speed-summary">
-    <article class="summary-card">
-      <div class="summary-icon">▲</div>
-      <div>
-        <div class="summary-label">Top Speed</div>
-        <div class="summary-value">{speedSummary.topSpeed}</div>
-      </div>
-    </article>
+    {#if canViewSpeedStatsTable}
+      <article class="summary-card">
+        <div class="summary-icon">▲</div>
+        <div>
+          <div class="summary-label">Top Speed</div>
+          <div class="summary-value">{speedSummary.topSpeed}</div>
+        </div>
+      </article>
 
-    <article class="summary-card">
-      <div class="summary-icon">≈</div>
-      <div>
-        <div class="summary-label">Average Speed</div>
-        <div class="summary-value">{speedSummary.averageSpeed}</div>
-      </div>
-    </article>
+      <article class="summary-card">
+        <div class="summary-icon">≈</div>
+        <div>
+          <div class="summary-label">Average Speed</div>
+          <div class="summary-value">{speedSummary.averageSpeed}</div>
+        </div>
+      </article>
+    {/if}
 
-    <article class="summary-card">
-      <div class="summary-icon">⇢</div>
-      <div>
-        <div class="summary-label">Total Distance</div>
-        <div class="summary-value">{speedSummary.totalDistance}</div>
-      </div>
-    </article>
+    {#if canViewTravelDistanceTable}
+      <article class="summary-card">
+        <div class="summary-icon">⇢</div>
+        <div>
+          <div class="summary-label">Total Distance</div>
+          <div class="summary-value">{speedSummary.totalDistance}</div>
+        </div>
+      </article>
+    {/if}
   </section>
+
+  <section class="environment-summary">
+    <section class="environment-card">
+      <div class="environment-header">
+        <span class="section-kicker">Weather Forecast</span>
+        <h2>Today · Tomorrow · Day After</h2>
+      </div>
+
+      <div class="environment-grid">
+        <article>
+          <span>Current</span>
+          <strong>{weatherSummary.current ? `${formatNumber(weatherSummary.current.temp_c, 1)}°C` : "-"}</strong>
+          <small>{weatherSummary.current?.condition || "-"}</small>
+        </article>
+
+        <article>
+          <span>Tomorrow</span>
+          <strong>{weatherSummary.tomorrow ? `${formatNumber(weatherSummary.tomorrow.temp_min_c, 1)}–${formatNumber(weatherSummary.tomorrow.temp_max_c, 1)}°C` : "-"}</strong>
+          <small>{weatherSummary.tomorrow?.condition || "-"}</small>
+        </article>
+
+        <article>
+          <span>Day After</span>
+          <strong>{weatherSummary.dayAfter ? `${formatNumber(weatherSummary.dayAfter.temp_min_c, 1)}–${formatNumber(weatherSummary.dayAfter.temp_max_c, 1)}°C` : "-"}</strong>
+          <small>{weatherSummary.dayAfter?.condition || "-"}</small>
+        </article>
+      </div>
+    </section>
+
+    <section class="environment-card">
+      <div class="environment-header">
+        <span class="section-kicker">Ocean Current</span>
+        <h2>Current Forecast</h2>
+      </div>
+
+      <div class="environment-grid">
+        <article>
+          <span>{oceanCurrentSummary.current?.label || "Today"}</span>
+          <strong>{oceanCurrentSummary.current ? `${formatNumber(oceanCurrentSummary.current.speed_kph, 1)} kph` : "-"}</strong>
+          <small>{oceanCurrentSummary.current?.direction_to || "-"}</small>
+        </article>
+
+        <article>
+          <span>{oceanCurrentSummary.tomorrow?.label || "Tomorrow"}</span>
+          <strong>{oceanCurrentSummary.tomorrow ? `${formatNumber(oceanCurrentSummary.tomorrow.speed_kph, 1)} kph` : "-"}</strong>
+          <small>{oceanCurrentSummary.tomorrow?.direction_to || "-"}</small>
+        </article>
+
+        <article>
+          <span>{oceanCurrentSummary.dayAfter?.label || "Day After"}</span>
+          <strong>{oceanCurrentSummary.dayAfter ? `${formatNumber(oceanCurrentSummary.dayAfter.speed_kph, 1)} kph` : "-"}</strong>
+          <small>{oceanCurrentSummary.dayAfter?.direction_to || "-"}</small>
+        </article>
+      </div>
+    </section>
+  </section>
+
 
   <section class="fuel-summary">
     <section class="fuel-card main-fuel-card">
@@ -477,41 +783,69 @@
         </button>
       </div>
 
-      <div class="fuel-cols">
-        <article class="fuel-metric">
-          <span class="fuel-label">EMS</span>
-          <strong class="fuel-value">{fuelSummary.ems}</strong>
-        </article>
+      {#if canViewFuelConsumptionTable && hasVisibleFuelSource}
+        <div class="fuel-cols">
+          {#if canShowFuelEmsInternal}
+            <article class="fuel-metric">
+              <span class="fuel-label">EMS Internal</span>
+              <strong class="fuel-value">{fuelSummary.emsInternal}</strong>
+            </article>
+          {/if}
 
-        <article class="fuel-metric">
-          <span class="fuel-label">FMS</span>
-          <strong class="fuel-value">{fuelSummary.fms}</strong>
-        </article>
-      </div>
+          {#if canShowFuelEmsExternal}
+            <article class="fuel-metric">
+              <span class="fuel-label">EMS External</span>
+              <strong class="fuel-value">{fuelSummary.emsExternal}</strong>
+            </article>
+          {/if}
 
-      <div class="fod-mini-grid">
-        <article>
-          <span>FOD Date</span>
-          <strong>{formatLiter(fodUsage?.accumulatedLiters ?? 0)}</strong>
-        </article>
+          {#if canShowFuelFms}
+            <article class="fuel-metric">
+              <span class="fuel-label">FMS</span>
+              <strong class="fuel-value">{fuelSummary.fms}</strong>
+            </article>
+          {/if}
 
-        <article>
-          <span>Accumulated</span>
-          <strong>{formatLiter(fodUsage?.accumulatedLiters || 0)}</strong>
-        </article>
+          {#if canShowFuelEcu}
+            <article class="fuel-metric">
+              <span class="fuel-label">ECU</span>
+              <strong class="fuel-value">{fuelSummary.ecu}</strong>
+            </article>
+          {/if}
+        </div>
+      {:else}
+        <div class="permission-note">
+          Fuel consumption tidak ditampilkan karena permission view_fuel_consumption_table atau permission sumber fuel belum tersedia.
+        </div>
+      {/if}
 
-        <article>
-          <span>Interval</span>
-          <strong>{formatLiter(fodUsage?.intervalLiters ?? 0)}</strong>
-        </article>
-      </div>
+      {#if canShowFodUsage}
+        <div class="fod-mini-grid">
+          <article>
+            <span>FOD Date</span>
+            <strong>{fodUsage?.date || "-"}</strong>
+          </article>
+
+          <article>
+            <span>Accumulated</span>
+            <strong>{formatLiter(fodUsage?.accumulatedLiters || 0)}</strong>
+          </article>
+
+          <article>
+            <span>Interval</span>
+            <strong>{formatLiter(fodUsage?.intervalLiters ?? 0)}</strong>
+          </article>
+        </div>
+      {/if}
     </section>
 
-    <section class="fuel-card rob-card">
-      <span class="section-kicker">Tank Status</span>
-      <h2>Latest ROB</h2>
-      <strong class="rob-value">{fuelSummary.latestRob}</strong>
-    </section>
+    {#if canShowRob}
+      <section class="fuel-card rob-card">
+        <span class="section-kicker">Tank Status</span>
+        <h2>Latest ROB</h2>
+        <strong class="rob-value">{fuelSummary.latestRob}</strong>
+      </section>
+    {/if}
   </section>
 </section>
 
@@ -602,6 +936,45 @@
     justify-content: flex-start;
   }
 
+  .cctv-status-text {
+    margin-left: 8px;
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #dbeafe;
+  }
+
+  .empty-cctv {
+    grid-template-columns: 1fr;
+  }
+
+  .cctv-empty {
+    height: 100%;
+    min-height: 260px;
+    border-radius: 14px;
+    background: #475569;
+    color: #ffffff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 8px;
+    padding: 20px;
+  }
+
+  .cctv-empty strong {
+    font-size: 15px;
+    font-weight: 900;
+  }
+
+  .cctv-empty span {
+    color: #cbd5e1;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
   .camera-dot {
     width: 12px;
     height: 12px;
@@ -652,6 +1025,35 @@
     background: #d8d8d8;
     overflow: hidden;
     position: relative;
+  }
+
+  .permission-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 220px;
+    padding: 20px;
+    text-align: center;
+    color: #64748b;
+  }
+
+  .permission-empty strong {
+    color: #0f172a;
+    font-size: 15px;
+    font-weight: 900;
+  }
+
+  .permission-empty span,
+  .permission-note {
+    font-size: 12px;
+    font-weight: 700;
+    color: #64748b;
+  }
+
+  .permission-note {
+    padding: 14px;
   }
 
   .dashboard-status {
@@ -827,6 +1229,68 @@
     margin-top: 14px;
   }
 
+  .environment-summary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 14px;
+  }
+
+  .environment-card {
+    background: #ffffff;
+    border: 1px solid #d9e2ec;
+    border-radius: 16px;
+    box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+    overflow: hidden;
+  }
+
+  .environment-header {
+    padding: 12px 14px;
+    border-bottom: 1px solid #e5edf5;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  }
+
+  .environment-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .environment-grid article {
+    min-height: 82px;
+    padding: 12px;
+    border-radius: 14px;
+    background: #f8fafc;
+    border: 1px solid #dbe4ef;
+  }
+
+  .environment-grid span,
+  .environment-grid small {
+    display: block;
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .environment-grid strong {
+    display: block;
+    margin-top: 9px;
+    color: #0f172a;
+    font-size: 17px;
+    line-height: 1.1;
+    font-weight: 900;
+  }
+
+  .environment-grid small {
+    margin-top: 8px;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 11px;
+  }
+
   .summary-card {
     min-height: 100px;
     padding: 16px;
@@ -981,6 +1445,7 @@
   @media (max-width: 1100px) {
     .hero-grid,
     .info-rpm-section,
+    .environment-summary,
     .fuel-summary {
       grid-template-columns: 1fr;
     }
@@ -1007,6 +1472,7 @@
     .vessel-info-grid,
     .rpm-grid,
     .speed-summary,
+    .environment-grid,
     .fuel-cols,
     .fod-mini-grid {
       grid-template-columns: 1fr;

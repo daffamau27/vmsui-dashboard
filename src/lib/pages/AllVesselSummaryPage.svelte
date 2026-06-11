@@ -1,1396 +1,1701 @@
 <script>
-  import { onMount } from "svelte";
-  import { getFleetVessels } from "$lib/api/fleetApi.js";
+	import { onMount } from 'svelte';
+	import { getFleetVessels } from '$lib/api/fleetApi.js';
+	import { apiRequest } from '$lib/api/authApi.js';
 
-  const TIME_RANGE_PRESETS = [
-    { id: "midnight", label: "00:00 - 06:00", start: "2026-05-20T00:00", end: "2026-05-20T06:00" },
-    { id: "day", label: "06:00 - 18:00", start: "2026-05-20T06:00", end: "2026-05-20T18:00" },
-    { id: "night", label: "18:00 - 24:00", start: "2026-05-20T18:00", end: "2026-05-21T00:00" }
-  ];
+	const TIME_RANGE_PRESETS = [
+		{ id: 'midnight', label: '00:00 - 06:00', startTime: '00:00', endTime: '06:00' },
+		{ id: 'day', label: '06:00 - 18:00', startTime: '06:00', endTime: '18:00' },
+		{ id: 'night', label: '18:00 - 24:00', startTime: '18:00', endTime: '23:59' }
+	];
 
-  let devices = $state([]);
-  let devicesLoading = $state(false);
-  let devicesError = $state("");
+	const TIMEZONE_OPTIONS = [
+		{ label: 'UTC+7', value: '+07:00' },
+		{ label: 'UTC+8', value: '+08:00' },
+		{ label: 'UTC+9', value: '+09:00' },
+		{ label: 'UTC+0', value: '+00:00' }
+	];
 
-  const reportColumns = [
-    { id: "me_port_rh", label: "ME PORT RH", type: "runtime", group: "Runtime / RH" },
-    { id: "me_stbd_rh", label: "ME STBD RH", type: "runtime", group: "Runtime / RH" },
-    { id: "me_center_rh", label: "ME CENTER RH", type: "runtime", group: "Runtime / RH" },
-    { id: "ae_port_rh", label: "AE PORT RH", type: "runtime", group: "Runtime / RH" },
-    { id: "ae_stbd_rh", label: "AE STBD RH", type: "runtime", group: "Runtime / RH" },
+	let devices = $state([]);
+	let devicesLoading = $state(false);
+	let devicesError = $state('');
 
-    { id: "me_port_fc_ems", label: "ME PORT FC (EMS)", type: "fuel", group: "Fuel / FC" },
-    { id: "me_stbd_fc_ems", label: "ME STBD FC (EMS)", type: "fuel", group: "Fuel / FC" },
-    { id: "me_center_fc_ems", label: "ME CENTER FC (EMS)", type: "fuel", group: "Fuel / FC" },
-    { id: "ae_port_fc_ems", label: "AE PORT FC (EMS)", type: "fuel", group: "Fuel / FC" },
-    { id: "ae_stbd_fc_ems", label: "AE STBD FC (EMS)", type: "fuel", group: "Fuel / FC" },
+	let currentUser = $state(null);
+	let currentUserLoading = $state(false);
+	let currentUserError = $state('');
 
-    { id: "me_port_fc_fms", label: "ME PORT FC (FMS/ECU)", type: "fuel", group: "Fuel / FC" },
-    { id: "me_stbd_fc_fms", label: "ME STBD FC (FMS/ECU)", type: "fuel", group: "Fuel / FC" },
-    { id: "ae_port_fc_fms", label: "AE PORT FC (FMS/ECU)", type: "fuel", group: "Fuel / FC" },
-    { id: "ae_stbd_fc_fms", label: "AE STBD FC (FMS/ECU)", type: "fuel", group: "Fuel / FC" },
+	async function loadCurrentUser() {
+		if (currentUser || currentUserLoading) return currentUser;
 
-    { id: "sriti_me_port", label: "SRITI ME PORT", type: "additional", group: "Additional" },
-    { id: "sriti_me_stbd", label: "SRITI ME STBD", type: "additional", group: "Additional" },
-    { id: "total_fuel", label: "TOTAL FUEL", type: "total", group: "Additional" },
-    { id: "avg_speed", label: "AVG SPEED", type: "additional", group: "Additional" },
-    { id: "max_speed", label: "MAX SPEED", type: "additional", group: "Additional" },
-    { id: "distance", label: "DISTANCE", type: "additional", group: "Additional" },
-    { id: "utc", label: "UTC", type: "utc", group: "Additional" }
-  ];
+		currentUserLoading = true;
+		currentUserError = '';
 
-  const defaultColumnIds = [
-    "me_port_rh",
-    "me_stbd_rh",
-    "ae_port_rh",
-    "ae_stbd_rh",
-    "me_port_fc_ems",
-    "me_stbd_fc_ems",
-    "me_port_fc_fms",
-    "me_stbd_fc_fms",
-    "total_fuel",
-    "avg_speed",
-    "max_speed",
-    "utc"
-  ];
+		try {
+			const response = await apiRequest('/users/current-user', {
+				method: 'GET'
+			});
 
-  let vesselReportRows = $state([]);
+			currentUser = response?.data || response?.user || response || null;
 
-  let selectedDeviceIds = $state([]);
-  let vesselSearch = $state("");
-  let defaultStartDate = $state("2026-05-20T00:00");
-  let defaultEndDate = $state("2026-05-20T13:44");
-  let activeDefaultPresetId = $state("custom");
-  let showColumnSelector = $state(false);
-  let visibleColumnIds = $state([...defaultColumnIds]);
-  let hasLoadedReport = $state(true);
-  let loading = $state(false);
-  let loadingStatus = $state("Preparing");
-  let completed = $state(0);
+			console.log('[ALL_VESSEL][CURRENT_USER_PERMISSION]', currentUser);
 
-  async function loadDeviceList() {
-    devicesLoading = true;
-    devicesError = "";
+			return currentUser;
+		} catch (err) {
+			console.error('[ALL_VESSEL][CURRENT_USER_PERMISSION_ERROR]', err);
+			currentUserError = err?.message || 'Gagal memuat permission user.';
+			currentUser = null;
+			return null;
+		} finally {
+			currentUserLoading = false;
+		}
+	}
 
-    try {
-      console.log("[ALL_VESSEL][LOAD_DEVICES][START]");
+	function hasPermissionForUser(user, permissionKey) {
+		if (!permissionKey) return true;
 
-      const rows = await getFleetVessels();
+		const permissionAccess = user?.permissionAccess || {};
+		const mode = permissionAccess?.mode;
 
-      console.log("[ALL_VESSEL][LOAD_DEVICES][RESULT]", rows);
+		if (mode === 'all') return true;
 
-      devices = Array.isArray(rows)
-        ? rows.map((item) => ({
-            id: String(item.vesselId || item.id),
-            vesselId: item.vesselId || item.id,
-            deviceId: item.deviceId || "",
-            name: item.vesselName || item.name || "-",
-            vesselName: item.vesselName || item.name || "-",
-            companyName: item.companyName || "-",
-            online: Boolean(item.online),
-            raw: item
-          }))
-        : [];
+		if (mode === 'selected') {
+			const permissions = Array.isArray(permissionAccess?.permissions)
+				? permissionAccess.permissions
+				: [];
 
-      if (!selectedDeviceIds.length && devices.length) {
-        selectedDeviceIds = [devices[0].id];
-      }
-    } catch (err) {
-      console.error("[ALL_VESSEL][LOAD_DEVICES][ERROR]", err);
-      devicesError = err?.message || "Gagal memuat device list dari API.";
-      devices = [];
-    } finally {
-      devicesLoading = false;
-    }
-  }
+			return permissions.includes(permissionKey);
+		}
 
-  let selectedDevicesCount = $derived(selectedDeviceIds.length);
-  let selectAllDevices = $derived(
-    devices.length > 0 && selectedDeviceIds.length === devices.length
-  );
-  let selectedColumnCount = $derived(visibleColumnIds.length);
+		return false;
+	}
 
-  let filteredDevices = $derived(
-    devices.filter((device) =>
-      device.name.toLowerCase().includes(vesselSearch.toLowerCase())
-    )
-  );
+	function hasPermission(permissionKey) {
+		return hasPermissionForUser(currentUser, permissionKey);
+	}
 
-  let selectedDevices = $derived(
-    devices.filter((device) => selectedDeviceIds.includes(device.id))
-  );
+	let canAccessAllVesselSummary = $derived(hasPermission('access_all_vessel_summary'));
 
-  let visibleDataColumns = $derived(
-    reportColumns.filter((col) => visibleColumnIds.includes(col.id))
-  );
+	let canViewEngineRuntimeTable = $derived(hasPermission('view_engine_runtime_table'));
 
-  let runtimeColumns = $derived(reportColumns.filter((col) => col.group === "Runtime / RH"));
-  let fuelColumns = $derived(reportColumns.filter((col) => col.group === "Fuel / FC"));
-  let controlColumns = $derived(reportColumns.filter((col) => col.group === "Additional"));
+	let canViewFuelConsumptionTable = $derived(hasPermission('view_fuel_consumption_table'));
 
-  let filteredVesselLogs = $derived(
-    vesselReportRows.filter((row) => selectedDeviceIds.includes(row.id))
-  );
+	let canViewSpeedStatsTable = $derived(hasPermission('view_speed_stats_table'));
 
-  let selectedRangeSummary = $derived(
-    `${defaultStartDate.replace("T", " ")} → ${defaultEndDate.replace("T", " ")}`
-  );
+	let canViewTravelDistanceTable = $derived(hasPermission('view_travel_distance_table'));
 
-  let selectedDeviceRangesValid = $derived(Boolean(defaultStartDate && defaultEndDate));
+	let canViewHighRpmLowSpeedTable = $derived(hasPermission('view_high_rpm_low_speed_table'));
 
-  let activeDefaultPresetLabel = $derived(
-    TIME_RANGE_PRESETS.find((item) => item.id === activeDefaultPresetId)?.label || "Custom"
-  );
+	let canViewFuelEcu = $derived(hasPermission('view_fuel_ecu'));
+	let canViewFuelFms = $derived(hasPermission('view_fuel_fms'));
+	let canViewFuelEmsInternal = $derived(hasPermission('view_fuel_ems_internal'));
+	let canViewFuelEmsExternal = $derived(hasPermission('view_fuel_ems_external'));
+	let canViewFuelEngineMaker = $derived(hasPermission('view_fuel_engine_maker'));
 
-  let progress = $derived(
-    selectedDevicesCount > 0
-      ? Math.min(100, (completed / selectedDevicesCount) * 100)
-      : 0
-  );
+	let canViewAnyFuel = $derived(
+		canViewFuelConsumptionTable &&
+			(canViewFuelEcu ||
+				canViewFuelFms ||
+				canViewFuelEmsInternal ||
+				canViewFuelEmsExternal ||
+				canViewFuelEngineMaker)
+	);
 
-  function toggleAllDevices(checked) {
-    selectedDeviceIds = checked ? devices.map((device) => device.id) : [];
-  }
+	const staticReportColumns = [
+		{ id: 'data_received', label: 'DATA RECEIVED', type: 'percent', group: 'Additional' },
+		{ id: 'total_fuel', label: 'TOTAL FUEL', type: 'total', group: 'Additional' },
+		{ id: 'avg_speed', label: 'AVG SPEED', type: 'additional', group: 'Additional' },
+		{ id: 'max_speed', label: 'MAX SPEED', type: 'additional', group: 'Additional' },
+		{ id: 'distance', label: 'DISTANCE', type: 'additional', group: 'Additional' },
+		{ id: 'utc', label: 'UTC', type: 'utc', group: 'Additional' }
+	];
 
-  function toggleSingleDevice(deviceId, checked) {
-    if (checked) {
-      selectedDeviceIds = [...new Set([...selectedDeviceIds, deviceId])];
-    } else {
-      selectedDeviceIds = selectedDeviceIds.filter((id) => id !== deviceId);
-    }
-  }
+	const defaultColumnIds = [
+		'data_received',
+		'total_fuel',
+		'avg_speed',
+		'max_speed',
+		'distance',
+		'utc'
+	];
 
-  function applyDefaultRangePreset(preset) {
-    defaultStartDate = preset.start;
-    defaultEndDate = preset.end;
-    activeDefaultPresetId = preset.id;
-  }
+	let vesselReportRows = $state([]);
 
-  function setAllColumnsVisibility(value) {
-    visibleColumnIds = value ? reportColumns.map((col) => col.id) : [];
-  }
+	let selectedDeviceIds = $state([]);
+	let vesselSearch = $state('');
 
-  function resetVisibleColumns() {
-    visibleColumnIds = [...defaultColumnIds];
-  }
+	let defaultStartDate = $state(getTodayDateTime('00:00'));
+	let defaultEndDate = $state(getTodayDateTime(getCurrentTime()));
+	let vesselRanges = $state({});
+	let timezoneOffset = $state('+07:00');
+	let timezoneMode = $state('manual');
 
-  function setColumnVisibility(columnId, checked) {
-    if (checked) {
-      visibleColumnIds = [...new Set([...visibleColumnIds, columnId])];
-    } else {
-      visibleColumnIds = visibleColumnIds.filter((id) => id !== columnId);
-    }
-  }
+	let activeDefaultPresetId = $state('custom');
+	let showColumnSelector = $state(false);
+	let visibleColumnIds = $state([...defaultColumnIds]);
 
-  function getGroupVisibleCount(columns) {
-    return columns.filter((col) => visibleColumnIds.includes(col.id)).length;
-  }
+	let hasLoadedReport = $state(false);
+	let loading = $state(false);
+	let loadingStatus = $state('Preparing');
+	let completed = $state(0);
+	let reportError = $state('');
 
-  async function loadReport() {
-    loading = true;
-    hasLoadedReport = false;
-    completed = 0;
-    loadingStatus = `Loading ${targetDevices[i].name}`;
+	function makeEngineColumnId(metric, engineKey) {
+		return `engine__${metric}__${engineKey}`;
+	}
 
-    const targetDevices = selectedDevices;
+	function parseEngineColumnId(columnId) {
+		const parts = String(columnId || '').split('__');
 
-    for (let i = 0; i < targetDevices.length; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 35));
-      completed = i + 1;
-    }
+		if (parts.length !== 3 || parts[0] !== 'engine') {
+			return null;
+		}
 
-    loading = false;
-    hasLoadedReport = true;
-  }
+		return {
+			metric: parts[1],
+			engineKey: parts[2]
+		};
+	}
 
-  function formatRangeLabel(row) {
-    return `${row.range_start.replace("T", " ")} → ${row.range_end.replace("T", " ")}`;
-  }
+	function buildDynamicEngineColumns(rows) {
+		const engineMap = new Map();
 
-  function getCellValue(row, col) {
-    return row[col.id] ?? "-";
-  }
+		rows.forEach((row) => {
+			const engines = Array.isArray(row?.engines) ? row.engines : [];
 
-  function isTotalColumn(col) {
-    return col.type === "total" || col.id.includes("total");
-  }
+			engines.forEach((engine) => {
+				if (!engine?.key) return;
 
-  onMount(() => {
-    loadDeviceList();
-  });
+				if (!engineMap.has(engine.key)) {
+					engineMap.set(engine.key, {
+						key: engine.key,
+						name: engine.name || engine.key
+					});
+				}
+			});
+		});
+
+		const engines = Array.from(engineMap.values());
+
+		const runtimeColumns = engines.map((engine) => ({
+			id: makeEngineColumnId('runtime', engine.key),
+			label: `${engine.name} RH`,
+			type: 'runtime',
+			group: 'Runtime / RH',
+			engineKey: engine.key
+		}));
+
+		const fuelEmsColumns = engines.map((engine) => ({
+			id: makeEngineColumnId('fuel_ems', engine.key),
+			label: `${engine.name} FC (EMS)`,
+			type: 'fuel',
+			group: 'Fuel / FC',
+			engineKey: engine.key
+		}));
+
+		const fuelEcuColumns = engines.map((engine) => ({
+			id: makeEngineColumnId('fuel_ecu', engine.key),
+			label: `${engine.name} FC (ECU)`,
+			type: 'fuel',
+			group: 'Fuel / FC',
+			engineKey: engine.key
+		}));
+
+		const sritiColumns = engines.map((engine) => ({
+			id: makeEngineColumnId('sriti', engine.key),
+			label: `SRITI ${engine.name}`,
+			type: 'additional',
+			group: 'Additional',
+			engineKey: engine.key
+		}));
+
+		return [...runtimeColumns, ...fuelEmsColumns, ...fuelEcuColumns, ...sritiColumns];
+	}
+
+	function getEngineByKey(row, engineKey) {
+		const engines = Array.isArray(row?.engines) ? row.engines : [];
+
+		return engines.find((engine) => String(engine?.key) === String(engineKey));
+	}
+
+	function canViewReportColumn(columnId) {
+		const engineColumn = parseEngineColumnId(columnId);
+
+		if (engineColumn) {
+			if (engineColumn.metric === 'runtime') {
+				return canViewEngineRuntimeTable;
+			}
+
+			if (engineColumn.metric === 'fuel_ems') {
+				return canViewFuelConsumptionTable && (canViewFuelEmsInternal || canViewFuelEmsExternal);
+			}
+
+			if (engineColumn.metric === 'fuel_ecu') {
+				return (
+					canViewFuelConsumptionTable &&
+					(canViewFuelEcu || canViewFuelFms || canViewFuelEngineMaker)
+				);
+			}
+
+			if (engineColumn.metric === 'sriti') {
+				return canViewHighRpmLowSpeedTable;
+			}
+		}
+
+		if (columnId === 'data_received') return canAccessAllVesselSummary;
+
+		if (columnId === 'total_fuel') {
+			return canViewAnyFuel;
+		}
+
+		if (['avg_speed', 'max_speed'].includes(columnId)) {
+			return canViewSpeedStatsTable;
+		}
+
+		if (columnId === 'distance') {
+			return canViewTravelDistanceTable;
+		}
+
+		if (columnId === 'utc') {
+			return true;
+		}
+
+		return true;
+	}
+
+	let selectedDevicesCount = $derived(selectedDeviceIds.length);
+
+	let selectAllDevices = $derived(
+		devices.length > 0 && selectedDeviceIds.length === devices.length
+	);
+
+	let selectedColumnCount = $derived(visibleColumnIds.length);
+
+	let filteredDevices = $derived(
+		devices.filter((device) => device.name.toLowerCase().includes(vesselSearch.toLowerCase()))
+	);
+
+	let selectedDevices = $derived(devices.filter((device) => selectedDeviceIds.includes(device.id)));
+
+	let dynamicEngineColumns = $derived(buildDynamicEngineColumns(vesselReportRows));
+
+	let reportColumns = $derived([...dynamicEngineColumns, ...staticReportColumns]);
+
+	let permittedReportColumns = $derived(reportColumns.filter((col) => canViewReportColumn(col.id)));
+
+	let visibleDataColumns = $derived(
+		permittedReportColumns.filter((col) => visibleColumnIds.includes(col.id))
+	);
+
+	let runtimeColumns = $derived(
+		permittedReportColumns.filter((col) => col.group === 'Runtime / RH')
+	);
+
+	let fuelColumns = $derived(permittedReportColumns.filter((col) => col.group === 'Fuel / FC'));
+
+	let controlColumns = $derived(permittedReportColumns.filter((col) => col.group === 'Additional'));
+
+	let selectedRangeSummary = $derived(
+		`${defaultStartDate.replace('T', ' ')} → ${defaultEndDate.replace('T', ' ')}`
+	);
+
+	let selectedDeviceRangesValid = $derived(Boolean(defaultStartDate && defaultEndDate));
+
+	let activeDefaultPresetLabel = $derived(
+		TIME_RANGE_PRESETS.find((item) => item.id === activeDefaultPresetId)?.label || 'Custom'
+	);
+
+	let progress = $derived(
+		selectedDevicesCount > 0 ? Math.min(100, (completed / selectedDevicesCount) * 100) : 0
+	);
+
+	let totalFuelSummary = $derived(
+		vesselReportRows.reduce(
+			(sum, row) => sum + numberValue(getCellValue(row, { id: 'total_fuel' })),
+			0
+		)
+	);
+
+	let avgSpeedSummary = $derived(() => {
+		const speeds = vesselReportRows
+			.map((row) => numberValue(getCellValue(row, { id: 'avg_speed' })))
+			.filter((value) => value > 0);
+
+		if (!speeds.length) return 0;
+
+		return speeds.reduce((sum, value) => sum + value, 0) / speeds.length;
+	});
+
+	function getTodayDateTime(time) {
+		const today = new Date();
+		const year = today.getFullYear();
+		const month = String(today.getMonth() + 1).padStart(2, '0');
+		const day = String(today.getDate()).padStart(2, '0');
+
+		return `${year}-${month}-${day}T${time}`;
+	}
+
+	function getCurrentTime() {
+		const now = new Date();
+		const hour = String(now.getHours()).padStart(2, '0');
+		const minute = String(now.getMinutes()).padStart(2, '0');
+
+		return `${hour}:${minute}`;
+	}
+
+	function numberValue(value) {
+		const numeric = Number(value);
+		return Number.isFinite(numeric) ? numeric : 0;
+	}
+
+	function formatNumber(value, digits = 2) {
+		const numeric = Number(value);
+
+		if (!Number.isFinite(numeric)) return '-';
+
+		return numeric.toLocaleString('en-US', {
+			minimumFractionDigits: 0,
+			maximumFractionDigits: digits
+		});
+	}
+
+	function formatDateTimeForApi(value) {
+		if (!value) return '';
+
+		const [datePart, timePart = '00:00'] = value.split('T');
+		const [year, month, day] = datePart.split('-');
+
+		return `${day}/${month}/${year} ${timePart}`;
+	}
+
+	function formatRangeLabel(row) {
+		return `${row?.range?.start || '-'} → ${row?.range?.end || '-'}`;
+	}
+
+	function getVesselRange(deviceId) {
+		return (
+			vesselRanges[deviceId] || {
+				start: defaultStartDate,
+				end: defaultEndDate
+			}
+		);
+	}
+
+	function setVesselRange(deviceId, field, value) {
+		const currentRange = getVesselRange(deviceId);
+
+		vesselRanges = {
+			...vesselRanges,
+			[deviceId]: {
+				...currentRange,
+				[field]: value
+			}
+		};
+	}
+
+	function applyDefaultRangeToSelectedVessels() {
+		const nextRanges = { ...vesselRanges };
+
+		selectedDevices.forEach((device) => {
+			nextRanges[device.id] = {
+				start: defaultStartDate,
+				end: defaultEndDate
+			};
+		});
+
+		vesselRanges = nextRanges;
+	}
+
+	function ensureVesselRange(deviceId) {
+		if (vesselRanges[deviceId]) return;
+
+		vesselRanges = {
+			...vesselRanges,
+			[deviceId]: {
+				start: defaultStartDate,
+				end: defaultEndDate
+			}
+		};
+	}
+
+	function getTotalFuel(row) {
+		const grand = row?.totals?.grand || {};
+		let total = 0;
+
+		if (canViewFuelEcu) {
+			total += numberValue(grand.ecu);
+		}
+
+		if (canViewFuelFms) {
+			total += numberValue(grand.fms);
+		}
+
+		if (canViewFuelEmsInternal) {
+			total += numberValue(grand.ems_internal);
+		}
+
+		if (canViewFuelEmsExternal) {
+			total += numberValue(grand.ems_external);
+		}
+
+		if (canViewFuelEngineMaker) {
+			total += numberValue(grand.engine_maker);
+		}
+
+		return total;
+	}
+
+	function getCellValue(row, col) {
+		const engineColumn = parseEngineColumnId(col.id);
+
+		if (engineColumn) {
+			const engine = getEngineByKey(row, engineColumn.engineKey);
+
+			if (!engine) return '-';
+
+			if (engineColumn.metric === 'runtime') {
+				return engine.runtime_formatted || '0h 0m';
+			}
+
+			if (engineColumn.metric === 'fuel_ems') {
+				const fuel = engine.fuel || {};
+
+				const value =
+					(canViewFuelEmsInternal ? numberValue(fuel.ems_internal) : 0) +
+					(canViewFuelEmsExternal ? numberValue(fuel.ems_external) : 0);
+
+				return formatNumber(value);
+			}
+
+			if (engineColumn.metric === 'fuel_ecu') {
+				const fuel = engine.fuel || {};
+
+				const value =
+					(canViewFuelEcu ? numberValue(fuel.ecu) : 0) +
+					(canViewFuelFms ? numberValue(fuel.fms) : 0) +
+					(canViewFuelEngineMaker ? numberValue(fuel.engine_maker) : 0);
+
+				return formatNumber(value);
+			}
+
+			if (engineColumn.metric === 'sriti') {
+				return engine.sriti_formatted || formatNumber(engine.sriti_duration || 0);
+			}
+		}
+
+		switch (col.id) {
+			case 'data_received':
+				return `${formatNumber(row?.data_received?.percentage || 0, 1)}%`;
+
+			case 'total_fuel':
+				return formatNumber(getTotalFuel(row));
+
+			case 'avg_speed':
+				return formatNumber(row?.speed?.avg_running_speed || 0);
+
+			case 'max_speed':
+				return formatNumber(row?.speed?.top_speed || 0);
+
+			case 'distance':
+				return formatNumber(row?.distance || 0);
+
+			case 'utc':
+				return row?.range?.timezone || timezoneOffset;
+
+			default:
+				return '-';
+		}
+	}
+
+	function isTotalColumn(col) {
+		return col.type === 'total' || col.id.includes('total');
+	}
+
+	function toggleAllDevices(checked) {
+		if (checked) {
+			selectedDeviceIds = devices.map((device) => device.id);
+
+			const nextRanges = { ...vesselRanges };
+
+			devices.forEach((device) => {
+				if (!nextRanges[device.id]) {
+					nextRanges[device.id] = {
+						start: defaultStartDate,
+						end: defaultEndDate
+					};
+				}
+			});
+
+			vesselRanges = nextRanges;
+		} else {
+			selectedDeviceIds = [];
+		}
+	}
+
+	function toggleSingleDevice(deviceId, checked) {
+		if (checked) {
+			selectedDeviceIds = [...new Set([...selectedDeviceIds, deviceId])];
+			ensureVesselRange(deviceId);
+		} else {
+			selectedDeviceIds = selectedDeviceIds.filter((id) => id !== deviceId);
+		}
+	}
+
+	function applyDefaultRangePreset(preset) {
+		const datePart = defaultStartDate.split('T')[0] || new Date().toISOString().slice(0, 10);
+
+		defaultStartDate = `${datePart}T${preset.startTime}`;
+		defaultEndDate = `${datePart}T${preset.endTime}`;
+		activeDefaultPresetId = preset.id;
+	}
+
+	function setAllColumnsVisibility(value) {
+		visibleColumnIds = value ? permittedReportColumns.map((col) => col.id) : [];
+	}
+
+	function resetVisibleColumns() {
+		visibleColumnIds = defaultColumnIds.filter((id) =>
+			permittedReportColumns.some((col) => col.id === id)
+		);
+	}
+
+	function setColumnVisibility(columnId, checked) {
+		if (checked) {
+			visibleColumnIds = [...new Set([...visibleColumnIds, columnId])];
+		} else {
+			visibleColumnIds = visibleColumnIds.filter((id) => id !== columnId);
+		}
+	}
+
+	function getGroupVisibleCount(columns) {
+		return columns.filter((col) => visibleColumnIds.includes(col.id)).length;
+	}
+
+	async function loadDeviceList() {
+		devicesLoading = true;
+		devicesError = '';
+
+		try {
+			console.log('[ALL_VESSEL][LOAD_DEVICES][START]');
+
+			const rows = await getFleetVessels();
+
+			console.log('[ALL_VESSEL][LOAD_DEVICES][RESULT]', rows);
+
+			devices = Array.isArray(rows)
+				? rows.map((item) => ({
+						id: String(item.vesselId || item.id),
+						vesselId: item.vesselId || item.id,
+						deviceId: item.deviceId || '',
+						name: item.vesselName || item.name || '-',
+						vesselName: item.vesselName || item.name || '-',
+						online: Boolean(item.online),
+						raw: item
+					}))
+				: [];
+
+			if (!selectedDeviceIds.length && devices.length) {
+				selectedDeviceIds = [devices[0].id];
+
+				vesselRanges = {
+					...vesselRanges,
+					[devices[0].id]: {
+						start: defaultStartDate,
+						end: defaultEndDate
+					}
+				};
+			}
+		} catch (err) {
+			console.error('[ALL_VESSEL][LOAD_DEVICES][ERROR]', err);
+			devicesError = err?.message || 'Gagal memuat vessel list dari API.';
+			devices = [];
+		} finally {
+			devicesLoading = false;
+		}
+	}
+
+	async function loadReport() {
+		if (!canAccessAllVesselSummary) {
+			reportError = 'Anda tidak memiliki permission access_all_vessel_summary.';
+			return;
+		}
+
+		if (!selectedDeviceRangesValid) {
+			reportError = 'Default start date dan end date wajib diisi.';
+			return;
+		}
+
+		if (!selectedDevices.length) {
+			reportError = 'Pilih minimal satu vessel.';
+			return;
+		}
+
+		const invalidRange = selectedDevices.find((device) => {
+			const range = getVesselRange(device.id);
+			return !range.start || !range.end;
+		});
+
+		if (invalidRange) {
+			reportError = `Range untuk ${invalidRange.name} belum lengkap.`;
+			return;
+		}
+
+		loading = true;
+		hasLoadedReport = false;
+		completed = 0;
+		reportError = '';
+		loadingStatus = 'Preparing request';
+
+		try {
+			const ranges = selectedDevices.map((device) => {
+				const range = getVesselRange(device.id);
+
+				return {
+					vesselId: Number(device.vesselId),
+					start: formatDateTimeForApi(range.start),
+					end: formatDateTimeForApi(range.end)
+				};
+			});
+
+			loadingStatus = `Loading ${ranges.length} vessel summary`;
+
+			const response = await apiRequest('/all-vessel-summary/data', {
+				method: 'POST',
+				body: JSON.stringify({
+					timezoneMode,
+					timezoneOffset,
+					ranges
+				})
+			});
+
+			const payload = response?.data || {};
+
+			vesselReportRows = Array.isArray(payload.rows)
+				? payload.rows.map((row) => ({
+						...row,
+						id: String(row.vessel_id)
+					}))
+				: [];
+
+			const dynamicDefaultColumnIds = buildDynamicEngineColumns(vesselReportRows)
+				.filter((col) => ['runtime', 'fuel'].includes(col.type) || col.id.includes('sriti'))
+				.map((col) => col.id);
+
+			visibleColumnIds = [...new Set([...dynamicDefaultColumnIds, ...defaultColumnIds])];
+
+			completed = ranges.length;
+			hasLoadedReport = true;
+			loadingStatus = 'Completed';
+		} catch (err) {
+			console.error('[ALL_VESSEL][LOAD_REPORT][ERROR]', err);
+			reportError = err?.message || 'Gagal memuat all vessel summary.';
+			vesselReportRows = [];
+			hasLoadedReport = true;
+		} finally {
+			loading = false;
+		}
+	}
+
+	onMount(async () => {
+		const user = await loadCurrentUser();
+
+		if (hasPermissionForUser(user, 'access_all_vessel_summary')) {
+			await loadDeviceList();
+		}
+	});
 </script>
 
 <section class="avs-page">
-  <div class="avs-container">
-    <header class="avs-header">
-      <div>
-        <h1>All Vessel Summary</h1>
-        <p>{completed} / {selectedDevicesCount} vessels processed</p>
-      </div>
+	{#if currentUserLoading}
+		<div class="status-box">Memuat permission user...</div>
+	{:else if currentUserError}
+		<div class="status-box error-box">{currentUserError}</div>
+	{:else if currentUser && !canAccessAllVesselSummary}
+		<div class="status-box error-box">
+			Anda tidak memiliki permission untuk mengakses All Vessel Summary.
+		</div>
+	{/if}
 
-    </header>
+	{#if canAccessAllVesselSummary}
+		<section class="avs-header-card">
+			<div>
+				<div class="page-kicker">All Vessel Summary</div>
+				<h1>All Vessel Summary</h1>
+				<p>
+					Aggregated summary for selected vessels using custom time range, runtime, fuel
+					consumption, speed, distance, and data received metrics.
+				</p>
+			</div>
 
-    <section class="summary-cards">
-      <div class="summary-card">
-        <span>Selected Vessels</span>
-        <strong>{selectedDevicesCount}</strong>
-        <small>of {devices.length} available vessels</small>
-      </div>
+			<div class="header-actions">
+				<button
+					type="button"
+					class="secondary-btn"
+					onclick={loadDeviceList}
+					disabled={devicesLoading || loading || !canAccessAllVesselSummary}
+				>
+					{devicesLoading ? 'Loading...' : 'Reload Vessels'}
+				</button>
 
-      <div class="summary-card">
-        <span>Date Ranges</span>
-        <strong>{selectedDeviceRangesValid ? "Ready" : "Not Ready"}</strong>
-        <small>{selectedRangeSummary}</small>
-      </div>
+				<button
+					type="button"
+					class="primary-btn"
+					onclick={loadReport}
+					disabled={loading || !selectedDevicesCount || !canAccessAllVesselSummary}
+				>
+					{loading ? 'Loading Summary...' : 'Load Summary'}
+				</button>
+			</div>
+		</section>
+	{/if}
 
-      <div class="summary-card">
-        <span>Active Columns</span>
-        <strong>{selectedColumnCount}</strong>
-        <small>of {reportColumns.length} report columns</small>
-      </div>
-    </section>
+	{#if devicesError}
+		<div class="status-box error-box">{devicesError}</div>
+	{/if}
 
-    <section class="control-layout">
-      <section class="panel-card device-panel">
-        <div class="panel-header">
-          <div>
-            <span class="step-chip">Step 1</span>
-            <h2>Select vessels</h2>
-            <p>Select vessels to include in the summary.</p>
-          </div>
+	{#if reportError}
+		<div class="status-box error-box">{reportError}</div>
+	{/if}
 
-          <span class="soft-badge">{selectedDevicesCount} selected</span>
-        </div>
+	<section class="summary-grid">
+		<article class="summary-card">
+			<span>Selected Vessels</span>
+			<strong>{selectedDevicesCount}</strong>
+		</article>
 
-        <div class="select-all-box">
-          <label>
-            <input
-              type="checkbox"
-              checked={selectAllDevices}
-              onchange={(e) => toggleAllDevices(e.currentTarget.checked)}
-            />
-            <span>Select all vessels</span>
-          </label>
+		<article class="summary-card">
+			<span>Loaded Rows</span>
+			<strong>{vesselReportRows.length}</strong>
+		</article>
 
-          <small>{selectedDevicesCount} of {devices.length}</small>
-        </div>
+		<article class="summary-card">
+			<span>Total Fuel</span>
+			<strong>{formatNumber(totalFuelSummary)} L</strong>
+		</article>
 
-        <input
-          class="search-input"
-          type="text"
-          placeholder="Search vessel name..."
-          bind:value={vesselSearch}
-        />
+		<article class="summary-card">
+			<span>Avg Running Speed</span>
+			<strong>{formatNumber(avgSpeedSummary(), 2)} kt</strong>
+		</article>
+	</section>
 
-        <div class="vessel-list">
-          {#if devicesLoading}
-            <div class="device-empty">Loading device list...</div>
-          {:else if devicesError}
-            <div class="device-empty error">{devicesError}</div>
-          {:else if filteredDevices.length}
-            <div class="device-grid">
-                {#if devicesLoading}
-                  <div class="device-empty">Loading device list...</div>
-                {:else if devicesError}
-                  <div class="device-empty error">{devicesError}</div>
-                {:else if filteredDevices.length}
-                  {#each filteredDevices as device}
-                    <label
-                      class="device-card"
-                      class:active={selectedDeviceIds.includes(device.id)}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedDeviceIds.includes(device.id)}
-                        onchange={(event) => toggleSingleDevice(device.id, event.currentTarget.checked)}
-                      />
+	<section class="layout-grid">
+		<aside class="vessel-panel">
+			<div class="section-header">
+				<div>
+					<span class="section-kicker">Vessels</span>
+					<h2>Select Vessel</h2>
+				</div>
 
-                      <div class="device-info">
-                        <div class="device-title-row">
-                          <strong>{device.name}</strong>
+				<strong>{selectedDevicesCount}/{devices.length}</strong>
+			</div>
 
-                          <span class:offline={!device.online} class="device-status">
-                            <span></span>
-                            {device.online ? "Online" : "Offline"}
-                          </span>
-                        </div>
-                      </div>
-                    </label>
-                  {/each}
-                {:else}
-                  <div class="device-empty">Tidak ada vessel dari API.</div>
-                {/if}
-            </div>
-          {:else}
-            <div class="device-empty">Tidak ada vessel dari API.</div>
-          {/if}
-        </div>
-      </section>
+			<div class="vessel-tools">
+				<input type="search" placeholder="Search vessel..." bind:value={vesselSearch} />
 
-      <div class="side-stack">
-        <section class="panel-card range-panel">
-          <div class="panel-header">
-            <div>
-              <span class="step-chip">Step 2</span>
-              <h2>Per-vessel date ranges</h2>
-              <p>Set calculation period for selected vessels.</p>
-            </div>
-          </div>
+				<label class="check-row">
+					<input
+						type="checkbox"
+						checked={selectAllDevices}
+						onchange={(event) => toggleAllDevices(event.currentTarget.checked)}
+					/>
+					<span>Select all vessels</span>
+				</label>
+			</div>
 
-          <div class="range-box">
-            <div class="range-box-head">
-              <strong>Default range</strong>
-              <small>Active preset: {activeDefaultPresetLabel}</small>
-            </div>
+			<div class="vessel-list">
+				{#if devicesLoading}
+					<div class="empty-box">Loading vessels...</div>
+				{:else if filteredDevices.length}
+					{#each filteredDevices as device}
+						<label class="vessel-check-card">
+							<input
+								type="checkbox"
+								checked={selectedDeviceIds.includes(device.id)}
+								onchange={(event) => toggleSingleDevice(device.id, event.currentTarget.checked)}
+							/>
 
-            <div class="date-grid">
-              <label>
-                <span>Start</span>
-                <input type="datetime-local" bind:value={defaultStartDate} />
-              </label>
+							<span class="vessel-info">
+								<strong>{device.name}</strong>
+							</span>
+						</label>
+					{/each}
+				{:else}
+					<div class="empty-box">Tidak ada vessel.</div>
+				{/if}
+			</div>
+		</aside>
 
-              <label>
-                <span>End</span>
-                <input type="datetime-local" bind:value={defaultEndDate} />
-              </label>
-            </div>
+		<section class="control-panel">
+			<section class="table-section">
+				<div class="section-header">
+					<div>
+						<span class="section-kicker">Range</span>
+						<h2>Summary Request</h2>
+					</div>
 
-            <div class="preset-row">
-              {#each TIME_RANGE_PRESETS as preset}
-                <button
-                  type="button"
-                  class:active={activeDefaultPresetId === preset.id}
-                  onclick={() => applyDefaultRangePreset(preset)}
-                >
-                  {preset.label}
-                </button>
-              {/each}
-            </div>
+					<strong>{activeDefaultPresetLabel}</strong>
+				</div>
 
-            <button class="primary-wide-btn">Apply to selected vessels</button>
-          </div>
+				<div class="filter-grid">
+					<label>
+						<span>Start</span>
+						<input
+							type="datetime-local"
+							bind:value={defaultStartDate}
+							onchange={() => (activeDefaultPresetId = 'custom')}
+						/>
+					</label>
 
-          <div class="selected-range-list">
-            {#if selectedDevices.length === 0}
-              <div class="range-empty">Select one or more vessels first.</div>
-            {:else}
-              {#each selectedDevices as device}
-                <div class="selected-range-item">
-                  <div>
-                    <strong>{device.name}</strong>
-                    <small>Active preset: {activeDefaultPresetLabel}</small>
-                  </div>
-                  <span>{defaultStartDate.replace("T", " ")} → {defaultEndDate.replace("T", " ")}</span>
-                </div>
-              {/each}
-            {/if}
-          </div>
+					<label>
+						<span>End</span>
+						<input
+							type="datetime-local"
+							bind:value={defaultEndDate}
+							onchange={() => (activeDefaultPresetId = 'custom')}
+						/>
+					</label>
 
-          <button class="load-report-btn" onclick={loadReport}>
-            {loading ? "Loading..." : "Load report"}
-          </button>
-        </section>
+					<label>
+						<span>Timezone</span>
+						<select bind:value={timezoneOffset}>
+							{#each TIMEZONE_OPTIONS as option}
+								<option value={option.value}>{option.label}</option>
+							{/each}
+						</select>
+					</label>
 
-        <section class="panel-card column-panel">
-          <div class="panel-header compact">
-            <div>
-              <span class="step-chip">Step 3</span>
-              <h2>Manage columns</h2>
-              <p>Hide unnecessary columns to keep table concise.</p>
-            </div>
+					<label>
+						<span>Timezone Mode</span>
+						<select bind:value={timezoneMode}>
+							<option value="manual">Manual</option>
+							<option value="auto">Auto</option>
+						</select>
+					</label>
+				</div>
 
-            <button
-              class="open-btn"
-              type="button"
-              onclick={() => (showColumnSelector = !showColumnSelector)}
-            >
-              {showColumnSelector ? "Close" : "Open"}
-            </button>
-          </div>
+				<div class="preset-row">
+					{#each TIME_RANGE_PRESETS as preset}
+						<button
+							type="button"
+							class:active-preset={activeDefaultPresetId === preset.id}
+							onclick={() => applyDefaultRangePreset(preset)}
+						>
+							{preset.label}
+						</button>
+					{/each}
+				</div>
 
-          <div class="column-toolbar">
-            <span class="soft-badge">{selectedColumnCount} / {reportColumns.length} active</span>
+				<div class="range-note">
+					Selected range: <strong>{selectedRangeSummary}</strong>
+				</div>
 
-            <div class="column-actions">
-              <button onclick={() => setAllColumnsVisibility(true)}>Show all</button>
-              <button onclick={() => setAllColumnsVisibility(false)}>Hide all</button>
-              <button onclick={resetVisibleColumns}>Reset</button>
-            </div>
-          </div>
+				<div class="range-actions">
+					<button
+						type="button"
+						class="secondary-btn"
+						onclick={applyDefaultRangeToSelectedVessels}
+						disabled={!selectedDevicesCount}
+					>
+						Apply Default Range to Selected Vessels
+					</button>
+				</div>
 
-          {#if showColumnSelector}
-            <div class="column-groups">
-              <div class="column-group">
-                <div class="column-group-head">
-                  <span>Runtime / RH</span>
-                  <small>{getGroupVisibleCount(runtimeColumns)} / {runtimeColumns.length}</small>
-                </div>
+				<div class="vessel-range-summary">
+					<div class="vessel-range-head">
+						<span>Vessel</span>
+						<span>Start</span>
+						<span>End</span>
+					</div>
 
-                <div class="column-grid">
-                  {#each runtimeColumns as col}
-                    <label class:active={visibleColumnIds.includes(col.id)}>
-                      <input
-                        type="checkbox"
-                        checked={visibleColumnIds.includes(col.id)}
-                        onchange={(e) => setColumnVisibility(col.id, e.currentTarget.checked)}
-                      />
-                      <span>{col.label}</span>
-                    </label>
-                  {/each}
-                </div>
-              </div>
+					{#if selectedDevices.length}
+						{#each selectedDevices as device}
+							<div class="vessel-range-row">
+								<div class="vessel-range-name">
+									<strong>{device.name}</strong>
+								</div>
 
-              <div class="column-group">
-                <div class="column-group-head">
-                  <span>Fuel / FC</span>
-                  <small>{getGroupVisibleCount(fuelColumns)} / {fuelColumns.length}</small>
-                </div>
+								<input
+									type="datetime-local"
+									value={getVesselRange(device.id).start}
+									onchange={(event) =>
+										setVesselRange(device.id, 'start', event.currentTarget.value)}
+								/>
 
-                <div class="column-grid">
-                  {#each fuelColumns as col}
-                    <label class:active={visibleColumnIds.includes(col.id)}>
-                      <input
-                        type="checkbox"
-                        checked={visibleColumnIds.includes(col.id)}
-                        onchange={(e) => setColumnVisibility(col.id, e.currentTarget.checked)}
-                      />
-                      <span>{col.label}</span>
-                    </label>
-                  {/each}
-                </div>
-              </div>
+								<input
+									type="datetime-local"
+									value={getVesselRange(device.id).end}
+									onchange={(event) => setVesselRange(device.id, 'end', event.currentTarget.value)}
+								/>
+							</div>
+						{/each}
+					{:else}
+						<div class="empty-box">Pilih vessel terlebih dahulu.</div>
+					{/if}
+				</div>
+			</section>
 
-              <div class="column-group full">
-                <div class="column-group-head">
-                  <span>Additional</span>
-                  <small>{getGroupVisibleCount(controlColumns)} / {controlColumns.length}</small>
-                </div>
+			<section class="table-section">
+				<div class="section-header">
+					<div>
+						<span class="section-kicker">Columns</span>
+						<h2>Visible Columns</h2>
+					</div>
 
-                <div class="column-grid compact">
-                  {#each controlColumns as col}
-                    <label class:active={visibleColumnIds.includes(col.id)}>
-                      <input
-                        type="checkbox"
-                        checked={visibleColumnIds.includes(col.id)}
-                        onchange={(e) => setColumnVisibility(col.id, e.currentTarget.checked)}
-                      />
-                      <span>{col.label}</span>
-                    </label>
-                  {/each}
-                </div>
-              </div>
-            </div>
-          {/if}
-        </section>
-      </div>
-    </section>
+					<button
+						type="button"
+						class="secondary-btn"
+						onclick={() => (showColumnSelector = !showColumnSelector)}
+					>
+						{selectedColumnCount} Selected
+					</button>
+				</div>
 
-    {#if loading}
-      <section class="loading-card">
-        <div class="spinner"></div>
-        <strong>Loading summary...</strong>
-        <span>{loadingStatus} · {completed} / {devices.length} vessels processed</span>
+				{#if showColumnSelector}
+					<div class="column-selector">
+						<div class="column-toolbar">
+							<button
+								type="button"
+								class="secondary-btn"
+								onclick={() => setAllColumnsVisibility(true)}
+							>
+								Select All
+							</button>
 
-        <div class="progress-track">
-          <div class="progress-bar" style={`width:${progress}%`}></div>
-        </div>
-      </section>
-    {:else if !hasLoadedReport}
-      <section class="empty-card">
-        <strong>No data loaded yet</strong>
-        <span>Select vessels, set each vessel date range, then click Load.</span>
-      </section>
-    {:else}
-      <section class="results-card">
-        <div class="results-header">
-          <div>
-            <span class="step-chip">Report Results</span>
-            <h2>Vessel summary table</h2>
-            <p>Showing runtime, fuel consumption, and UTC settings based on selected vessel configuration.</p>
-          </div>
+							<button
+								type="button"
+								class="secondary-btn"
+								onclick={() => setAllColumnsVisibility(false)}
+							>
+								Clear
+							</button>
 
-          <div class="result-badges">
-            <span>{filteredVesselLogs.length} rows</span>
-            <span>{visibleDataColumns.length} columns</span>
-          </div>
-        </div>
+							<button type="button" class="secondary-btn" onclick={resetVisibleColumns}>
+								Default
+							</button>
+						</div>
 
-        <div class="scroll-note">Scroll horizontally to view all selected columns.</div>
+						<div class="column-groups">
+							<div class="column-group">
+								<h3>Runtime / RH <span>{getGroupVisibleCount(runtimeColumns)}</span></h3>
 
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th class="sticky-left vessel-head">Vessel</th>
+								{#each runtimeColumns as col}
+									<label class="check-row">
+										<input
+											type="checkbox"
+											checked={visibleColumnIds.includes(col.id)}
+											onchange={(event) => setColumnVisibility(col.id, event.currentTarget.checked)}
+										/>
+										<span>{col.label}</span>
+									</label>
+								{/each}
+							</div>
 
-                {#each visibleDataColumns as col}
-                  <th
-                    class:runtime-head={col.type === "runtime"}
-                    class:fuel-head={col.type === "fuel"}
-                    class:total-head={isTotalColumn(col)}
-                    class:utc-head={col.type === "utc"}
-                  >
-                    {col.label}
-                  </th>
-                {/each}
-              </tr>
-            </thead>
+							<div class="column-group">
+								<h3>Fuel / FC <span>{getGroupVisibleCount(fuelColumns)}</span></h3>
 
-            <tbody>
-              {#each filteredVesselLogs as row}
-                <tr>
-                  <td class="sticky-left vessel-cell">
-                    <strong>{row.vessel}</strong>
-                    <small>{formatRangeLabel(row)}</small>
-                  </td>
+								{#each fuelColumns as col}
+									<label class="check-row">
+										<input
+											type="checkbox"
+											checked={visibleColumnIds.includes(col.id)}
+											onchange={(event) => setColumnVisibility(col.id, event.currentTarget.checked)}
+										/>
+										<span>{col.label}</span>
+									</label>
+								{/each}
+							</div>
 
-                  {#each visibleDataColumns as col}
-                    <td
-                      class:runtime-cell={col.type === "runtime"}
-                      class:fuel-cell={col.type === "fuel"}
-                      class:total-cell={isTotalColumn(col)}
-                      class:utc-cell={col.type === "utc"}
-                    >
-                      {#if col.type === "utc"}
-                        <div class="utc-content">
-                          <span class="utc-auto">Auto</span>
-                          <span class="utc-zone">{getCellValue(row, col)}</span>
-                        </div>
-                      {:else}
-                        <span>{getCellValue(row, col)}</span>
-                      {/if}
-                    </td>
-                  {/each}
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    {/if}
-  </div>
+							<div class="column-group">
+								<h3>Additional <span>{getGroupVisibleCount(controlColumns)}</span></h3>
+
+								{#each controlColumns as col}
+									<label class="check-row">
+										<input
+											type="checkbox"
+											checked={visibleColumnIds.includes(col.id)}
+											onchange={(event) => setColumnVisibility(col.id, event.currentTarget.checked)}
+										/>
+										<span>{col.label}</span>
+									</label>
+								{/each}
+							</div>
+						</div>
+					</div>
+				{/if}
+			</section>
+		</section>
+	</section>
+
+	{#if loading}
+		<section class="table-section">
+			<div class="loading-row">
+				<div>
+					<strong>{loadingStatus}</strong>
+					<span>{completed}/{selectedDevicesCount} vessels completed</span>
+				</div>
+
+				<div class="progress-track">
+					<div class="progress-fill" style={`width: ${progress}%;`}></div>
+				</div>
+			</div>
+		</section>
+	{/if}
+
+	<section class="table-section">
+		<div class="section-header">
+			<div>
+				<span class="section-kicker">Result</span>
+				<h2>Summary Table</h2>
+			</div>
+
+			<strong>{vesselReportRows.length} rows</strong>
+		</div>
+
+		{#if !hasLoadedReport && !loading}
+			<div class="empty-box">Klik Load Summary untuk mengambil data.</div>
+		{:else if loading}
+			<div class="empty-box">Summary sedang dimuat...</div>
+		{:else if vesselReportRows.length}
+			<div class="table-wrapper">
+				<table>
+					<thead>
+						<tr>
+							<th>No</th>
+							<th>Vessel</th>
+							<th>Range</th>
+
+							{#each visibleDataColumns as col}
+								<th class:total-column={isTotalColumn(col)}>
+									{col.label}
+								</th>
+							{/each}
+						</tr>
+					</thead>
+
+					<tbody>
+						{#each vesselReportRows as row, index}
+							<tr>
+								<td>{index + 1}</td>
+								<td>
+									<div class="vessel-name-cell">
+										<strong>{row.vessel_name}</strong>
+										<span>{row.device_id}</span>
+									</div>
+								</td>
+								<td>{formatRangeLabel(row)}</td>
+
+								{#each visibleDataColumns as col}
+									<td class:total-cell={isTotalColumn(col)}>
+										{getCellValue(row, col)}
+									</td>
+								{/each}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{:else}
+			<div class="empty-box">Tidak ada data summary pada range yang dipilih.</div>
+		{/if}
+	</section>
 </section>
 
 <style>
-.avs-page {
-  min-height: 100%;
-  background: #f4f6f8;
-  color: #0f172a;
-  padding: 18px 20px 48px;
-  box-sizing: border-box;
-}
-
-  .avs-container {
-    width: 100%;
-    max-width: 1280px;
-    margin: 0 auto;
-  }
-
-  .avs-header {
-    display: flex;
-    justify-content: center;
-    text-align: center;
-    margin-bottom: 18px;
-  }
-
-  h1 {
-    margin: 0;
-    font-size: 28px;
-    font-weight: 900;
-    line-height: 1.1;
-  }
-
-  .avs-header p {
-    margin: 6px 0 0;
-    color: #64748b;
-    font-size: 14px;
-    font-weight: 700;
-  }
-
-  .summary-cards {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 14px;
-    margin-bottom: 16px;
-  }
-
-  .device-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 12px;
-    padding: 12px;
-  }
-
-  .device-card {
-    min-height: fit-content;
-    padding: 12px 14px;
-    border: 1px solid #d7dee8;
-    border-radius: 14px;
-    background: #ffffff;
-    display: grid;
-    grid-template-columns: 22px 1fr;
-    gap: 10px;
-    align-items: flex-start;
-    cursor: pointer;
-    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
-    transition:
-      border-color 0.15s ease,
-      background 0.15s ease,
-      box-shadow 0.15s ease,
-      transform 0.15s ease;
-  }
-
-  .device-card:hover {
-    border-color: #93c5fd;
-    background: #f8fbff;
-    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
-    transform: translateY(-1px);
-  }
-
-  .device-card.active {
-    border-color: #2563eb;
-    background: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
-    box-shadow:
-      0 0 0 1px rgba(37, 99, 235, 0.18),
-      0 8px 18px rgba(37, 99, 235, 0.10);
-  }
-
-  .device-card input {
-    width: 17px;
-    height: 17px;
-    margin-top: 3px;
-    accent-color: #2563eb;
-    cursor: pointer;
-  }
-
-  .device-info {
-    min-width: 0;
-    display: grid;
-    gap: 7px;
-  }
-
-  .device-title-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .device-title-row strong {
-    min-width: 0;
-    color: #0f172a;
-    font-size: 15px;
-    line-height: 1.2;
-    font-weight: 900;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .device-status {
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 3px 8px;
-    border-radius: 999px;
-    background: #ecfdf5;
-    color: #047857;
-    border: 1px solid #bbf7d0;
-    font-size: 10px;
-    font-weight: 900;
-  }
-
-  .device-status span {
-    width: 7px;
-    height: 7px;
-    border-radius: 999px;
-    background: #10b981;
-  }
-
-  .device-status.offline {
-    background: #f8fafc;
-    color: #64748b;
-    border-color: #cbd5e1;
-  }
-
-  .device-status.offline span {
-    background: #94a3b8;
-  }
-
-  .device-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .device-meta span {
-    padding: 3px 7px;
-    border-radius: 8px;
-    background: #f1f5f9;
-    color: #475569;
-    border: 1px solid #e2e8f0;
-    font-size: 10.5px;
-    font-weight: 800;
-  }
-
-  .device-company {
-    color: #64748b;
-    font-size: 11px;
-    font-weight: 700;
-    line-height: 1.3;
-  }
-
-  .device-empty {
-    grid-column: 1 / -1;
-    padding: 16px;
-    border: 1px dashed #cbd5e1;
-    border-radius: 12px;
-    background: #f8fafc;
-    color: #64748b;
-    font-size: 12px;
-    font-weight: 800;
-  }
-
-  .device-empty.error {
-    color: #b91c1c;
-    border-color: #fecaca;
-    background: #fef2f2;
-  }
-
-  .device-empty {
-    padding: 12px;
-    color: #64748b;
-    font-size: 12px;
-    font-weight: 800;
-  }
-
-  .device-empty.error {
-    color: #b91c1c;
-  }
-
-  .summary-card,
-  .panel-card,
-  .results-card,
-  .loading-card,
-  .empty-card {
-    background: white;
-    border: 1px solid #d9e2ec;
-    border-radius: 14px;
-    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
-  }
-
-  .summary-card {
-    padding: 16px 18px;
-  }
-
-  .summary-card span {
-    display: block;
-    color: #64748b;
-    font-size: 12px;
-    font-weight: 900;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-
-  .summary-card strong {
-    display: block;
-    margin-top: 10px;
-    font-size: 30px;
-    line-height: 1;
-    font-weight: 900;
-  }
-
-  .summary-card small {
-    display: block;
-    margin-top: 8px;
-    color: #64748b;
-    font-size: 12px;
-    font-weight: 700;
-  }
-
-  .control-layout {
-    display: grid;
-    grid-template-columns: 1.4fr 1fr;
-    gap: 16px;
-    align-items: start;
-    margin-bottom: 16px;
-  }
-
-  .side-stack {
-    display: grid;
-    gap: 16px;
-  }
-
-  .panel-card {
-    padding: 16px;
-  }
-
-  .panel-header {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    align-items: flex-start;
-    margin-bottom: 14px;
-  }
-
-  .panel-header.compact {
-    align-items: center;
-  }
-
-  .step-chip {
-    display: inline-flex;
-    width: fit-content;
-    padding: 5px 10px;
-    border-radius: 999px;
-    background: #dbeafe;
-    color: #1d4ed8;
-    font-size: 11px;
-    font-weight: 900;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
-
-  .panel-header h2,
-  .results-header h2 {
-    margin: 8px 0 4px;
-    font-size: 20px;
-    font-weight: 900;
-  }
-
-  .panel-header p,
-  .results-header p {
-    margin: 0;
-    color: #64748b;
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1.45;
-  }
-
-  .soft-badge {
-    display: inline-flex;
-    padding: 7px 10px;
-    border-radius: 999px;
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
-    color: #1e3a8a;
-    font-size: 12px;
-    font-weight: 900;
-    white-space: nowrap;
-  }
-
-  .select-all-box {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    align-items: center;
-    padding: 12px;
-    border-radius: 12px;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    margin-bottom: 12px;
-  }
-
-  .select-all-box label,
-  .vessel-item,
-  .column-grid label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    font-weight: 800;
-  }
-
-  .select-all-box small {
-    color: #64748b;
-    font-size: 12px;
-    font-weight: 800;
-  }
-
-  input[type="checkbox"] {
-    width: 16px;
-    height: 16px;
-    accent-color: #2563eb;
-  }
-
-  .search-input,
-  .date-grid input {
-    width: 100%;
-    height: 40px;
-    border: 1px solid #cbd5e1;
-    border-radius: 10px;
-    padding: 0 12px;
-    font-size: 13px;
-    background: white;
-  }
-
-  .search-input {
-    margin-bottom: 12px;
-  }
-
-  .vessel-list {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 9px;
-    max-height: 410px;
-    overflow: auto;
-    padding-right: 4px;
-  }
-
-  .vessel-item {
-    min-height: 42px;
-    padding: 0 10px;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    background: white;
-    cursor: pointer;
-  }
-
-  .vessel-item.active {
-    background: #eff6ff;
-    border-color: #93c5fd;
-    color: #1e3a8a;
-  }
-
-  .range-box {
-    padding: 14px;
-    border-radius: 12px;
-    border: 1px solid #dbeafe;
-    background: #eff6ff;
-    margin-bottom: 12px;
-  }
-
-  .range-box-head,
-  .selected-range-item {
-    display: flex;
-    justify-content: space-between;
-    gap: 10px;
-    align-items: center;
-  }
-
-  .range-box-head small,
-  .selected-range-item small {
-    color: #64748b;
-    font-size: 12px;
-    font-weight: 800;
-  }
-
-  .date-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-top: 12px;
-  }
-
-  .date-grid span {
-    display: block;
-    margin-bottom: 6px;
-    color: #475569;
-    font-size: 12px;
-    font-weight: 900;
-  }
-
-  .preset-row {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
-    margin-top: 12px;
-  }
-
-  .preset-row button,
-  .primary-wide-btn,
-  .load-report-btn,
-  .open-btn,
-  .column-actions button {
-    border: none;
-    cursor: pointer;
-    font-weight: 900;
-  }
-
-  .preset-row button {
-    min-height: 34px;
-    border-radius: 9px;
-    background: white;
-    border: 1px solid #bfdbfe;
-    color: #1d4ed8;
-    font-size: 11px;
-  }
-
-  .preset-row button.active {
-    background: #2563eb;
-    color: white;
-    border-color: #2563eb;
-  }
-
-  .primary-wide-btn,
-  .load-report-btn {
-    width: 100%;
-    height: 40px;
-    margin-top: 12px;
-    border-radius: 10px;
-    background: #2563eb;
-    color: white;
-    font-size: 13px;
-  }
-
-  .selected-range-list {
-    display: grid;
-    gap: 9px;
-    max-height: 230px;
-    overflow: auto;
-    padding-right: 4px;
-  }
-
-  .selected-range-item {
-    padding: 11px 12px;
-    border-radius: 10px;
-    border: 1px solid #e2e8f0;
-    background: white;
-  }
-
-  .selected-range-item strong {
-    display: block;
-    font-size: 13px;
-  }
-
-  .selected-range-item span {
-    font-size: 11px;
-    color: #64748b;
-    font-weight: 700;
-    text-align: right;
-  }
-
-  .range-empty {
-    padding: 14px;
-    border-radius: 10px;
-    border: 1px dashed #cbd5e1;
-    color: #64748b;
-    text-align: center;
-    font-size: 13px;
-    font-weight: 700;
-  }
-
-  .open-btn {
-    min-width: 78px;
-    height: 36px;
-    border-radius: 9px;
-    background: #2563eb;
-    color: white;
-  }
-
-  .column-toolbar {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    align-items: center;
-    padding: 10px;
-    border-radius: 12px;
-    border: 1px solid #e2e8f0;
-    background: #f8fafc;
-  }
-
-  .column-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .column-actions button {
-    height: 32px;
-    border-radius: 8px;
-    padding: 0 10px;
-    background: white;
-    border: 1px solid #cbd5e1;
-    color: #334155;
-    font-size: 12px;
-  }
-
-  .column-groups {
-    display: grid;
-    gap: 12px;
-    margin-top: 12px;
-  }
-
-  .column-group {
-    padding: 12px;
-    border-radius: 12px;
-    border: 1px solid #e2e8f0;
-    background: white;
-  }
-
-  .column-group-head {
-    display: flex;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 10px;
-  }
-
-  .column-group-head span {
-    font-size: 13px;
-    font-weight: 900;
-  }
-
-  .column-group-head small {
-    color: #64748b;
-    font-size: 12px;
-    font-weight: 800;
-  }
-
-  .column-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
-    gap: 8px;
-  }
-
-  .column-grid.compact {
-    grid-template-columns: repeat(auto-fill, minmax(125px, 1fr));
-  }
-
-  .column-grid label {
-    min-height: 38px;
-    padding: 8px 9px;
-    border-radius: 10px;
-    border: 1px solid #e2e8f0;
-    background: #f8fafc;
-    font-size: 11px;
-    cursor: pointer;
-  }
-
-  .column-grid label.active {
-    background: #eff6ff;
-    border-color: #93c5fd;
-    color: #1e3a8a;
-  }
-
-  .results-card,
-  .loading-card,
-  .empty-card {
-    padding: 16px;
-  }
-
-  .results-header {
-    display: flex;
-    justify-content: space-between;
-    gap: 14px;
-    align-items: flex-start;
-    padding-bottom: 14px;
-    border-bottom: 1px solid #e5e7eb;
-  }
-
-  .result-badges {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .result-badges span {
-    display: inline-flex;
-    padding: 7px 10px;
-    border-radius: 999px;
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
-    color: #1e3a8a;
-    font-size: 12px;
-    font-weight: 900;
-  }
-
-  .scroll-note {
-    display: inline-flex;
-    margin: 14px 0 10px;
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: #f1f5f9;
-    color: #64748b;
-    font-size: 12px;
-    font-weight: 800;
-  }
-
-  .table-container {
-    overflow: auto;
-    border: 1px solid #dbe3ef;
-    border-radius: 14px;
-    max-height: 70vh;
-  }
-
-  table {
-    width: 100%;
-    min-width: 1250px;
-    border-collapse: separate;
-    border-spacing: 0;
-    font-size: 12px;
-  }
-
-  th,
-  td {
-    padding: 10px 11px;
-    border-right: 1px solid #dbe4ef;
-    border-bottom: 1px solid #dbe4ef;
-    text-align: center;
-    white-space: nowrap;
-    background: white;
-  }
-
-  th {
-    position: sticky;
-    top: 0;
-    z-index: 5;
-    background: #0f172a;
-    color: white;
-    font-weight: 900;
-    text-transform: uppercase;
-    font-size: 11px;
-  }
-
-  th.runtime-head { background: #1e3a8a; }
-  th.fuel-head { background: #065f46; }
-  th.total-head { background: #7c2d12; }
-  th.utc-head { background: #334155; }
-
-  tbody tr:nth-child(even) td {
-    background: #f8fafc;
-  }
-
-  tbody tr:hover td {
-    background: #eef6ff;
-  }
-
-  .sticky-left {
-    position: sticky;
-    left: 0;
-    z-index: 6;
-  }
-
-  th.sticky-left {
-    z-index: 10;
-    background: #111827;
-  }
-
-  .vessel-cell {
-    min-width: 210px;
-    text-align: left;
-  }
-
-  .vessel-cell strong {
-    display: block;
-    font-size: 13px;
-    font-weight: 900;
-  }
-
-  .vessel-cell small {
-    display: block;
-    margin-top: 3px;
-    color: #64748b;
-    font-size: 11px;
-    font-weight: 700;
-    white-space: normal;
-  }
-
-  .runtime-cell span {
-    color: #1e3a8a;
-    font-weight: 900;
-  }
-
-  .fuel-cell span {
-    color: #065f46;
-    font-weight: 900;
-  }
-
-  .total-cell {
-    background: #fff7ed !important;
-    color: #9a3412;
-    font-weight: 900;
-  }
-
-  .utc-content {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    align-items: center;
-  }
-
-  .utc-auto {
-    padding: 4px 9px;
-    border-radius: 999px;
-    background: #eff6ff;
-    color: #1d4ed8;
-    font-weight: 900;
-  }
-
-  .utc-zone {
-    padding: 5px 9px;
-    border-radius: 8px;
-    border: 1px solid #dbe4ef;
-    background: #f8fafc;
-    font-weight: 800;
-  }
-
-  .loading-card,
-  .empty-card {
-    display: grid;
-    place-items: center;
-    gap: 10px;
-    text-align: center;
-    min-height: 180px;
-  }
-
-  .spinner {
-    width: 36px;
-    height: 36px;
-    border: 4px solid #dbeafe;
-    border-top-color: #2563eb;
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-
-  .progress-track {
-    width: min(420px, 90%);
-    height: 10px;
-    border-radius: 999px;
-    background: #e2e8f0;
-    overflow: hidden;
-  }
-
-  .progress-bar {
-    height: 100%;
-    background: #2563eb;
-  }
-
-  @media (max-width: 1100px) {
-    .summary-cards,
-    .control-layout {
-      grid-template-columns: 1fr;
-    }
-
-    .vessel-list {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .avs-header,
-    .results-header {
-      flex-direction: column;
-    }
-  }
-
-  @media (max-width: 700px) {
-    .avs-page {
-      padding: 14px 12px 36px;
-    }
-
-    .vessel-list,
-    .date-grid,
-    .preset-row {
-      grid-template-columns: 1fr;
-    }
-
-    .column-toolbar,
-    .select-all-box {
-      flex-direction: column;
-      align-items: stretch;
-    }
-  }
+	.avs-page {
+		min-height: 100vh;
+		padding: 16px;
+		background: #f3f6fa;
+		color: #0f172a;
+		display: grid;
+		gap: 14px;
+		box-sizing: border-box;
+	}
+
+	.avs-header-card,
+	.table-section,
+	.summary-card,
+	.vessel-panel,
+	.status-box {
+		background: #ffffff;
+		border: 1px solid #d9e2ec;
+		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+	}
+
+	.avs-header-card {
+		padding: 18px 22px;
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 18px;
+	}
+
+	.page-kicker,
+	.section-kicker {
+		display: inline-flex;
+		padding: 4px 10px;
+		border-radius: 999px;
+		background: #dbeafe;
+		color: #1d4ed8;
+		font-size: 11px;
+		font-weight: 900;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+	}
+
+	.avs-header-card h1 {
+		margin: 10px 0 4px;
+		font-size: 24px;
+		font-weight: 900;
+	}
+
+	.avs-header-card p {
+		margin: 0;
+		color: #64748b;
+		font-size: 13px;
+		font-weight: 700;
+	}
+
+	.header-actions {
+		display: flex;
+		gap: 10px;
+		align-items: center;
+	}
+
+	.primary-btn,
+	.secondary-btn {
+		height: 40px;
+		padding: 0 16px;
+		border: none;
+		font-size: 13px;
+		font-weight: 900;
+		cursor: pointer;
+	}
+
+	.primary-btn {
+		background: #2563eb;
+		color: #ffffff;
+	}
+
+	.secondary-btn {
+		background: #f8fafc;
+		color: #0f172a;
+		border: 1px solid #cbd5e1;
+	}
+
+	.primary-btn:disabled,
+	.secondary-btn:disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
+	}
+
+	.status-box {
+		padding: 12px 16px;
+		font-size: 13px;
+		font-weight: 900;
+	}
+
+	.error-box {
+		background: #fef2f2;
+		color: #b91c1c;
+		border-color: #fecaca;
+	}
+
+	.summary-grid {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 12px;
+	}
+
+	.summary-card {
+		min-height: 88px;
+		padding: 16px;
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+	}
+
+	.summary-card span {
+		color: #64748b;
+		font-size: 11px;
+		font-weight: 900;
+		text-transform: uppercase;
+	}
+
+	.summary-card strong {
+		margin-top: 8px;
+		font-size: 22px;
+		font-weight: 900;
+	}
+
+	.layout-grid {
+		display: grid;
+		grid-template-columns: 320px minmax(0, 1fr);
+		gap: 14px;
+	}
+
+	.vessel-panel {
+		min-height: 420px;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
+	.section-header {
+		min-height: 58px;
+		padding: 12px 16px;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		border-bottom: 1px solid #e2e8f0;
+	}
+
+	.section-header h2 {
+		margin: 6px 0 0;
+		font-size: 18px;
+		font-weight: 900;
+	}
+
+	.section-header strong {
+		padding: 5px 10px;
+		border-radius: 999px;
+		background: #eff6ff;
+		border: 1px solid #bfdbfe;
+		color: #1d4ed8;
+		font-size: 11px;
+		font-weight: 900;
+	}
+
+	.vessel-tools {
+		padding: 12px;
+		display: grid;
+		gap: 10px;
+		background: #f8fafc;
+		border-bottom: 1px solid #e2e8f0;
+	}
+
+	.vessel-tools input,
+	.filter-grid input,
+	.filter-grid select {
+		height: 40px;
+		padding: 0 10px;
+		border: 1px solid #cbd5e1;
+		background: #ffffff;
+		color: #0f172a;
+		font-size: 13px;
+		font-weight: 800;
+		box-sizing: border-box;
+	}
+
+	.vessel-list {
+		flex: 1;
+		overflow: auto;
+		padding: 10px;
+		display: grid;
+		align-content: start;
+		gap: 8px;
+	}
+
+	.vessel-check-card {
+		padding: 10px;
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 10px;
+		border: 1px solid #e2e8f0;
+		background: #ffffff;
+		cursor: pointer;
+	}
+
+	.vessel-info {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.vessel-info strong {
+		font-size: 12px;
+		font-weight: 900;
+	}
+
+	.vessel-info small {
+		color: #64748b;
+		font-size: 11px;
+		font-weight: 800;
+	}
+
+	.status-dot {
+		width: 9px;
+		height: 9px;
+		border-radius: 50%;
+		background: #cbd5e1;
+	}
+
+	.online-dot {
+		background: #22c55e;
+	}
+
+	.control-panel {
+		display: grid;
+		gap: 14px;
+		align-content: start;
+		min-width: 0;
+	}
+
+	.filter-grid {
+		padding: 14px;
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 12px;
+		background: #f8fafc;
+	}
+
+	.filter-grid label {
+		display: grid;
+		gap: 6px;
+	}
+
+	.filter-grid label span {
+		color: #475569;
+		font-size: 10px;
+		font-weight: 900;
+		text-transform: uppercase;
+	}
+
+	.preset-row {
+		padding: 0 14px 14px;
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
+		background: #f8fafc;
+	}
+
+	.preset-row button {
+		height: 34px;
+		padding: 0 12px;
+		border: 1px solid #cbd5e1;
+		background: #ffffff;
+		color: #0f172a;
+		font-size: 12px;
+		font-weight: 900;
+		cursor: pointer;
+	}
+
+	.preset-row button.active-preset {
+		border-color: #2563eb;
+		background: #dbeafe;
+		color: #1d4ed8;
+	}
+
+	.range-actions {
+		padding: 0 14px 14px;
+		background: #f8fafc;
+	}
+
+	.vessel-range-summary {
+		padding: 14px;
+		background: #f8fafc;
+		border-top: 1px solid #e2e8f0;
+		display: grid;
+		gap: 8px;
+		max-height: 280px;
+		overflow: auto;
+	}
+
+	.vessel-range-head,
+	.vessel-range-row {
+		display: grid;
+		grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1fr) minmax(180px, 1fr);
+		gap: 10px;
+		align-items: center;
+	}
+
+	.vessel-range-head {
+		position: sticky;
+		top: 0;
+		z-index: 2;
+		padding: 8px 10px;
+		background: #f1f5f9;
+		border: 1px solid #d9e2ec;
+	}
+
+	.vessel-range-head span {
+		color: #334155;
+		font-size: 10px;
+		font-weight: 900;
+		text-transform: uppercase;
+	}
+
+	.vessel-range-row {
+		padding: 10px;
+		background: #ffffff;
+		border: 1px solid #d9e2ec;
+	}
+
+	.vessel-range-name {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.vessel-range-name strong {
+		color: #0f172a;
+		font-size: 12px;
+		font-weight: 900;
+	}
+
+	.vessel-range-name small {
+		color: #64748b;
+		font-size: 10px;
+		font-weight: 800;
+	}
+
+	.vessel-range-row input {
+		width: 100%;
+		height: 38px;
+		padding: 0 10px;
+		border: 1px solid #cbd5e1;
+		background: #ffffff;
+		color: #0f172a;
+		font-size: 12px;
+		font-weight: 800;
+		box-sizing: border-box;
+	}
+
+	@media (max-width: 900px) {
+		.vessel-range-head,
+		.vessel-range-row {
+			grid-template-columns: 1fr;
+		}
+	}
+
+	.range-note {
+		padding: 12px 14px;
+		border-top: 1px solid #e2e8f0;
+		color: #475569;
+		font-size: 12px;
+		font-weight: 800;
+	}
+
+	.column-selector {
+		padding: 14px;
+		background: #f8fafc;
+	}
+
+	.column-toolbar {
+		display: flex;
+		gap: 8px;
+		margin-bottom: 12px;
+		flex-wrap: wrap;
+	}
+
+	.column-groups {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 12px;
+	}
+
+	.column-group {
+		padding: 12px;
+		background: #ffffff;
+		border: 1px solid #d9e2ec;
+	}
+
+	.column-group h3 {
+		margin: 0 0 10px;
+		display: flex;
+		justify-content: space-between;
+		font-size: 13px;
+		font-weight: 900;
+	}
+
+	.check-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		color: #334155;
+		font-size: 12px;
+		font-weight: 800;
+		cursor: pointer;
+	}
+
+	.column-group .check-row + .check-row {
+		margin-top: 8px;
+	}
+
+	.loading-row {
+		padding: 14px;
+		display: grid;
+		gap: 10px;
+	}
+
+	.loading-row strong {
+		display: block;
+		font-size: 13px;
+		font-weight: 900;
+	}
+
+	.loading-row span {
+		color: #64748b;
+		font-size: 12px;
+		font-weight: 800;
+	}
+
+	.progress-track {
+		height: 9px;
+		background: #e2e8f0;
+		overflow: hidden;
+	}
+
+	.progress-fill {
+		height: 100%;
+		background: #2563eb;
+		transition: width 0.25s ease;
+	}
+
+	.table-section {
+		min-width: 0;
+		overflow: hidden;
+	}
+
+	.table-wrapper {
+		display: block;
+		width: 100%;
+		max-width: 100%;
+		max-height: 62vh;
+		overflow-x: auto;
+		overflow-y: auto;
+		border-top: 1px solid #e2e8f0;
+		-webkit-overflow-scrolling: touch;
+	}
+
+	.table-wrapper table {
+		width: max-content;
+		min-width: 1800px;
+		border-collapse: separate;
+		border-spacing: 0;
+		font-size: 12px;
+	}
+
+	.table-wrapper thead th {
+		position: sticky;
+		top: 0;
+		z-index: 5;
+	}
+
+	.table-wrapper th,
+	.table-wrapper td {
+		min-width: 120px;
+	}
+
+	.table-wrapper th:nth-child(1),
+	.table-wrapper td:nth-child(1) {
+		position: sticky;
+		left: 0;
+		z-index: 6;
+		min-width: 54px;
+		width: 54px;
+		background: #ffffff;
+	}
+
+	.table-wrapper th:nth-child(2),
+	.table-wrapper td:nth-child(2) {
+		position: sticky;
+		left: 54px;
+		z-index: 6;
+		min-width: 180px;
+		width: 180px;
+		background: #ffffff;
+	}
+
+	.table-wrapper th:nth-child(3),
+	.table-wrapper td:nth-child(3) {
+		position: sticky;
+		left: 234px;
+		z-index: 6;
+		min-width: 300px;
+		width: 300px;
+		background: #ffffff;
+	}
+
+	.table-wrapper thead th:nth-child(1),
+	.table-wrapper thead th:nth-child(2),
+	.table-wrapper thead th:nth-child(3) {
+		z-index: 8;
+		background: #f1f5f9;
+	}
+
+	.table-wrapper tbody td:nth-child(1),
+	.table-wrapper tbody td:nth-child(2),
+	.table-wrapper tbody td:nth-child(3) {
+		box-shadow: 2px 0 0 rgba(226, 232, 240, 0.9);
+	}
+
+	.table-wrapper th {
+		padding: 10px 12px;
+		background: #f1f5f9;
+		border-bottom: 1px solid #d9e2ec;
+		color: #334155;
+		font-size: 11px;
+		font-weight: 900;
+		text-align: left;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+
+	.table-wrapper td {
+		padding: 10px 12px;
+		border-bottom: 1px solid #edf2f7;
+		color: #0f172a;
+		font-weight: 800;
+		white-space: nowrap;
+		background: #ffffff;
+	}
+
+	.total-cell {
+		background: #f0f9ff;
+		color: #0369a1;
+		font-weight: 900;
+	}
+
+	.vessel-name-cell {
+		display: grid;
+		gap: 3px;
+	}
+
+	.vessel-name-cell strong {
+		font-size: 12px;
+		font-weight: 900;
+	}
+
+	.vessel-name-cell span {
+		color: #64748b;
+		font-size: 10px;
+		font-weight: 800;
+	}
+
+	.empty-box {
+		padding: 18px;
+		color: #64748b;
+		font-weight: 800;
+	}
+
+	@media (max-width: 1100px) {
+		.layout-grid,
+		.summary-grid,
+		.filter-grid,
+		.column-groups {
+			grid-template-columns: 1fr;
+		}
+
+		.avs-header-card,
+		.header-actions {
+			flex-direction: column;
+			align-items: stretch;
+		}
+
+		.primary-btn,
+		.secondary-btn {
+			width: 100%;
+		}
+	}
 </style>
