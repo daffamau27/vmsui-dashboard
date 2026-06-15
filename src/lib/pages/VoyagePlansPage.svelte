@@ -64,8 +64,13 @@
 	let mapContainer;
 	let routeMap;
 	let markerLayer;
+	let assetMarkerLayer;
 	let routeLine;
 	let selectedPointIndex = 0;
+
+	let assets = [];
+	let assetsLoading = false;
+	let assetsError = '';
 	let mapInitializing = false;
 
 	let pointContextMenu = {
@@ -446,6 +451,7 @@
 				})
 				.addTo(routeMap);
 
+			assetMarkerLayer = leaflet.layerGroup().addTo(routeMap);
 			markerLayer = leaflet.layerGroup().addTo(routeMap);
 
 			routeLine = leaflet
@@ -455,6 +461,8 @@
 					opacity: 0.95
 				})
 				.addTo(routeMap);
+
+			renderAssetMarkers();
 
 			routeMap.on('click', (event) => {
 				if (movingPointIndex === null || movingPointIndex === undefined) {
@@ -499,6 +507,7 @@
 
 		routeMap = null;
 		markerLayer = null;
+		assetMarkerLayer = null;
 		routeLine = null;
 	}
 
@@ -509,16 +518,11 @@
 		});
 	}
 
-	function handleMapClick(event) {
-		if (movingPointIndex !== null && movingPointIndex !== undefined) {
-			moveSelectedPointToLatLng(movingPointIndex, event.latlng);
-			return;
-		}
+	function addRoutePointFromLatLng(latlng, undoLabel = 'Add point') {
+		pushUndoState(undoLabel);
 
-		pushUndoState('Add point');
-
-		const lat = roundCoord(event.latlng.lat);
-		const lng = roundCoord(event.latlng.lng);
+		const lat = roundCoord(latlng.lat);
+		const lng = roundCoord(latlng.lng);
 
 		const emptyIndex = form.planData.findIndex(
 			(point) =>
@@ -552,6 +556,15 @@
 		}
 
 		refreshRouteMap();
+	}
+
+	function handleMapClick(event) {
+		if (movingPointIndex !== null && movingPointIndex !== undefined) {
+			moveSelectedPointToLatLng(movingPointIndex, event.latlng);
+			return;
+		}
+
+		addRoutePointFromLatLng(event.latlng, 'Add route point from map');
 	}
 
 	function updatePointCoordinate(index, latlng) {
@@ -718,6 +731,113 @@
 		}
 	}
 
+	function normalizeAsset(asset) {
+		const latitude = Number(asset?.latitude);
+		const longitude = Number(asset?.longitude);
+
+		if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+		return {
+			id: asset?.id,
+			assetId: asset?.assetId || '',
+			assetName: asset?.assetName || `Asset ${asset?.id || ''}`,
+			latitude,
+			longitude,
+			raw: asset
+		};
+	}
+
+	function escapeHtml(value) {
+		return String(value ?? '')
+			.replaceAll('&', '&amp;')
+			.replaceAll('<', '&lt;')
+			.replaceAll('>', '&gt;')
+			.replaceAll('"', '&quot;')
+			.replaceAll("'", '&#039;');
+	}
+
+	async function loadFleetAssets() {
+		assetsLoading = true;
+		assetsError = '';
+
+		try {
+			const result = await apiFetch('/fleet/assets', {
+				method: 'GET',
+				headers: {
+					Accept: 'application/json'
+				}
+			});
+
+			const rows = Array.isArray(result?.data) ? result.data : Array.isArray(result) ? result : [];
+
+			assets = rows.map(normalizeAsset).filter(Boolean);
+
+			console.log('[VOYAGE_PLANS][ASSETS]', assets);
+
+			renderAssetMarkers();
+		} catch (error) {
+			console.error('[VOYAGE_PLANS][ASSETS][ERROR]', error);
+			assets = [];
+			assetsError = error?.message || 'Gagal memuat asset fleet.';
+			renderAssetMarkers();
+		} finally {
+			assetsLoading = false;
+		}
+	}
+
+	function renderAssetMarkers() {
+		if (!L || !routeMap) return;
+
+		if (!assetMarkerLayer) {
+			assetMarkerLayer = L.layerGroup().addTo(routeMap);
+		}
+
+		assetMarkerLayer.clearLayers();
+
+		assets.forEach((asset) => {
+			const marker = L.marker([asset.latitude, asset.longitude], {
+				icon: L.divIcon({
+					className: 'asset-leaflet-icon',
+					html: `
+						<div class="asset-marker-shell" title="${escapeHtml(asset.assetName)}">
+							<div class="asset-marker-core"></div>
+						</div>
+					`,
+					iconSize: [22, 22],
+					iconAnchor: [11, 11]
+				})
+			});
+
+			marker.bindTooltip(escapeHtml(asset.assetName), {
+				direction: 'top',
+				offset: [0, -10],
+				opacity: 0.95
+			});
+
+			marker.on('click', (event) => {
+				if (event?.originalEvent) {
+					L.DomEvent.stopPropagation(event.originalEvent);
+				}
+
+				closePointContextMenu();
+
+				const latlng = {
+					lat: asset.latitude,
+					lng: asset.longitude
+				};
+
+				if (movingPointIndex !== null && movingPointIndex !== undefined) {
+					moveSelectedPointToLatLng(movingPointIndex, latlng);
+					return;
+				}
+
+				addRoutePointFromLatLng(latlng, `Add route point from ${asset.assetName}`);
+			});
+
+			marker.addTo(assetMarkerLayer);
+		});
+	}
+
 	async function apiFetchBlob(path, options = {}) {
 		const response = await apiRequest(path, {
 			...options,
@@ -753,7 +873,7 @@
 		try {
 			await loadCurrentUser();
 			if (canAccess) {
-				await Promise.all([loadPlans(), loadVessels()]);
+				await Promise.all([loadPlans(), loadVessels(), loadFleetAssets()]);
 			}
 		} catch (error) {
 			errorMessage = error.message;
@@ -1628,7 +1748,9 @@
 				<div class="section-title route-section-title">
 					<div>
 						<h3>Route Points</h3>
-						<span>Klik map untuk tambah titik, klik kanan marker untuk geser, urutkan, atau hapus.</span>
+						<span
+							>Klik map untuk tambah titik, klik kanan marker untuk geser, urutkan, atau hapus.</span
+						>
 					</div>
 
 					<div class="route-title-actions">
@@ -1637,14 +1759,20 @@
 							class="toolbar-button"
 							on:click={undoRouteChange}
 							disabled={!canUndoRoute}
-							title={canUndoRoute ? `Undo: ${undoStack[undoStack.length - 1]?.label}` : 'No undo available'}
+							title={canUndoRoute
+								? `Undo: ${undoStack[undoStack.length - 1]?.label}`
+								: 'No undo available'}
 						>
 							↶ Undo
 						</button>
 
 						<button class="toolbar-button" type="button" on:click={addPoint}>+ Add Point</button>
 						<button class="toolbar-button" type="button" on:click={fitRouteMap}>Fit Map</button>
-						<button class="toolbar-button danger ghost-danger" type="button" on:click={clearRoutePoints}>
+						<button
+							class="toolbar-button danger ghost-danger"
+							type="button"
+							on:click={clearRoutePoints}
+						>
 							Clear
 						</button>
 					</div>
@@ -1732,7 +1860,13 @@
 					<section class="route-map-card">
 						<div class="map-mini-toolbar">
 							<strong>Map Point Editor</strong>
-							<span>{getValidRoutePoints().length} valid point</span>
+							<div class="map-mini-meta">
+								<span>{getValidRoutePoints().length} valid point</span>
+								<span>{assetsLoading ? 'Loading assets...' : `${assets.length} assets`}</span>
+								{#if assetsError}
+									<span class="asset-error">{assetsError}</span>
+								{/if}
+							</div>
 						</div>
 
 						<div class="route-map-shell">
@@ -1828,13 +1962,17 @@
 {/if}
 
 <style>
-	:global(html),
-	:global(body) {
+	.voyage-page {
 		width: 100%;
 		height: 100%;
-		margin: 0;
-		padding: 0;
-		overflow: hidden;
+		max-height: 100%;
+		min-height: 0;
+		padding: 14px;
+		background: #f4f6f8;
+		color: #0f172a;
+		overflow-y: auto;
+		overflow-x: hidden;
+		box-sizing: border-box;
 		font-family:
 			Inter,
 			ui-sans-serif,
@@ -1843,12 +1981,6 @@
 			BlinkMacSystemFont,
 			'Segoe UI',
 			sans-serif;
-		background: #f3f6f9;
-		color: #111827;
-	}
-
-	:global(*) {
-		box-sizing: border-box;
 	}
 
 	:global(.leaflet-container) {
@@ -1862,6 +1994,41 @@
 			sans-serif;
 	}
 
+	:global(.asset-leaflet-icon) {
+		background: transparent;
+		border: none;
+	}
+
+	:global(.asset-marker-shell) {
+		width: 22px;
+		height: 22px;
+		border-radius: 999px;
+		display: grid;
+		place-items: center;
+		background: rgba(255, 255, 255, 0.96);
+		border: 2px solid #f59e0b;
+		box-shadow:
+			0 0 0 4px rgba(245, 158, 11, 0.16),
+			0 5px 10px rgba(15, 23, 42, 0.16);
+	}
+
+	:global(.asset-marker-core) {
+		width: 9px;
+		height: 9px;
+		border-radius: 999px;
+		background: #f59e0b;
+		color: transparent;
+	}
+
+	:global(.leaflet-tooltip) {
+		border: 1px solid #d9e2ec;
+		border-radius: 10px;
+		box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
+		color: #0f172a;
+		font-size: 11px;
+		font-weight: 900;
+	}
+
 	:global(.route-marker) {
 		width: 30px;
 		height: 30px;
@@ -1869,7 +2036,7 @@
 		place-items: center;
 		border: 3px solid #ffffff;
 		border-radius: 999px;
-		background: #2f65e8;
+		background: #2563eb;
 		color: #ffffff;
 		box-shadow: 0 4px 12px rgba(15, 23, 42, 0.28);
 		font-size: 12px;
@@ -1887,8 +2054,18 @@
 	}
 
 	@keyframes movingPulse {
-		0%, 100% { transform: scale(1); }
-		50% { transform: scale(1.18); }
+		0%,
+		100% {
+			transform: scale(1);
+		}
+
+		50% {
+			transform: scale(1.18);
+		}
+	}
+
+	:global(*) {
+		box-sizing: border-box;
 	}
 
 	h1,
@@ -1898,63 +2075,49 @@
 		margin: 0;
 	}
 
-	.voyage-page {
-		width: 100%;
-		height: 100vh;
-		overflow: auto;
-		padding: 14px 12px 28px;
-		background: #f3f6f9;
-	}
-
 	.voyage-header-card,
 	.panel,
 	.empty-card {
-		border: 1px solid #d4dfec;
-		border-radius: 0;
 		background: #ffffff;
-		box-shadow: none;
+		border: 1px solid #d9e2ec;
+		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
 	}
 
 	.voyage-header-card {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
+		display: flex;
 		align-items: center;
-		gap: 18px;
-		margin-bottom: 12px;
-		padding: 18px 20px;
-		border-left: 5px solid #2f65e8;
+		justify-content: space-between;
+		gap: 16px;
+		padding: 16px;
 	}
 
 	.page-kicker {
 		display: inline-flex;
-		align-items: center;
-		min-height: 26px;
-		margin-bottom: 9px;
-		border: 1px solid #bfdbfe;
+		width: fit-content;
+		padding: 4px 9px;
 		border-radius: 999px;
 		background: #dbeafe;
-		color: #245bd4;
-		padding: 5px 12px;
-		font-size: 12px;
+		color: #1d4ed8;
+		font-size: 10px;
 		font-weight: 900;
-		line-height: 1;
-		letter-spacing: 0.11em;
+		letter-spacing: 0.07em;
 		text-transform: uppercase;
 	}
 
 	.voyage-header-card h1 {
-		color: #0f172a;
-		font-size: clamp(27px, 2.2vw, 34px);
+		margin: 8px 0 0;
+		font-size: 22px;
+		line-height: 1.2;
 		font-weight: 900;
-		line-height: 1.08;
-		letter-spacing: -0.04em;
+		letter-spacing: -0.02em;
+		color: #0f172a;
 	}
 
 	.voyage-header-card p {
 		max-width: 760px;
-		margin-top: 7px;
-		color: #627087;
-		font-size: 15px;
+		margin: 7px 0 0;
+		color: #64748b;
+		font-size: 12px;
 		font-weight: 700;
 		line-height: 1.45;
 	}
@@ -1964,7 +2127,7 @@
 	.action-row,
 	.pagination-bar,
 	.modal-footer,
-	.map-toolbar-right,
+	.map-mini-meta,
 	.move-confirm-actions {
 		display: flex;
 		align-items: center;
@@ -1977,26 +2140,24 @@
 	}
 
 	.alert {
-		margin-bottom: 12px;
-		border: 1px solid #d4dfec;
-		border-radius: 0;
-		background: #ffffff;
-		padding: 12px 14px;
-		color: #334155;
-		font-size: 14px;
-		font-weight: 800;
+		margin-top: 14px;
+		padding: 10px 12px;
+		border-radius: 10px;
+		font-size: 12px;
+		font-weight: 900;
+		line-height: 1.45;
 	}
 
 	.alert.error {
-		border-color: #fecaca;
-		background: #fff1f1;
-		color: #b11111;
+		background: #fef2f2;
+		color: #b91c1c;
+		border: 1px solid #fecaca;
 	}
 
 	.alert.success {
-		border-color: #bbf7d0;
-		background: #f0fdf4;
-		color: #166534;
+		background: #ecfdf5;
+		color: #047857;
+		border: 1px solid #bbf7d0;
 	}
 
 	.empty-card,
@@ -2004,30 +2165,36 @@
 	.empty-cell {
 		padding: 28px;
 		color: #64748b;
-		font-size: 14px;
+		font-size: 12px;
 		font-weight: 700;
+		line-height: 1.5;
 		text-align: center;
+	}
+
+	.empty-card {
+		margin-top: 14px;
 	}
 
 	.empty-card h3 {
 		margin-bottom: 8px;
 		color: #0f172a;
-		font-size: 20px;
+		font-size: 18px;
 		font-weight: 900;
 	}
 
 	.voyage-grid {
 		display: grid;
 		grid-template-columns: minmax(520px, 1.08fr) minmax(410px, 0.92fr);
-		gap: 12px;
+		gap: 14px;
 		align-items: start;
+		margin-top: 14px;
 	}
 
 	.bottom-grid {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 12px;
-		margin-top: 12px;
+		gap: 14px;
+		margin-top: 14px;
 	}
 
 	.panel {
@@ -2044,18 +2211,19 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
-		border-bottom: 1px solid #d4dfec;
-		background: #f8fbff;
-		padding: 13px 14px;
+		padding: 12px 14px;
+		border-bottom: 1px solid #e5edf5;
+		background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
 	}
 
 	.panel-toolbar h2,
 	.modal-header h2,
 	.section-title h3 {
-		color: #111827;
-		font-size: 18px;
+		color: #0f172a;
+		font-size: 15px;
+		line-height: 1.25;
 		font-weight: 900;
-		letter-spacing: -0.025em;
+		letter-spacing: -0.02em;
 	}
 
 	.panel-toolbar span,
@@ -2063,14 +2231,37 @@
 	.section-title span,
 	.map-mini-toolbar span,
 	label {
-		color: #5f6f86;
-		font-size: 12px;
+		color: #64748b;
+		font-size: 10px;
 		font-weight: 900;
-		letter-spacing: 0.02em;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
 	}
 
-	.section-title {
-		margin: 0;
+	.map-mini-meta {
+		justify-content: flex-end;
+		flex-wrap: wrap;
+	}
+
+	.map-mini-meta span {
+		display: inline-flex;
+		align-items: center;
+		min-height: 24px;
+		padding: 4px 8px;
+		border-radius: 999px;
+		border: 1px solid #d9e2ec;
+		background: #ffffff;
+		color: #64748b;
+		font-size: 10px;
+		font-weight: 900;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+	}
+
+	.map-mini-meta .asset-error {
+		border-color: #fecaca;
+		background: #fef2f2;
+		color: #b91c1c;
 	}
 
 	.compact-title,
@@ -2085,84 +2276,91 @@
 	}
 
 	button {
-		min-height: 38px;
-		border: 1px solid #c9d5e5;
-		border-radius: 0;
-		background: #ffffff;
-		color: #111827;
-		padding: 8px 12px;
-		font-size: 13px;
+		height: 32px;
+		min-height: 32px;
+		border: none;
+		background: #e2e8f0;
+		color: #0f172a;
+		padding: 0 12px;
+		font-size: 11px;
 		font-weight: 900;
 		cursor: pointer;
 		transition:
 			background 0.15s ease,
-			border-color 0.15s ease,
 			color 0.15s ease,
 			opacity 0.15s ease,
 			transform 0.12s ease;
 	}
 
 	button:hover:not(:disabled) {
-		border-color: #2f65e8;
-		background: #f8fbff;
+		background: #cbd5e1;
 	}
 
 	button:disabled {
 		cursor: not-allowed;
-		opacity: 0.52;
+		opacity: 0.55;
 	}
 
 	.primary-button {
-		border-color: #2f65e8;
-		background: #2f65e8;
+		background: #2563eb;
 		color: #ffffff;
 	}
 
 	.primary-button:hover:not(:disabled) {
-		border-color: #245bd4;
-		background: #245bd4;
+		background: #1d4ed8;
 	}
 
 	.ghost-button,
 	.toolbar-button {
-		border-color: #bfdbfe;
-		background: #ffffff;
-		color: #245bd4;
+		background: #e2e8f0;
+		color: #0f172a;
 	}
 
-	.danger {
-		border-color: #fca5a5;
+	.ghost-button:hover:not(:disabled),
+	.toolbar-button:hover:not(:disabled) {
+		background: #cbd5e1;
+	}
+
+	.danger,
+	.ghost-danger {
+		background: #fee2e2;
 		color: #b91c1c;
 	}
 
-	.ghost-danger {
-		background: #fff5f5;
+	.danger:hover:not(:disabled),
+	.ghost-danger:hover:not(:disabled) {
+		background: #fecaca;
+		color: #991b1b;
 	}
 
 	.search-input,
 	input,
 	select {
 		width: 100%;
-		min-height: 38px;
+		height: 32px;
+		min-height: 32px;
 		min-width: 0;
-		border: 1px solid #c9d5e5;
-		border-radius: 0;
+		border: 1px solid #cbd5e1;
 		background: #ffffff;
-		color: #111827;
-		padding: 8px 10px;
-		font-size: 14px;
-		font-weight: 800;
+		color: #0f172a;
+		padding: 0 9px;
+		font-size: 12px;
+		font-weight: 700;
 		outline: none;
-		transition: border-color 0.15s ease, background 0.15s ease;
+		transition:
+			border-color 0.15s ease,
+			box-shadow 0.15s ease,
+			background 0.15s ease;
 	}
 
 	.search-input {
-		max-width: 250px;
+		max-width: 230px;
 	}
 
 	input:focus,
 	select:focus {
-		border-color: #2f65e8;
+		border-color: #2563eb;
+		box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 		background: #fbfdff;
 	}
 
@@ -2176,7 +2374,7 @@
 
 	.table-wrap,
 	.route-table-wrap {
-		border-top: 1px solid #d4dfec;
+		border-top: 1px solid #eef2f7;
 	}
 
 	.list-panel .table-wrap {
@@ -2191,14 +2389,14 @@
 		width: 100%;
 		border-collapse: separate;
 		border-spacing: 0;
-		font-size: 13px;
+		font-size: 12px;
 	}
 
 	th,
 	td {
-		padding: 10px 12px;
-		border-right: 1px solid rgba(255, 255, 255, 0.22);
-		border-bottom: 1px solid #dbe4f0;
+		padding: 9px 10px;
+		border-right: 1px solid rgba(255, 255, 255, 0.18);
+		border-bottom: 1px solid #e5edf5;
 		text-align: left;
 		vertical-align: middle;
 		white-space: nowrap;
@@ -2213,26 +2411,26 @@
 		position: sticky;
 		top: 0;
 		z-index: 2;
-		background: #2f65e8;
+		background: #2563eb;
 		color: #ffffff;
-		font-size: 11px;
+		font-size: 10px;
 		font-weight: 900;
-		letter-spacing: 0.045em;
+		letter-spacing: 0.05em;
 		text-transform: uppercase;
 	}
 
 	tbody td {
 		background: #ffffff;
-		color: #111827;
+		color: #0f172a;
 		font-weight: 700;
 	}
 
 	tbody tr:nth-child(even) td {
-		background: #f8fbff;
+		background: #f8fafc;
 	}
 
 	tbody tr:hover td {
-		background: #eef5ff;
+		background: #eff6ff;
 	}
 
 	tr.active-row td,
@@ -2241,7 +2439,7 @@
 	}
 
 	.strong {
-		color: #111827;
+		color: #0f172a;
 		font-weight: 900;
 	}
 
@@ -2251,10 +2449,9 @@
 		text-align: right;
 	}
 
-	.action-th,
 	td.actions {
-		width: 150px;
-		min-width: 150px;
+		width: 142px;
+		min-width: 142px;
 		vertical-align: middle;
 	}
 
@@ -2275,33 +2472,31 @@
 	}
 
 	.icon-action {
-		width: 32px;
-		height: 32px;
-		min-height: 32px;
-		font-size: 15px;
+		width: 30px;
+		height: 30px;
+		min-height: 30px;
+		font-size: 14px;
 	}
 
 	.icon-action:hover:not(:disabled) {
-		background: #eef4ff;
-		border-color: #8fb3f4;
+		background: #dbeafe;
 		transform: translateY(-1px);
 	}
 
 	.icon-action.active-toggle {
-		background: #eef4ff;
-		border-color: #7da7f2;
+		background: #dbeafe;
 		color: #1d4ed8;
 	}
 
-	.icon-action.danger {
-		border-color: #ff9b9b;
-		background: #fff6f6;
+	.icon-action.danger,
+	.icon-action.ghost-danger {
+		background: #fee2e2;
 		color: #b91c1c;
 	}
 
-	.icon-action.danger:hover:not(:disabled) {
-		background: #fee2e2;
-		border-color: #ef4444;
+	.icon-action.danger:hover:not(:disabled),
+	.icon-action.ghost-danger:hover:not(:disabled) {
+		background: #fecaca;
 		color: #991b1b;
 	}
 
@@ -2310,35 +2505,38 @@
 		align-items: center;
 		justify-content: center;
 		border-radius: 999px;
-		padding: 5px 9px;
-		font-size: 11px;
+		padding: 4px 9px;
+		font-size: 10px;
 		font-weight: 900;
+		line-height: 1.2;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
 	}
 
 	.badge.large {
-		padding: 7px 11px;
+		padding: 6px 10px;
 	}
 
 	.badge-active {
-		border: 1px solid #86efac;
-		background: #dcfce7;
-		color: #166534;
+		border: 1px solid #bbf7d0;
+		background: #ecfdf5;
+		color: #047857;
 	}
 
 	.badge-muted {
-		border: 1px solid #d4dfec;
-		background: #f1f5f9;
+		border: 1px solid #e2e8f0;
+		background: #f8fafc;
 		color: #64748b;
 	}
 
 	.pagination-bar {
 		justify-content: flex-end;
 		flex-wrap: wrap;
-		border-top: 1px solid #d4dfec;
-		background: #f8fbff;
+		border-top: 1px solid #e5edf5;
+		background: #f8fafc;
 		padding: 10px 12px;
 		color: #64748b;
-		font-size: 12px;
+		font-size: 11px;
 		font-weight: 800;
 	}
 
@@ -2349,23 +2547,26 @@
 	.detail-summary {
 		display: grid;
 		grid-template-columns: repeat(4, minmax(0, 1fr));
-		gap: 10px;
-		padding: 12px;
+		gap: 12px;
+		padding: 14px;
+		background: #f8fafc;
 	}
 
 	.detail-summary div {
 		min-width: 0;
-		border: 1px solid #d4dfec;
+		padding: 14px;
+		border: 1px solid #d9e2ec;
+		border-radius: 12px;
 		background: #ffffff;
-		padding: 13px;
+		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
 	}
 
 	.detail-summary b {
 		display: block;
-		margin-top: 6px;
+		margin-top: 7px;
 		overflow: hidden;
-		color: #111827;
-		font-size: 20px;
+		color: #0f172a;
+		font-size: 18px;
 		font-weight: 900;
 		line-height: 1.15;
 		text-overflow: ellipsis;
@@ -2377,7 +2578,7 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 8px;
-		padding: 12px;
+		padding: 12px 14px 14px;
 	}
 
 	.allowed-list {
@@ -2386,20 +2587,25 @@
 
 	.allowed-list span,
 	.vessel-chips button {
-		min-height: auto;
-		border: 1px solid #d4dfec;
+		height: auto;
+		min-height: 28px;
+		border: 1px solid #d9e2ec;
 		border-radius: 999px;
-		background: #f8fbff;
+		background: #f8fafc;
 		color: #334155;
-		padding: 7px 11px;
-		font-size: 12px;
+		padding: 6px 10px;
+		font-size: 11px;
 		font-weight: 900;
 	}
 
+	.vessel-chips button:hover:not(:disabled) {
+		background: #eff6ff;
+	}
+
 	.vessel-chips button.selected {
-		border-color: #93c5fd;
+		border-color: #bfdbfe;
 		background: #dbeafe;
-		color: #245bd4;
+		color: #1d4ed8;
 	}
 
 	.form-grid {
@@ -2420,8 +2626,7 @@
 
 	label {
 		display: grid;
-		gap: 7px;
-		text-transform: uppercase;
+		gap: 5px;
 	}
 
 	.switch-line {
@@ -2429,20 +2634,22 @@
 		align-items: center;
 		gap: 9px;
 		align-self: end;
-		min-height: 38px;
+		min-height: 32px;
 		padding-bottom: 1px;
 		text-transform: none;
 	}
 
 	.switch-line input {
 		width: auto;
+		height: auto;
 		min-height: auto;
 	}
 
 	.file-box {
 		position: relative;
-		min-height: 44px;
+		min-height: 42px;
 		border: 1px dashed #93c5fd;
+		border-radius: 12px;
 		background: #eff6ff;
 		padding: 12px;
 		cursor: pointer;
@@ -2452,21 +2659,25 @@
 	.file-box input {
 		position: absolute;
 		inset: 0;
+		height: 100%;
 		opacity: 0;
 		cursor: pointer;
 	}
 
 	.preview-box {
 		margin: 0 14px 14px;
-		border: 1px solid #d4dfec;
+		border: 1px solid #d9e2ec;
+		border-radius: 12px;
+		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
 	}
 
 	.preview-box b {
 		display: block;
 		padding: 10px 12px;
-		border-bottom: 1px solid #d4dfec;
-		background: #f8fbff;
-		color: #111827;
+		border-bottom: 1px solid #e5edf5;
+		background: #f8fafc;
+		color: #0f172a;
+		font-size: 12px;
 		font-weight: 900;
 	}
 
@@ -2474,22 +2685,25 @@
 		position: fixed;
 		inset: 0;
 		z-index: 50;
-		display: grid;
-		place-items: center;
-		padding: 18px;
+		display: flex;
+		align-items: flex-start;
+		justify-content: center;
+		padding: 24px 24px 24px 104px;
 		background: rgba(15, 23, 42, 0.48);
 		backdrop-filter: blur(3px);
+		overflow: auto;
 	}
 
 	.modal-card {
-		width: min(1280px, 97vw);
-		max-height: 94vh;
+		width: min(1080px, calc(100vw - 144px));
+		max-height: calc(100vh - 48px);
 		display: grid;
 		grid-template-rows: auto 1fr auto;
 		overflow: hidden;
-		border: 1px solid #d4dfec;
+		border: 1px solid #d9e2ec;
+		border-radius: 14px;
 		background: #ffffff;
-		box-shadow: none;
+		box-shadow: 0 22px 60px rgba(15, 23, 42, 0.22);
 	}
 
 	.modal-header,
@@ -2500,9 +2714,9 @@
 
 	.modal-footer {
 		justify-content: flex-end;
-		border-top: 1px solid #d4dfec;
+		border-top: 1px solid #e5edf5;
 		border-bottom: 0;
-		background: #f8fbff;
+		background: #f8fafc;
 	}
 
 	.modal-body {
@@ -2512,16 +2726,20 @@
 	}
 
 	.icon-button {
-		width: 38px;
-		height: 38px;
-		min-height: 38px;
-		font-size: 23px;
+		width: 32px;
+		height: 32px;
+		min-height: 32px;
+		border-radius: 999px;
+		font-size: 20px;
 	}
 
 	.vessel-picker {
-		border: 1px solid #d4dfec;
+		border: 1px solid #d9e2ec;
+		border-radius: 12px;
 		background: #ffffff;
 		margin-bottom: 14px;
+		overflow: hidden;
+		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
 	}
 
 	.vessel-picker .compact-title {
@@ -2529,9 +2747,10 @@
 	}
 
 	.route-section-title {
-		border: 1px solid #d4dfec;
+		border: 1px solid #d9e2ec;
 		border-bottom: 0;
-		background: #f8fbff;
+		border-radius: 12px 12px 0 0;
+		background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
 	}
 
 	.route-title-actions {
@@ -2540,18 +2759,22 @@
 	}
 
 	.route-title-actions button {
-		min-height: 34px;
-		padding: 7px 10px;
-		font-size: 12px;
+		height: 30px;
+		min-height: 30px;
+		padding: 0 10px;
+		font-size: 10px;
 	}
 
 	.route-map-editor {
 		display: grid;
-		grid-template-columns: minmax(390px, 0.8fr) minmax(520px, 1.4fr);
+		grid-template-columns: minmax(360px, 0.78fr) minmax(480px, 1.42fr);
 		gap: 0;
-		min-height: 560px;
-		border: 1px solid #d4dfec;
+		min-height: 540px;
+		border: 1px solid #d9e2ec;
+		border-radius: 0 0 12px 12px;
 		background: #ffffff;
+		overflow: hidden;
+		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
 	}
 
 	.route-point-panel,
@@ -2564,15 +2787,15 @@
 		display: grid;
 		grid-template-rows: auto 1fr;
 		overflow: hidden;
-		border-right: 1px solid #d4dfec;
+		border-right: 1px solid #e5edf5;
 	}
 
 	.point-hint {
-		border-bottom: 1px solid #d4dfec;
-		background: #f8fbff;
-		color: #52627a;
-		padding: 11px 12px;
-		font-size: 12px;
+		border-bottom: 1px solid #e5edf5;
+		background: #f8fafc;
+		color: #64748b;
+		padding: 10px 12px;
+		font-size: 11px;
 		font-weight: 800;
 		line-height: 1.45;
 	}
@@ -2585,19 +2808,19 @@
 
 	.map-mini-toolbar {
 		margin: 0;
-		padding: 11px 12px;
+		padding: 10px 12px;
 	}
 
 	.map-mini-toolbar strong {
-		color: #111827;
-		font-size: 13px;
+		color: #0f172a;
+		font-size: 12px;
 		font-weight: 900;
 	}
 
 	.route-map-shell {
 		position: relative;
 		width: 100%;
-		min-height: 515px;
+		min-height: 500px;
 		overflow: hidden;
 	}
 
@@ -2605,96 +2828,94 @@
 	.route-map {
 		width: 100%;
 		height: 100%;
-		min-height: 515px;
+		min-height: 500px;
 		background: #dbeafe;
 	}
 
-  .route-editor {
-    width: 100%;
-    height: 100%;
-    max-height: 470px;
-    overflow-x: hidden;
-    overflow-y: auto;
-    border: 0;
-    border-radius: 0;
-  }
+	.route-editor {
+		width: 100%;
+		height: 100%;
+		max-height: 450px;
+		overflow-x: hidden;
+		overflow-y: auto;
+		border: 0;
+		border-radius: 0;
+	}
 
-  .route-editor table {
-    width: 100%;
-    min-width: 0;
-    table-layout: fixed;
-  }
+	.route-editor table {
+		width: 100%;
+		min-width: 0;
+		table-layout: fixed;
+	}
 
-  .route-editor th,
-  .route-editor td {
-    white-space: normal;
-    padding: 8px 7px;
-  }
+	.route-editor th,
+	.route-editor td {
+		white-space: normal;
+		padding: 7px 6px;
+	}
 
-  .route-editor th:nth-child(1),
-  .route-editor td:nth-child(1) {
-    width: 54px;
-  }
+	.route-editor th:nth-child(1),
+	.route-editor td:nth-child(1) {
+		width: 48px;
+	}
 
-  .route-editor th:nth-child(2),
-  .route-editor td:nth-child(2),
-  .route-editor th:nth-child(3),
-  .route-editor td:nth-child(3) {
-    width: 29%;
-  }
+	.route-editor th:nth-child(2),
+	.route-editor td:nth-child(2),
+	.route-editor th:nth-child(3),
+	.route-editor td:nth-child(3) {
+		width: 30%;
+	}
 
-  .route-editor th:nth-child(4),
-  .route-editor td:nth-child(4) {
-    width: 78px;
-  }
+	.route-editor th:nth-child(4),
+	.route-editor td:nth-child(4) {
+		width: 66px;
+	}
 
-  .route-editor th:nth-child(5),
-  .route-editor td:nth-child(5) {
-    width: 48px;
-  }
+	.route-editor th:nth-child(5),
+	.route-editor td:nth-child(5) {
+		width: 44px;
+	}
 
-  .route-editor input {
-    width: 100%;
-    min-width: 0;
-    min-height: 34px;
-    padding: 6px 7px;
-    font-size: 12px;
-  }
+	.route-editor input {
+		width: 100%;
+		min-width: 0;
+		height: 30px;
+		min-height: 30px;
+		padding: 0 6px;
+		font-size: 11px;
+	}
 
-  .route-editor .icon-action {
-    width: 30px;
-    height: 30px;
-    min-height: 30px;
-    padding: 0;
-  }
-
-	.route-editor td,
-	.route-editor th {
-		padding: 7px 8px;
+	.route-editor .icon-action {
+		width: 28px;
+		height: 28px;
+		min-height: 28px;
+		padding: 0;
 	}
 
 	.point-context-menu {
 		position: absolute;
 		z-index: 1000;
 		min-width: 160px;
-		border: 1px solid #c9d5e5;
+		border: 1px solid #d9e2ec;
+		border-radius: 12px;
 		background: #ffffff;
-		box-shadow: 0 8px 22px rgba(15, 23, 42, 0.18);
+		box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
 		transform: translate(8px, 8px);
 		overflow: hidden;
 	}
 
 	.context-title {
-		border-bottom: 1px solid #dbe4f0;
-		background: #f8fbff;
-		color: #111827;
+		border-bottom: 1px solid #e5edf5;
+		background: #f8fafc;
+		color: #0f172a;
 		padding: 9px 11px;
-		font-size: 12px;
+		font-size: 11px;
 		font-weight: 900;
 	}
 
 	.point-context-menu button {
 		width: 100%;
+		height: 34px;
 		min-height: 34px;
 		display: flex;
 		align-items: center;
@@ -2702,9 +2923,9 @@
 		border: 0;
 		border-bottom: 1px solid #edf2f7;
 		background: #ffffff;
-		color: #111827;
-		padding: 8px 11px;
-		font-size: 12px;
+		color: #0f172a;
+		padding: 0 11px;
+		font-size: 11px;
 		font-weight: 800;
 		text-align: left;
 	}
@@ -2714,8 +2935,8 @@
 	}
 
 	.point-context-menu button:hover:not(:disabled) {
-		background: #eef4ff;
-		color: #245bd4;
+		background: #eff6ff;
+		color: #1d4ed8;
 	}
 
 	.point-context-menu button:disabled {
@@ -2760,7 +2981,6 @@
 
 	.move-point-btn.confirm:hover:not(:disabled) {
 		background: #bbf7d0;
-		border-color: #16a34a;
 		color: #14532d;
 	}
 
@@ -2772,7 +2992,6 @@
 
 	.move-point-btn.cancel:hover:not(:disabled) {
 		background: #fecaca;
-		border-color: #dc2626;
 		color: #7f1d1d;
 	}
 
@@ -2780,11 +2999,12 @@
 		display: inline-flex;
 		align-items: center;
 		min-height: 28px;
-		border: 1px solid #facc15;
+		border-radius: 999px;
+		border: 1px solid #fde68a;
 		background: #fef9c3;
 		color: #854d0e;
 		padding: 6px 10px;
-		font-size: 12px;
+		font-size: 11px;
 		font-weight: 900;
 	}
 
@@ -2795,20 +3015,18 @@
 		width: 30px;
 		height: 30px;
 		min-height: 30px;
-		font-size: 15px;
+		font-size: 14px;
 	}
 
 	.confirm-move-btn,
 	.move-confirm-btn {
-		border-color: #86efac;
 		background: #dcfce7;
 		color: #166534;
 	}
 
 	.cancel-move-btn,
 	.move-cancel-btn {
-		border-color: #fca5a5;
-		background: #fff1f1;
+		background: #fee2e2;
 		color: #b91c1c;
 	}
 
@@ -2825,7 +3043,11 @@
 
 		.route-point-panel {
 			border-right: 0;
-			border-bottom: 1px solid #d4dfec;
+			border-bottom: 1px solid #e5edf5;
+		}
+
+		.modal-card {
+			width: min(980px, calc(100vw - 126px));
 		}
 	}
 
@@ -2839,7 +3061,6 @@
 		.section-title,
 		.modal-header {
 			align-items: flex-start;
-			grid-template-columns: 1fr;
 			flex-direction: column;
 		}
 
@@ -2852,6 +3073,11 @@
 			width: 100%;
 		}
 
+		.header-actions,
+		.route-title-actions {
+			justify-content: flex-start;
+		}
+
 		.header-actions button,
 		.route-title-actions button,
 		.form-grid button,
@@ -2862,6 +3088,12 @@
 
 		.modal-backdrop {
 			padding: 10px;
+		}
+
+		.modal-card {
+			width: 100%;
+			max-height: calc(100vh - 20px);
+			border-radius: 12px;
 		}
 
 		.modal-body {

@@ -946,10 +946,8 @@
 			const percentage = total ? ((received / total) * 100).toFixed(1) : '-';
 
 			setPageStatus({
+				pageKey: 'monthly-report',
 				dataReceived: total > 0 ? `${received} of ${total} (${percentage}%)` : '-',
-				queue: payload?.queue ?? '-',
-				sdcard: payload?.sdcard ?? '-',
-				online: Boolean($selectedVesselInfo?.online),
 				sourcePage: 'Monthly Report'
 			});
 

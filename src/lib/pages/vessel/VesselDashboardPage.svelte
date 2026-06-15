@@ -519,8 +519,56 @@
 </script>
 
 <section class="dashboard-content">
+  <section class="dashboard-header-card">
+    <div>
+      <span class="page-kicker">Vessel Dashboard</span>
+      <h1>{vesselInfo.vesselName}</h1>
+      <p>Realtime monitoring untuk status kapal, posisi, RPM engine, cuaca, arus laut, dan konsumsi fuel harian.</p>
+    </div>
+
+    <div class="header-right">
+      <div class="header-meta">
+        <span>Status</span>
+        <strong class:online-text={vesselInfo.online} class:offline-text={!vesselInfo.online}>
+          {vesselInfo.online ? "Online" : "Offline"}
+        </strong>
+      </div>
+
+      <button type="button" class="primary-btn" onclick={loadDashboard} disabled={loading || currentUserLoading}>
+        Refresh
+      </button>
+    </div>
+  </section>
+
+  {#if loading || currentUserLoading}
+    <div class="status-box loading-box">
+      Loading dashboard data...
+    </div>
+  {:else if error}
+    <div class="status-box error-box">
+      {error}
+    </div>
+  {:else if currentUserError}
+    <div class="status-box error-box">
+      {currentUserError}
+    </div>
+  {:else if !canAccessDashboard}
+    <div class="status-box error-box">
+      User belum memiliki permission access_dashboard atau access_daily_report.
+    </div>
+  {/if}
+
   <section class="hero-grid">
     <div class="monitoring-card cctv-section">
+      <div class="section-header">
+        <div>
+          <span class="section-kicker">CCTV Monitoring</span>
+          <h2>Live Camera</h2>
+        </div>
+
+        <strong>{cctvItems.length} cameras</strong>
+      </div>
+
       <div class="cctv-grid" class:empty-cctv={cctvItems.length === 0}>
         {#if cctvItems.length === 0}
           <div class="cctv-empty">
@@ -549,6 +597,15 @@
 
     {#if canViewDailyPathMap}
       <div class="monitoring-card map-section">
+        <div class="section-header">
+          <div>
+            <span class="section-kicker">Position</span>
+            <h2>Current Vessel Location</h2>
+          </div>
+
+          <strong>{vesselInfo.currentSpeed}</strong>
+        </div>
+
         <div class="map-box">
           <VesselMap
             latitude={vesselInfo.latitude}
@@ -570,33 +627,15 @@
     {/if}
   </section>
 
-  {#if loading || currentUserLoading}
-    <div class="dashboard-status loading-box">
-      Loading dashboard data...
-    </div>
-  {:else if error}
-    <div class="dashboard-status error-box">
-      {error}
-    </div>
-  {:else if currentUserError}
-    <div class="dashboard-status error-box">
-      {currentUserError}
-    </div>
-  {:else if !canAccessDashboard}
-    <div class="dashboard-status error-box">
-      User belum memiliki permission access_dashboard atau access_daily_report.
-    </div>
-  {/if}
-
   <section class="info-rpm-section">
     <section class="vessel-panel">
-      <div class="panel-header">
+      <div class="section-header">
         <div>
           <span class="section-kicker">Vessel Status</span>
           <h2>{vesselInfo.vesselName}</h2>
         </div>
 
-        <div class:offline-badge={!vesselInfo.online} class="online-badge">
+        <div class="online-badge" class:offline-badge={!vesselInfo.online}>
           <span></span>
           {vesselInfo.online ? "Online" : "Offline"}
         </div>
@@ -612,6 +651,7 @@
           <span class="info-label">Longitude</span>
           <strong>{vesselInfo.longitude === null ? "-" : `${formatNumber(vesselInfo.longitude, 6)}°`}</strong>
         </article>
+
         <article class="compact-info-card">
           <span class="info-label">Vessel Time</span>
           <strong>{vesselInfo.vesselLocalTime === null ? "-" : vesselInfo.vesselLocalTime}</strong>
@@ -652,13 +692,13 @@
 
     {#if canViewEngineRpmStatsTable}
       <section class="rpm-panel">
-        <div class="panel-header">
+        <div class="section-header">
           <div>
             <span class="section-kicker">Engine Monitoring</span>
             <h2>RPM Overview</h2>
           </div>
 
-          <span class="rpm-count">{rpmCards.length} engines</span>
+          <strong>{rpmCards.length} engines</strong>
         </div>
 
         <div class="rpm-grid">
@@ -683,41 +723,36 @@
     {/if}
   </section>
 
-  <section class="speed-summary">
-    {#if canViewSpeedStatsTable}
-      <article class="summary-card">
-        <div class="summary-icon">▲</div>
-        <div>
-          <div class="summary-label">Top Speed</div>
-          <div class="summary-value">{speedSummary.topSpeed}</div>
-        </div>
-      </article>
+  {#if canViewSpeedStatsTable || canViewTravelDistanceTable}
+    <section class="summary-grid">
+      {#if canViewSpeedStatsTable}
+        <article class="summary-card">
+          <span>Top Speed</span>
+          <strong>{speedSummary.topSpeed}</strong>
+        </article>
 
-      <article class="summary-card">
-        <div class="summary-icon">≈</div>
-        <div>
-          <div class="summary-label">Average Speed</div>
-          <div class="summary-value">{speedSummary.averageSpeed}</div>
-        </div>
-      </article>
-    {/if}
+        <article class="summary-card">
+          <span>Average Speed</span>
+          <strong>{speedSummary.averageSpeed}</strong>
+        </article>
+      {/if}
 
-    {#if canViewTravelDistanceTable}
-      <article class="summary-card">
-        <div class="summary-icon">⇢</div>
-        <div>
-          <div class="summary-label">Total Distance</div>
-          <div class="summary-value">{speedSummary.totalDistance}</div>
-        </div>
-      </article>
-    {/if}
-  </section>
+      {#if canViewTravelDistanceTable}
+        <article class="summary-card">
+          <span>Total Distance</span>
+          <strong>{speedSummary.totalDistance}</strong>
+        </article>
+      {/if}
+    </section>
+  {/if}
 
   <section class="environment-summary">
-    <section class="environment-card">
-      <div class="environment-header">
-        <span class="section-kicker">Weather Forecast</span>
-        <h2>Today · Tomorrow · Day After</h2>
+    <section class="table-section environment-card">
+      <div class="section-header">
+        <div>
+          <span class="section-kicker">Weather Forecast</span>
+          <h2>Today · Tomorrow · Day After</h2>
+        </div>
       </div>
 
       <div class="environment-grid">
@@ -741,10 +776,12 @@
       </div>
     </section>
 
-    <section class="environment-card">
-      <div class="environment-header">
-        <span class="section-kicker">Ocean Current</span>
-        <h2>Current Forecast</h2>
+    <section class="table-section environment-card">
+      <div class="section-header">
+        <div>
+          <span class="section-kicker">Ocean Current</span>
+          <h2>Current Forecast</h2>
+        </div>
       </div>
 
       <div class="environment-grid">
@@ -769,16 +806,15 @@
     </section>
   </section>
 
-
   <section class="fuel-summary">
-    <section class="fuel-card main-fuel-card">
-      <div class="fuel-card-header">
+    <section class="table-section main-fuel-card">
+      <div class="section-header">
         <div>
           <span class="section-kicker">Fuel Monitoring</span>
           <h2>Current Daily Consumption So Far</h2>
         </div>
 
-        <button type="button" class="refresh-btn" onclick={loadDashboard}>
+        <button type="button" class="secondary-btn" onclick={loadDashboard} disabled={loading || currentUserLoading}>
           Refresh
         </button>
       </div>
@@ -814,13 +850,13 @@
           {/if}
         </div>
       {:else}
-        <div class="permission-note">
+        <div class="empty-box">
           Fuel consumption tidak ditampilkan karena permission view_fuel_consumption_table atau permission sumber fuel belum tersedia.
         </div>
       {/if}
 
       {#if canShowFodUsage}
-        <div class="fod-mini-grid">
+        <div class="fod-usage-summary">
           <article>
             <span>FOD Date</span>
             <strong>{fodUsage?.date || "-"}</strong>
@@ -831,7 +867,7 @@
             <strong>{formatLiter(fodUsage?.accumulatedLiters || 0)}</strong>
           </article>
 
-          <article>
+          <article class="fod-total-card">
             <span>Interval</span>
             <strong>{formatLiter(fodUsage?.intervalLiters ?? 0)}</strong>
           </article>
@@ -840,67 +876,286 @@
     </section>
 
     {#if canShowRob}
-      <section class="fuel-card rob-card">
-        <span class="section-kicker">Tank Status</span>
-        <h2>Latest ROB</h2>
-        <strong class="rob-value">{fuelSummary.latestRob}</strong>
+      <section class="table-section rob-card">
+        <div class="section-header">
+          <div>
+            <span class="section-kicker">Tank Status</span>
+            <h2>Latest ROB</h2>
+          </div>
+        </div>
+
+        <div class="rob-content">
+          <span>Remaining On Board</span>
+          <strong class="rob-value">{fuelSummary.latestRob}</strong>
+        </div>
       </section>
     {/if}
   </section>
 </section>
 
 <style>
-  .dashboard-content {
-    min-height: 100%;
+  :global(*) {
+    box-sizing: border-box;
+  }
+
+  :global(html),
+  :global(body) {
     margin: 0;
+    padding: 0;
+    font-family:
+      Inter,
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      sans-serif;
+    color: #0f172a;
+    background: #f4f6f8;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  h1,
+  h2,
+  p {
+    margin: 0;
+  }
+
+  .dashboard-content {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
     padding: 14px;
     background: #f4f6f8;
     color: #0f172a;
-    box-sizing: border-box;
-    overflow: auto;
+    overflow-y: auto;
+    overflow-x: hidden;
   }
 
-  .hero-grid {
-    display: grid;
-    grid-template-columns: 1fr 1.15fr;
-    gap: 14px;
-    height: 360px;
-  }
-
+  .dashboard-header-card,
   .monitoring-card,
   .vessel-panel,
   .rpm-panel,
   .summary-card,
-  .fuel-card {
+  .table-section {
     background: #ffffff;
     border: 1px solid #d9e2ec;
-    border-radius: 16px;
+    border-radius: 12px;
     box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
     overflow: hidden;
+  }
+
+  .dashboard-header-card {
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .page-kicker,
+  .section-kicker {
+    display: inline-flex;
+    width: fit-content;
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: #dbeafe;
+    color: #1d4ed8;
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .dashboard-header-card h1 {
+    margin: 8px 0 0;
+    font-size: 22px;
+    line-height: 1.2;
+    font-weight: 900;
+    color: #0f172a;
+  }
+
+  .dashboard-header-card p {
+    margin: 7px 0 0;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.5;
+    font-weight: 700;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .header-meta {
+    min-width: 120px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    text-align: right;
+  }
+
+  .header-meta span {
+    display: block;
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .header-meta strong {
+    display: block;
+    margin-top: 5px;
+    color: #0f172a;
+    font-size: 14px;
+    font-weight: 900;
+  }
+
+  .online-text {
+    color: #047857 !important;
+  }
+
+  .offline-text {
+    color: #64748b !important;
+  }
+
+  .primary-btn,
+  .secondary-btn {
+    height: 32px;
+    padding: 0 12px;
+    border: none;
+    font-size: 11px;
+    font-weight: 900;
+  }
+
+  .primary-btn {
+    background: #2563eb;
+    color: #ffffff;
+  }
+
+  .primary-btn:hover {
+    background: #1d4ed8;
+  }
+
+  .secondary-btn {
+    background: #e2e8f0;
+    color: #0f172a;
+  }
+
+  .secondary-btn:hover {
+    background: #cbd5e1;
+  }
+
+  .status-box {
+    margin-top: 14px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .loading-box {
+    background: #eff6ff;
+    color: #1d4ed8;
+    border: 1px solid #bfdbfe;
+  }
+
+  .error-box {
+    background: #fef2f2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+  }
+
+  .hero-grid {
+    display: grid;
+    grid-template-columns: minmax(360px, 1fr) minmax(420px, 1.15fr);
+    gap: 14px;
+    min-height: 404px;
+    margin-top: 14px;
   }
 
   .cctv-section,
   .map-section {
     min-width: 0;
-    height: 100%;
+    min-height: 404px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .section-header {
+    min-height: 58px;
+    padding: 12px 14px;
+    border-bottom: 1px solid #e5edf5;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  }
+
+  .section-header h2 {
+    margin: 7px 0 0;
+    color: #0f172a;
+    font-size: 17px;
+    line-height: 1.2;
+    font-weight: 900;
+  }
+
+  .section-header > strong {
+    flex-shrink: 0;
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1d4ed8;
+    font-size: 11px;
+    font-weight: 900;
+    white-space: nowrap;
   }
 
   .cctv-grid {
-    height: 100%;
+    flex: 1;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
-    padding: 12px;
+    padding: 14px;
+    background: #f8fafc;
+  }
+
+  .empty-cctv {
+    grid-template-columns: 1fr;
   }
 
   .cctv-box {
     position: relative;
-    min-height: 126px;
-    border-radius: 14px;
+    min-height: 142px;
+    border-radius: 12px;
     overflow: hidden;
     background:
       linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0)),
-      #3f4751;
+      #334155;
+    border: 1px solid rgba(255, 255, 255, 0.1);
     color: #ffffff;
     display: flex;
     flex-direction: column;
@@ -920,7 +1175,7 @@
   }
 
   .cctv-box.offline {
-    background: #707780;
+    background: #64748b;
     color: #e5e7eb;
   }
 
@@ -933,46 +1188,6 @@
   .cctv-top {
     display: flex;
     align-items: center;
-    justify-content: flex-start;
-  }
-
-  .cctv-status-text {
-    margin-left: 8px;
-    font-size: 10px;
-    font-weight: 900;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: #dbeafe;
-  }
-
-  .empty-cctv {
-    grid-template-columns: 1fr;
-  }
-
-  .cctv-empty {
-    height: 100%;
-    min-height: 260px;
-    border-radius: 14px;
-    background: #475569;
-    color: #ffffff;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    gap: 8px;
-    padding: 20px;
-  }
-
-  .cctv-empty strong {
-    font-size: 15px;
-    font-weight: 900;
-  }
-
-  .cctv-empty span {
-    color: #cbd5e1;
-    font-size: 12px;
-    font-weight: 700;
   }
 
   .camera-dot {
@@ -988,6 +1203,15 @@
     box-shadow: 0 0 0 5px rgba(148, 163, 184, 0.16);
   }
 
+  .cctv-status-text {
+    margin-left: 8px;
+    color: #dbeafe;
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
   .cctv-content {
     display: grid;
     place-items: center;
@@ -999,7 +1223,7 @@
   .cctv-icon {
     width: 38px;
     height: 38px;
-    border-radius: 14px;
+    border-radius: 12px;
     background: rgba(255, 255, 255, 0.14);
     display: flex;
     align-items: center;
@@ -1013,16 +1237,48 @@
   }
 
   .cctv-location {
+    color: #dbe3ec;
     font-size: 11px;
     font-weight: 700;
-    color: #dbe3ec;
+  }
+
+  .cctv-empty {
+    min-height: 260px;
+    border-radius: 12px;
+    background: #ffffff;
+    border: 1px dashed #bfdbfe;
+    color: #64748b;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 8px;
+    padding: 20px;
+  }
+
+  .cctv-empty .cctv-icon {
+    color: #2563eb;
+    background: #eff6ff;
+  }
+
+  .cctv-empty strong {
+    color: #0f172a;
+    font-size: 15px;
+    font-weight: 900;
+  }
+
+  .cctv-empty span {
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
   }
 
   .map-box {
+    flex: 1;
     width: 100%;
-    height: 100%;
-    min-height: 0;
-    background: #d8d8d8;
+    min-height: 320px;
+    background: #e5edf5;
     overflow: hidden;
     position: relative;
   }
@@ -1045,35 +1301,10 @@
     font-weight: 900;
   }
 
-  .permission-empty span,
-  .permission-note {
+  .permission-empty span {
+    color: #64748b;
     font-size: 12px;
     font-weight: 700;
-    color: #64748b;
-  }
-
-  .permission-note {
-    padding: 14px;
-  }
-
-  .dashboard-status {
-    margin-top: 14px;
-    padding: 10px 12px;
-    border-radius: 12px;
-    font-size: 12px;
-    font-weight: 900;
-  }
-
-  .loading-box {
-    background: #eff6ff;
-    color: #1d4ed8;
-    border: 1px solid #bfdbfe;
-  }
-
-  .error-box {
-    background: #fef2f2;
-    color: #b91c1c;
-    border: 1px solid #fecaca;
   }
 
   .info-rpm-section {
@@ -1084,41 +1315,59 @@
     align-items: stretch;
   }
 
-  .panel-header,
-  .fuel-card-header {
-    min-height: 58px;
-    padding: 12px 14px;
-    border-bottom: 1px solid #e5edf5;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  .vessel-panel,
+  .rpm-panel {
+    min-width: 0;
   }
 
-  .section-kicker {
-    display: inline-flex;
-    width: fit-content;
-    padding: 4px 9px;
-    border-radius: 999px;
-    background: #dbeafe;
-    color: #1d4ed8;
+  .vessel-info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    padding: 14px;
+    background: #f8fafc;
+  }
+
+  .compact-info-card {
+    min-height: 72px;
+    padding: 12px;
+    border: 1px solid #d9e2ec;
+    border-radius: 10px;
+    background: #ffffff;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .compact-info-card.highlight {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+  }
+
+  .info-label {
+    color: #64748b;
     font-size: 10px;
     font-weight: 900;
-    letter-spacing: 0.07em;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
   }
 
-  h2 {
-    margin: 7px 0 0;
+  .compact-info-card strong {
+    display: block;
+    margin-top: 7px;
     color: #0f172a;
-    font-size: 17px;
-    line-height: 1.2;
+    font-size: 13px;
+    line-height: 1.25;
     font-weight: 900;
+    word-break: break-word;
   }
 
-  .online-badge,
-  .rpm-count {
+  .compact-info-card.highlight strong {
+    color: #1d4ed8;
+    font-size: 20px;
+  }
+
+  .online-badge {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1126,20 +1375,17 @@
     min-height: 30px;
     padding: 0 11px;
     border-radius: 999px;
+    background: #ecfdf5;
+    border: 1px solid #bbf7d0;
+    color: #047857;
     font-size: 12px;
     font-weight: 900;
     white-space: nowrap;
   }
 
-  .online-badge {
-    background: #ecfdf5;
-    border: 1px solid #bbf7d0;
-    color: #047857;
-  }
-
   .online-badge.offline-badge {
     background: #f8fafc;
-    border: 1px solid #cbd5e1;
+    border-color: #cbd5e1;
     color: #64748b;
   }
 
@@ -1154,79 +1400,43 @@
     background: #94a3b8;
   }
 
-  .rpm-count {
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
-    color: #1d4ed8;
-  }
-
-  .vessel-panel {
-    padding-bottom: 12px;
-  }
-
-  .vessel-info-grid {
+  .rpm-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
     gap: 10px;
-    padding: 12px;
+    padding: 14px;
+    background: #f8fafc;
+    min-width: 0;
   }
 
-  .compact-info-card {
-    min-height: 72px;
-    padding: 12px;
-    border: 1px solid #dbe4ef;
-    border-radius: 14px;
-    background: #ffffff;
+  .summary-grid {
+    margin-top: 14px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .summary-card {
+    min-height: 96px;
+    padding: 16px;
     display: flex;
     flex-direction: column;
     justify-content: center;
   }
 
-  .compact-info-card.highlight {
-    border-color: #bfdbfe;
-    background: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
-  }
-
-  .info-label {
+  .summary-card span {
     color: #64748b;
-    font-size: 10.5px;
+    font-size: 11px;
     font-weight: 900;
     text-transform: uppercase;
-    letter-spacing: 0.045em;
   }
 
-  .compact-info-card strong {
-    display: block;
-    margin-top: 7px;
+  .summary-card strong {
+    margin-top: 10px;
     color: #0f172a;
-    font-size: 14px;
-    line-height: 1.25;
+    font-size: 22px;
+    line-height: 1.1;
     font-weight: 900;
-    word-break: break-word;
-  }
-
-  .compact-info-card.highlight strong {
-    color: #2563eb;
-    font-size: 20px;
-  }
-
-  .rpm-panel {
-    min-width: 0;
-  }
-
-  .rpm-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(180px, 1fr));
-    gap: 10px;
-    padding: 12px;
-    min-width: 0;
-  }
-
-  .speed-summary {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
-    margin-top: 14px;
   }
 
   .environment-summary {
@@ -1236,33 +1446,20 @@
     margin-top: 14px;
   }
 
-  .environment-card {
-    background: #ffffff;
-    border: 1px solid #d9e2ec;
-    border-radius: 16px;
-    box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
-    overflow: hidden;
-  }
-
-  .environment-header {
-    padding: 12px 14px;
-    border-bottom: 1px solid #e5edf5;
-    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-  }
-
   .environment-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
-    padding: 12px;
+    padding: 14px;
+    background: #f8fafc;
   }
 
   .environment-grid article {
     min-height: 82px;
     padding: 12px;
-    border-radius: 14px;
-    background: #f8fafc;
-    border: 1px solid #dbe4ef;
+    border-radius: 10px;
+    background: #ffffff;
+    border: 1px solid #d9e2ec;
   }
 
   .environment-grid span,
@@ -1291,44 +1488,6 @@
     font-size: 11px;
   }
 
-  .summary-card {
-    min-height: 100px;
-    padding: 16px;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-  }
-
-  .summary-icon {
-    width: 42px;
-    height: 42px;
-    border-radius: 15px;
-    background: #eff6ff;
-    color: #2563eb;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
-    font-weight: 900;
-    flex-shrink: 0;
-  }
-
-  .summary-label {
-    color: #64748b;
-    font-size: 12px;
-    font-weight: 900;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .summary-value {
-    margin-top: 7px;
-    color: #0f172a;
-    font-size: 18px;
-    font-weight: 900;
-    line-height: 1.2;
-  }
-
   .fuel-summary {
     display: grid;
     grid-template-columns: 1.45fr 0.85fr;
@@ -1336,52 +1495,26 @@
     margin-top: 14px;
   }
 
-  .fuel-card {
-    padding: 16px;
-  }
-
-  .fuel-card-header {
-    min-height: auto;
-    padding: 0 0 14px;
-    border-bottom: 1px solid #e5edf5;
-    background: transparent;
-  }
-
-  .refresh-btn {
-    height: 30px;
-    padding: 0 12px;
-    border: none;
-    border-radius: 9px;
-    background: #2563eb;
-    color: #ffffff;
-    font-size: 11px;
-    font-weight: 900;
-    cursor: pointer;
-  }
-
-  .refresh-btn:hover {
-    background: #1d4ed8;
-  }
-
   .fuel-cols {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
-    margin-top: 14px;
+    padding: 14px;
+    background: #f8fafc;
   }
 
   .fuel-metric {
     min-height: 92px;
     padding: 14px;
-    border-radius: 14px;
-    border: 1px solid #dbe4ef;
-    background: #f8fafc;
+    border-radius: 10px;
+    border: 1px solid #d9e2ec;
+    background: #ffffff;
   }
 
   .fuel-label {
     display: block;
     color: #64748b;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 900;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -1396,47 +1529,77 @@
     line-height: 1.1;
   }
 
-  .fod-mini-grid {
+  .empty-box {
+    padding: 18px 14px;
+    color: #64748b;
+    background: #f8fafc;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .fod-usage-summary {
+    padding: 0 14px 14px;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
-    margin-top: 14px;
+    background: #f8fafc;
   }
 
-  .fod-mini-grid article {
-    min-height: 64px;
-    padding: 10px;
-    border-radius: 12px;
+  .fod-usage-summary article {
+    min-height: 68px;
+    padding: 12px 14px;
     background: #ffffff;
-    border: 1px solid #dbe4ef;
-  }
-
-  .fod-mini-grid span {
-    display: block;
-    color: #64748b;
-    font-size: 10px;
-    font-weight: 900;
-    text-transform: uppercase;
-  }
-
-  .fod-mini-grid strong {
-    display: block;
-    margin-top: 8px;
-    color: #0f172a;
-    font-size: 13px;
-    font-weight: 900;
-  }
-
-  .rob-card {
+    border: 1px solid #d9e2ec;
+    border-radius: 10px;
     display: flex;
     flex-direction: column;
     justify-content: center;
   }
 
+  .fod-usage-summary span {
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .fod-usage-summary strong {
+    margin-top: 6px;
+    color: #0f172a;
+    font-size: 18px;
+    font-weight: 900;
+  }
+
+  .fod-total-card {
+    background: #eff6ff !important;
+    border-color: #bfdbfe !important;
+  }
+
+  .fod-total-card strong {
+    color: #1d4ed8;
+  }
+
+  .rob-card {
+    min-height: 180px;
+  }
+
+  .rob-content {
+    padding: 18px 16px;
+    background: #f8fafc;
+  }
+
+  .rob-content span {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
   .rob-value {
     display: block;
-    margin-top: 18px;
-    color: #2563eb;
+    margin-top: 14px;
+    color: #1d4ed8;
     font-size: 30px;
     line-height: 1;
     font-weight: 900;
@@ -1450,16 +1613,15 @@
       grid-template-columns: 1fr;
     }
 
-    .hero-grid {
-      height: auto;
-    }
-
-    .cctv-grid {
-      height: 320px;
+    .hero-grid,
+    .cctv-section,
+    .map-section {
+      min-height: auto;
     }
 
     .map-box {
       height: 320px;
+      flex: none;
     }
   }
 
@@ -1468,23 +1630,29 @@
       padding: 10px;
     }
 
-    .cctv-grid,
-    .vessel-info-grid,
-    .rpm-grid,
-    .speed-summary,
-    .environment-grid,
-    .fuel-cols,
-    .fod-mini-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .panel-header {
+    .dashboard-header-card,
+    .section-header {
       flex-direction: column;
       align-items: flex-start;
     }
 
-    .cctv-grid {
-      height: auto;
+    .header-right {
+      width: 100%;
+      justify-content: flex-start;
+    }
+
+    .header-meta {
+      text-align: left;
+    }
+
+    .cctv-grid,
+    .vessel-info-grid,
+    .rpm-grid,
+    .summary-grid,
+    .environment-grid,
+    .fuel-cols,
+    .fod-usage-summary {
+      grid-template-columns: 1fr;
     }
 
     .cctv-box {

@@ -2318,15 +2318,13 @@
 			payload?.data_received_stats || payload?.dataReceivedStats || payload?.stats || {};
 
 		setPageStatus({
+			pageKey: 'daily-report',
 			dataReceived:
 				stats?.received_minutes !== undefined && stats?.total_minutes !== undefined
 					? `${stats.received_minutes} of ${stats.total_minutes} (${stats.percentage ?? '-'}%)`
 					: stats?.received_slots !== undefined && stats?.total_slots !== undefined
 						? `${stats.received_slots} of ${stats.total_slots} (${stats.percentage ?? '-'}%)`
 						: '-',
-			queue: payload?.queue ?? '-',
-			sdcard: payload?.sdcard ?? '-',
-			online: Boolean($selectedVesselInfo?.online),
 			sourcePage: 'Daily Report'
 		});
 	}

@@ -16,6 +16,13 @@
 			alwaysShow: true
 		},
 		{
+			icon: '⚙',
+			title: 'Administrator',
+			key: 'administrator',
+			type: 'text',
+			superAdminOnly: true
+		},
+		{
 			icon: '/assets/fleetview.svg',
 			title: 'Fleet View',
 			key: 'fleet-view',
@@ -72,10 +79,16 @@
 
 	function hasPermission(menu) {
 		if (menu?.alwaysShow) return true;
+
+		if (menu?.superAdminOnly) {
+			return permissionMode === 'all';
+		}
+
 		if (permissionMode === 'all') return true;
 
 		const permissionKeys = Array.isArray(menu?.permissions) ? menu.permissions : [];
-		if (!permissionKeys.length) return true;
+
+		if (!permissionKeys.length) return false;
 
 		return permissionKeys.some((permissionKey) => permissions.includes(permissionKey));
 	}

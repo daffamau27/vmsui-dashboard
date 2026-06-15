@@ -8,6 +8,7 @@
   import AlarmPage from "$lib/pages/AlarmPage.svelte";
   import AuditLogPage from "$lib/pages/AuditLogPage.svelte";
   import VoyagePlansPage from "$lib/pages/VoyagePlansPage.svelte";
+  import AdministratorPage from "$lib/pages/AdministratorPage.svelte";
 </script>
 
 <main class="app-content">
@@ -59,6 +60,13 @@
   >
     <VoyagePlansPage />
   </section>
+
+  <section
+    class="keep-page no-scroll-page"
+    class:active-page={$activeMenu === "administrator"}
+  >
+    <AdministratorPage />
+  </section>
 </main>
 
 <style>
@@ -92,19 +100,16 @@
     pointer-events: auto;
   }
 
-  /* Halaman utama dari sidebar boleh scroll */
   .scroll-page.active-page {
     overflow-y: auto;
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
   }
 
-  /* Fleet View dan Vessel punya sistem scroll sendiri */
   .no-scroll-page.active-page {
     overflow: hidden;
   }
 
-  /* Root halaman sidebar harus mengisi tinggi parent */
   .scroll-page :global(.page-shell),
   .scroll-page :global(.placeholder-page),
   .scroll-page :global(.avs-page),
@@ -113,7 +118,6 @@
     box-sizing: border-box;
   }
 
-  /* Jangan paksa child scroll sendiri untuk halaman sidebar */
   .scroll-page :global(.page-shell),
   .scroll-page :global(.placeholder-page) {
     overflow: visible;

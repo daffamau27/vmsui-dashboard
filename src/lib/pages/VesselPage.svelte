@@ -1,6 +1,7 @@
 <script>
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { activeVesselMenu, setActiveVesselMenu } from '$lib/stores/vesselNavigation.svelte.js';
+	import { apiRequest } from '$lib/api/authApi.js';
 
 	import VesselDashboardPage from '$lib/pages/vessel/VesselDashboardPage.svelte';
 	import DailyReportPage from '$lib/pages/vessel/DailyReportPage.svelte';
@@ -9,6 +10,7 @@
 	import VoyagePlanPage from '$lib/pages/vessel/VoyagePlanPage.svelte';
 	import TracePage from '$lib/pages/vessel/TracePage.svelte';
 	import DataLogPage from '$lib/pages/vessel/DataLogPage.svelte';
+	import FuelManagementPage from '$lib/pages/vessel/FuelManagementPage.svelte';
 
 	import { getFleetVesselsWithEngines } from '$lib/api/fleetApi.js';
 	import {
@@ -26,29 +28,276 @@
 	let vesselLoading = $state(false);
 	let vesselError = $state('');
 
+	let permissionLoading = $state(true);
+	let permissionMode = $state('selected');
+	let permissions = $state([]);
+
+	let pageStatusMap = $state({});	
+
 	let mountedPages = $state({
 		dashboard: true
 	});
 
 	const vesselMenus = [
-		{ label: 'Dashboard', key: 'dashboard' },
-		{ label: 'Daily Report', key: 'daily-report' },
-		{ label: 'Monthly Report', key: 'monthly-report' },
-		{ label: 'Periodical Report', key: 'periodical-report' },
-		{ label: 'Voyage Plan', key: 'voyage-plan' },
-		{ label: 'Trace', key: 'trace' },
-		{ label: 'Data Log', key: 'datalog' }
+		{
+			label: 'Dashboard',
+			key: 'dashboard',
+			permissions: ['access_dashboard']
+		},
+		{
+			label: 'Daily Report',
+			key: 'daily-report',
+			permissions: ['access_daily_report']
+		},
+		{
+			label: 'Monthly Report',
+			key: 'monthly-report',
+			permissions: ['access_monthly_report']
+		},
+		{
+			label: 'Periodical Report',
+			key: 'periodical-report',
+			permissions: ['access_periodical_report']
+		},
+		{
+			label: 'Voyage Plan',
+			key: 'voyage-plan',
+			permissions: ['view_voyage_planvessel']
+		},
+		{
+			label: 'Trace',
+			key: 'trace',
+			permissions: ['access_trace']
+		},
+		{
+			label: 'Data Log',
+			key: 'data-log',
+			permissions: ['access_data_log']
+		},
+		{
+			label: 'Fuel Management',
+			key: 'fuel-management',
+			permissions: ['access_fuel_management']
+		}
 	];
 
+	function normalizePermissions(permissionAccess = {}) {
+		const rawPermissions = Array.isArray(permissionAccess?.permissions)
+			? permissionAccess.permissions
+			: Array.isArray(permissionAccess?.details)
+				? permissionAccess.details
+				: [];
+
+		return rawPermissions
+			.map((item) => {
+				if (typeof item === 'string') return item;
+
+				return (
+					item?.key || item?.permissionKey || item?.name || item?.code || item?.permission || ''
+				);
+			})
+			.filter(Boolean);
+	}
+
+	function hasPermission(permissionKeys = []) {
+		if (permissionMode === 'all') return true;
+
+		if (!Array.isArray(permissionKeys)) return false;
+		if (!permissionKeys.length) return false;
+
+		return permissionKeys.some((permissionKey) => permissions.includes(permissionKey));
+	}
+
+	function isPageAllowed(key) {
+		const menu = vesselMenus.find((item) => item.key === key);
+		if (!menu) return false;
+
+		return hasPermission(menu.permissions);
+	}
+
+	let visibleVesselMenus = $derived(vesselMenus.filter((menu) => hasPermission(menu.permissions)));
+
 	let activeLabel = $derived(
-		vesselMenus.find((menu) => menu.key === $activeVesselMenu)?.label || 'Dashboard'
+		permissionLoading
+			? 'Loading...'
+			: visibleVesselMenus.find((menu) => menu.key === $activeVesselMenu)?.label ||
+					visibleVesselMenus[0]?.label ||
+					'No Access'
 	);
 
 	let selectedVessel = $derived(
 		$selectedVesselInfo?.vesselName || $selectedVesselInfo?.name || 'Select Vessel'
 	);
 
-	let status = $derived($pageStatus);
+	let latestStatusInterval = null;
+	let latestStatusRequestId = 0;
+	let lastLatestStatusVesselId = $state(null);
+
+	let latestVesselStatus = $state({
+		queue: '-',
+		sdcard: '-',
+		online: false
+	});
+
+	function normalizeStatusPageKey(rawStatus = {}) {
+		const pageKey = rawStatus?.pageKey || rawStatus?.key;
+
+		if (pageKey) return pageKey;
+
+		const sourcePage = String(rawStatus?.sourcePage || '').toLowerCase();
+
+		if (sourcePage.includes('daily')) return 'daily-report';
+		if (sourcePage.includes('monthly')) return 'monthly-report';
+		if (sourcePage.includes('periodical')) return 'periodical-report';
+		if (sourcePage.includes('data log')) return 'data-log';
+		if (sourcePage.includes('fuel')) return 'fuel-management';
+		if (sourcePage.includes('dashboard')) return 'dashboard';
+		if (sourcePage.includes('trace')) return 'trace';
+		if (sourcePage.includes('voyage')) return 'voyage-plan';
+
+		return $activeVesselMenu || 'dashboard';
+	}
+
+	let activePageStatus = $derived(pageStatusMap[$activeVesselMenu] || {});
+
+	let status = $derived({
+		dataReceived: activePageStatus?.dataReceived ?? '-',
+		queue: latestVesselStatus.queue ?? '-',
+		sdcard: latestVesselStatus.sdcard ?? '-',
+		online: latestVesselStatus.online ?? false
+	});
+
+	function getVesselId(vessel) {
+		return vessel?.vesselId || vessel?.id || vessel?.vessel_id || vessel?.dbId || null;
+	}
+
+	function formatNumber(value) {
+		const number = Number(value);
+
+		if (!Number.isFinite(number)) return '-';
+
+		return number.toLocaleString('en-US');
+	}
+
+	function formatSdCardStatus(sdCardStats) {
+		if (!sdCardStats || sdCardStats.available === false) {
+			return 'Not Available';
+		}
+
+		const freePercentage = Number(sdCardStats.sd_card_free_percentage);
+		const free = Number(sdCardStats.sd_card_free);
+		const total = Number(sdCardStats.sd_card_total);
+		const used = Number(sdCardStats.sd_card_used);
+
+		if (Number.isFinite(free) && Number.isFinite(total) && total > 0) {
+			const percentageText = Number.isFinite(freePercentage)
+				? ` (${freePercentage.toFixed(1)}%)`
+				: '';
+
+			return `${formatNumber(free)} of ${formatNumber(total)} MB Free${percentageText}`;
+		}
+
+		if (Number.isFinite(used) && Number.isFinite(total) && total > 0) {
+			return `${formatNumber(used)} of ${formatNumber(total)} MB Used`;
+		}
+
+		if (Number.isFinite(freePercentage)) {
+			return `${freePercentage.toFixed(1)}% Free`;
+		}
+
+		return 'Available';
+	}
+
+	function normalizeLatestStatus(response) {
+		const data = response?.data || response || {};
+
+		return {
+			queue: data.queue ?? '-',
+			sdcard: formatSdCardStatus(data.sd_card_stats),
+			online: Boolean(data.online)
+		};
+	}
+
+	async function loadLatestVesselStatus(vesselId) {
+		const effectiveVesselId =
+			vesselId ||
+			$selectedVesselId ||
+			getVesselId($selectedVesselInfo);
+
+		console.log('[VESSEL_PAGE][LATEST_STATUS][CALL]', {
+			vesselId,
+			effectiveVesselId,
+			selectedVesselId: $selectedVesselId,
+			selectedVesselInfo: $selectedVesselInfo
+		});
+
+		if (!effectiveVesselId) {
+			console.warn('[VESSEL_PAGE][LATEST_STATUS][SKIP] vesselId kosong');
+
+			latestVesselStatus = {
+				queue: '-',
+				sdcard: '-',
+				online: false
+			};
+
+			return;
+		}
+
+		const requestId = ++latestStatusRequestId;
+
+		try {
+			const response = await apiRequest(`/vessels/${effectiveVesselId}/latest-status`, {
+				method: 'GET'
+			});
+
+			console.log('[VESSEL_PAGE][LATEST_STATUS][RESPONSE]', response);
+
+			if (requestId !== latestStatusRequestId) return;
+
+			latestVesselStatus = normalizeLatestStatus(response);
+
+			console.log('[VESSEL_PAGE][LATEST_STATUS][NORMALIZED]', latestVesselStatus);
+		} catch (err) {
+			console.error('[VESSEL_PAGE][LATEST_STATUS][ERROR]', err);
+
+			if (requestId !== latestStatusRequestId) return;
+
+			latestVesselStatus = {
+				queue: '-',
+				sdcard: '-',
+				online: false
+			};
+		}
+	}
+
+	function stopLatestStatusPolling() {
+		if (latestStatusInterval) {
+			clearInterval(latestStatusInterval);
+			latestStatusInterval = null;
+		}
+	}
+
+	function startLatestStatusPolling(vesselId) {
+		const effectiveVesselId =
+			vesselId ||
+			$selectedVesselId ||
+			getVesselId($selectedVesselInfo);
+
+		console.log('[VESSEL_PAGE][LATEST_STATUS][START_POLLING]', effectiveVesselId);
+
+		stopLatestStatusPolling();
+
+		if (!effectiveVesselId) {
+			console.warn('[VESSEL_PAGE][LATEST_STATUS][POLLING_SKIP] vesselId kosong');
+			return;
+		}
+
+		loadLatestVesselStatus(effectiveVesselId);
+
+		latestStatusInterval = setInterval(() => {
+			loadLatestVesselStatus(effectiveVesselId);
+		}, 30000);
+	}
 
 	function isPageActive(key) {
 		return $activeVesselMenu === key;
@@ -59,9 +308,56 @@
 	}
 
 	$effect(() => {
+		const rawStatus = $pageStatus;
+
+		if (!rawStatus) return;
+
+		const pageKey = normalizeStatusPageKey(rawStatus);
+
+		if (!pageKey) return;
+
+		const nextStatus = {
+			dataReceived: rawStatus?.dataReceived ?? '-',
+			sourcePage: rawStatus?.sourcePage ?? ''
+		};
+
+		const currentStatus = pageStatusMap[pageKey];
+
+		if (
+			currentStatus?.dataReceived === nextStatus.dataReceived &&
+			currentStatus?.sourcePage === nextStatus.sourcePage
+		) {
+			return;
+		}
+
+		pageStatusMap[pageKey] = nextStatus;
+	});
+
+	$effect(() => {
+		if (permissionLoading) return;
+
+		if (!visibleVesselMenus.length) {
+			if ($activeVesselMenu) {
+				setActiveVesselMenu('');
+			}
+			return;
+		}
+
+		const activeMenuStillAllowed = visibleVesselMenus.some(
+			(menu) => menu.key === $activeVesselMenu
+		);
+
+		if (!activeMenuStillAllowed) {
+			setActiveVesselMenu(visibleVesselMenus[0].key);
+		}
+	});
+
+	$effect(() => {
 		const key = $activeVesselMenu;
 
+		if (permissionLoading) return;
 		if (!key) return;
+		if (!isPageAllowed(key)) return;
 
 		if (!mountedPages[key]) {
 			mountedPages = {
@@ -70,6 +366,43 @@
 			};
 		}
 	});
+
+	$effect(() => {
+		const vesselId = $selectedVesselId || getVesselId($selectedVesselInfo);
+
+		if (!vesselId) return;
+		if (String(vesselId) === String(lastLatestStatusVesselId)) return;
+
+		lastLatestStatusVesselId = vesselId;
+		startLatestStatusPolling(vesselId);
+	});
+
+	async function loadCurrentUserPermissions() {
+		permissionLoading = true;
+
+		try {
+			const response = await apiRequest('/users/current-user', {
+				method: 'GET'
+			});
+
+			const permissionAccess = response?.data?.permissionAccess || {};
+
+			permissionMode = permissionAccess?.mode || 'selected';
+			permissions = normalizePermissions(permissionAccess);
+
+			console.log('[VESSEL_PAGE][CURRENT_USER_PERMISSION]', {
+				mode: permissionMode,
+				permissions
+			});
+		} catch (err) {
+			console.error('[VESSEL_PAGE][CURRENT_USER_PERMISSION][ERROR]', err);
+
+			permissionMode = 'selected';
+			permissions = [];
+		} finally {
+			permissionLoading = false;
+		}
+	}
 
 	async function loadVesselsFromApi() {
 		vesselLoading = true;
@@ -87,13 +420,16 @@
 			const currentId = $selectedVesselId;
 
 			if (currentId && vessels.length) {
-				const found = vessels.find((item) => Number(item.vesselId) === Number(currentId));
+				const found = vessels.find((item) => Number(getVesselId(item)) === Number(currentId));
+				const selected = found || vessels[0];
 
-				if (found) {
-					setSelectedVessel(found);
-				}
+				setSelectedVessel(selected);
+				startLatestStatusPolling(getVesselId(selected));
 			} else if (vessels.length) {
-				setSelectedVessel(vessels[0]);
+				const selected = vessels[0];
+
+				setSelectedVessel(selected);
+				startLatestStatusPolling(getVesselId(selected));
 			}
 		} catch (err) {
 			console.error('[VESSEL_PAGE][LOAD_VESSELS][ERROR]', err);
@@ -105,6 +441,8 @@
 	}
 
 	function selectVesselMenu(key) {
+		if (!isPageAllowed(key)) return;
+
 		setActiveVesselMenu(key);
 		menuOpen = false;
 	}
@@ -114,14 +452,21 @@
 		vesselDropdownOpen = false;
 
 		console.log('[VESSEL_PAGE][VESSEL_SELECTED]', vessel);
+
+		startLatestStatusPolling(getVesselId(vessel));
 	}
 
 	onMount(() => {
 		restoreSelectedVessel();
 
 		setTimeout(() => {
+			loadCurrentUserPermissions();
 			loadVesselsFromApi();
 		}, 150);
+	});
+
+	onDestroy(() => {
+		stopLatestStatusPolling();
 	});
 </script>
 
@@ -136,16 +481,22 @@
 
 				{#if menuOpen}
 					<div class="dropdown-menu">
-						{#each vesselMenus as menu}
-							<button
-								type="button"
-								class="dropdown-item"
-								class:active-item={$activeVesselMenu === menu.key}
-								onclick={() => selectVesselMenu(menu.key)}
-							>
-								{menu.label}
-							</button>
-						{/each}
+						{#if permissionLoading}
+							<div class="dropdown-empty">Loading menu...</div>
+						{:else if visibleVesselMenus.length}
+							{#each visibleVesselMenus as menu}
+								<button
+									type="button"
+									class="dropdown-item"
+									class:active-item={$activeVesselMenu === menu.key}
+									onclick={() => selectVesselMenu(menu.key)}
+								>
+									{menu.label}
+								</button>
+							{/each}
+						{:else}
+							<div class="dropdown-empty">Tidak ada akses menu.</div>
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -162,9 +513,9 @@
 				SD Card : {status.sdcard}
 			</div>
 
-			<div class="topbar-item online-box">
+			<div class="topbar-item online-box" class:offline-box={!status.online}>
 				<span class="dot"></span>
-				Online
+				{status.online ? 'Online' : 'Offline'}
 			</div>
 		</div>
 
@@ -191,7 +542,7 @@
 							<button
 								type="button"
 								class="vessel-item"
-								class:active-vessel={Number($selectedVesselId) === Number(vessel.vesselId)}
+								class:active-vessel={Number($selectedVesselId) === Number(getVesselId(vessel))}
 								onclick={() => selectVessel(vessel)}
 							>
 								{vessel.vesselName || vessel.name}
@@ -204,46 +555,68 @@
 	</header>
 
 	<main class="vessel-content">
-		{#if shouldMountPage('dashboard')}
-			<section class="vessel-page" class:active-vessel-page={isPageActive('dashboard')}>
-				<VesselDashboardPage active={isPageActive('dashboard')} />
+		{#if permissionLoading}
+			<section class="vessel-page active-vessel-page">
+				<div class="no-access-card">
+					<h2>Loading access...</h2>
+					<p>Sedang memuat permission user.</p>
+				</div>
 			</section>
-		{/if}
+		{:else if !visibleVesselMenus.length}
+			<section class="vessel-page active-vessel-page">
+				<div class="no-access-card">
+					<h2>Tidak ada akses menu</h2>
+					<p>User ini belum memiliki permission untuk membuka halaman vessel.</p>
+				</div>
+			</section>
+		{:else}
+			{#if shouldMountPage('dashboard') && isPageAllowed('dashboard')}
+				<section class="vessel-page" class:active-vessel-page={isPageActive('dashboard')}>
+					<VesselDashboardPage active={isPageActive('dashboard')} />
+				</section>
+			{/if}
 
-		{#if shouldMountPage('daily-report')}
-			<section class="vessel-page" class:active-vessel-page={isPageActive('daily-report')}>
-				<DailyReportPage active={isPageActive('daily-report')} />
-			</section>
-		{/if}
+			{#if shouldMountPage('daily-report') && isPageAllowed('daily-report')}
+				<section class="vessel-page" class:active-vessel-page={isPageActive('daily-report')}>
+					<DailyReportPage active={isPageActive('daily-report')} />
+				</section>
+			{/if}
 
-		{#if shouldMountPage('monthly-report')}
-			<section class="vessel-page" class:active-vessel-page={isPageActive('monthly-report')}>
-				<MonthlyReportPage active={isPageActive('monthly-report')} />
-			</section>
-		{/if}
+			{#if shouldMountPage('monthly-report') && isPageAllowed('monthly-report')}
+				<section class="vessel-page" class:active-vessel-page={isPageActive('monthly-report')}>
+					<MonthlyReportPage active={isPageActive('monthly-report')} />
+				</section>
+			{/if}
 
-		{#if shouldMountPage('periodical-report')}
-			<section class="vessel-page" class:active-vessel-page={isPageActive('periodical-report')}>
-				<PeriodicalReportPage active={isPageActive('periodical-report')} />
-			</section>
-		{/if}
+			{#if shouldMountPage('periodical-report') && isPageAllowed('periodical-report')}
+				<section class="vessel-page" class:active-vessel-page={isPageActive('periodical-report')}>
+					<PeriodicalReportPage active={isPageActive('periodical-report')} />
+				</section>
+			{/if}
 
-		{#if shouldMountPage('voyage-plan')}
-			<section class="vessel-page" class:active-vessel-page={isPageActive('voyage-plan')}>
-				<VoyagePlanPage active={isPageActive('voyage-plan')} />
-			</section>
-		{/if}
+			{#if shouldMountPage('voyage-plan') && isPageAllowed('voyage-plan')}
+				<section class="vessel-page" class:active-vessel-page={isPageActive('voyage-plan')}>
+					<VoyagePlanPage active={isPageActive('voyage-plan')} />
+				</section>
+			{/if}
 
-		{#if shouldMountPage('trace')}
-			<section class="vessel-page" class:active-vessel-page={isPageActive('trace')}>
-				<TracePage active={isPageActive('trace')} />
-			</section>
-		{/if}
+			{#if shouldMountPage('trace') && isPageAllowed('trace')}
+				<section class="vessel-page" class:active-vessel-page={isPageActive('trace')}>
+					<TracePage active={isPageActive('trace')} />
+				</section>
+			{/if}
 
-		{#if shouldMountPage('datalog')}
-			<section class="vessel-page" class:active-vessel-page={isPageActive('datalog')}>
-				<DataLogPage active={isPageActive('datalog')} />
-			</section>
+			{#if shouldMountPage('data-log') && isPageAllowed('data-log')}
+				<section class="vessel-page" class:active-vessel-page={isPageActive('data-log')}>
+					<DataLogPage active={isPageActive('data-log')} />
+				</section>
+			{/if}
+
+			{#if shouldMountPage('fuel-management') && isPageAllowed('fuel-management')}
+				<section class="vessel-page" class:active-vessel-page={isPageActive('fuel-management')}>
+					<FuelManagementPage active={isPageActive('fuel-management')} />
+				</section>
+			{/if}
 		{/if}
 	</main>
 </section>
@@ -403,6 +776,10 @@
 		display: inline-block;
 	}
 
+	.offline-box .dot {
+		background: #ef4444;
+	}
+
 	.vessel-dropdown {
 		position: relative;
 		height: 100%;
@@ -486,6 +863,39 @@
 		opacity: 1;
 		visibility: visible;
 		pointer-events: auto;
+	}
+
+	.dropdown-empty {
+		padding: 10px 14px;
+		font-size: 13px;
+		font-weight: 600;
+		color: #6b7280;
+		background: #ffffff;
+		white-space: nowrap;
+	}
+
+	.no-access-card {
+		width: min(520px, calc(100% - 32px));
+		margin: 48px auto;
+		padding: 22px 24px;
+		border: 1px solid #d1d5db;
+		border-radius: 14px;
+		background: #ffffff;
+		box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+		color: #111827;
+	}
+
+	.no-access-card h2 {
+		margin: 0 0 8px;
+		font-size: 18px;
+		font-weight: 800;
+	}
+
+	.no-access-card p {
+		margin: 0;
+		font-size: 13px;
+		color: #6b7280;
+		line-height: 1.5;
 	}
 
 	@media (max-width: 900px) {
@@ -603,6 +1013,10 @@
 			background: #12b886;
 			display: inline-block;
 			flex-shrink: 0;
+		}
+
+		.offline-box .dot {
+			background: #ef4444;
 		}
 
 		.vessel-dropdown {

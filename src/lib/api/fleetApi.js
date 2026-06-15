@@ -75,20 +75,23 @@ function normalizeFleetVessel(item) {
   };
 }
 
-export async function getFleetVessels() {
-  const response = await apiRequest("/users/my-vessels", {
-    method: "GET"
-  });
+export async function getFleetVessels({ search = '', status = '' } = {}) {
+	const params = new URLSearchParams();
 
-  const rows = Array.isArray(response)
-    ? response
-    : Array.isArray(response?.data)
-      ? response.data
-      : Array.isArray(response?.vessels)
-        ? response.vessels
-        : [];
+	if (search) params.set('search', search);
+	if (status && status !== 'all') params.set('status', status);
 
-  return rows.map(normalizeFleetVessel);
+	const query = params.toString();
+	const endpoint = query ? `/fleet/vessels?${query}` : '/fleet/vessels';
+
+	const response = await apiRequest(endpoint, {
+		method: 'GET',
+		headers: {
+			accept: 'application/json'
+		}
+	});
+
+	return response?.data ?? [];
 }
 
 function normalizeLiveVessel(item) {
@@ -131,18 +134,17 @@ function normalizeLiveVessel(item) {
   };
 }
 
-export async function getFleetVesselLiveDetail(vesselId) {
-  if (!vesselId) {
-    throw new Error("vesselId wajib diisi.");
-  }
+export async function getFleetVesselLiveDetail(id) {
+	if (!id) throw new Error('Vessel ID is required');
 
-  const response = await apiRequest(`/fleet/vessels/${vesselId}`, {
-    method: "GET"
-  });
+	const response = await apiRequest(`/fleet/vessels/${id}`, {
+		method: 'GET',
+		headers: {
+			accept: 'application/json'
+		}
+	});
 
-  const data = response?.data || response?.vessel || response;
-
-  return normalizeLiveVessel(data);
+	return response?.data ?? null;
 }
 
 export async function getFleetVesselDetail(vesselId) {
@@ -197,30 +199,12 @@ export async function getFleetVesselsWithEngines() {
 }
 
 export async function getFleetAssets() {
-  const response = await apiRequest("/fleet/assets", {
-    method: "GET"
-  });
+	const response = await apiRequest('/fleet/assets', {
+		method: 'GET',
+		headers: {
+			accept: 'application/json'
+		}
+	});
 
-  const rows = Array.isArray(response)
-    ? response
-    : Array.isArray(response?.data)
-      ? response.data
-      : Array.isArray(response?.assets)
-        ? response.assets
-        : [];
-
-  return rows.map((item) => ({
-    id: String(item.id || item.assetId),
-    dbId: item.id,
-    assetId: item.assetId || "",
-    name: item.assetName || item.name || "-",
-    assetName: item.assetName || item.name || "-",
-    latitude: Number(item.latitude ?? item.lat ?? 0),
-    longitude: Number(item.longitude ?? item.lng ?? 0),
-    lat: Number(item.latitude ?? item.lat ?? 0),
-    lng: Number(item.longitude ?? item.lng ?? 0),
-    type: item.type || item.assetType || "Asset",
-    description: item.description || "",
-    raw: item
-  }));
+	return response?.data ?? [];
 }

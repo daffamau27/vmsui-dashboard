@@ -47,8 +47,13 @@
 	let mapContainer;
 	let routeMap;
 	let markerLayer;
+	let assetMarkerLayer;
 	let routeLine;
 	let mapInitializing = false;
+
+	let assets = [];
+	let assetsLoading = false;
+	let assetsError = '';
 
 	$: canView = permissions.has('view_voyage_plan_vessel');
 	$: currentPlan = selectedAssignment?.voyagePlan || activeAssignment?.voyagePlan || null;
@@ -91,6 +96,10 @@
 				updateSelectedVesselName();
 			}
 
+			if (canView) {
+				await loadFleetAssets();
+			}
+
 			if (canView && selectedVesselId) {
 				await loadVesselVoyageData(1);
 			}
@@ -116,6 +125,96 @@
 			}
 			throw new Error(message);
 		}
+	}
+
+	function normalizeAsset(asset) {
+		const latitude = Number(asset?.latitude);
+		const longitude = Number(asset?.longitude);
+
+		if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+		return {
+			id: asset?.id,
+			assetId: asset?.assetId || '',
+			assetName: asset?.assetName || `Asset ${asset?.id || ''}`,
+			latitude,
+			longitude,
+			raw: asset
+		};
+	}
+
+	async function loadFleetAssets() {
+		assetsLoading = true;
+		assetsError = '';
+
+		try {
+			const result = await apiFetch('/fleet/assets', {
+				method: 'GET',
+				headers: {
+					Accept: 'application/json'
+				}
+			});
+
+			const rows = Array.isArray(result?.data) ? result.data : Array.isArray(result) ? result : [];
+
+			assets = rows.map(normalizeAsset).filter(Boolean);
+
+			console.log('[VOYAGE_PLAN_VESSEL][ASSETS]', assets);
+
+			renderAssetMarkers();
+		} catch (error) {
+			console.error('[VOYAGE_PLAN_VESSEL][ASSETS][ERROR]', error);
+			assets = [];
+			assetsError = error?.message || 'Gagal memuat asset fleet.';
+			renderAssetMarkers();
+		} finally {
+			assetsLoading = false;
+		}
+	}
+
+	function escapeHtml(value) {
+		return String(value ?? '')
+			.replaceAll('&', '&amp;')
+			.replaceAll('<', '&lt;')
+			.replaceAll('>', '&gt;')
+			.replaceAll('"', '&quot;')
+			.replaceAll("'", '&#039;');
+	}
+
+	function renderAssetMarkers() {
+		if (!L || !routeMap) return;
+
+		if (!assetMarkerLayer) {
+			assetMarkerLayer = L.layerGroup().addTo(routeMap);
+		}
+
+		assetMarkerLayer.clearLayers();
+
+		assets.forEach((asset) => {
+			const marker = L.marker([asset.latitude, asset.longitude], {
+				icon: L.divIcon({
+					className: 'asset-leaflet-icon',
+					html: `
+            <div class="asset-marker-shell">
+              <div class="asset-marker-core"></div>
+            </div>
+          `,
+					iconSize: [22, 22],
+					iconAnchor: [11, 11]
+				})
+			});
+
+			marker.bindPopup(`
+        <div class="asset-popup">
+          <strong>${escapeHtml(asset.assetName)}</strong>
+          <span>ID: ${escapeHtml(asset.id ?? '-')}</span>
+          <span>Lat: ${escapeHtml(asset.latitude)}</span>
+          <span>Lng: ${escapeHtml(asset.longitude)}</span>
+        </div>
+      `);
+
+			marker.addTo(assetMarkerLayer);
+		});
 	}
 
 	async function loadCurrentUser() {
@@ -240,7 +339,7 @@
 		}
 
 		resetSelectedAssignmentState();
-		await loadVesselVoyageData(1);
+		await loadVesselVoyageData(selectedVesselId, 1);
 	}
 
 	function toSelectedVesselStorePayload(vessel) {
@@ -279,28 +378,27 @@
 			console.log('[VOYAGE_PLAN_VESSEL][NAVBAR_VESSEL_CHANGED]', selectedVesselId);
 
 			if (canView) {
-				await loadVesselVoyageData(1);
+				await loadVesselVoyageData(selectedVesselId, 1);
 			}
 		} finally {
 			syncingVesselFromNavbar = false;
 		}
 	}
 
-	async function loadVesselVoyageData(targetPage = page) {
-		if (!selectedVesselId) {
-			errorMessage = 'Pilih vessel terlebih dahulu.';
-			return;
-		}
+	async function loadVesselVoyageData(vesselId = selectedVesselId, targetPage = 1) {
+		if (!vesselId) return;
 
-		await Promise.all([loadActiveVoyagePlan(), loadHistory(targetPage)]);
+		await Promise.all([loadActiveVoyagePlan(vesselId), loadHistory(vesselId, targetPage)]);
 	}
 
-	async function loadActiveVoyagePlan() {
+	async function loadActiveVoyagePlan(vesselId = selectedVesselId) {
+		if (!vesselId) return;
+
 		activeLoading = true;
 		clearMessages();
 
 		try {
-			const result = await apiFetch(`/voyage-plans/vessels/${selectedVesselId}/active`, {
+			const result = await apiFetch(`/voyage-plans/vessels/${vesselId}/active`, {
 				method: 'GET'
 			});
 
@@ -324,13 +422,15 @@
 		}
 	}
 
-	async function loadHistory(targetPage = page) {
+	async function loadHistory(vesselId = selectedVesselId, targetPage = page) {
+		if (!vesselId) return;
+
 		historyLoading = true;
 		clearMessages();
 
 		try {
 			const result = await apiFetch(
-				`/voyage-plans/vessels/${selectedVesselId}/history?page=${targetPage}&pageSize=${pageSize}`,
+				`/voyage-plans/vessels/${vesselId}/history?page=${targetPage}&pageSize=${pageSize}`,
 				{ method: 'GET' }
 			);
 
@@ -437,7 +537,9 @@
 				})
 				.addTo(routeMap);
 
+			assetMarkerLayer = leaflet.layerGroup().addTo(routeMap);
 			markerLayer = leaflet.layerGroup().addTo(routeMap);
+
 			routeLine = leaflet
 				.polyline([], {
 					color: '#2f65e8',
@@ -445,6 +547,8 @@
 					opacity: 0.95
 				})
 				.addTo(routeMap);
+
+			renderAssetMarkers();
 
 			routeMap.setView([-2.5489, 118.0149], 5);
 
@@ -503,6 +607,7 @@
 
 		routeMap = null;
 		markerLayer = null;
+		assetMarkerLayer = null;
 		routeLine = null;
 	}
 
@@ -576,45 +681,20 @@
 
 <section class="voyage-vessel-page">
 	<section class="voyage-header-card">
-		<div>
+		<div class="header-copy">
 			<div class="page-kicker">Voyage Plan Vessel</div>
 			<h1>{selectedVesselName}</h1>
 			<p>Active voyage route and assignment history for the selected vessel.</p>
 		</div>
-	</section>
 
-	<section class="filter-card">
-		<label>
-			<span>Vessel</span>
-			<select bind:value={selectedVesselId} on:change={handleVesselChange} disabled={loading}>
-				<option value="">Select vessel</option>
-				{#each vessels as vessel}
-					<option value={vessel.id}>{vessel.vesselName}</option>
-				{/each}
-			</select>
-		</label>
-
-		<label>
-			<span>Page Size</span>
-			<select bind:value={pageSize} on:change={() => loadHistory(1)} disabled={!selectedVesselId}>
-				{#each PAGE_SIZE_OPTIONS as option}
-					<option value={option}>{option} rows</option>
-				{/each}
-			</select>
-		</label>
-
-		<div class="filter-actions">
-			<button
-				type="button"
-				class="primary-button"
-				on:click={() => loadVesselVoyageData(1)}
-				disabled={!selectedVesselId || activeLoading || historyLoading}
-			>
-				{activeLoading || historyLoading ? 'Loading...' : 'Load Data'}
-			</button>
-
-			<button type="button" on:click={fitMap} disabled={!routePointCount}>Fit Map</button>
-		</div>
+		<button
+			type="button"
+			class="primary-button header-refresh-button"
+			on:click={() => loadVesselVoyageData(selectedVesselId || $selectedVesselIdStore, 1)}
+			disabled={!(selectedVesselId || $selectedVesselIdStore) || loading}
+		>
+			{loading ? 'Loading...' : 'Refresh Data'}
+		</button>
 	</section>
 
 	{#if errorMessage}
@@ -656,17 +736,25 @@
 
 		<section class="main-grid">
 			<section class="map-panel">
-				<div class="section-header">
-					<div>
+				<div class="section-header map-section-header">
+					<div class="map-title">
 						<span class="section-kicker">Route Map</span>
-						<h2>{currentPlan?.voyageName || 'No Active Voyage Plan'}</h2>
+						<h2>{currentPlan?.voyageName || 'No Active Route'}</h2>
+						<div class="map-meta-line">
+							<span>{routePointCount} route points</span>
+							<span>{assetsLoading ? 'Loading assets...' : `${assets.length} assets`}</span>
+							{#if assetsError}
+								<span class="asset-error">{assetsError}</span>
+							{/if}
+						</div>
 					</div>
 
-					{#if activeAssignment}
-						<button type="button" on:click={showActivePlan} disabled={detailLoading}
-							>Show Active</button
-						>
-					{/if}
+					<div class="section-actions map-actions">
+						<button type="button" on:click={fitMap}>Fit Map</button>
+						{#if activeAssignment}
+							<button type="button" on:click={showActivePlan} disabled={detailLoading}>Show Active</button>
+						{/if}
+					</div>
 				</div>
 
 				<div class="map-shell">
@@ -805,7 +893,7 @@
 					<button
 						type="button"
 						disabled={!pagination.hasPrevious || historyLoading}
-						on:click={() => loadHistory(page - 1)}
+						on:click={() => loadHistory(selectedVesselId, page - 1)}
 					>
 						Previous
 					</button>
@@ -815,7 +903,7 @@
 					<button
 						type="button"
 						disabled={!pagination.hasNext || historyLoading}
-						on:click={() => loadHistory(page + 1)}
+						on:click={() => loadHistory(selectedVesselId, page + 1)}
 					>
 						Next
 					</button>
@@ -843,8 +931,8 @@
 			BlinkMacSystemFont,
 			'Segoe UI',
 			sans-serif;
-		background: #f3f6f9;
-		color: #111827;
+		background: #f4f6f8;
+		color: #0f172a;
 	}
 
 	:global(*) {
@@ -859,114 +947,123 @@
 
 	.voyage-vessel-page {
 		width: 100%;
-		height: 100vh;
-		overflow: auto;
-		padding: 14px 12px 28px;
-		background: #f3f6f9;
+		height: 100%;
+		max-height: 100%;
+		min-height: 0;
+		overflow-y: auto;
+		overflow-x: hidden;
+		padding: 14px;
+		background: #f4f6f8;
+		color: #0f172a;
 	}
 
 	.voyage-header-card,
-	.filter-card,
 	.summary-card,
 	.map-panel,
 	.detail-panel,
-	.table-section,
-	.status-box {
-		border: 1px solid #d4dfec;
-		border-radius: 0;
+	.table-section {
 		background: #ffffff;
-		box-shadow: none;
+		border: 1px solid #d9e2ec;
+		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
 	}
 
 	.voyage-header-card {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 20px;
-		margin-bottom: 16px;
-		padding: 22px 22px 20px;
+		gap: 16px;
+		padding: 16px;
+	}
+
+	.header-copy {
+		min-width: 0;
+	}
+
+	.header-refresh-button {
+		flex-shrink: 0;
+		min-width: 130px;
+		justify-content: center;
 	}
 
 	.page-kicker,
 	.section-kicker {
 		display: inline-flex;
+		width: fit-content;
 		align-items: center;
-		min-height: 28px;
-		margin-bottom: 10px;
+		padding: 4px 9px;
 		border-radius: 999px;
 		background: #dbeafe;
-		color: #245bd4;
-		padding: 6px 13px;
-		font-size: 12px;
+		color: #1d4ed8;
+		font-size: 10px;
 		font-weight: 900;
 		line-height: 1;
-		letter-spacing: 0.12em;
+		letter-spacing: 0.07em;
 		text-transform: uppercase;
 	}
 
 	.section-kicker {
-		min-height: auto;
-		margin-bottom: 7px;
-		padding: 5px 10px;
-		font-size: 11px;
+		margin-bottom: 6px;
 	}
 
 	.voyage-header-card h1 {
+		margin-top: 8px;
 		color: #0f172a;
-		font-size: clamp(28px, 2.2vw, 34px);
+		font-size: 22px;
 		font-weight: 900;
-		line-height: 1.1;
-		letter-spacing: -0.04em;
+		line-height: 1.2;
+		letter-spacing: -0.02em;
 	}
 
 	.voyage-header-card p {
-		margin-top: 8px;
-		color: #627087;
-		font-size: 16px;
+		margin-top: 7px;
+		color: #64748b;
+		font-size: 12px;
 		font-weight: 700;
 		line-height: 1.45;
 	}
 
-	.header-meta {
-		min-width: 150px;
-		border: 1px solid #d4dfec;
-		background: #f8fbff;
-		padding: 14px 16px;
-		text-align: right;
-	}
 
 	.header-meta span,
 	.summary-card span,
 	.detail-list span,
 	label span {
 		display: block;
-		color: #5f6f86;
-		font-size: 12px;
+		color: #64748b;
+		font-size: 10px;
 		font-weight: 900;
-		letter-spacing: 0.06em;
+		letter-spacing: 0.04em;
 		text-transform: uppercase;
+	}
+
+
+	.header-meta {
+		min-width: 120px;
+		padding: 10px 12px;
+		border-radius: 12px;
+		background: #f8fafc;
+		border: 1px solid #e2e8f0;
+		text-align: right;
 	}
 
 	.header-meta strong {
 		display: block;
-		margin-top: 7px;
-		color: #111827;
-		font-size: 24px;
+		margin-top: 5px;
+		color: #0f172a;
+		font-size: 14px;
 		font-weight: 900;
 	}
 
-	.filter-card {
-		display: grid;
-		grid-template-columns: minmax(240px, 0.9fr) minmax(140px, 180px) auto;
-		gap: 14px;
-		align-items: end;
-		margin-bottom: 16px;
-		padding: 16px;
+	.filter-actions {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 8px;
+		flex-wrap: wrap;
 	}
 
 	label {
 		display: grid;
-		gap: 8px;
+		gap: 5px;
 	}
 
 	input,
@@ -978,38 +1075,39 @@
 	select,
 	input {
 		width: 100%;
-		min-height: 43px;
-		border: 1px solid #c9d5e5;
-		border-radius: 0;
+		height: 32px;
+		min-width: 150px;
+		border: 1px solid #cbd5e1;
 		background: #ffffff;
-		color: #111827;
-		padding: 10px 13px;
-		font-size: 15px;
-		font-weight: 800;
+		color: #0f172a;
+		padding: 0 9px;
+		font-size: 12px;
+		font-weight: 700;
 		outline: none;
 	}
 
 	select:focus,
 	input:focus {
-		border-color: #2f65e8;
-		background: #fbfdff;
+		border-color: #2563eb;
+		box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 	}
 
 	button {
-		min-height: 43px;
-		border: 1px solid #c9d5e5;
-		border-radius: 0;
-		background: #ffffff;
-		color: #111827;
-		padding: 10px 14px;
-		font-size: 14px;
+		height: 32px;
+		min-height: 32px;
+		border: none;
+		background: #e2e8f0;
+		color: #0f172a;
+		padding: 0 12px;
+		font-size: 11px;
 		font-weight: 900;
+		line-height: 32px;
 		cursor: pointer;
+		white-space: nowrap;
 	}
 
 	button:hover:not(:disabled) {
-		border-color: #2f65e8;
-		background: #f8fbff;
+		background: #cbd5e1;
 	}
 
 	button:disabled {
@@ -1018,110 +1116,171 @@
 	}
 
 	.primary-button {
-		border-color: #2f65e8;
-		background: #2f65e8;
+		background: #2563eb;
 		color: #ffffff;
 	}
 
 	.primary-button:hover:not(:disabled) {
-		border-color: #245bd4;
-		background: #245bd4;
-	}
-
-	.filter-actions {
-		display: flex;
-		align-items: center;
-		justify-content: flex-end;
-		gap: 10px;
+		background: #1d4ed8;
 	}
 
 	.status-box {
-		margin-bottom: 16px;
-		padding: 15px 16px;
+		margin-top: 14px;
+		padding: 10px 12px;
+		border-radius: 10px;
+		font-size: 12px;
+		font-weight: 900;
+		line-height: 1.45;
+		background: #ffffff;
+		border: 1px solid #d9e2ec;
+		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
 		color: #334155;
-		font-size: 15px;
-		font-weight: 800;
 	}
 
 	.error-box {
 		border-color: #fecaca;
-		background: #fff1f1;
-		color: #b11111;
+		background: #fef2f2;
+		color: #b91c1c;
 	}
 
 	.success-box {
 		border-color: #bbf7d0;
-		background: #f0fdf4;
-		color: #166534;
+		background: #ecfdf5;
+		color: #047857;
 	}
 
 	.summary-grid {
 		display: grid;
 		grid-template-columns: repeat(4, minmax(0, 1fr));
-		gap: 16px;
-		margin-bottom: 16px;
+		gap: 14px;
+		margin-top: 14px;
 	}
 
 	.summary-card {
-		padding: 18px 16px;
+		padding: 14px 16px;
 	}
 
 	.summary-card strong {
 		display: block;
-		margin-top: 8px;
+		margin-top: 6px;
 		overflow: hidden;
-		color: #111827;
-		font-size: 24px;
+		color: #0f172a;
+		font-size: 16px;
 		font-weight: 900;
-		line-height: 1.15;
+		line-height: 1.2;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
 	.main-grid {
 		display: grid;
-		grid-template-columns: minmax(540px, 1.35fr) minmax(340px, 0.65fr);
-		gap: 16px;
+		grid-template-columns: minmax(540px, 1.35fr) minmax(320px, 0.65fr);
+		gap: 14px;
 		align-items: stretch;
-		margin-bottom: 16px;
+		margin-top: 14px;
 	}
 
 	.map-panel,
 	.detail-panel,
 	.table-section {
 		min-width: 0;
-		padding: 16px;
+		padding: 14px;
+	}
+
+	.table-section {
+		margin-top: 14px;
 	}
 
 	.section-header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 14px;
-		margin-bottom: 14px;
+		gap: 12px;
+		margin-bottom: 12px;
 	}
 
 	.section-header h2 {
-		color: #111827;
-		font-size: 22px;
+		color: #0f172a;
+		font-size: 16px;
 		font-weight: 900;
-		letter-spacing: -0.035em;
+		line-height: 1.25;
+		letter-spacing: -0.02em;
 	}
 
-	.section-header strong {
-		color: #64748b;
-		font-size: 13px;
+	.section-header > strong {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 24px;
+		padding: 4px 9px;
+		border-radius: 999px;
+		background: #f1f5f9;
+		color: #475569;
+		font-size: 11px;
 		font-weight: 900;
 		white-space: nowrap;
+	}
+
+	.map-section-header {
+		align-items: flex-start;
+	}
+
+	.map-title {
+		display: block;
+		min-width: 0;
+		flex: 1 1 auto;
+	}
+
+	.section-actions,
+	.map-actions {
+		display: inline-flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 8px;
+		flex: 0 0 auto;
+		margin-left: auto;
+	}
+
+	.map-actions button {
+		width: auto;
+		min-width: 96px;
+	}
+
+	.map-meta-line {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 6px;
+		margin-top: 8px;
+	}
+
+	.map-meta-line span {
+		display: inline-flex;
+		align-items: center;
+		min-height: 24px;
+		padding: 4px 8px;
+		border-radius: 999px;
+		border: 1px solid #d9e2ec;
+		background: #f8fafc;
+		color: #64748b;
+		font-size: 11px;
+		font-weight: 900;
+	}
+
+	.map-meta-line .asset-error {
+		border-color: #fecaca;
+		background: #fef2f2;
+		color: #b91c1c;
 	}
 
 	.map-shell {
 		position: relative;
 		width: 100%;
 		min-height: 460px;
-		border: 1px solid #d4dfec;
-		background: #dbeafe;
 		overflow: hidden;
+		border: 1px solid #d9e2ec;
+		border-radius: 12px;
+		background: #dbeafe;
 	}
 
 	.route-map {
@@ -1137,42 +1296,44 @@
 		display: grid;
 		place-content: center;
 		gap: 8px;
-		background: rgba(248, 251, 255, 0.82);
+		background: rgba(248, 250, 252, 0.86);
 		color: #64748b;
 		text-align: center;
-		font-size: 14px;
+		font-size: 12px;
 		font-weight: 800;
 	}
 
 	.map-empty strong {
-		color: #111827;
-		font-size: 18px;
+		color: #0f172a;
+		font-size: 16px;
 		font-weight: 900;
 	}
 
 	.detail-list {
 		display: grid;
-		gap: 10px;
+		gap: 8px;
 	}
 
 	.detail-list div {
-		border: 1px solid #d4dfec;
-		background: #f8fbff;
-		padding: 12px 13px;
+		padding: 10px 12px;
+		border: 1px solid #d9e2ec;
+		border-radius: 10px;
+		background: #f8fafc;
 	}
 
 	.detail-list strong {
 		display: block;
-		margin-top: 6px;
-		color: #111827;
-		font-size: 14px;
+		margin-top: 5px;
+		color: #0f172a;
+		font-size: 12px;
 		font-weight: 900;
 		line-height: 1.35;
+		word-break: break-word;
 	}
 
 	.table-wrap {
 		overflow: auto;
-		border: 1px solid #d4dfec;
+		border: 1px solid #d9e2ec;
 		background: #ffffff;
 	}
 
@@ -1184,31 +1345,25 @@
 		width: 100%;
 		border-collapse: separate;
 		border-spacing: 0;
-		font-size: 13px;
+		font-size: 12px;
 	}
 
 	th,
 	td {
-		padding: 12px 14px;
-		border-right: 1px solid rgba(255, 255, 255, 0.22);
-		border-bottom: 1px solid #dbe4f0;
+		padding: 9px 10px;
+		border-bottom: 1px solid #e2e8f0;
 		text-align: left;
 		vertical-align: middle;
 		white-space: nowrap;
-	}
-
-	th:last-child,
-	td:last-child {
-		border-right: 0;
 	}
 
 	th {
 		position: sticky;
 		top: 0;
 		z-index: 2;
-		background: #2f65e8;
+		background: #2563eb;
 		color: #ffffff;
-		font-size: 12px;
+		font-size: 10px;
 		font-weight: 900;
 		letter-spacing: 0.04em;
 		text-transform: uppercase;
@@ -1216,12 +1371,13 @@
 
 	tbody td {
 		background: #ffffff;
-		color: #111827;
+		color: #0f172a;
+		font-size: 12px;
 		font-weight: 700;
 	}
 
 	tbody tr:nth-child(even) td {
-		background: #f8fbff;
+		background: #f8fafc;
 	}
 
 	tbody tr:hover td,
@@ -1234,29 +1390,37 @@
 	}
 
 	.table-action-btn {
-		min-height: 34px;
-		padding: 7px 12px;
-		font-size: 12px;
+		height: 28px;
+		min-height: 28px;
+		padding: 0 10px;
+		font-size: 10px;
+		line-height: 28px;
 	}
 
 	.pagination-bar {
 		display: flex;
 		align-items: center;
 		justify-content: flex-end;
-		gap: 10px;
-		margin-top: 14px;
+		gap: 8px;
+		margin-top: 12px;
 		color: #64748b;
-		font-size: 13px;
+		font-size: 12px;
 		font-weight: 800;
 	}
 
+	.pagination-bar select {
+		width: auto;
+		min-width: 110px;
+	}
+
 	.empty-box {
-		border: 1px dashed #c9d5e5;
-		background: #f8fbff;
-		padding: 26px;
+		padding: 22px;
+		border: 1px dashed #cbd5e1;
+		border-radius: 10px;
+		background: #f8fafc;
 		color: #64748b;
 		text-align: center;
-		font-size: 14px;
+		font-size: 12px;
 		font-weight: 800;
 	}
 
@@ -1267,7 +1431,7 @@
 		place-items: center;
 		border: 3px solid #ffffff;
 		border-radius: 999px;
-		background: #2f65e8;
+		background: #2563eb;
 		color: #ffffff;
 		box-shadow: 0 4px 12px rgba(15, 23, 42, 0.32);
 		font-size: 12px;
@@ -1282,6 +1446,58 @@
 		background: #ef4444;
 	}
 
+	:global(.asset-leaflet-icon) {
+		background: transparent;
+		border: none;
+	}
+
+	:global(.asset-marker-shell) {
+		width: 22px;
+		height: 22px;
+		display: grid;
+		place-items: center;
+		border: 2px solid #f59e0b;
+		border-radius: 999px;
+		background: rgba(255, 255, 255, 0.96);
+		box-shadow:
+			0 0 0 4px rgba(245, 158, 11, 0.16),
+			0 5px 10px rgba(15, 23, 42, 0.16);
+	}
+
+	:global(.asset-marker-core) {
+		width: 9px;
+		height: 9px;
+		border-radius: 999px;
+		background: #f59e0b;
+		color: transparent;
+	}
+
+	:global(.asset-popup) {
+		display: grid;
+		gap: 4px;
+		min-width: 150px;
+		font-family:
+			Inter,
+			ui-sans-serif,
+			system-ui,
+			-apple-system,
+			BlinkMacSystemFont,
+			'Segoe UI',
+			sans-serif;
+	}
+
+	:global(.asset-popup strong) {
+		color: #0f172a;
+		font-size: 13px;
+		font-weight: 900;
+	}
+
+	:global(.asset-popup span) {
+		color: #64748b;
+		font-size: 12px;
+		font-weight: 700;
+	}
+
 	:global(.leaflet-container) {
 		font-family:
 			Inter,
@@ -1294,9 +1510,8 @@
 	}
 
 	@media (max-width: 1180px) {
-		.filter-card,
-		.main-grid,
-		.summary-grid {
+		.summary-grid,
+		.main-grid {
 			grid-template-columns: 1fr;
 		}
 
@@ -1311,20 +1526,29 @@
 		}
 
 		.voyage-header-card,
-		.section-header {
+		.section-header,
+		.map-title {
 			align-items: flex-start;
 			flex-direction: column;
 		}
 
 		.header-meta,
 		.filter-actions,
-		.filter-actions button {
+		.filter-actions button,
+		.header-refresh-button {
 			width: 100%;
 			text-align: left;
 		}
 
-		.filter-actions {
-			flex-direction: column;
+		.summary-grid {
+			grid-template-columns: 1fr;
+			gap: 10px;
+		}
+
+		.route-map,
+		.map-shell {
+			height: 380px;
+			min-height: 380px;
 		}
 	}
 </style>

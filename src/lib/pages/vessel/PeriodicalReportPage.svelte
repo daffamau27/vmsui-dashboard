@@ -724,61 +724,76 @@
 
 <style>
 	.periodical-page {
-		min-height: 100vh;
-		padding: 16px;
-		background: #f3f6fa;
+		width: 100%;
+		height: 100%;
+		max-height: 100%;
+		min-height: 0;
+		padding: 14px;
+		background: #f4f6f8;
 		color: #0f172a;
-		display: grid;
-		gap: 14px;
+		overflow-y: auto;
+		overflow-x: hidden;
+		box-sizing: border-box;
+	}
+
+	.periodical-page * {
+		box-sizing: border-box;
 	}
 
 	.periodical-header-card,
 	.filter-card,
+	.summary-card,
 	.table-section,
 	.raw-box,
-	.data-received-card {
+	.data-received-card,
+	.speed-detail-grid article {
 		background: #ffffff;
 		border: 1px solid #d9e2ec;
-		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+		border-radius: 0;
+		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
 	}
 
 	.periodical-header-card {
-		padding: 18px 22px;
+		padding: 16px;
 		display: flex;
-		align-items: flex-start;
+		align-items: center;
 		justify-content: space-between;
-		gap: 18px;
+		gap: 16px;
 	}
 
 	.page-kicker,
 	.section-kicker {
 		display: inline-flex;
-		padding: 4px 10px;
+		width: fit-content;
+		padding: 4px 9px;
 		border-radius: 999px;
 		background: #dbeafe;
 		color: #1d4ed8;
-		font-size: 11px;
+		font-size: 10px;
 		font-weight: 900;
+		letter-spacing: 0.07em;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
 	}
 
 	.periodical-header-card h1 {
-		margin: 10px 0 4px;
-		font-size: 24px;
+		margin: 8px 0 0;
+		color: #0f172a;
+		font-size: 22px;
+		line-height: 1.2;
 		font-weight: 900;
 	}
 
 	.periodical-header-card p {
-		margin: 0;
+		margin: 7px 0 0;
 		color: #64748b;
-		font-size: 13px;
+		font-size: 12px;
+		line-height: 1.45;
 		font-weight: 700;
 	}
 
 	.header-meta {
 		min-width: 120px;
-		padding: 10px 14px;
+		padding: 10px 12px;
 		border-radius: 12px;
 		background: #f8fafc;
 		border: 1px solid #e2e8f0;
@@ -795,90 +810,111 @@
 
 	.header-meta strong {
 		display: block;
-		margin-top: 4px;
-		font-size: 16px;
+		margin-top: 5px;
+		color: #0f172a;
+		font-size: 14px;
 		font-weight: 900;
 	}
 
 	.filter-card {
-		padding: 14px 18px;
+		margin-top: 14px;
+		padding: 12px;
 		display: flex;
 		align-items: end;
-		gap: 12px;
+		gap: 10px;
 		flex-wrap: wrap;
 	}
 
 	.filter-card label {
 		display: grid;
-		gap: 6px;
+		gap: 5px;
 	}
 
 	.filter-card label span {
 		color: #475569;
-		font-size: 11px;
+		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
 	}
 
 	.filter-card input,
 	.filter-card select {
-		height: 42px;
-		min-width: 180px;
-		padding: 0 12px;
+		height: 32px;
+		min-width: 150px;
 		border: 1px solid #cbd5e1;
+		border-radius: 0;
 		background: #ffffff;
+		padding: 0 9px;
 		color: #0f172a;
-		font-size: 14px;
-		font-weight: 800;
+		font-size: 12px;
+		font-weight: 700;
+		outline: none;
+	}
+
+	.filter-card input:focus,
+	.filter-card select:focus {
+		border-color: #2563eb;
+		box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 	}
 
 	.filter-actions {
 		display: flex;
-		gap: 10px;
-		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
 	}
 
 	.primary-btn,
 	.export-btn {
-		height: 42px;
-		padding: 0 18px;
+		height: 32px;
+		padding: 0 12px;
 		border: none;
-		color: #ffffff;
-		font-size: 14px;
+		border-radius: 0;
+		font-size: 11px;
 		font-weight: 900;
 		cursor: pointer;
 	}
 
 	.primary-btn {
 		background: #2563eb;
+		color: #ffffff;
 	}
 
 	.export-btn {
 		background: #16a34a;
+		color: #ffffff;
+	}
+
+	.primary-btn:hover:not(:disabled),
+	.export-btn:hover:not(:disabled) {
+		filter: brightness(0.96);
 	}
 
 	.primary-btn:disabled,
 	.export-btn:disabled {
-		opacity: 0.6;
+		opacity: 0.55;
 		cursor: not-allowed;
 	}
 
 	.status-box {
-		padding: 14px 18px;
+		margin-top: 14px;
+		padding: 10px 12px;
+		border-radius: 10px;
+		font-size: 12px;
 		font-weight: 900;
 	}
 
 	.error-box {
-		color: #b91c1c;
 		background: #fef2f2;
+		color: #b91c1c;
 		border: 1px solid #fecaca;
 	}
 
 	.data-received-card {
-		min-height: 62px;
-		padding: 14px 18px;
+		margin-top: 14px;
+		padding: 14px 16px;
 		display: flex;
 		justify-content: space-between;
+		gap: 12px;
 		align-items: center;
 	}
 
@@ -890,21 +926,22 @@
 	}
 
 	.data-received-card strong {
-		font-size: 20px;
+		color: #0f172a;
+		font-size: 16px;
+		line-height: 1.2;
 		font-weight: 900;
 	}
 
 	.summary-grid {
+		margin-top: 14px;
 		display: grid;
 		grid-template-columns: repeat(4, minmax(0, 1fr));
-		gap: 12px;
+		gap: 14px;
 	}
 
 	.summary-card {
-		min-height: 92px;
+		min-height: 96px;
 		padding: 16px;
-		background: #ffffff;
-		border: 1px solid #d9e2ec;
 		display: flex;
 		flex-direction: column;
 		justify-content: center;
@@ -918,27 +955,38 @@
 	}
 
 	.summary-card strong {
-		margin-top: 8px;
+		margin-top: 10px;
+		color: #0f172a;
 		font-size: 22px;
+		line-height: 1.1;
 		font-weight: 900;
+	}
+
+	.table-section {
+		margin-top: 14px;
+		overflow: hidden;
 	}
 
 	.section-header {
 		min-height: 58px;
-		padding: 12px 16px;
+		padding: 12px 14px;
+		border-bottom: 1px solid #e5edf5;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		border-bottom: 1px solid #e2e8f0;
+		gap: 12px;
+		background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
 	}
 
 	.section-header h2 {
-		margin: 6px 0 0;
-		font-size: 18px;
+		margin: 7px 0 0;
+		color: #0f172a;
+		font-size: 17px;
+		line-height: 1.2;
 		font-weight: 900;
 	}
 
-	.section-header strong {
+	.section-header > strong {
 		padding: 5px 10px;
 		border-radius: 999px;
 		background: #eff6ff;
@@ -946,6 +994,7 @@
 		color: #1d4ed8;
 		font-size: 11px;
 		font-weight: 900;
+		white-space: nowrap;
 	}
 
 	.table-wrapper {
@@ -960,38 +1009,48 @@
 	}
 
 	th {
-		padding: 10px 12px;
-		background: #f1f5f9;
-		border-bottom: 1px solid #d9e2ec;
-		color: #334155;
-		font-size: 11px;
+		background: #f8fafc;
+		color: #475569;
+		font-size: 10.5px;
 		font-weight: 900;
-		text-align: left;
 		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		text-align: left;
+		padding: 10px 12px;
+		border-bottom: 1px solid #e2e8f0;
+		white-space: nowrap;
 	}
 
 	td {
-		padding: 10px 12px;
-		border-bottom: 1px solid #edf2f7;
 		color: #0f172a;
-		font-weight: 800;
+		font-size: 12px;
+		font-weight: 700;
+		padding: 10px 12px;
+		border-bottom: 1px solid #eef2f7;
+		white-space: nowrap;
+	}
+
+	tr:hover td {
+		background: #f8fafc;
 	}
 
 	.total-row td {
 		background: #eff6ff;
+		color: #0f172a;
 		font-weight: 900;
 	}
 
 	.empty-box {
-		padding: 18px;
+		padding: 18px 14px;
 		color: #64748b;
+		font-size: 12px;
 		font-weight: 800;
 	}
 
 	.fod-usage-summary {
 		padding: 12px 14px 0;
 		display: grid;
-		grid-template-columns: repeat(5, minmax(0, 1fr));
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 10px;
 		background: #f8fafc;
 	}
@@ -1013,6 +1072,7 @@
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
+		letter-spacing: 0.04em;
 	}
 
 	.fod-usage-summary strong,
@@ -1020,6 +1080,7 @@
 		margin-top: 6px;
 		color: #0f172a;
 		font-size: 18px;
+		line-height: 1.15;
 		font-weight: 900;
 	}
 
@@ -1036,43 +1097,61 @@
 		padding: 14px;
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 10px;
+		gap: 12px;
 		background: #f8fafc;
 	}
 
 	.speed-detail-grid article {
-		min-height: 68px;
-		padding: 12px 14px;
-		background: #ffffff;
-		border: 1px solid #d9e2ec;
-		border-radius: 10px;
-		display: grid;
+		min-height: 80px;
+		padding: 14px;
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
 	}
 
 	.raw-box {
-		padding: 12px 16px;
+		margin-top: 14px;
+		padding: 12px 14px;
 	}
 
 	.raw-box summary {
 		cursor: pointer;
-		color: #2563eb;
+		color: #1d4ed8;
+		font-size: 12px;
 		font-weight: 900;
 	}
 
 	.raw-box pre {
+		margin-top: 12px;
 		max-height: 360px;
 		overflow: auto;
 		padding: 12px;
+		border-radius: 0;
 		background: #0f172a;
 		color: #e2e8f0;
 		font-size: 11px;
+		line-height: 1.5;
 	}
 
-	@media (max-width: 900px) {
+	@media (max-width: 1100px) {
+		.summary-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.fod-usage-summary {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+
+	@media (max-width: 760px) {
+		.periodical-page {
+			padding: 10px;
+		}
+
 		.periodical-header-card,
 		.data-received-card {
 			flex-direction: column;
-			align-items: stretch;
+			align-items: flex-start;
 		}
 
 		.summary-grid,
@@ -1087,6 +1166,16 @@
 
 		.filter-card input,
 		.filter-card select {
+			min-width: 100%;
+			width: 100%;
+		}
+
+		.filter-actions {
+			width: 100%;
+		}
+
+		.primary-btn,
+		.export-btn {
 			width: 100%;
 		}
 	}
