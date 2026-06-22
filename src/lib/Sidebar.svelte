@@ -376,17 +376,17 @@
 			<div class="logout-confirm-icon">⏻</div>
 
 			<div class="logout-confirm-content">
-				<h3 id="logout-confirm-title">Konfirmasi Logout</h3>
-				<p>Apakah Anda yakin ingin keluar dari akun ini?</p>
+				<h3 id="logout-confirm-title">Logout Confirmation</h3>
+				<p>Are you sure you want to sign out of this account?</p>
 			</div>
 
 			<div class="logout-confirm-actions">
 				<button type="button" class="logout-cancel-btn" onclick={closeLogoutConfirm}>
-					Batal
+					Cancel
 				</button>
 
 				<button type="button" class="logout-confirm-btn" onclick={confirmLogout}>
-					Ya, Logout
+					Yes, Logout
 				</button>
 			</div>
 		</section>

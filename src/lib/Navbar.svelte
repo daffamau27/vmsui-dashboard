@@ -89,7 +89,7 @@
 			companyId: item?.companyId ?? null,
 			companyName: item?.companyName || '-',
 
-			// Endpoint /users/my-vessels belum membawa live status
+			// Endpoint /users/my-vessels does not include live status yet
 			online: item?.online ?? null,
 
 			raw: item
@@ -251,7 +251,7 @@
 		});
 
 		if (!effectiveVesselId) {
-			console.warn('[NAVBAR][LATEST_STATUS][SKIP] vesselId kosong');
+			console.warn('[NAVBAR][LATEST_STATUS][SKIP] vesselId is empty');
 
 			latestVesselStatus = {
 				queue: '-',
@@ -309,7 +309,7 @@
 		stopLatestStatusPolling();
 
 		if (!effectiveVesselId) {
-			console.warn('[NAVBAR][LATEST_STATUS][POLLING_SKIP] vesselId kosong');
+			console.warn('[NAVBAR][LATEST_STATUS][POLLING_SKIP] vesselId is empty');
 			return;
 		}
 
@@ -363,7 +363,7 @@
 			}
 		} catch (err) {
 			console.error('[NAVBAR][LOAD_MY_VESSELS][ERROR]', err);
-			vesselError = err?.message || 'Gagal memuat vessel dari API.';
+			vesselError = err?.message || 'Failed to load vessels from the API.';
 			vessels = [];
 		} finally {
 			vesselLoading = false;
@@ -425,7 +425,7 @@
 							</button>
 						{/each}
 					{:else}
-						<div class="dropdown-empty">Tidak ada akses menu.</div>
+						<div class="dropdown-empty">No menu access.</div>
 					{/if}
 				</div>
 			{/if}
@@ -483,7 +483,7 @@
 						</button>
 					{/each}
 				{:else}
-					<div class="vessel-empty">Tidak ada vessel.</div>
+					<div class="vessel-empty">No vessels available.</div>
 				{/if}
 			</div>
 		{/if}
