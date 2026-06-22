@@ -1,6 +1,7 @@
 <script>
+  import { onDestroy, tick } from "svelte";
+  import { browser } from "$app/environment";
   import RpmCard from "$lib/RpmCard.svelte";
-  import VesselMap from "$lib/VesselMap.svelte";
   import {
     selectedVesselId,
     selectedVesselInfo
@@ -18,9 +19,83 @@
   let currentUserLoading = $state(false);
   let currentUserError = $state("");
 
+    const SHADCN_LIGHT_TILE_URL =
+      'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+
+    const SHADCN_TILE_ATTRIBUTION =
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+
   let { active = false } = $props();
   let loadedKeys = $state({});
 
+  let dashboardMapContainer;
+  let dashboardMap = null;
+  let L = null;
+  let dashboardMapInitializing = false;
+  let vesselMarker = null;
+  let lastDashboardMapVesselId = null;
+
+  let showWindParticles = $state(true);
+  let windParticleLayer = null;
+  let windCanvas = null;
+  let windContext = null;
+  let windParticles = [];
+  let windFrame = null;
+  let windLastFrameAt = 0;
+
+  let showCurrentParticles = $state(true);
+  let currentParticleLayer = null;
+  let currentCanvas = null;
+  let currentContext = null;
+  let currentParticles = [];
+  let currentFrame = null;
+  let currentLastFrameAt = 0;
+
+  const WIND_PARTICLE_MIN_COUNT = 130;
+  const WIND_PARTICLE_MAX_COUNT = 460;
+  const WIND_PARTICLE_MAX_AGE = 90;
+  const WIND_PARTICLE_FRAME_INTERVAL_MS = 28;
+  const WIND_CANVAS_BUFFER_PX = 320;
+  const WIND_PARTICLE_STEP_MULTIPLIER = 1.55;
+  const WIND_PARTICLE_TRAIL_FADE_ALPHA = 0.16;
+  const WIND_PARTICLE_LINE_WIDTH = 1.15;
+
+  let windCanvasWidth = 0;
+  let windCanvasHeight = 0;
+  let windCanvasBuffer = 0;
+
+  const CURRENT_INFLUENCE_RADIUS_METERS = 120000;
+  const CURRENT_PARTICLE_MIN_COUNT = 120;
+  const CURRENT_PARTICLE_MAX_COUNT = 420;
+  const CURRENT_PARTICLE_MAX_AGE = 140;
+  const CURRENT_PARTICLE_FRAME_INTERVAL_MS = 32;
+  const CURRENT_CANVAS_BUFFER_PX = 320;
+  const CURRENT_PARTICLE_STEP_MULTIPLIER = 1.18;
+  const CURRENT_PARTICLE_TRAIL_FADE_ALPHA = 0.08;
+  const CURRENT_PARTICLE_LINE_WIDTH = 1.25;
+
+  let currentCanvasWidth = 0;
+  let currentCanvasHeight = 0;
+  let currentCanvasBuffer = 0;
+
+  const CARDINAL_WIND_DEGREES = {
+    N: 0,
+    NNE: 22.5,
+    NE: 45,
+    ENE: 67.5,
+    E: 90,
+    ESE: 112.5,
+    SE: 135,
+    SSE: 157.5,
+    S: 180,
+    SSW: 202.5,
+    SW: 225,
+    WSW: 247.5,
+    W: 270,
+    WNW: 292.5,
+    NW: 315,
+    NNW: 337.5
+  };
 
   async function loadCurrentUser() {
     if (currentUser || currentUserLoading) return currentUser;
@@ -40,7 +115,7 @@
       return currentUser;
     } catch (err) {
       console.error("[CURRENT_USER_PERMISSION_DASHBOARD_ERROR]", err);
-      currentUserError = err?.message || "Gagal memuat permission user.";
+      currentUserError = err?.message || "Failed to load user permissions.";
       currentUser = null;
       return null;
     } finally {
@@ -192,14 +267,14 @@
     ...($selectedVesselInfo || {}),
     ...(liveVesselDetail || {}),
 
-    // engine konfigurasi tetap dari selected vessel
+    // engine configuration remains from selected vessel
     engines: Array.isArray($selectedVesselInfo?.engines)
       ? $selectedVesselInfo.engines
       : Array.isArray(liveVesselDetail?.engines)
         ? liveVesselDetail.engines
         : [],
 
-    // engine RPM live dari /fleet/vessels/{id}
+    // live engine RPM from /fleet/vessels/{id}
     liveEngines: Array.isArray(liveVesselDetail?.liveEngines)
       ? liveVesselDetail.liveEngines
       : Array.isArray(liveVesselDetail?.rawLive?.engines)
@@ -372,6 +447,841 @@
     });
   }
 
+  function normalizeWindDirectionDegrees(value) {
+    if (value === null || value === undefined || value === "") return null;
+
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return ((numeric % 360) + 360) % 360;
+    }
+
+    const text = String(value).trim().toUpperCase().replace(/\s+/g, "");
+    const numericMatch = text.match(/-?\d+(\.\d+)?/);
+
+    if (numericMatch) {
+      const parsed = Number(numericMatch[0]);
+      return Number.isFinite(parsed) ? ((parsed % 360) + 360) % 360 : null;
+    }
+
+    return CARDINAL_WIND_DEGREES[text] ?? null;
+  }
+
+  function getDashboardMapCoordinates() {
+    const lat = Number(vesselInfo?.latitude ?? currentVessel?.lat ?? currentVessel?.latitude);
+    const lng = Number(vesselInfo?.longitude ?? currentVessel?.lng ?? currentVessel?.longitude);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (lat === 0 && lng === 0) return null;
+
+    return { lat, lng };
+  }
+
+  function getDashboardWeatherData() {
+    return dashboardData?.weatherForecast?.current || currentVessel?.weather?.current || null;
+  }
+
+  function getDashboardOceanCurrentData() {
+    return dashboardData?.oceanCurrent?.current || currentVessel?.oceanCurrent?.current || null;
+  }
+
+  function getWeatherWindSpeedKt(weather = {}) {
+    const directKt = Number(
+      weather?.wind_speed_kt ??
+        weather?.windSpeedKt ??
+        weather?.wind_kt ??
+        weather?.wind_kts ??
+        weather?.wind_knots
+    );
+
+    if (Number.isFinite(directKt)) return Math.max(0, Math.min(80, directKt));
+
+    const kph = Number(weather?.wind_kph ?? weather?.windSpeedKph);
+    if (Number.isFinite(kph)) return Math.max(0, Math.min(80, kph / 1.852));
+
+    const mph = Number(weather?.wind_mph ?? weather?.windSpeedMph);
+    if (Number.isFinite(mph)) return Math.max(0, Math.min(80, mph * 0.868976));
+
+    const ms = Number(weather?.wind_ms ?? weather?.wind_mps ?? weather?.windSpeedMs);
+    if (Number.isFinite(ms)) return Math.max(0, Math.min(80, ms * 1.94384));
+
+    const fallback = Number(weather?.wind_speed ?? weather?.windSpeed);
+    return Number.isFinite(fallback) ? Math.max(0, Math.min(80, fallback)) : 8;
+  }
+
+  function getSeaCurrentSpeedKt(current = {}) {
+    const speedKph = Number(current?.speed_kph);
+
+    if (!Number.isFinite(speedKph)) return 1.2;
+
+    return Math.max(0.1, Math.min(12, speedKph / 1.852));
+  }
+
+  function getDashboardWindSourcePoints() {
+    const coords = getDashboardMapCoordinates();
+    const currentWeather = getDashboardWeatherData();
+
+    if (!coords || !currentWeather) return [];
+
+    const windFromDeg = normalizeWindDirectionDegrees(
+      currentWeather.wind_degree ??
+        currentWeather.wind_deg ??
+        currentWeather.wind_dir_degree ??
+        currentWeather.windDirectionDeg ??
+        currentWeather.wind_dir ??
+        currentWeather.windDirection
+    );
+
+    if (windFromDeg === null) return [];
+
+    return [
+      {
+        lat: coords.lat,
+        lng: coords.lng,
+        directionToDeg: (windFromDeg + 180) % 360,
+        speedKt: getWeatherWindSpeedKt(currentWeather)
+      }
+    ];
+  }
+
+  function getDashboardCurrentSourcePoints() {
+    const coords = getDashboardMapCoordinates();
+    const current = getDashboardOceanCurrentData();
+
+    if (!coords || !current) return [];
+
+    const directionToDeg = normalizeWindDirectionDegrees(
+      current.direction_to_deg ?? current.direction_to
+    );
+
+    if (directionToDeg === null) return [];
+
+    return [
+      {
+        lat: coords.lat,
+        lng: coords.lng,
+        directionToDeg,
+        speedKt: getSeaCurrentSpeedKt(current)
+      }
+    ];
+  }
+
+  function setupDashboardMapPanes() {
+    if (!dashboardMap) return;
+
+    if (!dashboardMap.getPane("dashboardWindPane")) {
+      dashboardMap.createPane("dashboardWindPane");
+      dashboardMap.getPane("dashboardWindPane").style.zIndex = "420";
+      dashboardMap.getPane("dashboardWindPane").style.pointerEvents = "none";
+    }
+
+    if (!dashboardMap.getPane("dashboardCurrentPane")) {
+      dashboardMap.createPane("dashboardCurrentPane");
+      dashboardMap.getPane("dashboardCurrentPane").style.zIndex = "430";
+      dashboardMap.getPane("dashboardCurrentPane").style.pointerEvents = "none";
+    }
+
+    if (!dashboardMap.getPane("dashboardVesselPane")) {
+      dashboardMap.createPane("dashboardVesselPane");
+      dashboardMap.getPane("dashboardVesselPane").style.zIndex = "760";
+      dashboardMap.getPane("dashboardVesselPane").style.pointerEvents = "auto";
+    }
+  }
+
+  function createDashboardVesselIcon() {
+    if (!L) return null;
+
+    const heading = Number(vesselInfo.heading || 0);
+    const isOnline = vesselInfo.online !== false;
+
+    return L.divIcon({
+      className: `dashboard-vessel-leaflet-icon ${isOnline ? "online" : "offline"}`,
+      html: `
+        <div class="dashboard-vessel-marker-shell">
+          <svg
+            class="dashboard-vessel-marker-svg"
+            viewBox="0 0 32 32"
+            aria-hidden="true"
+            style="transform: rotate(${heading}deg);"
+          >
+            <circle
+              cx="16"
+              cy="16"
+              r="14"
+              fill="white"
+              stroke="${isOnline ? "#2563eb" : "#64748b"}"
+              stroke-width="2.6"
+            />
+
+            <path
+              d="M16 5.8L23.2 24.2L16 20.6L8.8 24.2L16 5.8Z"
+              fill="${isOnline ? "#dc2626" : "#64748b"}"
+              stroke="white"
+              stroke-width="2.2"
+              stroke-linejoin="round"
+            />
+
+            <path
+              d="M16 8.4L19.8 20.2L16 18.3V8.4Z"
+              fill="${isOnline ? "#ef4444" : "#94a3b8"}"
+              opacity="0.95"
+            />
+          </svg>
+        </div>
+      `,
+      iconSize: [34, 34],
+      iconAnchor: [17, 17],
+      popupAnchor: [0, -17]
+    });
+  }
+
+  function createDashboardVesselPopupHtml() {
+    const current = getDashboardOceanCurrentData();
+    const weather = getDashboardWeatherData();
+
+    return `
+      <div class="dashboard-map-popup">
+        <div class="dashboard-map-popup-title">${vesselInfo.vesselName || "Vessel"}</div>
+        <div class="dashboard-map-popup-row"><span>Status</span><strong>${vesselInfo.online ? "Online" : "Offline"}</strong></div>
+        <div class="dashboard-map-popup-row"><span>Speed</span><strong>${vesselInfo.currentSpeed || "-"}</strong></div>
+        <div class="dashboard-map-popup-row"><span>Heading</span><strong>${formatNumber(vesselInfo.heading, 1, "-")}°</strong></div>
+        <div class="dashboard-map-popup-row"><span>Wind</span><strong>${weather?.wind_dir || "-"} ${weather?.wind_speed_kt || "-"} kt</strong></div>
+        <div class="dashboard-map-popup-row"><span>Current</span><strong>${current ? `${formatNumber(current.speed_kph, 1, "0.0")} kph · ${current.direction_to || "-"}` : "-"}</strong></div>
+      </div>
+    `;
+  }
+
+  function updateDashboardMapMarker({ center = false } = {}) {
+    if (!dashboardMap || !L) return;
+
+    const coords = getDashboardMapCoordinates();
+    if (!coords) return;
+
+    const latLng = [coords.lat, coords.lng];
+    const icon = createDashboardVesselIcon();
+
+    if (!vesselMarker) {
+      vesselMarker = L.marker(latLng, {
+        icon,
+        pane: "dashboardVesselPane",
+        zIndexOffset: 2000,
+        riseOnHover: true
+      }).addTo(dashboardMap);
+
+      vesselMarker.bindPopup(createDashboardVesselPopupHtml(), {
+        closeButton: true,
+        autoPan: true,
+        maxWidth: 260,
+        className: "dashboard-leaflet-popup"
+      });
+
+      dashboardMap.setView(latLng, 12);
+      lastDashboardMapVesselId = String($selectedVesselId || "");
+      return;
+    }
+
+    vesselMarker.setLatLng(latLng);
+    vesselMarker.setIcon(icon);
+    vesselMarker.setZIndexOffset(2000);
+    vesselMarker.setPopupContent(createDashboardVesselPopupHtml());
+
+    const vesselKey = String($selectedVesselId || "");
+    if (center || vesselKey !== lastDashboardMapVesselId) {
+      dashboardMap.setView(latLng, 12);
+      lastDashboardMapVesselId = vesselKey;
+    }
+  }
+
+  async function ensureDashboardMap() {
+    if (!browser || dashboardMap || dashboardMapInitializing) return;
+
+    dashboardMapInitializing = true;
+
+    try {
+      await tick();
+
+      if (!dashboardMapContainer) return;
+
+      if (!L) {
+        L = await import("leaflet");
+        await import("leaflet/dist/leaflet.css");
+      }
+
+      const coords = getDashboardMapCoordinates();
+      const center = coords ? [coords.lat, coords.lng] : [-2.8, 114.5];
+
+      dashboardMap = L.map(dashboardMapContainer, {
+        zoomControl: false,
+        attributionControl: true,
+        preferCanvas: true
+      }).setView(center, coords ? 12 : 5);
+
+      L.tileLayer(SHADCN_LIGHT_TILE_URL, {
+        maxZoom: 20,
+        subdomains: "abcd",
+        detectRetina: true,
+        attribution: SHADCN_TILE_ATTRIBUTION
+      }).addTo(dashboardMap);
+
+      setupDashboardMapPanes();
+      addCurrentParticleLayer();
+      addWindParticleLayer();
+      updateDashboardMapMarker({ center: Boolean(coords) });
+
+      setTimeout(() => {
+        dashboardMap?.invalidateSize();
+      }, 100);
+    } finally {
+      dashboardMapInitializing = false;
+    }
+  }
+
+  function getWindParticleCount() {
+    if (!dashboardMap) return WIND_PARTICLE_MIN_COUNT;
+
+    const size = dashboardMap.getSize();
+    const width = Math.max(size.x, windCanvasWidth || size.x);
+    const height = Math.max(size.y, windCanvasHeight || size.y);
+    const count = Math.round((width * height) / 7200);
+
+    return Math.max(WIND_PARTICLE_MIN_COUNT, Math.min(WIND_PARTICLE_MAX_COUNT, count));
+  }
+
+  function resetWindParticle(particle = {}, randomAge = true) {
+    if (!dashboardMap) return particle;
+
+    const size = dashboardMap.getSize();
+    const width = windCanvasWidth || size.x;
+    const height = windCanvasHeight || size.y;
+
+    particle.x = Math.random() * Math.max(1, width);
+    particle.y = Math.random() * Math.max(1, height);
+    particle.age = randomAge ? Math.floor(Math.random() * WIND_PARTICLE_MAX_AGE) : 0;
+    particle.maxAge = WIND_PARTICLE_MAX_AGE + Math.floor(Math.random() * 44);
+    particle.speedJitter = 0.82 + Math.random() * 0.78;
+    particle.trailLength = 2.8 + Math.random() * 3.8;
+    particle.alpha = 0.34 + Math.random() * 0.34;
+
+    return particle;
+  }
+
+  function positionWindCanvas() {
+    if (!dashboardMap || !L || !windCanvas) return;
+
+    const topLeft = dashboardMap.containerPointToLayerPoint([
+      -windCanvasBuffer,
+      -windCanvasBuffer
+    ]);
+
+    L.DomUtil.setPosition(windCanvas, topLeft);
+  }
+
+  function seedWindParticles(keepExisting = true) {
+    const targetCount = getWindParticleCount();
+    const nextParticles = keepExisting ? windParticles.slice(0, targetCount) : [];
+
+    while (nextParticles.length < targetCount) {
+      nextParticles.push(resetWindParticle({}, true));
+    }
+
+    windParticles = nextParticles;
+  }
+
+  function resizeWindCanvas({ reseed = true } = {}) {
+    if (!browser || !dashboardMap || !windCanvas || !windContext) return;
+
+    const size = dashboardMap.getSize();
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+
+    windCanvasBuffer = WIND_CANVAS_BUFFER_PX;
+    windCanvasWidth = size.x + windCanvasBuffer * 2;
+    windCanvasHeight = size.y + windCanvasBuffer * 2;
+
+    positionWindCanvas();
+
+    windCanvas.width = Math.max(1, Math.floor(windCanvasWidth * pixelRatio));
+    windCanvas.height = Math.max(1, Math.floor(windCanvasHeight * pixelRatio));
+    windCanvas.style.width = `${windCanvasWidth}px`;
+    windCanvas.style.height = `${windCanvasHeight}px`;
+
+    windContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+
+    if (reseed) {
+      seedWindParticles(false);
+    }
+  }
+
+  function getFallbackWindVector() {
+    return {
+      x: 0.94,
+      y: -0.34,
+      speed: 8
+    };
+  }
+
+  function getWindVectorAtContainerPoint(point, sources = []) {
+    if (!dashboardMap || !sources.length) return getFallbackWindVector();
+
+    const latLng = dashboardMap.containerPointToLatLng([point.x, point.y]);
+    let totalWeight = 0;
+    let weightedX = 0;
+    let weightedY = 0;
+    let weightedSpeed = 0;
+
+    sources.forEach((source) => {
+      const distance = Math.max(18000, dashboardMap.distance(latLng, [source.lat, source.lng]));
+      const weight = 1 / Math.pow(distance / 1000, 1.8);
+      const angleRad = (source.directionToDeg * Math.PI) / 180;
+      const speed = Math.max(1, source.speedKt || 8);
+
+      weightedX += Math.sin(angleRad) * weight * speed;
+      weightedY += -Math.cos(angleRad) * weight * speed;
+      weightedSpeed += speed * weight;
+      totalWeight += weight;
+    });
+
+    const magnitude = Math.hypot(weightedX, weightedY);
+
+    if (!totalWeight || !magnitude) return getFallbackWindVector();
+
+    return {
+      x: weightedX / magnitude,
+      y: weightedY / magnitude,
+      speed: weightedSpeed / totalWeight
+    };
+  }
+
+  function drawWindParticles() {
+    if (!dashboardMap || !windCanvas || !windContext || !showWindParticles) return;
+
+    const size = dashboardMap.getSize();
+    const canvasWidth = windCanvasWidth || size.x;
+    const canvasHeight = windCanvasHeight || size.y;
+    const sources = getDashboardWindSourcePoints();
+
+    windContext.globalCompositeOperation = "destination-out";
+    windContext.fillStyle = `rgba(0, 0, 0, ${WIND_PARTICLE_TRAIL_FADE_ALPHA})`;
+    windContext.fillRect(0, 0, canvasWidth, canvasHeight);
+
+    windContext.globalCompositeOperation = "source-over";
+
+    if (!sources.length) return;
+
+    windContext.lineCap = "round";
+    windContext.lineJoin = "round";
+    windContext.lineWidth = WIND_PARTICLE_LINE_WIDTH;
+    windContext.shadowBlur = 2;
+    windContext.shadowColor = "rgba(255, 255, 255, 0.28)";
+
+    windParticles.forEach((particle) => {
+      const containerPoint = {
+        x: particle.x - windCanvasBuffer,
+        y: particle.y - windCanvasBuffer
+      };
+
+      const vector = getWindVectorAtContainerPoint(containerPoint, sources);
+      const speed = Math.max(2, Math.min(34, vector.speed || 8));
+
+      const velocity =
+        (0.42 + speed * 0.045) *
+        particle.speedJitter *
+        WIND_PARTICLE_STEP_MULTIPLIER;
+
+      const stepX = vector.x * velocity;
+      const stepY = vector.y * velocity;
+      const previousX = particle.x;
+      const previousY = particle.y;
+      const nextX = previousX + stepX;
+      const nextY = previousY + stepY;
+      const tailX = previousX - stepX * particle.trailLength;
+      const tailY = previousY - stepY * particle.trailLength;
+
+      particle.x = nextX;
+      particle.y = nextY;
+      particle.age += 1;
+
+      const headAlpha = particle.alpha;
+      const tailAlpha = Math.max(0.06, particle.alpha * 0.22);
+      const gradient = windContext.createLinearGradient(tailX, tailY, nextX, nextY);
+
+      gradient.addColorStop(0, `rgba(255, 255, 255, ${tailAlpha})`);
+      gradient.addColorStop(0.55, `rgba(255, 255, 255, ${particle.alpha * 0.42})`);
+      gradient.addColorStop(1, `rgba(255, 255, 255, ${headAlpha})`);
+
+      windContext.beginPath();
+      windContext.moveTo(tailX, tailY);
+      windContext.lineTo(nextX, nextY);
+      windContext.strokeStyle = gradient;
+      windContext.stroke();
+
+      if (
+        particle.age > particle.maxAge ||
+        particle.x < -40 ||
+        particle.x > canvasWidth + 40 ||
+        particle.y < -40 ||
+        particle.y > canvasHeight + 40
+      ) {
+        resetWindParticle(particle, false);
+      }
+    });
+
+    windContext.shadowBlur = 0;
+    windContext.globalCompositeOperation = "source-over";
+  }
+
+  function handleWindMapMove() {
+    positionWindCanvas();
+  }
+
+  function handleWindMapChange() {
+    resizeWindCanvas({ reseed: true });
+    drawWindParticles();
+  }
+
+  function startWindAnimation() {
+    if (!browser || windFrame) return;
+
+    const animate = (timestamp) => {
+      windFrame = requestAnimationFrame(animate);
+
+      if (timestamp - windLastFrameAt < WIND_PARTICLE_FRAME_INTERVAL_MS) return;
+
+      windLastFrameAt = timestamp;
+      drawWindParticles();
+    };
+
+    windFrame = requestAnimationFrame(animate);
+  }
+
+  function stopWindAnimation() {
+    if (!browser || !windFrame) return;
+
+    cancelAnimationFrame(windFrame);
+    windFrame = null;
+    windLastFrameAt = 0;
+  }
+
+  function addWindParticleLayer() {
+    if (!dashboardMap || !L || windParticleLayer) return;
+
+    windParticleLayer = new L.Layer();
+
+    windParticleLayer.onAdd = (targetMap) => {
+      const pane = targetMap.getPane("dashboardWindPane") || targetMap.getPanes().overlayPane;
+
+      windCanvas = L.DomUtil.create("canvas", "wind-particle-canvas");
+      windCanvas.setAttribute("aria-hidden", "true");
+      pane.appendChild(windCanvas);
+
+      windContext = windCanvas.getContext("2d");
+
+      targetMap.on("move zoom", handleWindMapMove);
+      targetMap.on("dragend resize moveend zoomend viewreset", handleWindMapChange);
+
+      resizeWindCanvas();
+      startWindAnimation();
+    };
+
+    windParticleLayer.onRemove = (targetMap) => {
+      targetMap.off("move zoom", handleWindMapMove);
+      targetMap.off("dragend resize moveend zoomend viewreset", handleWindMapChange);
+      stopWindAnimation();
+
+      if (windCanvas?.parentNode) {
+        windCanvas.parentNode.removeChild(windCanvas);
+      }
+
+      windCanvas = null;
+      windContext = null;
+      windParticles = [];
+    };
+
+    windParticleLayer.addTo(dashboardMap);
+  }
+
+  function removeWindParticleLayer() {
+    if (windParticleLayer && dashboardMap) {
+      dashboardMap.removeLayer(windParticleLayer);
+    }
+
+    windParticleLayer = null;
+    stopWindAnimation();
+  }
+
+  function getCurrentParticleCount() {
+    if (!dashboardMap) return CURRENT_PARTICLE_MIN_COUNT;
+
+    const size = dashboardMap.getSize();
+    const width = Math.max(size.x, currentCanvasWidth || size.x);
+    const height = Math.max(size.y, currentCanvasHeight || size.y);
+    const count = Math.round((width * height) / 10500);
+
+    return Math.max(CURRENT_PARTICLE_MIN_COUNT, Math.min(CURRENT_PARTICLE_MAX_COUNT, count));
+  }
+
+  function resetCurrentParticle(particle = {}, randomAge = true) {
+    if (!dashboardMap) return particle;
+
+    const size = dashboardMap.getSize();
+    const width = currentCanvasWidth || size.x;
+    const height = currentCanvasHeight || size.y;
+
+    particle.x = Math.random() * Math.max(1, width);
+    particle.y = Math.random() * Math.max(1, height);
+    particle.age = randomAge ? Math.floor(Math.random() * CURRENT_PARTICLE_MAX_AGE) : 0;
+    particle.maxAge = CURRENT_PARTICLE_MAX_AGE + Math.floor(Math.random() * 60);
+    particle.speedJitter = 0.72 + Math.random() * 0.56;
+    particle.trailLength = 4.5 + Math.random() * 5.5;
+    particle.alpha = 0.34 + Math.random() * 0.28;
+
+    return particle;
+  }
+
+  function positionCurrentCanvas() {
+    if (!dashboardMap || !L || !currentCanvas) return;
+
+    const topLeft = dashboardMap.containerPointToLayerPoint([
+      -currentCanvasBuffer,
+      -currentCanvasBuffer
+    ]);
+
+    L.DomUtil.setPosition(currentCanvas, topLeft);
+  }
+
+  function seedCurrentParticles(keepExisting = true) {
+    const targetCount = getCurrentParticleCount();
+    const nextParticles = keepExisting ? currentParticles.slice(0, targetCount) : [];
+
+    while (nextParticles.length < targetCount) {
+      nextParticles.push(resetCurrentParticle({}, true));
+    }
+
+    currentParticles = nextParticles;
+  }
+
+  function resizeCurrentCanvas({ reseed = true } = {}) {
+    if (!browser || !dashboardMap || !currentCanvas || !currentContext) return;
+
+    const size = dashboardMap.getSize();
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+
+    currentCanvasBuffer = CURRENT_CANVAS_BUFFER_PX;
+    currentCanvasWidth = size.x + currentCanvasBuffer * 2;
+    currentCanvasHeight = size.y + currentCanvasBuffer * 2;
+
+    positionCurrentCanvas();
+
+    currentCanvas.width = Math.max(1, Math.floor(currentCanvasWidth * pixelRatio));
+    currentCanvas.height = Math.max(1, Math.floor(currentCanvasHeight * pixelRatio));
+    currentCanvas.style.width = `${currentCanvasWidth}px`;
+    currentCanvas.style.height = `${currentCanvasHeight}px`;
+
+    currentContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+
+    if (reseed) {
+      seedCurrentParticles(false);
+    }
+  }
+
+  function getCurrentVectorAtContainerPoint(point, sources = []) {
+    if (!dashboardMap || !sources.length) return null;
+
+    const latLng = dashboardMap.containerPointToLatLng([point.x, point.y]);
+    let totalWeight = 0;
+    let weightedX = 0;
+    let weightedY = 0;
+    let weightedSpeed = 0;
+
+    sources.forEach((source) => {
+      const rawDistance = dashboardMap.distance(latLng, [source.lat, source.lng]);
+
+      if (rawDistance > CURRENT_INFLUENCE_RADIUS_METERS) {
+        return;
+      }
+
+      const distance = Math.max(25000, rawDistance);
+      const weight = 1 / Math.pow(distance / 1000, 1.65);
+      const angleRad = (source.directionToDeg * Math.PI) / 180;
+      const speed = Math.max(0.1, source.speedKt || 1.2);
+
+      weightedX += Math.sin(angleRad) * weight * speed;
+      weightedY += -Math.cos(angleRad) * weight * speed;
+      weightedSpeed += speed * weight;
+      totalWeight += weight;
+    });
+
+    const magnitude = Math.hypot(weightedX, weightedY);
+
+    if (!totalWeight || !magnitude) return null;
+
+    return {
+      x: weightedX / magnitude,
+      y: weightedY / magnitude,
+      speed: weightedSpeed / totalWeight
+    };
+  }
+
+  function drawCurrentParticles() {
+    if (!dashboardMap || !currentCanvas || !currentContext || !showCurrentParticles) return;
+
+    const size = dashboardMap.getSize();
+    const canvasWidth = currentCanvasWidth || size.x;
+    const canvasHeight = currentCanvasHeight || size.y;
+    const sources = getDashboardCurrentSourcePoints();
+
+    currentContext.globalCompositeOperation = "destination-out";
+    currentContext.fillStyle = `rgba(0, 0, 0, ${CURRENT_PARTICLE_TRAIL_FADE_ALPHA})`;
+    currentContext.fillRect(0, 0, canvasWidth, canvasHeight);
+
+    currentContext.globalCompositeOperation = "source-over";
+
+    if (!sources.length) return;
+
+    currentContext.lineCap = "round";
+    currentContext.lineJoin = "round";
+    currentContext.lineWidth = CURRENT_PARTICLE_LINE_WIDTH;
+    currentContext.shadowBlur = 2;
+    currentContext.shadowColor = "rgba(80, 190, 255, 0.22)";
+
+    currentParticles.forEach((particle) => {
+      const containerPoint = {
+        x: particle.x - currentCanvasBuffer,
+        y: particle.y - currentCanvasBuffer
+      };
+
+      const vector = getCurrentVectorAtContainerPoint(containerPoint, sources);
+
+      if (!vector) {
+        resetCurrentParticle(particle, false);
+        return;
+      }
+
+      const speed = Math.max(0.2, Math.min(12, vector.speed || 1.2));
+      const velocity =
+        (0.18 + speed * 0.08) *
+        particle.speedJitter *
+        CURRENT_PARTICLE_STEP_MULTIPLIER;
+
+      const stepX = vector.x * velocity;
+      const stepY = vector.y * velocity;
+      const previousX = particle.x;
+      const previousY = particle.y;
+      const nextX = previousX + stepX;
+      const nextY = previousY + stepY;
+      const tailX = previousX - stepX * particle.trailLength;
+      const tailY = previousY - stepY * particle.trailLength;
+
+      particle.x = nextX;
+      particle.y = nextY;
+      particle.age += 1;
+
+      const headAlpha = particle.alpha;
+      const tailAlpha = Math.max(0.04, particle.alpha * 0.2);
+      const gradient = currentContext.createLinearGradient(tailX, tailY, nextX, nextY);
+
+      gradient.addColorStop(0, `rgba(75, 190, 255, ${tailAlpha})`);
+      gradient.addColorStop(0.55, `rgba(90, 205, 255, ${particle.alpha * 0.42})`);
+      gradient.addColorStop(1, `rgba(125, 220, 255, ${headAlpha})`);
+
+      currentContext.beginPath();
+      currentContext.moveTo(tailX, tailY);
+      currentContext.lineTo(nextX, nextY);
+      currentContext.strokeStyle = gradient;
+      currentContext.stroke();
+
+      if (
+        particle.age > particle.maxAge ||
+        particle.x < -40 ||
+        particle.x > canvasWidth + 40 ||
+        particle.y < -40 ||
+        particle.y > canvasHeight + 40
+      ) {
+        resetCurrentParticle(particle, false);
+      }
+    });
+
+    currentContext.shadowBlur = 0;
+    currentContext.globalCompositeOperation = "source-over";
+  }
+
+  function handleCurrentMapMove() {
+    positionCurrentCanvas();
+  }
+
+  function handleCurrentMapChange() {
+    resizeCurrentCanvas({ reseed: true });
+    drawCurrentParticles();
+  }
+
+  function startCurrentAnimation() {
+    if (!browser || currentFrame) return;
+
+    const animate = (timestamp) => {
+      currentFrame = requestAnimationFrame(animate);
+
+      if (timestamp - currentLastFrameAt < CURRENT_PARTICLE_FRAME_INTERVAL_MS) return;
+
+      currentLastFrameAt = timestamp;
+      drawCurrentParticles();
+    };
+
+    currentFrame = requestAnimationFrame(animate);
+  }
+
+  function stopCurrentAnimation() {
+    if (!browser || !currentFrame) return;
+
+    cancelAnimationFrame(currentFrame);
+    currentFrame = null;
+    currentLastFrameAt = 0;
+  }
+
+  function addCurrentParticleLayer() {
+    if (!dashboardMap || !L || currentParticleLayer) return;
+
+    currentParticleLayer = new L.Layer();
+
+    currentParticleLayer.onAdd = (targetMap) => {
+      const pane = targetMap.getPane("dashboardCurrentPane") || targetMap.getPanes().overlayPane;
+
+      currentCanvas = L.DomUtil.create("canvas", "current-particle-canvas");
+      currentCanvas.setAttribute("aria-hidden", "true");
+      pane.appendChild(currentCanvas);
+
+      currentContext = currentCanvas.getContext("2d");
+
+      targetMap.on("move zoom", handleCurrentMapMove);
+      targetMap.on("dragend resize moveend zoomend viewreset", handleCurrentMapChange);
+
+      resizeCurrentCanvas();
+      startCurrentAnimation();
+    };
+
+    currentParticleLayer.onRemove = (targetMap) => {
+      targetMap.off("move zoom", handleCurrentMapMove);
+      targetMap.off("dragend resize moveend zoomend viewreset", handleCurrentMapChange);
+      stopCurrentAnimation();
+
+      if (currentCanvas?.parentNode) {
+        currentCanvas.parentNode.removeChild(currentCanvas);
+      }
+
+      currentCanvas = null;
+      currentContext = null;
+      currentParticles = [];
+    };
+
+    currentParticleLayer.addTo(dashboardMap);
+  }
+
+  function removeCurrentParticleLayer() {
+    if (currentParticleLayer && dashboardMap) {
+      dashboardMap.removeLayer(currentParticleLayer);
+    }
+
+    currentParticleLayer = null;
+    stopCurrentAnimation();
+  }
+
 
   let canAccessDashboard = $derived(
     hasPermission("access_dashboard") || hasPermission("access_daily_report")
@@ -472,7 +1382,7 @@
     if (!$selectedVesselId) {
       dashboardData = null;
       liveVesselDetail = null;
-      error = "Belum ada vessel yang dipilih dari Fleet View.";
+      error = "No vessel has been selected from Fleet View.";
       return;
     }
 
@@ -493,7 +1403,7 @@
       console.log("[VESSEL_DASHBOARD_LIVE_DETAIL]", liveVesselDetail);
     } catch (err) {
       console.error("[VESSEL_DASHBOARD_ERROR]", err);
-      error = err?.message || "Gagal memuat dashboard vessel.";
+      error = err?.message || "Failed to load vessel dashboard.";
       dashboardData = null;
       liveVesselDetail = null;
     } finally {
@@ -516,6 +1426,64 @@
 
     loadDashboard();
   });
+
+  $effect(() => {
+    active;
+    canViewDailyPathMap;
+    vesselInfo.latitude;
+    vesselInfo.longitude;
+
+    if (!active || !canViewDailyPathMap) return;
+
+    ensureDashboardMap();
+  });
+
+  $effect(() => {
+    active;
+    canViewDailyPathMap;
+    showWindParticles;
+    showCurrentParticles;
+    dashboardData;
+    liveVesselDetail;
+    vesselInfo.latitude;
+    vesselInfo.longitude;
+    vesselInfo.heading;
+    vesselInfo.vesselName;
+
+    if (!active || !canViewDailyPathMap || !dashboardMap || !L) return;
+
+    dashboardMap.invalidateSize();
+    updateDashboardMapMarker();
+
+    if (showWindParticles) {
+      addWindParticleLayer();
+      seedWindParticles(true);
+    } else {
+      removeWindParticleLayer();
+    }
+
+    if (showCurrentParticles) {
+      addCurrentParticleLayer();
+      seedCurrentParticles(true);
+    } else {
+      removeCurrentParticleLayer();
+    }
+  });
+
+  onDestroy(() => {
+    removeCurrentParticleLayer();
+    removeWindParticleLayer();
+
+    if (vesselMarker) {
+      vesselMarker.remove();
+      vesselMarker = null;
+    }
+
+    if (dashboardMap) {
+      dashboardMap.remove();
+      dashboardMap = null;
+    }
+  });
 </script>
 
 <section class="dashboard-content">
@@ -523,7 +1491,7 @@
     <div>
       <span class="page-kicker">Vessel Dashboard</span>
       <h1>{vesselInfo.vesselName}</h1>
-      <p>Realtime monitoring untuk status kapal, posisi, RPM engine, cuaca, arus laut, dan konsumsi fuel harian.</p>
+      <p>Real-time monitoring for vessel status, position, engine RPM, weather, ocean current, and daily fuel consumption.</p>
     </div>
 
     <div class="header-right">
@@ -554,7 +1522,7 @@
     </div>
   {:else if !canAccessDashboard}
     <div class="status-box error-box">
-      User belum memiliki permission access_dashboard atau access_daily_report.
+      The user does not have the access_dashboard or access_daily_report permission.
     </div>
   {/if}
 
@@ -573,8 +1541,8 @@
         {#if cctvItems.length === 0}
           <div class="cctv-empty">
             <div class="cctv-icon">▣</div>
-            <strong>CCTV belum tersedia</strong>
-            <span>Endpoint mengirim nilai CCTV kosong.</span>
+            <strong>CCTV is not available yet</strong>
+            <span>The endpoint returned an empty CCTV value.</span>
           </div>
         {/if}
 
@@ -607,22 +1575,39 @@
         </div>
 
         <div class="map-box">
-          <VesselMap
-            latitude={vesselInfo.latitude}
-            longitude={vesselInfo.longitude}
-            heading={vesselInfo.heading}
-            vesselName={vesselInfo.vesselName}
-            speed={vesselInfo.currentSpeed}
-            lastUpdate={vesselInfo.localTime}
-            iconUrl="/assets/vessel-marker.svg"
-            zoom={12}
-          />
+          <div class="dashboard-leaflet-map" bind:this={dashboardMapContainer}></div>
+
+          {#if vesselInfo.latitude === null || vesselInfo.longitude === null}
+            <div class="dashboard-map-status">Vessel coordinates are not available yet.</div>
+          {/if}
+
+          <div class="dashboard-map-legend">
+            <button
+              type="button"
+              class:active-wind-toggle={showWindParticles}
+              class="wind-toggle-btn"
+              onclick={() => (showWindParticles = !showWindParticles)}
+            >
+              <span class="wind-legend-line"></span>
+              Wind: {showWindParticles ? "On" : "Off"}
+            </button>
+
+            <button
+              type="button"
+              class:active-current-toggle={showCurrentParticles}
+              class="current-toggle-btn"
+              onclick={() => (showCurrentParticles = !showCurrentParticles)}
+            >
+              <span class="current-legend-line"></span>
+              Current: {showCurrentParticles ? "On" : "Off"}
+            </button>
+          </div>
         </div>
       </div>
     {:else}
       <div class="monitoring-card permission-empty">
-        <strong>Map tidak ditampilkan</strong>
-        <span>User belum memiliki permission view_daily_path_map.</span>
+        <strong>Map is not displayed</strong>
+        <span>The user does not have the view_daily_path_map permission.</span>
       </div>
     {/if}
   </section>
@@ -717,8 +1702,8 @@
       </section>
     {:else}
       <section class="rpm-panel permission-empty">
-        <strong>RPM Overview tidak ditampilkan</strong>
-        <span>User belum memiliki permission view_engine_rpm_stats_table.</span>
+        <strong>RPM Overview is not displayed</strong>
+        <span>The user does not have the view_engine_rpm_stats_table permission.</span>
       </section>
     {/if}
   </section>
@@ -851,7 +1836,7 @@
         </div>
       {:else}
         <div class="empty-box">
-          Fuel consumption tidak ditampilkan karena permission view_fuel_consumption_table atau permission sumber fuel belum tersedia.
+          Fuel consumption is not displayed because the view_fuel_consumption_table permission or fuel source permission is not available.
         </div>
       {/if}
 
@@ -1278,9 +2263,229 @@
     flex: 1;
     width: 100%;
     min-height: 320px;
-    background: #e5edf5;
+    background: #f8fafc;
     overflow: hidden;
     position: relative;
+  }
+
+  .dashboard-leaflet-map {
+    width: 100%;
+    height: 100%;
+    min-height: 320px;
+    background: #f8fafc;
+  }
+
+  .dashboard-map-status {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    z-index: 760;
+    transform: translateX(-50%);
+    min-height: 28px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid #bfdbfe;
+    color: #1d4ed8;
+    font-size: 10px;
+    font-weight: 900;
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+  }
+
+  .dashboard-map-legend {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+    z-index: 740;
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px;
+    max-width: calc(100% - 16px);
+    padding: 5px 7px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid #dbe4ef;
+    box-shadow: 0 4px 10px rgba(15, 23, 42, 0.07);
+  }
+
+  .wind-legend-line,
+  .current-legend-line {
+    width: 15px;
+    height: 2px;
+    border-radius: 999px;
+    flex-shrink: 0;
+  }
+
+  .wind-legend-line {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.16), #ffffff);
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12);
+  }
+
+  .current-legend-line {
+    background: linear-gradient(90deg, rgba(56, 189, 248, 0.14), #38bdf8);
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14);
+  }
+
+  .wind-toggle-btn,
+  .current-toggle-btn {
+    height: 21px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 7px;
+    border-radius: 999px;
+    background: #ffffff;
+    font-size: 8px;
+    line-height: 1;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .wind-toggle-btn {
+    border: 1px solid #bae6fd;
+    color: #0369a1;
+  }
+
+  .wind-toggle-btn.active-wind-toggle,
+  .wind-toggle-btn:hover {
+    background: #f0f9ff;
+    border-color: #0ea5e9;
+  }
+
+  .current-toggle-btn {
+    border: 1px solid #bae6fd;
+    color: #075985;
+  }
+
+  .current-toggle-btn.active-current-toggle,
+  .current-toggle-btn:hover {
+    background: #ecfeff;
+    border-color: #38bdf8;
+  }
+
+  :global(.wind-particle-canvas),
+  :global(.current-particle-canvas) {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    mix-blend-mode: screen;
+  }
+
+  :global(.wind-particle-canvas) {
+    opacity: 0.82;
+  }
+
+  :global(.current-particle-canvas) {
+    opacity: 0.86;
+  }
+
+  :global(.dashboard-vessel-leaflet-icon) {
+    background: transparent;
+    border: none;
+  }
+
+  :global(.dashboard-vessel-marker-shell) {
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    background: rgba(239, 246, 255, 0.98);
+    border: 2px solid #2563eb;
+    box-shadow:
+      0 0 0 5px rgba(37, 99, 235, 0.22),
+      0 0 0 10px rgba(37, 99, 235, 0.09),
+      0 10px 20px rgba(15, 23, 42, 0.22);
+  }
+
+  :global(.dashboard-vessel-marker-svg) {
+    width: 28px;
+    height: 28px;
+    display: block;
+    transform-origin: center center;
+    filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.28));
+  }
+
+  :global(.dashboard-vessel-leaflet-icon.offline .dashboard-vessel-marker-shell) {
+    background: #f8fafc;
+    border-color: #64748b;
+    box-shadow:
+      0 0 0 5px rgba(100, 116, 139, 0.2),
+      0 0 0 10px rgba(100, 116, 139, 0.08),
+      0 10px 20px rgba(15, 23, 42, 0.18);
+    filter: grayscale(0.35);
+  }
+
+  :global(.dashboard-leaflet-popup .leaflet-popup-content-wrapper) {
+    background: #ffffff;
+    color: #0f172a;
+    border-radius: 10px;
+    border: 1px solid #dbe4ef;
+    box-shadow:
+      0 9px 20px rgba(15, 23, 42, 0.14),
+      0 1px 4px rgba(15, 23, 42, 0.08);
+    overflow: hidden;
+  }
+
+  :global(.dashboard-leaflet-popup .leaflet-popup-content) {
+    margin: 0;
+    width: 215px !important;
+  }
+
+  :global(.dashboard-leaflet-popup .leaflet-popup-tip) {
+    background: #ffffff;
+    border: 1px solid #dbe4ef;
+  }
+
+  :global(.dashboard-map-popup-title) {
+    padding: 8px 30px 7px 9px;
+    background: linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(37, 99, 235, 0)), #f8fafc;
+    color: #0f172a;
+    font-size: 11.5px;
+    font-weight: 900;
+    line-height: 1.1;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  :global(.dashboard-map-popup-row) {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    gap: 5px;
+    align-items: start;
+    padding: 5px 9px;
+    border-bottom: 1px solid #eef2f7;
+  }
+
+  :global(.dashboard-map-popup-row span) {
+    color: #64748b;
+    font-size: 8px;
+    font-weight: 800;
+  }
+
+  :global(.dashboard-map-popup-row strong) {
+    color: #0f172a;
+    font-size: 8.8px;
+    line-height: 1.25;
+    font-weight: 900;
+    text-align: right;
+  }
+
+  :global(.leaflet-control-attribution) {
+    border-radius: 8px 0 0 0;
+    background: rgba(255, 255, 255, 0.86) !important;
+    color: #64748b !important;
+    font-size: 8px !important;
+    font-weight: 700;
+    backdrop-filter: blur(8px);
+  }
+
+  :global(.leaflet-control-attribution a) {
+    color: #2563eb !important;
+    font-weight: 800;
   }
 
   .permission-empty {

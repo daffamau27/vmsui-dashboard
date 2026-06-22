@@ -16,57 +16,61 @@
 			alwaysShow: true
 		},
 		{
-			icon: '⚙',
+			icon: '/assets/adminpage.png',
 			title: 'Administrator',
 			key: 'administrator',
-			type: 'text',
+			type: 'image',
 			superAdminOnly: true
 		},
 		{
-			icon: '/assets/fleetview.svg',
+			icon: '/assets/fleetviewpage.png',
 			title: 'Fleet View',
 			key: 'fleet-view',
 			type: 'image',
 			permissions: ['access_fleet_view']
 		},
 		{
-			icon: '/assets/vessel.svg',
+			icon: '/assets/vesselpage.png',
 			title: 'Vessel',
 			key: 'vessel',
 			type: 'image',
 			alwaysShow: true
 		},
 		{
-			icon: '▤',
+			icon: '/assets/summarypage.png',
 			title: 'All Vessel Summary',
 			key: 'all-vessel-summary',
-			type: 'text',
+			type: 'image',
 			permissions: ['access_all_vessel_summary']
 		},
 		{
-			icon: '🔔',
+			icon: '/assets/alarmpage.png',
 			title: 'Alarm',
 			key: 'alarm',
-			type: 'text',
+			type: 'image',
 			permissions: ['access_alarm']
 		},
 		{
-			icon: '☷',
+			icon: '/assets/auditlogpage.png',
 			title: 'Audit Log',
 			key: 'audit-log',
-			type: 'text',
+			type: 'image',
 			permissions: ['access_audit_logs']
 		},
 		{
-			icon: '⌁',
+			icon: '/assets/voyageplanspage.png',
 			title: 'Voyage Plans',
 			key: 'voyage-plans',
-			type: 'text',
+			type: 'image',
 			permissions: ['access_voyage_plan_fleet']
 		}
 	];
 
 	const itemHeight = 46;
+	const alarmBadgeRefreshMs = 10000;
+
+	let alarmBadgeTimer = null;
+	let activeAlarmCount = $state(0);
 
 	let permissionLoading = $state(true);
 	let permissionMode = $state('selected');
@@ -91,6 +95,62 @@
 		if (!permissionKeys.length) return false;
 
 		return permissionKeys.some((permissionKey) => permissions.includes(permissionKey));
+	}
+
+	function canAccessAlarmMenu() {
+		const alarmMenu = menus.find((menu) => menu.key === 'alarm');
+		return alarmMenu ? hasPermission(alarmMenu) : false;
+	}
+
+	async function loadActiveAlarmCount() {
+		if (!browser) return;
+
+		if (!canAccessAlarmMenu()) {
+			activeAlarmCount = 0;
+			return;
+		}
+
+		try {
+			const response = await apiRequest('/alarm/monitor', {
+				method: 'GET'
+			});
+
+			const payload = response?.data || {};
+
+			const rows = Array.isArray(payload?.monitor)
+				? payload.monitor
+				: Array.isArray(response?.monitor)
+					? response.monitor
+					: Array.isArray(response?.data)
+						? response.data
+						: Array.isArray(response)
+							? response
+							: [];
+
+			activeAlarmCount = rows.filter(
+				(row) => String(row?.status || '').toUpperCase() === 'ACTIVE'
+			).length;
+		} catch (err) {
+			console.error('[SIDEBAR][ALARM_BADGE_ERROR]', err);
+			activeAlarmCount = 0;
+		}
+	}
+
+	function startAlarmBadgeRefresh() {
+		stopAlarmBadgeRefresh();
+
+		loadActiveAlarmCount();
+
+		alarmBadgeTimer = setInterval(() => {
+			loadActiveAlarmCount();
+		}, alarmBadgeRefreshMs);
+	}
+
+	function stopAlarmBadgeRefresh() {
+		if (alarmBadgeTimer) {
+			clearInterval(alarmBadgeTimer);
+			alarmBadgeTimer = null;
+		}
 	}
 
 	let visibleMenus = $derived(menus.filter((menu) => hasPermission(menu)));
@@ -122,6 +182,13 @@
 			permissions = [];
 		} finally {
 			permissionLoading = false;
+
+			if (canAccessAlarmMenu()) {
+				startAlarmBadgeRefresh();
+			} else {
+				stopAlarmBadgeRefresh();
+				activeAlarmCount = 0;
+			}
 		}
 	}
 
@@ -216,6 +283,8 @@
 
 	onDestroy(() => {
 		if (!browser) return;
+
+		stopAlarmBadgeRefresh();
 		window.removeEventListener('mobile-panel-open', handleMobilePanelOpen);
 	});
 </script>
@@ -256,16 +325,22 @@
 			<button
 				class="side-item"
 				class:active={isActive(menu.key)}
-				title={menu.title}
+				title={menu.key === 'alarm' && activeAlarmCount > 0 ? `${menu.title} (${activeAlarmCount} active)` : menu.title}
 				onclick={() => openMenu(menu)}
 			>
-				<span class="side-icon">
-					{#if menu.type === 'image'}
-						<img src={menu.icon} alt={menu.title} class="side-icon-img" />
-					{:else}
-						{menu.icon}
-					{/if}
-				</span>
+			<span class="side-icon">
+				{#if menu.type === 'image'}
+					<img src={menu.icon} alt={menu.title} class="side-icon-img" />
+				{:else}
+					{menu.icon}
+				{/if}
+
+				{#if menu.key === 'alarm' && activeAlarmCount > 0}
+					<span class="alarm-count-badge" aria-label={`${activeAlarmCount} active alarms`}>
+						{activeAlarmCount > 99 ? '99+' : activeAlarmCount}
+					</span>
+				{/if}
+			</span>
 
 				<span class="side-label">{menu.title}</span>
 			</button>
@@ -453,6 +528,32 @@
 		100% {
 			transform: scale(1);
 		}
+	}
+
+	.alarm-count-badge {
+		position: absolute;
+		top: -9px;
+		right: -11px;
+		min-width: 16px;
+		height: 16px;
+		padding: 0 4px;
+		border-radius: 999px;
+		background: #dc2626;
+		border: 2px solid #d5d7d9;
+		color: #ffffff;
+		font-size: 9px;
+		line-height: 12px;
+		font-weight: 900;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		box-sizing: border-box;
+		box-shadow: 0 3px 8px rgba(220, 38, 38, 0.35);
+		pointer-events: none;
+	}
+
+	.side-item.active .alarm-count-badge {
+		border-color: #b9bbbd;
 	}
 
 	.logout-button {
@@ -747,6 +848,16 @@
 			line-height: 1;
 			cursor: pointer;
 			flex-shrink: 0;
+		}
+
+		.alarm-count-badge {
+			top: -8px;
+			right: -10px;
+			border-color: #f8fafc;
+		}
+
+		.side-item.active .alarm-count-badge {
+			border-color: #eff6ff;
 		}
 
 		.side-icon-img {

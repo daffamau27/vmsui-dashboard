@@ -85,7 +85,7 @@
 			const date = new Date(Number(value));
 
 			if (!Number.isNaN(date.getTime())) {
-				return date.toLocaleString('id-ID', {
+				return date.toLocaleString('en-US', {
 					day: '2-digit',
 					month: 'short',
 					year: 'numeric',
@@ -99,7 +99,7 @@
 		const date = new Date(value);
 
 		if (!Number.isNaN(date.getTime())) {
-			return date.toLocaleString('id-ID', {
+			return date.toLocaleString('en-US', {
 				day: '2-digit',
 				month: 'short',
 				year: 'numeric',
@@ -302,7 +302,7 @@
 
 	async function loadTrace() {
 		if (!$selectedVesselId) {
-			error = 'Belum ada vessel yang dipilih dari Fleet View.';
+			error = 'No vessel has been selected from Fleet View.';
 			traceData = null;
 			return;
 		}
@@ -326,7 +326,7 @@
 			console.log('[VESSEL_TRACE_POINTS_COUNT]', getTracePoints(result).length);
 		} catch (err) {
 			console.error('[VESSEL_TRACE_ERROR]', err);
-			error = err?.message || 'Gagal memuat trace vessel.';
+			error = err?.message || 'Failed to load vessel trace.';
 			traceData = null;
 		} finally {
 			loading = false;
@@ -510,7 +510,7 @@
 								class="cctv-mini"
 								class:offline={cctv.status === 'Offline'}
 								onclick={() => selectCctv(cctv.index)}
-								title={`Tampilkan ${cctv.name}`}
+								title={`Show ${cctv.name}`}
 								in:scale={{ start: 0.96, duration: 150 }}
 								out:fade={{ duration: 80 }}
 							>
@@ -655,7 +655,7 @@
 							{/each}
 						</div>
 					{:else}
-						<div class="rpm-empty">Data RPM belum tersedia.</div>
+						<div class="rpm-empty">RPM data is not available.</div>
 					{/if}
 				</section>
 			</section>

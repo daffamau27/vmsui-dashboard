@@ -41,7 +41,7 @@
 			return currentUser;
 		} catch (err) {
 			console.error('[DATA_LOG_CURRENT_USER_PERMISSION_ERROR]', err);
-			currentUserError = err?.message || 'Gagal memuat permission user.';
+			currentUserError = err?.message || 'Failed to load user permissions.';
 			currentUser = null;
 			return null;
 		} finally {
@@ -80,6 +80,17 @@
 	let canViewFuelEmsInternal = $derived(hasPermission('view_fuel_ems_internal'));
 	let canViewFuelEmsExternal = $derived(hasPermission('view_fuel_ems_external'));
 	let canViewFuelEngineMaker = $derived(hasPermission('view_fuel_engine_maker'));
+	let canManageDataLogOverride = $derived(hasPermission('manage_data_log_override'));
+
+	let overrideDownloadingTemplate = $state(false);
+	let overrideImporting = $state(false);
+	let overrideDeleting = $state(false);
+
+	let overrideFile = $state(null);
+	let overrideFileInput = $state(null);
+	let overrideSourceFilePath = $state('');
+	let overrideMessage = $state('');
+	let overrideError = $state('');
 
 	let canViewAnyEngineFuelSource = $derived(
 		canViewFuelEcu ||
@@ -242,12 +253,12 @@
 
 		if (!value) return 0;
 
-		// Jika Unix timestamp
+		// If this is a Unix timestamp
 		if (/^\d+$/.test(String(value))) {
 			return Number(value);
 		}
 
-		// Bersihkan format seperti: 2026-05-24 00:00:00 (UTC+7)
+		// Clean formats such as: 2026-05-24 00:00:00 (UTC+7)
 		const cleaned = String(value)
 			.replace(/\s*\(UTC[+-]?\d{1,2}(?::?\d{2})?\)\s*/i, '')
 			.replace(' ', 'T');
@@ -440,7 +451,7 @@
 
 	async function loadDataLog() {
 		if (!$selectedVesselId) {
-			error = 'Belum ada vessel yang dipilih dari Fleet View.';
+			error = 'No vessel has been selected from Fleet View.';
 			logData = null;
 			return;
 		}
@@ -482,7 +493,7 @@
 			console.log('[DATA_LOG_DATA]', result);
 		} catch (err) {
 			console.error('[DATA_LOG_ERROR]', err);
-			error = err?.message || 'Gagal memuat data log.';
+			error = err?.message || 'Failed to load data log.';
 			logData = null;
 		} finally {
 			loading = false;
@@ -491,7 +502,7 @@
 
 	async function handleExportExcel() {
 		if (!$selectedVesselId) {
-			error = 'Belum ada vessel yang dipilih.';
+			error = 'No vessel has been selected.';
 			return;
 		}
 
@@ -522,9 +533,207 @@
 			);
 		} catch (err) {
 			console.error('[DATA_LOG_EXPORT_ERROR]', err);
-			error = err?.message || 'Gagal export Excel data log.';
+			error = err?.message || 'Failed to export data log to Excel.';
 		} finally {
 			exporting = false;
+		}
+	}
+
+	function getOverrideResponseMessage(response, fallback = 'Override operation completed successfully.') {
+		return response?.message || response?.data?.message || fallback;
+	}
+
+	function getImportedSourceFilePath(response) {
+		return (
+			response?.data?.sourceFilePath ||
+			response?.data?.source_file_path ||
+			response?.data?.source_file ||
+			response?.sourceFilePath ||
+			response?.source_file_path ||
+			''
+		);
+	}
+
+	function handleOverrideFileChange(event) {
+		overrideFile = event?.currentTarget?.files?.[0] || null;
+		overrideMessage = '';
+		overrideError = '';
+	}
+
+	function resetOverrideFileInput() {
+		overrideFile = null;
+
+		if (overrideFileInput) {
+			overrideFileInput.value = '';
+		}
+	}
+
+	function fileToBase64(file) {
+		return new Promise((resolve, reject) => {
+			const reader = new FileReader();
+
+			reader.onload = () => {
+				const result = String(reader.result || '');
+				const base64 = result.includes(',') ? result.split(',').pop() : result;
+				resolve(base64);
+			};
+
+			reader.onerror = () => {
+				reject(new Error('Failed to read the Excel file.'));
+			};
+
+			reader.readAsDataURL(file);
+		});
+	}
+
+	async function handleDownloadOverrideTemplate() {
+		await loadCurrentUser();
+
+		if (!canManageDataLogOverride) {
+			overrideError = 'You do not have the manage_data_log_override permission.';
+			return;
+		}
+
+		overrideDownloadingTemplate = true;
+		overrideMessage = '';
+		overrideError = '';
+
+		try {
+			await downloadApiFile(
+				'/data-logs/overrides/template',
+				'data_log_override_template.xlsx'
+			);
+
+			overrideMessage = 'Data log override template downloaded successfully.';
+		} catch (err) {
+			console.error('[DATA_LOG_OVERRIDE_TEMPLATE_ERROR]', err);
+			overrideError = err?.message || 'Failed to download the data log override template.';
+		} finally {
+			overrideDownloadingTemplate = false;
+		}
+	}
+
+	async function handleImportOverrideFile() {
+		if (!$selectedVesselId) {
+			overrideError = 'No vessel has been selected.';
+			return;
+		}
+
+		await loadCurrentUser();
+
+		if (!canManageDataLogOverride) {
+			overrideError = 'You do not have the manage_data_log_override permission.';
+			return;
+		}
+
+		if (!overrideFile) {
+			overrideError = 'Select an override Excel file first.';
+			return;
+		}
+
+		const allowedExtension = /\.xlsx$/i.test(overrideFile.name);
+
+		if (!allowedExtension) {
+			overrideError = 'The override file must be in .xlsx format.';
+			return;
+		}
+
+		overrideImporting = true;
+		overrideMessage = '';
+		overrideError = '';
+
+		try {
+			const fileBase64 = await fileToBase64(overrideFile);
+
+			const response = await apiRequest('/data-logs/overrides/import', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					vesselId: Number($selectedVesselId),
+					fileName: overrideFile.name,
+					fileBase64
+				})
+			});
+
+			const importedSourceFilePath = getImportedSourceFilePath(response);
+
+			if (importedSourceFilePath) {
+				overrideSourceFilePath = importedSourceFilePath;
+			}
+
+			overrideMessage = getOverrideResponseMessage(
+				response,
+				'Data log override file imported successfully.'
+			);
+
+			resetOverrideFileInput();
+
+			await loadDataLog();
+		} catch (err) {
+			console.error('[DATA_LOG_OVERRIDE_IMPORT_ERROR]', err);
+			overrideError =
+				err?.message ||
+				'Failed to import data log override. Make sure the permission and vessel access are correct.';
+		} finally {
+			overrideImporting = false;
+		}
+	}
+
+	async function handleDeleteOverrideImport() {
+		if (!$selectedVesselId) {
+			overrideError = 'No vessel has been selected.';
+			return;
+		}
+
+		await loadCurrentUser();
+
+		if (!canManageDataLogOverride) {
+			overrideError = 'You do not have the manage_data_log_override permission.';
+			return;
+		}
+
+		if (!overrideSourceFilePath.trim()) {
+			overrideError = 'Enter the source file path to delete.';
+			return;
+		}
+
+		const confirmed = window.confirm(
+			'Are you sure you want to delete all overrides from this imported file?'
+		);
+
+		if (!confirmed) return;
+
+		overrideDeleting = true;
+		overrideMessage = '';
+		overrideError = '';
+
+		try {
+			const query = new URLSearchParams({
+				vesselId: String($selectedVesselId),
+				sourceFilePath: overrideSourceFilePath.trim()
+			});
+
+			const response = await apiRequest(`/data-logs/overrides/imports?${query.toString()}`, {
+				method: 'DELETE'
+			});
+
+			overrideMessage = getOverrideResponseMessage(
+				response,
+				'Imported override file deleted successfully.'
+			);
+
+			overrideSourceFilePath = '';
+
+			await loadDataLog();
+		} catch (err) {
+			console.error('[DATA_LOG_OVERRIDE_DELETE_ERROR]', err);
+			overrideError =
+				err?.message ||
+				'Failed to delete override import. Make sure sourceFilePath and vessel access are correct.';
+		} finally {
+			overrideDeleting = false;
 		}
 	}
 
@@ -609,6 +818,90 @@
 		</div>
 	</section>
 
+	{#if canManageDataLogOverride}
+		<section class="override-card">
+			<div class="override-header">
+				<div>
+					<span class="section-kicker">Override</span>
+					<h2>Data Log Override</h2>
+					<p>
+						Download the template, import an override Excel file, or delete overrides by
+						source file path.
+					</p>
+				</div>
+
+				<button
+					type="button"
+					class="export-btn"
+					onclick={handleDownloadOverrideTemplate}
+					disabled={overrideDownloadingTemplate}
+				>
+					{overrideDownloadingTemplate ? 'Downloading...' : 'Download Template'}
+				</button>
+			</div>
+
+			<div class="override-grid">
+				<label class="override-field">
+					<span>Import Excel Override</span>
+					<input
+						bind:this={overrideFileInput}
+						type="file"
+						accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+						onchange={handleOverrideFileChange}
+					/>
+					<small>
+						The file must use the system template and .xlsx format.
+					</small>
+				</label>
+
+				<div class="override-actions">
+					<button
+						type="button"
+						class="primary-btn"
+						onclick={handleImportOverrideFile}
+						disabled={overrideImporting || !overrideFile}
+					>
+						{overrideImporting ? 'Importing...' : 'Import Override'}
+					</button>
+
+					{#if overrideFile}
+						<button type="button" class="ghost-btn" onclick={resetOverrideFileInput}>
+							Clear File
+						</button>
+					{/if}
+				</div>
+			</div>
+
+			<div class="override-delete-row">
+				<label class="override-field">
+					<span>Source File Path</span>
+					<input
+						type="text"
+						bind:value={overrideSourceFilePath}
+						placeholder="Enter the source_file_path from the import result"
+					/>
+				</label>
+
+				<button
+					type="button"
+					class="danger-btn"
+					onclick={handleDeleteOverrideImport}
+					disabled={overrideDeleting || !overrideSourceFilePath.trim()}
+				>
+					{overrideDeleting ? 'Deleting...' : 'Delete Import'}
+				</button>
+			</div>
+
+			{#if overrideMessage}
+				<div class="status-box success-box">{overrideMessage}</div>
+			{/if}
+
+			{#if overrideError}
+				<div class="status-box error-box">{overrideError}</div>
+			{/if}
+		</section>
+	{/if}
+
 	<section class="column-card">
 		<div class="column-header">
 			<div>
@@ -677,7 +970,7 @@
 				</table>
 			</div>
 		{:else}
-			<div class="empty-box">Data log belum tersedia pada rentang waktu yang dipilih.</div>
+			<div class="empty-box">Data log is not available for the selected time range.</div>
 		{/if}
 	</section>
 
@@ -721,12 +1014,133 @@
 		gap: 16px;
 	}
 
-	.header-meta small {
-		display: block;
-		margin-top: 4px;
+	.override-card {
+		display: grid;
+		gap: 16px;
+		margin-top: 16px;
+		padding: 18px;
+		border: 1px solid rgba(15, 23, 42, 0.1);
+		border-radius: 18px;
+		background: #ffffff;
+		box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+	}
+
+	.override-header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 16px;
+	}
+
+	.override-header h2 {
+		margin: 2px 0 4px;
+		font-size: 18px;
+		font-weight: 800;
+		color: #0f172a;
+	}
+
+	.override-header p {
+		max-width: 720px;
+		font-size: 13px;
+		line-height: 1.5;
 		color: #64748b;
-		font-size: 11px;
-		font-weight: 900;
+	}
+
+	.override-grid,
+	.override-delete-row {
+		display: grid;
+		grid-template-columns: minmax(260px, 1fr) auto;
+		align-items: end;
+		gap: 14px;
+	}
+
+	.override-field {
+		display: grid;
+		gap: 7px;
+	}
+
+	.override-field span {
+		font-size: 12px;
+		font-weight: 800;
+		letter-spacing: 0.04em;
+		color: #475569;
+		text-transform: uppercase;
+	}
+
+	.override-field input[type='text'],
+	.override-field input[type='file'] {
+		width: 100%;
+		min-height: 42px;
+		border: 1px solid rgba(15, 23, 42, 0.14);
+		border-radius: 12px;
+		background: #f8fafc;
+		color: #0f172a;
+		font-size: 13px;
+	}
+
+	.override-field input[type='text'] {
+		padding: 0 12px;
+	}
+
+	.override-field input[type='file'] {
+		padding: 9px 12px;
+	}
+
+	.override-field small {
+		font-size: 12px;
+		color: #64748b;
+	}
+
+	.override-actions {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+
+	.ghost-btn,
+	.danger-btn {
+		min-height: 42px;
+		border: 0;
+		border-radius: 12px;
+		padding: 0 14px;
+		font-size: 13px;
+		font-weight: 800;
+		cursor: pointer;
+	}
+
+	.ghost-btn {
+		background: #e2e8f0;
+		color: #0f172a;
+	}
+
+	.danger-btn {
+		background: #ef4444;
+		color: #ffffff;
+	}
+
+	.ghost-btn:disabled,
+	.danger-btn:disabled {
+		cursor: not-allowed;
+		opacity: 0.55;
+	}
+
+	.success-box {
+		border: 1px solid rgba(22, 163, 74, 0.2);
+		background: #f0fdf4;
+		color: #166534;
+	}
+
+	@media (max-width: 760px) {
+		.override-header,
+		.override-actions {
+			align-items: stretch;
+			flex-direction: column;
+		}
+
+		.override-grid,
+		.override-delete-row {
+			grid-template-columns: 1fr;
+		}
 	}
 
 	.page-kicker,

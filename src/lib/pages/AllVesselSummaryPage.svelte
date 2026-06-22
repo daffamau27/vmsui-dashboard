@@ -1,6 +1,5 @@
 <script>
 	import { onMount } from 'svelte';
-	import { getFleetVessels } from '$lib/api/fleetApi.js';
 	import { apiRequest } from '$lib/api/authApi.js';
 
 	const TIME_RANGE_PRESETS = [
@@ -42,7 +41,7 @@
 			return currentUser;
 		} catch (err) {
 			console.error('[ALL_VESSEL][CURRENT_USER_PERMISSION_ERROR]', err);
-			currentUserError = err?.message || 'Gagal memuat permission user.';
+			currentUserError = err?.message || 'Failed to load user permissions.';
 			currentUser = null;
 			return null;
 		} finally {
@@ -126,8 +125,9 @@
 	let defaultStartDate = $state(getTodayDateTime('00:00'));
 	let defaultEndDate = $state(getTodayDateTime(getCurrentTime()));
 	let vesselRanges = $state({});
-	let timezoneOffset = $state('+07:00');
-	let timezoneMode = $state('manual');
+	let defaultTimezoneOffset = $state('+07:00');
+	let defaultTimezoneMode = $state('manual');
+	let vesselTimezones = $state({});
 
 	let activeDefaultPresetId = $state('custom');
 	let showColumnSelector = $state(false);
@@ -392,6 +392,52 @@
 		};
 	}
 
+	function getVesselTimezone(deviceId) {
+		return (
+			vesselTimezones[deviceId] || {
+				mode: defaultTimezoneMode,
+				offset: defaultTimezoneOffset
+			}
+		);
+	}
+
+	function setVesselTimezone(deviceId, field, value) {
+		const currentTimezone = getVesselTimezone(deviceId);
+
+		vesselTimezones = {
+			...vesselTimezones,
+			[deviceId]: {
+				...currentTimezone,
+				[field]: value
+			}
+		};
+	}
+
+	function applyDefaultTimezoneToSelectedVessels() {
+		const nextTimezones = { ...vesselTimezones };
+
+		selectedDevices.forEach((device) => {
+			nextTimezones[device.id] = {
+				mode: defaultTimezoneMode,
+				offset: defaultTimezoneOffset
+			};
+		});
+
+		vesselTimezones = nextTimezones;
+	}
+
+	function ensureVesselTimezone(deviceId) {
+		if (vesselTimezones[deviceId]) return;
+
+		vesselTimezones = {
+			...vesselTimezones,
+			[deviceId]: {
+				mode: defaultTimezoneMode,
+				offset: defaultTimezoneOffset
+			}
+		};
+	}
+
 	function applyDefaultRangeToSelectedVessels() {
 		const nextRanges = { ...vesselRanges };
 
@@ -499,7 +545,7 @@
 				return formatNumber(row?.distance || 0);
 
 			case 'utc':
-				return row?.range?.timezone || timezoneOffset;
+				return row?.range?.timezone || '-';
 
 			default:
 				return '-';
@@ -515,6 +561,7 @@
 			selectedDeviceIds = devices.map((device) => device.id);
 
 			const nextRanges = { ...vesselRanges };
+			const nextTimezones = { ...vesselTimezones };
 
 			devices.forEach((device) => {
 				if (!nextRanges[device.id]) {
@@ -523,9 +570,17 @@
 						end: defaultEndDate
 					};
 				}
+
+				if (!nextTimezones[device.id]) {
+					nextTimezones[device.id] = {
+						mode: defaultTimezoneMode,
+						offset: defaultTimezoneOffset
+					};
+				}
 			});
 
 			vesselRanges = nextRanges;
+			vesselTimezones = nextTimezones;
 		} else {
 			selectedDeviceIds = [];
 		}
@@ -535,6 +590,7 @@
 		if (checked) {
 			selectedDeviceIds = [...new Set([...selectedDeviceIds, deviceId])];
 			ensureVesselRange(deviceId);
+			ensureVesselTimezone(deviceId);
 		} else {
 			selectedDeviceIds = selectedDeviceIds.filter((id) => id !== deviceId);
 		}
@@ -575,47 +631,72 @@
 		devicesError = '';
 
 		try {
-			console.log('[ALL_VESSEL][LOAD_DEVICES][START]');
+			console.log('[ALL_VESSEL][LOAD_VESSELS][START]');
 
-			const rows = await getFleetVessels();
+			const response = await apiRequest('/all-vessel-summary/vessels', {
+				method: 'GET'
+			});
 
-			console.log('[ALL_VESSEL][LOAD_DEVICES][RESULT]', rows);
+			const rows = response?.data || [];
+
+			console.log('[ALL_VESSEL][LOAD_VESSELS][RESULT]', rows);
 
 			devices = Array.isArray(rows)
 				? rows.map((item) => ({
-						id: String(item.vesselId || item.id),
-						vesselId: item.vesselId || item.id,
+						id: String(item.id),
+						vesselId: item.id,
 						deviceId: item.deviceId || '',
-						name: item.vesselName || item.name || '-',
-						vesselName: item.vesselName || item.name || '-',
-						online: Boolean(item.online),
+						name: item.vesselName || '-',
+						vesselName: item.vesselName || '-',
+						engines: item.engines || [],
 						raw: item
 					}))
 				: [];
 
 			if (!selectedDeviceIds.length && devices.length) {
-				selectedDeviceIds = [devices[0].id];
+				const firstDeviceId = devices[0].id;
+
+				selectedDeviceIds = [firstDeviceId];
 
 				vesselRanges = {
 					...vesselRanges,
-					[devices[0].id]: {
+					[firstDeviceId]: {
 						start: defaultStartDate,
 						end: defaultEndDate
 					}
 				};
+
+				vesselTimezones = {
+					...vesselTimezones,
+					[firstDeviceId]: {
+						mode: defaultTimezoneMode,
+						offset: defaultTimezoneOffset
+					}
+				};
 			}
 		} catch (err) {
-			console.error('[ALL_VESSEL][LOAD_DEVICES][ERROR]', err);
-			devicesError = err?.message || 'Gagal memuat vessel list dari API.';
+			console.error('[ALL_VESSEL][LOAD_VESSELS][ERROR]', err);
+			devicesError = err?.message || 'Failed to load the vessel list from the API.';
 			devices = [];
 		} finally {
 			devicesLoading = false;
 		}
 	}
 
+	function isValidDateTimeRange(start, end) {
+		if (!start || !end) return false;
+
+		const startTime = new Date(start).getTime();
+		const endTime = new Date(end).getTime();
+
+		if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return false;
+
+		return startTime <= endTime;
+	}
+
 	async function loadReport() {
 		if (!canAccessAllVesselSummary) {
-			reportError = 'Anda tidak memiliki permission access_all_vessel_summary.';
+			reportError = 'You do not have the access_all_vessel_summary permission.';
 			return;
 		}
 
@@ -625,7 +706,7 @@
 		}
 
 		if (!selectedDevices.length) {
-			reportError = 'Pilih minimal satu vessel.';
+			reportError = 'Select at least one vessel.';
 			return;
 		}
 
@@ -635,7 +716,17 @@
 		});
 
 		if (invalidRange) {
-			reportError = `Range untuk ${invalidRange.name} belum lengkap.`;
+			reportError = `The range for ${invalidRange.name} is incomplete.`;
+			return;
+		}
+
+		const invalidDateOrder = selectedDevices.find((device) => {
+			const range = getVesselRange(device.id);
+			return !isValidDateTimeRange(range.start, range.end);
+		});
+
+		if (invalidDateOrder) {
+			reportError = `The range for ${invalidDateOrder.name} is invalid. Start must not be later than End.`;
 			return;
 		}
 
@@ -646,48 +737,78 @@
 		loadingStatus = 'Preparing request';
 
 		try {
-			const ranges = selectedDevices.map((device) => {
-				const range = getVesselRange(device.id);
+			const groupedRequests = new Map();
 
-				return {
+			selectedDevices.forEach((device) => {
+				const range = getVesselRange(device.id);
+				const timezone = getVesselTimezone(device.id);
+
+				const timezoneMode = timezone.mode === 'auto' ? 'auto' : 'manual';
+				const timezoneOffset = timezone.offset || '+07:00';
+				const groupKey = timezoneMode === 'auto' ? 'auto' : `manual__${timezoneOffset}`;
+
+				if (!groupedRequests.has(groupKey)) {
+					groupedRequests.set(groupKey, {
+						timezoneMode,
+						timezoneOffset,
+						ranges: []
+					});
+				}
+
+				groupedRequests.get(groupKey).ranges.push({
 					vesselId: Number(device.vesselId),
 					start: formatDateTimeForApi(range.start),
 					end: formatDateTimeForApi(range.end)
+				});
+			});
+
+			const requestGroups = Array.from(groupedRequests.values());
+
+			loadingStatus = `Loading ${selectedDevices.length} vessel summary`;
+
+			const responses = [];
+
+			for (const requestGroup of requestGroups) {
+				const requestBody = {
+					timezoneMode: requestGroup.timezoneMode,
+					ranges: requestGroup.ranges
 				};
+
+				if (requestGroup.timezoneMode === 'manual') {
+					requestBody.timezoneOffset = requestGroup.timezoneOffset;
+				}
+
+				const response = await apiRequest('/all-vessel-summary/data', {
+					method: 'POST',
+					body: JSON.stringify(requestBody)
+				});
+
+				responses.push(response);
+
+				completed += requestGroup.ranges.length;
+			}
+
+			const mergedRows = responses.flatMap((response) => {
+				const payload = response?.data || {};
+				return Array.isArray(payload.rows) ? payload.rows : [];
 			});
 
-			loadingStatus = `Loading ${ranges.length} vessel summary`;
-
-			const response = await apiRequest('/all-vessel-summary/data', {
-				method: 'POST',
-				body: JSON.stringify({
-					timezoneMode,
-					timezoneOffset,
-					ranges
-				})
-			});
-
-			const payload = response?.data || {};
-
-			vesselReportRows = Array.isArray(payload.rows)
-				? payload.rows.map((row) => ({
-						...row,
-						id: String(row.vessel_id)
-					}))
-				: [];
+			vesselReportRows = mergedRows.map((row) => ({
+				...row,
+				id: String(row.vessel_id)
+			}));
 
 			const dynamicDefaultColumnIds = buildDynamicEngineColumns(vesselReportRows)
 				.filter((col) => ['runtime', 'fuel'].includes(col.type) || col.id.includes('sriti'))
 				.map((col) => col.id);
 
 			visibleColumnIds = [...new Set([...dynamicDefaultColumnIds, ...defaultColumnIds])];
-
-			completed = ranges.length;
+			
 			hasLoadedReport = true;
 			loadingStatus = 'Completed';
 		} catch (err) {
 			console.error('[ALL_VESSEL][LOAD_REPORT][ERROR]', err);
-			reportError = err?.message || 'Gagal memuat all vessel summary.';
+			reportError = err?.message || 'Failed to load the all vessel summary.';
 			vesselReportRows = [];
 			hasLoadedReport = true;
 		} finally {
@@ -706,12 +827,12 @@
 
 <section class="avs-page">
 	{#if currentUserLoading}
-		<div class="status-box">Memuat permission user...</div>
+		<div class="status-box">Loading user permissions...</div>
 	{:else if currentUserError}
 		<div class="status-box error-box">{currentUserError}</div>
 	{:else if currentUser && !canAccessAllVesselSummary}
 		<div class="status-box error-box">
-			Anda tidak memiliki permission untuk mengakses All Vessel Summary.
+			You do not have permission to access All Vessel Summary.
 		</div>
 	{/if}
 
@@ -820,117 +941,220 @@
 						</label>
 					{/each}
 				{:else}
-					<div class="empty-box">Tidak ada vessel.</div>
+					<div class="empty-box">No vessels available.</div>
 				{/if}
 			</div>
 		</aside>
 
 		<section class="control-panel">
-			<section class="table-section">
-				<div class="section-header">
+			<section class="table-section summary-request-section">
+				<div class="section-header summary-request-header">
 					<div>
-						<span class="section-kicker">Range</span>
+						<span class="section-kicker">Range & UTC</span>
 						<h2>Summary Request</h2>
 					</div>
 
 					<strong>{activeDefaultPresetLabel}</strong>
 				</div>
 
-				<div class="filter-grid">
-					<label>
-						<span>Start</span>
-						<input
-							type="datetime-local"
-							bind:value={defaultStartDate}
-							onchange={() => (activeDefaultPresetId = 'custom')}
-						/>
-					</label>
+				<div class="summary-request-body">
+					<div class="request-config-card">
+						<div class="request-config-head">
+							<div class="request-title-block">
+								<div class="request-icon">↔</div>
 
-					<label>
-						<span>End</span>
-						<input
-							type="datetime-local"
-							bind:value={defaultEndDate}
-							onchange={() => (activeDefaultPresetId = 'custom')}
-						/>
-					</label>
+								<div>
+									<h3>Default Request</h3>
+									<p>Set the main range and UTC, then apply them to the selected vessels.</p>
+								</div>
+							</div>
 
-					<label>
-						<span>Timezone</span>
-						<select bind:value={timezoneOffset}>
-							{#each TIMEZONE_OPTIONS as option}
-								<option value={option.value}>{option.label}</option>
-							{/each}
-						</select>
-					</label>
+							<span class="request-badge">
+								{defaultTimezoneMode === 'auto' ? 'Auto UTC' : defaultTimezoneOffset}
+							</span>
+						</div>
 
-					<label>
-						<span>Timezone Mode</span>
-						<select bind:value={timezoneMode}>
-							<option value="manual">Manual</option>
-							<option value="auto">Auto</option>
-						</select>
-					</label>
-				</div>
+						<div class="request-config-grid">
+							<label class="request-field">
+								<span>Start</span>
+								<input
+									type="datetime-local"
+									bind:value={defaultStartDate}
+									onchange={() => (activeDefaultPresetId = 'custom')}
+								/>
+							</label>
 
-				<div class="preset-row">
-					{#each TIME_RANGE_PRESETS as preset}
-						<button
-							type="button"
-							class:active-preset={activeDefaultPresetId === preset.id}
-							onclick={() => applyDefaultRangePreset(preset)}
-						>
-							{preset.label}
-						</button>
-					{/each}
-				</div>
+							<label class="request-field">
+								<span>End</span>
+								<input
+									type="datetime-local"
+									bind:value={defaultEndDate}
+									onchange={() => (activeDefaultPresetId = 'custom')}
+								/>
+							</label>
 
-				<div class="range-note">
-					Selected range: <strong>{selectedRangeSummary}</strong>
-				</div>
+							<label class="request-field">
+								<span>Default UTC Mode</span>
+								<select bind:value={defaultTimezoneMode}>
+									<option value="manual">Manual</option>
+									<option value="auto">Auto</option>
+								</select>
+							</label>
 
-				<div class="range-actions">
-					<button
-						type="button"
-						class="secondary-btn"
-						onclick={applyDefaultRangeToSelectedVessels}
-						disabled={!selectedDevicesCount}
-					>
-						Apply Default Range to Selected Vessels
-					</button>
-				</div>
+							<label class="request-field">
+								<span>Default UTC</span>
+								<select bind:value={defaultTimezoneOffset} disabled={defaultTimezoneMode === 'auto'}>
+									{#each TIMEZONE_OPTIONS as option}
+										<option value={option.value}>{option.label}</option>
+									{/each}
+								</select>
+							</label>
+						</div>
 
-				<div class="vessel-range-summary">
-					<div class="vessel-range-head">
-						<span>Vessel</span>
-						<span>Start</span>
-						<span>End</span>
+						<div class="request-presets">
+							<span>Quick range</span>
+
+							<div class="request-preset-buttons">
+								{#each TIME_RANGE_PRESETS as preset}
+									<button
+										type="button"
+										class:active-preset={activeDefaultPresetId === preset.id}
+										onclick={() => applyDefaultRangePreset(preset)}
+									>
+										{preset.label}
+									</button>
+								{/each}
+							</div>
+						</div>
+
+						<div class="request-actions">
+							<button
+								type="button"
+								class="secondary-btn"
+								onclick={applyDefaultRangeToSelectedVessels}
+								disabled={!selectedDevicesCount}
+							>
+								Apply Range
+							</button>
+
+							<button
+								type="button"
+								class="secondary-btn"
+								onclick={applyDefaultTimezoneToSelectedVessels}
+								disabled={!selectedDevicesCount}
+							>
+								Apply UTC
+							</button>
+						</div>
 					</div>
 
-					{#if selectedDevices.length}
-						{#each selectedDevices as device}
-							<div class="vessel-range-row">
-								<div class="vessel-range-name">
-									<strong>{device.name}</strong>
-								</div>
+					<div class="request-summary-strip">
+						<div class="request-summary-item">
+							<span>Default Range</span>
+							<strong>{selectedRangeSummary}</strong>
+						</div>
 
-								<input
-									type="datetime-local"
-									value={getVesselRange(device.id).start}
-									onchange={(event) =>
-										setVesselRange(device.id, 'start', event.currentTarget.value)}
-								/>
+						<div class="request-summary-item">
+							<span>Default UTC</span>
+							<strong>{defaultTimezoneMode === 'auto' ? 'Auto UTC' : defaultTimezoneOffset}</strong>
+						</div>
 
-								<input
-									type="datetime-local"
-									value={getVesselRange(device.id).end}
-									onchange={(event) => setVesselRange(device.id, 'end', event.currentTarget.value)}
-								/>
+						<div class="request-summary-item">
+							<span>Selected Vessel</span>
+							<strong>{selectedDevicesCount}</strong>
+						</div>
+
+						<div class="request-summary-item">
+							<span>Preset</span>
+							<strong>{activeDefaultPresetLabel}</strong>
+						</div>
+					</div>
+
+					<div class="vessel-request-panel">
+						<div class="vessel-request-head">
+							<div>
+								<h3>Request per Vessel</h3>
+								<p>Each vessel can use a different range and UTC setting.</p>
 							</div>
-						{/each}
-					{:else}
-						<div class="empty-box">Pilih vessel terlebih dahulu.</div>
-					{/if}
+
+							<strong>{selectedDevicesCount} selected</strong>
+						</div>
+
+						{#if selectedDevices.length}
+							<div class="vessel-request-list">
+								{#each selectedDevices as device}
+									<article class="vessel-request-card">
+										<div class="vessel-request-title">
+											<div class="vessel-avatar">
+												{device.name?.slice(0, 1).toUpperCase() || 'V'}
+											</div>
+
+											<div class="vessel-request-name">
+												<strong>{device.name}</strong>
+												<small>{device.deviceId || 'No device id'}</small>
+											</div>
+
+											<span class="vessel-utc-pill">
+												{getVesselTimezone(device.id).mode === 'auto'
+													? 'Auto UTC'
+													: getVesselTimezone(device.id).offset}
+											</span>
+										</div>
+
+										<div class="vessel-request-fields">
+											<label class="request-field">
+												<span>Start</span>
+												<input
+													type="datetime-local"
+													value={getVesselRange(device.id).start}
+													onchange={(event) =>
+														setVesselRange(device.id, 'start', event.currentTarget.value)}
+												/>
+											</label>
+
+											<label class="request-field">
+												<span>End</span>
+												<input
+													type="datetime-local"
+													value={getVesselRange(device.id).end}
+													onchange={(event) =>
+														setVesselRange(device.id, 'end', event.currentTarget.value)}
+												/>
+											</label>
+
+											<label class="request-field">
+												<span>UTC Mode</span>
+												<select
+													value={getVesselTimezone(device.id).mode}
+													onchange={(event) =>
+														setVesselTimezone(device.id, 'mode', event.currentTarget.value)}
+												>
+													<option value="manual">Manual</option>
+													<option value="auto">Auto</option>
+												</select>
+											</label>
+
+											<label class="request-field">
+												<span>UTC</span>
+												<select
+													value={getVesselTimezone(device.id).offset}
+													onchange={(event) =>
+														setVesselTimezone(device.id, 'offset', event.currentTarget.value)}
+													disabled={getVesselTimezone(device.id).mode === 'auto'}
+												>
+													{#each TIMEZONE_OPTIONS as option}
+														<option value={option.value}>{option.label}</option>
+													{/each}
+												</select>
+											</label>
+										</div>
+									</article>
+								{/each}
+							</div>
+						{:else}
+							<div class="empty-box">Select a vessel first.</div>
+						{/if}
+					</div>
 				</div>
 			</section>
 
@@ -1052,9 +1276,9 @@
 		</div>
 
 		{#if !hasLoadedReport && !loading}
-			<div class="empty-box">Klik Load Summary untuk mengambil data.</div>
+			<div class="empty-box">Click Load Summary to retrieve data.</div>
 		{:else if loading}
-			<div class="empty-box">Summary sedang dimuat...</div>
+			<div class="empty-box">Summary is loading...</div>
 		{:else if vesselReportRows.length}
 			<div class="table-wrapper">
 				<table>
@@ -1095,7 +1319,7 @@
 				</table>
 			</div>
 		{:else}
-			<div class="empty-box">Tidak ada data summary pada range yang dipilih.</div>
+			<div class="empty-box">No summary data is available for the selected range.</div>
 		{/if}
 	</section>
 </section>
@@ -1341,35 +1565,165 @@
 		min-width: 0;
 	}
 
-	.filter-grid {
+	.summary-request-section {
+		overflow: visible;
+	}
+
+	.summary-request-section {
+		overflow: hidden;
+	}
+
+	.summary-request-header {
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.04)),
+			#ffffff;
+	}
+
+	.summary-request-body {
 		padding: 14px;
 		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
 		gap: 12px;
 		background: #f8fafc;
 	}
 
-	.filter-grid label {
+	.request-config-card {
+		padding: 14px;
+		background: #ffffff;
+		border: 1px solid #d9e2ec;
+		box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
 		display: grid;
-		gap: 6px;
+		gap: 14px;
 	}
 
-	.filter-grid label span {
+	.request-config-head {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.request-title-block {
+		display: flex;
+		align-items: flex-start;
+		gap: 10px;
+		min-width: 0;
+	}
+
+	.request-icon {
+		width: 34px;
+		height: 34px;
+		display: grid;
+		place-items: center;
+		border-radius: 10px;
+		background: #dbeafe;
+		color: #1d4ed8;
+		font-size: 18px;
+		font-weight: 900;
+		flex: 0 0 auto;
+	}
+
+	.request-title-block h3,
+	.vessel-request-head h3 {
+		margin: 0;
+		color: #0f172a;
+		font-size: 15px;
+		font-weight: 900;
+	}
+
+	.request-title-block p,
+	.vessel-request-head p {
+		margin: 4px 0 0;
+		color: #64748b;
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.request-badge,
+	.vessel-request-head strong,
+	.vessel-utc-pill {
+		padding: 6px 10px;
+		border-radius: 999px;
+		background: #eff6ff;
+		border: 1px solid #bfdbfe;
+		color: #1d4ed8;
+		font-size: 11px;
+		font-weight: 900;
+		white-space: nowrap;
+	}
+
+	.request-config-grid {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 10px;
+	}
+
+	.request-field {
+		display: grid;
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.request-field span {
 		color: #475569;
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
+		letter-spacing: 0.04em;
 	}
 
-	.preset-row {
-		padding: 0 14px 14px;
+	.request-field input,
+	.request-field select {
+		width: 100%;
+		height: 40px;
+		padding: 0 10px;
+		border: 1px solid #cbd5e1;
+		background: #ffffff;
+		color: #0f172a;
+		font-size: 12px;
+		font-weight: 800;
+		box-sizing: border-box;
+		outline: none;
+	}
+
+	.request-field input:focus,
+	.request-field select:focus {
+		border-color: #2563eb;
+		box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+	}
+
+	.request-field select:disabled {
+		background: #f1f5f9;
+		color: #94a3b8;
+		cursor: not-allowed;
+	}
+
+	.request-presets {
+		padding: 10px;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		background: #f8fafc;
+		border: 1px solid #e2e8f0;
+	}
+
+	.request-presets > span {
+		color: #475569;
+		font-size: 11px;
+		font-weight: 900;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		white-space: nowrap;
+	}
+
+	.request-preset-buttons {
 		display: flex;
 		gap: 8px;
 		flex-wrap: wrap;
-		background: #f8fafc;
+		justify-content: flex-end;
 	}
 
-	.preset-row button {
+	.request-preset-buttons button {
 		height: 34px;
 		padding: 0 12px;
 		border: 1px solid #cbd5e1;
@@ -1380,100 +1734,180 @@
 		cursor: pointer;
 	}
 
-	.preset-row button.active-preset {
+	.request-preset-buttons button.active-preset {
 		border-color: #2563eb;
 		background: #dbeafe;
 		color: #1d4ed8;
 	}
 
-	.range-actions {
-		padding: 0 14px 14px;
-		background: #f8fafc;
-	}
-
-	.vessel-range-summary {
-		padding: 14px;
-		background: #f8fafc;
-		border-top: 1px solid #e2e8f0;
-		display: grid;
+	.request-actions {
+		display: flex;
 		gap: 8px;
-		max-height: 280px;
-		overflow: auto;
+		flex-wrap: wrap;
+		justify-content: flex-end;
 	}
 
-	.vessel-range-head,
-	.vessel-range-row {
+	.request-actions .secondary-btn {
+		width: auto;
+		height: 36px;
+		padding: 0 14px;
+		background: #ffffff;
+	}
+
+	.request-summary-strip {
 		display: grid;
-		grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1fr) minmax(180px, 1fr);
+		grid-template-columns: 1.7fr 0.8fr 0.7fr 0.7fr;
 		gap: 10px;
-		align-items: center;
 	}
 
-	.vessel-range-head {
-		position: sticky;
-		top: 0;
-		z-index: 2;
-		padding: 8px 10px;
-		background: #f1f5f9;
+	.request-summary-item {
+		min-width: 0;
+		padding: 12px;
+		background: #ffffff;
 		border: 1px solid #d9e2ec;
+		display: grid;
+		gap: 5px;
 	}
 
-	.vessel-range-head span {
-		color: #334155;
+	.request-summary-item span {
+		color: #64748b;
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
+		letter-spacing: 0.04em;
 	}
 
-	.vessel-range-row {
-		padding: 10px;
+	.request-summary-item strong {
+		color: #0f172a;
+		font-size: 12px;
+		font-weight: 900;
+		overflow-wrap: anywhere;
+	}
+
+	.vessel-request-panel {
+		padding: 14px;
 		background: #ffffff;
 		border: 1px solid #d9e2ec;
+		display: grid;
+		gap: 12px;
 	}
 
-	.vessel-range-name {
+	.vessel-request-head {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.vessel-request-list {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 10px;
+		max-height: 420px;
+		overflow: auto;
+		padding-right: 2px;
+	}
+
+	.vessel-request-card {
+		padding: 12px;
+		background: #f8fafc;
+		border: 1px solid #e2e8f0;
+		display: grid;
+		gap: 12px;
+	}
+
+	.vessel-request-title {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 10px;
+	}
+
+	.vessel-avatar {
+		width: 34px;
+		height: 34px;
+		display: grid;
+		place-items: center;
+		border-radius: 10px;
+		background: #0f172a;
+		color: #ffffff;
+		font-size: 13px;
+		font-weight: 900;
+	}
+
+	.vessel-request-name {
 		display: grid;
 		gap: 3px;
 		min-width: 0;
 	}
 
-	.vessel-range-name strong {
+	.vessel-request-name strong {
 		color: #0f172a;
 		font-size: 12px;
 		font-weight: 900;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
-	.vessel-range-name small {
+	.vessel-request-name small {
 		color: #64748b;
 		font-size: 10px;
 		font-weight: 800;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
-	.vessel-range-row input {
-		width: 100%;
-		height: 38px;
-		padding: 0 10px;
-		border: 1px solid #cbd5e1;
-		background: #ffffff;
-		color: #0f172a;
-		font-size: 12px;
-		font-weight: 800;
-		box-sizing: border-box;
+	.vessel-request-fields {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 10px;
 	}
 
-	@media (max-width: 900px) {
-		.vessel-range-head,
-		.vessel-range-row {
+	@media (max-width: 1200px) {
+		.request-config-grid,
+		.request-summary-strip {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.vessel-request-list {
 			grid-template-columns: 1fr;
 		}
 	}
 
-	.range-note {
-		padding: 12px 14px;
-		border-top: 1px solid #e2e8f0;
-		color: #475569;
-		font-size: 12px;
-		font-weight: 800;
+	@media (max-width: 760px) {
+		.request-config-head,
+		.request-presets,
+		.vessel-request-head {
+			flex-direction: column;
+			align-items: stretch;
+		}
+
+		.request-config-grid,
+		.request-summary-strip,
+		.vessel-request-fields {
+			grid-template-columns: 1fr;
+		}
+
+		.request-preset-buttons,
+		.request-actions {
+			justify-content: stretch;
+		}
+
+		.request-preset-buttons button,
+		.request-actions .secondary-btn {
+			width: 100%;
+		}
+
+		.vessel-request-title {
+			grid-template-columns: auto minmax(0, 1fr);
+		}
+
+		.vessel-utc-pill {
+			grid-column: 1 / -1;
+			width: fit-content;
+		}
 	}
 
 	.column-selector {

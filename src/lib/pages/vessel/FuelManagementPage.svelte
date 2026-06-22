@@ -304,7 +304,7 @@
 		successMessage = '';
 	}
 
-	function getErrorMessage(err, fallback = 'Terjadi kesalahan.') {
+	function getErrorMessage(err, fallback = 'An error occurred.') {
 		return err?.data?.message || err?.response?.data?.message || err?.message || fallback;
 	}
 
@@ -326,7 +326,7 @@
 			return currentUser;
 		} catch (err) {
 			console.error('[CURRENT_USER_PERMISSION_ERROR][FUEL_MANAGEMENT]', err);
-			currentUserError = err?.message || 'Gagal memuat permission user.';
+			currentUserError = err?.message || 'Failed to load user permissions.';
 			currentUser = null;
 			return null;
 		} finally {
@@ -373,7 +373,7 @@
 		} catch (err) {
 			console.error('[FUEL_MANAGEMENT][DATA][ERROR]', err);
 			dashboardData = null;
-			errorMessage = getErrorMessage(err, 'Gagal memuat data Fuel Management.');
+			errorMessage = getErrorMessage(err, 'Failed to load Fuel Management data.');
 		} finally {
 			loadingData = false;
 		}
@@ -399,7 +399,7 @@
 			console.error('[FUEL_MANAGEMENT][HISTORY][ERROR]', err);
 			historyRows = [];
 			historyPagination = { total_items: 0, page, limit, total_pages: 1 };
-			historyError = getErrorMessage(err, 'Gagal memuat history Fuel Management.');
+			historyError = getErrorMessage(err, 'Failed to load Fuel Management history.');
 		} finally {
 			loadingHistory = false;
 		}
@@ -427,12 +427,12 @@
 		clearMessages();
 
 		if (!currentVesselId) {
-			errorMessage = 'Pilih vessel terlebih dahulu.';
+			errorMessage = 'Please select a vessel first.';
 			return;
 		}
 
 		if (!robForm.datetime || robForm.rob === '' || Number.isNaN(Number(robForm.rob))) {
-			errorMessage = 'Datetime dan nilai ROB wajib diisi dengan benar.';
+			errorMessage = 'Datetime and ROB value must be filled in correctly.';
 			return;
 		}
 
@@ -446,13 +446,13 @@
 				note: robForm.note
 			});
 
-			successMessage = response?.message || 'Fuel ROB berhasil disimpan.';
+			successMessage = response?.message || 'Fuel ROB saved successfully.';
 			robForm.rob = '';
 			robForm.note = '';
 			await refreshCurrent();
 		} catch (err) {
 			console.error('[FUEL_MANAGEMENT][SAVE_ROB][ERROR]', err);
-			errorMessage = getErrorMessage(err, 'Gagal menyimpan Fuel ROB.');
+			errorMessage = getErrorMessage(err, 'Failed to save Fuel ROB.');
 		} finally {
 			actionLoading = '';
 		}
@@ -462,7 +462,7 @@
 		clearMessages();
 
 		if (!currentVesselId) {
-			errorMessage = 'Pilih vessel terlebih dahulu.';
+			errorMessage = 'Please select a vessel first.';
 			return;
 		}
 
@@ -470,19 +470,19 @@
 		const consumption = Number(transactionForm.consumption || 0);
 
 		if (!transactionForm.datetime) {
-			errorMessage = 'Datetime transaksi wajib diisi.';
+			errorMessage = 'Transaction datetime is required.';
 			return;
 		}
 
 		if (received <= 0 && consumption <= 0) {
 			errorMessage =
-				'Isi salah satu nilai: Received untuk Bunkering In atau Consumption untuk Bunkering Out.';
+				'Fill in one value only: Received for Bunkering In or Consumption for Bunkering Out.';
 			return;
 		}
 
 		if (received > 0 && consumption > 0) {
 			errorMessage =
-				'Gunakan salah satu saja. Received untuk Bunkering In, atau Consumption untuk Bunkering Out.';
+				'Use only one field. Received is for Bunkering In, while Consumption is for Bunkering Out.';
 			return;
 		}
 
@@ -497,14 +497,14 @@
 				note: transactionForm.note
 			});
 
-			successMessage = response?.message || 'Fuel transaction berhasil disimpan.';
+			successMessage = response?.message || 'Fuel transaction saved successfully.';
 			transactionForm.received = '';
 			transactionForm.consumption = '';
 			transactionForm.note = '';
 			await refreshCurrent();
 		} catch (err) {
 			console.error('[FUEL_MANAGEMENT][TRANSACTION][ERROR]', err);
-			errorMessage = getErrorMessage(err, 'Gagal menyimpan fuel transaction.');
+			errorMessage = getErrorMessage(err, 'Failed to save fuel transaction.');
 		} finally {
 			actionLoading = '';
 		}
@@ -514,17 +514,17 @@
 		clearMessages();
 
 		if (!item?.id || !item?.is_deletable) return;
-		if (!window.confirm(`Hapus transaksi ${item.action} pada ${item.date}?`)) return;
+		if (!window.confirm(`Delete transaction ${item.action} on ${item.date}?`)) return;
 
 		actionLoading = `delete-${item.id}`;
 
 		try {
 			const response = await deleteFuelTransaction(item.id);
-			successMessage = response?.message || 'Transaksi berhasil dihapus.';
+			successMessage = response?.message || 'Transaction deleted successfully.';
 			await refreshCurrent();
 		} catch (err) {
 			console.error('[FUEL_MANAGEMENT][DELETE][ERROR]', err);
-			errorMessage = getErrorMessage(err, 'Gagal menghapus transaksi.');
+			errorMessage = getErrorMessage(err, 'Failed to delete transaction.');
 		} finally {
 			actionLoading = '';
 		}
@@ -552,12 +552,12 @@
 		clearMessages();
 
 		if (!currentVesselId) {
-			errorMessage = 'Pilih vessel terlebih dahulu.';
+			errorMessage = 'Please select a vessel first.';
 			return;
 		}
 
 		if (!selectedImportFile) {
-			errorMessage = 'Pilih file Excel VDOR terlebih dahulu.';
+			errorMessage = 'Please select a VDOR Excel file first.';
 			return;
 		}
 
@@ -567,7 +567,7 @@
 			const fileBase64 = await fileToBase64(selectedImportFile);
 			const response = await importFuelVdor({ vesselId: currentVesselId, fileBase64 });
 
-			successMessage = response?.message || 'VDOR berhasil diimport.';
+			successMessage = response?.message || 'VDOR imported successfully.';
 			selectedImportFile = null;
 			selectedImportFileName = '';
 			await refreshCurrent();
@@ -575,7 +575,7 @@
 			console.error('[FUEL_MANAGEMENT][IMPORT_VDOR][ERROR]', err);
 			errorMessage = getErrorMessage(
 				err,
-				'Gagal import VDOR. Pastikan file memakai template Excel yang benar.'
+				'Failed to import VDOR. Make sure the file uses the correct Excel template.'
 			);
 		} finally {
 			importLoading = false;
@@ -610,7 +610,7 @@
 			URL.revokeObjectURL(url);
 		} catch (err) {
 			console.error('[FUEL_MANAGEMENT][DOWNLOAD_TEMPLATE][ERROR]', err);
-			errorMessage = getErrorMessage(err, 'Gagal download template VDOR.');
+			errorMessage = getErrorMessage(err, 'Failed to download the VDOR template.');
 		} finally {
 			actionLoading = '';
 		}
@@ -717,8 +717,8 @@
 			{#if !currentVesselId && !hideNoVesselNotice}
 				<div class="fuel-toast warning">
 					<div>
-						<strong>Vessel belum dipilih</strong>
-						<span>Pilih vessel terlebih dahulu untuk menampilkan data Fuel Management.</span>
+						<strong>No vessel selected</strong>
+						<span>Please select a vessel first to display Fuel Management data.</span>
 					</div>
 					<button
 						type="button"
@@ -804,7 +804,7 @@
 				</div>
 			{:else}
 				<div class="empty-state">
-					Data comparison tidak tersedia untuk permission atau tanggal ini.
+					Comparison data is not available for your permissions or this date.
 				</div>
 			{/if}
 		</article>
@@ -929,7 +929,7 @@
 				</div>
 			{:else}
 				<div class="empty-state">
-					Akun ini tidak memiliki permission untuk mengelola ROB, transaksi, atau import VDOR.
+					This account does not have permission to manage ROB, transactions, or VDOR imports.
 				</div>
 			{/if}
 		</article>
@@ -991,7 +991,7 @@
 					</div>
 				{:else}
 					<div class="empty-state">
-						Data tidak tersedia atau permission tabel ini belum diberikan.
+						Data is not available or permission for this table has not been granted.
 					</div>
 				{/if}
 			</article>
@@ -1072,7 +1072,7 @@
 				</table>
 			</div>
 		{:else}
-			<div class="empty-state">History belum tersedia untuk tanggal ini.</div>
+			<div class="empty-state">History is not available for this date.</div>
 		{/if}
 	</section>
 </section>

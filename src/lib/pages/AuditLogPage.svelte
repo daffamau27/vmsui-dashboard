@@ -69,7 +69,7 @@
 			return currentUser;
 		} catch (err) {
 			console.error('[AUDIT_LOG][CURRENT_USER_ERROR]', err);
-			currentUserError = err?.message || 'Gagal memuat data user.';
+			currentUserError = err?.message || 'Failed to load user data.';
 			currentUser = null;
 			return null;
 		} finally {
@@ -193,9 +193,9 @@
 			console.error('[AUDIT_LOG][LOAD_ERROR]', err);
 
 			if (auditScope === 'all' && String(err?.message || '').includes('Forbidden')) {
-				error = 'Endpoint All Audit Logs hanya dapat diakses oleh Super Admin.';
+				error = 'The All Audit Logs endpoint can only be accessed by Super Admin.';
 			} else {
-				error = err?.message || 'Gagal memuat audit log.';
+				error = err?.message || 'Failed to load audit logs.';
 			}
 
 			logs = [];
@@ -228,7 +228,7 @@
 			selectedDetail = response?.data || null;
 		} catch (err) {
 			console.error('[AUDIT_LOG][DETAIL_ERROR]', err);
-			error = err?.message || 'Gagal memuat detail audit log.';
+			error = err?.message || 'Failed to load audit log detail.';
 			detailOpen = false;
 		} finally {
 			detailLoading = false;
@@ -321,9 +321,9 @@
 			console.error('[AUDIT_LOG][EXPORT_ERROR]', err);
 
 			if (auditScope === 'all' && String(err?.message || '').includes('Forbidden')) {
-				error = 'Export All Audit Logs hanya dapat diakses oleh Super Admin.';
+				error = 'Exporting All Audit Logs is only available for Super Admin.';
 			} else {
-				error = err?.message || 'Gagal export audit log CSV.';
+				error = err?.message || 'Failed to export audit log CSV.';
 			}
 		} finally {
 			exporting = false;
@@ -583,7 +583,7 @@
 				</button>
 			</div>
 		{:else}
-			<div class="empty-box">Tidak ada audit log untuk user ini.</div>
+			<div class="empty-box">No audit logs are available for this user.</div>
 		{/if}
 	</section>
 </section>
@@ -659,7 +659,7 @@
 						{#if selectedDetail.changes?.length}
 							<pre>{JSON.stringify(selectedDetail.changes, null, 2)}</pre>
 						{:else}
-							<div class="empty-box">Tidak ada detail perubahan.</div>
+							<div class="empty-box">No change details are available.</div>
 						{/if}
 					</div>
 				</div>

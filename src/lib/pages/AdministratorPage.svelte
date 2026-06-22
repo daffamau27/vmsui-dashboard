@@ -1,5 +1,7 @@
 <script>
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
+	import { fade, fly } from 'svelte/transition';
+	import { cubicOut } from 'svelte/easing';
 	import { getCurrentUserApi } from '$lib/api/authApi.js';
 	import {
 		getPermissionCatalogApi,
@@ -26,6 +28,7 @@
 		toggleEngineCurveActiveAdminApi,
 		getReportingVesselsAdminApi,
 		saveAutoReportConfigAdminApi,
+		getReportingAssignableUsersAdminApi,
 		downloadReportingDailyReportAdminApi,
 		sendReportingDailyReportEmailAdminApi,
 		getAutoReportAuditLogsAdminApi,
@@ -36,6 +39,10 @@
 		updateTelegramGroupAdminApi,
 		deleteTelegramGroupAdminApi,
 		saveEngineHealthConfigAdminApi,
+		getAllCompaniesAdminApi,
+		syncCompaniesAdminApi,
+		deleteCompanyAdminApi,
+		syncAllVesselsAdminApi,
 		getGlobalAuditLogsAdminApi,
 		exportGlobalAuditLogsCsvAdminApi
 	} from '$lib/api/administratorApi.js';
@@ -52,6 +59,19 @@
 	let currentUser = null;
 
 	let activeAdminTab = 'users';
+	const adminTabOrder = [
+		'users',
+		'vessels',
+		'assets',
+		'engine-curves',
+		'reporting',
+		'alarm',
+		'global-audit-logs'
+	];
+	let adminTabDirection = 1;
+	let adminTabsElement;
+	let adminTabIndicatorStyle = 'width: 0px; transform: translateX(0px); opacity: 0;';
+	let adminTabIndicatorFrame = null;
 
 	let vessels = [];
 	let vesselsLoading = false;
@@ -60,6 +80,13 @@
 	let selectedVessel = null;
 	let vesselMode = 'create';
 	let searchVessel = '';
+
+	let companies = [];
+	let companiesLoading = false;
+	let companiesSyncing = false;
+	let companyActionLoadingId = null;
+	let syncAllLoading = false;
+	let searchCompany = '';
 
 	let assets = [];
 	let assetsLoading = false;
@@ -84,6 +111,15 @@
 	let reportingSaving = false;
 	let reportingActionLoadingId = null;
 	let selectedReportingVessel = null;
+	let reportingAssignableUsers = [];
+	let reportingAssignableUsersLoading = false;
+	let reportingAssignableSearch = '';
+	let reportingAssignablePagination = {
+		page: 1,
+		pageSize: 20,
+		totalItems: 0,
+		totalPages: 1
+	};
 
 	let globalAuditLogs = [];
 	let globalAuditPagination = {
@@ -130,7 +166,7 @@
 				page: globalAuditPagination.page || page
 			};
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal memuat audit logs.');
+			showAlert('error', error.message || 'Failed to load audit logs.');
 		} finally {
 			globalAuditLoading = false;
 		}
@@ -168,9 +204,9 @@
 				endDate: globalAuditFilters.endDate
 			});
 
-			showAlert('success', 'CSV global audit logs berhasil diunduh.');
+			showAlert('success', 'Global audit logs CSV downloaded successfully.');
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal export global audit logs.');
+			showAlert('error', error.message || 'Failed to export global audit logs.');
 		} finally {
 			globalAuditExporting = false;
 		}
@@ -194,10 +230,10 @@
 		isEnabled: false,
 		sendTime: '08:00',
 		timezoneMode: 'auto',
-		timezoneOffset: '+00:00',
-		picText: '',
-		ccText: '',
-		bccText: ''
+		timezoneOffset: '+07:00',
+		picEmails: [],
+		ccEmails: [],
+		bccEmails: []
 	};
 
 	let manualReportDate = new Date().toISOString().slice(0, 10);
@@ -223,9 +259,10 @@
 		name: '',
 		chatId: '',
 		isActive: true,
-		vesselIdsText: '',
+		vesselIds: [],
 		alarmKeys: []
 	};
+	let telegramVesselSearch = '';
 
 	let autoReportAuditLogs = [];
 	let autoReportAuditLoading = false;
@@ -245,6 +282,217 @@
 			.filter(Boolean);
 	}
 
+	function normalizeEmailList(value) {
+		const list = Array.isArray(value) ? value : parseTextList(value);
+		const seen = new Set();
+
+		return list
+			.map((item) => String(item || '').trim())
+			.filter(Boolean)
+			.filter((email) => {
+				const key = email.toLowerCase();
+
+				if (seen.has(key)) return false;
+
+				seen.add(key);
+				return true;
+			});
+	}
+
+	function getVesselDisplayName(vessel) {
+		return vessel?.vessel_name || vessel?.vesselName || vessel?.name || `Vessel ${vessel?.id || '-'}`;
+	}
+
+	function getVesselDeviceLabel(vessel) {
+		return vessel?.deviceId || vessel?.device_id || vessel?.deviceName || vessel?.thingsboardName || '-';
+	}
+
+	function getCompanyDisplayName(company) {
+		return company?.name || company?.companyName || `Company ${company?.id || '-'}`;
+	}
+
+	function getCompanyThingsboardId(company) {
+		return (
+			company?.companyIdThingsboard ||
+			company?.company_id_thingsboard ||
+			company?.thingsboardId ||
+			company?.customerIdThingsboard ||
+			'-'
+		);
+	}
+
+	function getCompanyById(companyId) {
+		const id = Number(companyId);
+
+		if (!Number.isFinite(id) || id <= 0) return null;
+
+		return companies.find((company) => Number(company?.id) === id) || null;
+	}
+
+	function getVesselCompanyLabel(vessel) {
+		const companyId = vessel?.companyId ?? vessel?.company_id;
+		const company = getCompanyById(companyId);
+
+		if (company) return `${getCompanyDisplayName(company)} • ID ${company.id}`;
+		if (companyId) return `Company ID ${companyId}`;
+
+		return 'No Company';
+	}
+
+	function getAutoReportConfig(vessel) {
+		return (
+			vessel?.auto_report ||
+			vessel?.autoReport ||
+			vessel?.autoReportConfig ||
+			vessel?.auto_report_config ||
+			{}
+		);
+	}
+
+	function isAutoReportEnabled(vessel) {
+		const config = getAutoReportConfig(vessel);
+
+		return Boolean(config.is_enabled ?? config.isEnabled);
+	}
+
+	function getEngineHealthConfig(vessel) {
+		return vessel?.engine_health || vessel?.engineHealth || vessel?.engineHealthConfig || {};
+	}
+
+	function isEngineHealthEnabled(vessel) {
+		const config = getEngineHealthConfig(vessel);
+
+		return Boolean(config.is_enabled ?? config.isEnabled);
+	}
+
+	function getRecipientField(role) {
+		return {
+			pic: 'picEmails',
+			cc: 'ccEmails',
+			bcc: 'bccEmails'
+		}[role];
+	}
+
+	function hasAutoReportRecipient(email, role) {
+		const field = getRecipientField(role);
+		const target = String(email || '').trim().toLowerCase();
+
+		if (!field || !target) return false;
+
+		return (autoReportForm[field] || []).some(
+			(item) => String(item || '').trim().toLowerCase() === target
+		);
+	}
+
+	function toggleAutoReportRecipient(email, role, checked) {
+		const field = getRecipientField(role);
+		const cleanEmail = String(email || '').trim();
+
+		if (!field || !cleanEmail) return;
+
+		const current = normalizeEmailList(autoReportForm[field]);
+		const next = checked
+			? normalizeEmailList([...current, cleanEmail])
+			: current.filter((item) => item.toLowerCase() !== cleanEmail.toLowerCase());
+
+		autoReportForm = {
+			...autoReportForm,
+			[field]: next
+		};
+	}
+
+	function removeAutoReportRecipient(role, email) {
+		toggleAutoReportRecipient(email, role, false);
+	}
+
+	function getAssignableUserName(user) {
+		return user?.fullName || user?.name || user?.username || user?.email || 'Unnamed User';
+	}
+
+	function normalizeIds(value) {
+		const source = Array.isArray(value) ? value : parseTextList(value);
+		const seen = new Set();
+
+		return source
+			.map((item) => Number(item))
+			.filter((item) => Number.isFinite(item) && item > 0)
+			.filter((item) => {
+				if (seen.has(item)) return false;
+
+				seen.add(item);
+				return true;
+			});
+	}
+
+	function getTelegramRuleVesselIds(group) {
+		const rules = group?.rules || {};
+
+		return normalizeIds(
+			rules.vesselIds ||
+				rules.vessel_ids ||
+				rules.vesselId ||
+				rules.vessel_id ||
+				group?.vesselIds ||
+				group?.vessel_ids ||
+				[]
+		);
+	}
+
+	function hasTelegramVessel(vesselId) {
+		const target = Number(vesselId);
+
+		return normalizeIds(telegramForm.vesselIds).includes(target);
+	}
+
+	function toggleTelegramVessel(vesselId, checked) {
+		const id = Number(vesselId);
+
+		if (!Number.isFinite(id) || id <= 0) return;
+
+		const current = normalizeIds(telegramForm.vesselIds);
+		const next = checked ? normalizeIds([...current, id]) : current.filter((item) => item !== id);
+
+		telegramForm = {
+			...telegramForm,
+			vesselIds: next
+		};
+	}
+
+	function getTelegramVesselName(vesselId) {
+		const id = Number(vesselId);
+		const source = [...vessels, ...reportingVessels];
+		const vessel = source.find((item) => Number(item?.id) === id);
+
+		return getVesselDisplayName(vessel || { id });
+	}
+
+	$: telegramVesselOptions = (vessels.length ? vessels : reportingVessels).map((vessel) => ({
+		id: Number(vessel?.id),
+		label: getVesselDisplayName(vessel),
+		sublabel: getVesselDeviceLabel(vessel),
+		status: vessel?.status || ''
+	})).filter((vessel) => Number.isFinite(vessel.id) && vessel.id > 0);
+
+	$: filteredTelegramVesselOptions = telegramVesselOptions.filter((vessel) => {
+		const keyword = telegramVesselSearch.trim().toLowerCase();
+
+		if (!keyword) return true;
+
+		return [vessel.id ? String(vessel.id) : '', vessel.label, vessel.sublabel, vessel.status]
+			.filter(Boolean)
+			.some((value) => String(value).toLowerCase().includes(keyword));
+	});
+
+	$: filteredReportingAssignableUsers = reportingAssignableUsers.filter((user) => {
+		const keyword = reportingAssignableSearch.trim().toLowerCase();
+
+		if (!keyword) return true;
+
+		return [user?.fullName, user?.name, user?.username, user?.email, user?.id ? String(user.id) : '']
+			.filter(Boolean)
+			.some((value) => String(value).toLowerCase().includes(keyword));
+	});
+
 	function nullableNumber(value) {
 		const text = String(value ?? '').trim();
 
@@ -263,11 +511,11 @@
 
 			if (selectedReportingVessel?.id) {
 				const refreshed = reportingVessels.find(
-					(vessel) => vessel.id === selectedReportingVessel.id
+					(vessel) => Number(vessel.id) === Number(selectedReportingVessel.id)
 				);
 
 				if (refreshed) {
-					openReportingVessel(refreshed);
+					openReportingVessel(refreshed, false, false);
 				}
 			}
 		} finally {
@@ -275,33 +523,137 @@
 		}
 	}
 
-	function openReportingVessel(vessel) {
-		selectedReportingVessel = vessel;
+	async function loadReportingAssignableUsers(vesselId, page = 1) {
+		if (!vesselId) return;
 
-		const autoReport = vessel?.auto_report || {};
+		reportingAssignableUsersLoading = true;
+
+		try {
+			const response = await getReportingAssignableUsersAdminApi(vesselId, {
+				page,
+				pageSize: reportingAssignablePagination.pageSize || 20
+			});
+			const data = response?.users
+				? response
+				: response?.data?.users
+					? response.data
+					: unwrapApiData(response);
+
+			reportingAssignableUsers = Array.isArray(data?.users) ? data.users : [];
+			reportingAssignablePagination = data?.pagination || {
+				page,
+				pageSize: reportingAssignablePagination.pageSize || 20,
+				totalItems: reportingAssignableUsers.length,
+				totalPages: 1
+			};
+		} catch (error) {
+			reportingAssignableUsers = [];
+			showAlert('error', error.message || 'Failed to load assignable users for this vessel.');
+		} finally {
+			reportingAssignableUsersLoading = false;
+		}
+	}
+
+	function goToAssignableUserPage(page) {
+		const targetPage = Number(page);
+		const totalPages = Number(reportingAssignablePagination.totalPages || 1);
+
+		if (!selectedReportingVessel?.id) return;
+		if (!Number.isFinite(targetPage) || targetPage < 1 || targetPage > totalPages) return;
+
+		loadReportingAssignableUsers(selectedReportingVessel.id, targetPage);
+	}
+
+	function loadAlarmVessels() {
+		reportingFilters = {
+			...reportingFilters,
+			autoReport: 'all'
+		};
+
+		loadReportingVessels();
+	}
+
+	function openAlarmTab() {
+		setActiveAdminTab('alarm');
+		loadAlarmVessels();
+	}
+
+
+	function setActiveAdminTab(tabKey) {
+		if (!tabKey || activeAdminTab === tabKey) {
+			scheduleAdminTabIndicatorUpdate();
+			return;
+		}
+
+		const currentIndex = adminTabOrder.indexOf(activeAdminTab);
+		const nextIndex = adminTabOrder.indexOf(tabKey);
+		adminTabDirection = nextIndex >= currentIndex ? 1 : -1;
+		activeAdminTab = tabKey;
+		scheduleAdminTabIndicatorUpdate();
+	}
+
+	function scheduleAdminTabIndicatorUpdate() {
+		if (!adminTabsElement || typeof requestAnimationFrame === 'undefined') return;
+
+		if (adminTabIndicatorFrame) {
+			cancelAnimationFrame(adminTabIndicatorFrame);
+		}
+
+		adminTabIndicatorFrame = requestAnimationFrame(updateAdminTabIndicator);
+	}
+
+	async function updateAdminTabIndicator() {
+		await tick();
+
+		const activeButton = adminTabsElement?.querySelector('button.active-tab');
+
+		if (!activeButton) {
+			adminTabIndicatorStyle = 'width: 0px; transform: translateX(0px); opacity: 0;';
+			return;
+		}
+
+		adminTabIndicatorStyle = `width: ${activeButton.offsetWidth}px; transform: translateX(${activeButton.offsetLeft}px); opacity: 1;`;
+		activeButton.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
+	}
+
+	$: activeAdminTab, adminTabsElement, scheduleAdminTabIndicatorUpdate();
+
+	function openReportingVessel(vessel, shouldLoadAssignableUsers = true, shouldClearAlert = true) {
+		selectedReportingVessel = vessel;
+		reportingAssignableSearch = '';
+
+		const autoReport = getAutoReportConfig(vessel);
 		const recipients = autoReport?.recipients || {};
-		const engineHealth = vessel?.engine_health || {};
+		const engineHealth = getEngineHealthConfig(vessel);
 
 		autoReportForm = {
-			isEnabled: Boolean(autoReport.is_enabled),
-			sendTime: autoReport.send_time || '08:00',
-			timezoneMode: autoReport.timezone_mode || 'auto',
-			timezoneOffset: autoReport.timezone_offset || '+00:00',
-			picText: (recipients.pic || []).join(', '),
-			ccText: (recipients.cc || []).join(', '),
-			bccText: (recipients.bcc || []).join(', ')
+			isEnabled: Boolean(autoReport.is_enabled ?? autoReport.isEnabled),
+			sendTime: autoReport.send_time || autoReport.sendTime || '08:00',
+			timezoneMode: autoReport.timezone_mode || autoReport.timezoneMode || 'auto',
+			timezoneOffset: autoReport.timezone_offset || autoReport.timezoneOffset || '+07:00',
+			picEmails: normalizeEmailList(recipients.pic),
+			ccEmails: normalizeEmailList(recipients.cc),
+			bccEmails: normalizeEmailList(recipients.bcc)
 		};
 
 		engineHealthForm = {
-			isEnabled: Boolean(engineHealth.is_enabled),
-			oilPressureMin: engineHealth.oil_pressure_min ?? '',
-			oilPressureMax: engineHealth.oil_pressure_max ?? '',
-			oilTemperatureMax: engineHealth.oil_temperature_max ?? '',
-			coolantTemperatureMin: engineHealth.coolant_temperature_min ?? '',
-			coolantTemperatureMax: engineHealth.coolant_temperature_max ?? ''
+			isEnabled: Boolean(engineHealth.is_enabled ?? engineHealth.isEnabled),
+			oilPressureMin: engineHealth.oil_pressure_min ?? engineHealth.oilPressureMin ?? '',
+			oilPressureMax: engineHealth.oil_pressure_max ?? engineHealth.oilPressureMax ?? '',
+			oilTemperatureMax: engineHealth.oil_temperature_max ?? engineHealth.oilTemperatureMax ?? '',
+			coolantTemperatureMin:
+				engineHealth.coolant_temperature_min ?? engineHealth.coolantTemperatureMin ?? '',
+			coolantTemperatureMax:
+				engineHealth.coolant_temperature_max ?? engineHealth.coolantTemperatureMax ?? ''
 		};
 
-		clearAlert();
+		if (shouldClearAlert) {
+			clearAlert();
+		}
+
+		if (shouldLoadAssignableUsers) {
+			loadReportingAssignableUsers(vessel.id, 1);
+		}
 	}
 
 	function buildAutoReportPayload() {
@@ -309,18 +661,46 @@
 			isEnabled: Boolean(autoReportForm.isEnabled),
 			sendTime: autoReportForm.sendTime || '08:00',
 			recipients: {
-				pic: parseTextList(autoReportForm.picText),
-				cc: parseTextList(autoReportForm.ccText),
-				bcc: parseTextList(autoReportForm.bccText)
+				pic: normalizeEmailList(autoReportForm.picEmails),
+				cc: normalizeEmailList(autoReportForm.ccEmails),
+				bcc: normalizeEmailList(autoReportForm.bccEmails)
 			},
 			timezoneMode: autoReportForm.timezoneMode || 'auto',
-			timezoneOffset: autoReportForm.timezoneOffset || '+00:00'
+			timezoneOffset: autoReportForm.timezoneOffset || '+07:00'
 		};
+	}
+
+	function validateAutoReportPayload(payload) {
+		if (!/^\d{2}:\d{2}$/.test(payload.sendTime || '')) {
+			return 'Send time format must be HH:mm, for example 08:00.';
+		}
+
+		if (!['auto', 'manual'].includes(payload.timezoneMode)) {
+			return 'Timezone mode must be auto or manual.';
+		}
+
+		if (!/^[+-](0\d|1[0-4]):[0-5]\d$/.test(payload.timezoneOffset || '')) {
+			return 'Timezone offset must use the format +07:00, -03:00, up to +14:00.';
+		}
+
+		if (payload.isEnabled && payload.recipients.pic.length === 0) {
+			return 'At least 1 PIC recipient is required when auto-report is enabled.';
+		}
+
+		return null;
 	}
 
 	async function saveAutoReportConfig() {
 		if (!selectedReportingVessel?.id) {
-			showAlert('error', 'Pilih vessel terlebih dahulu.');
+			showAlert('error', 'Please select a vessel first.');
+			return;
+		}
+
+		const payload = buildAutoReportPayload();
+		const errorMessage = validateAutoReportPayload(payload);
+
+		if (errorMessage) {
+			showAlert('error', errorMessage);
 			return;
 		}
 
@@ -328,12 +708,27 @@
 		clearAlert();
 
 		try {
-			await saveAutoReportConfigAdminApi(selectedReportingVessel.id, buildAutoReportPayload());
+			const response = await saveAutoReportConfigAdminApi(selectedReportingVessel.id, payload);
+			const savedConfig = unwrapApiData(response);
 
-			showAlert('success', 'Konfigurasi auto-report berhasil disimpan.');
+			showAlert('success', 'Auto-report configuration saved successfully.');
+
+			selectedReportingVessel = {
+				...selectedReportingVessel,
+				auto_report: {
+					...(selectedReportingVessel.auto_report || {}),
+					...savedConfig,
+					is_enabled: savedConfig?.isEnabled ?? payload.isEnabled,
+					send_time: savedConfig?.sendTime ?? payload.sendTime,
+					timezone_mode: savedConfig?.timezoneMode ?? payload.timezoneMode,
+					timezone_offset: savedConfig?.timezoneOffset ?? payload.timezoneOffset,
+					recipients: savedConfig?.recipients ?? payload.recipients
+				}
+			};
+
 			await loadReportingVessels();
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal menyimpan konfigurasi auto-report.');
+			showAlert('error', error.message || 'Failed to save auto-report configuration.');
 		} finally {
 			reportingSaving = false;
 		}
@@ -352,7 +747,7 @@
 
 	async function saveEngineHealthConfig() {
 		if (!selectedReportingVessel?.id) {
-			showAlert('error', 'Pilih vessel terlebih dahulu.');
+			showAlert('error', 'Please select a vessel first.');
 			return;
 		}
 
@@ -362,10 +757,10 @@
 		try {
 			await saveEngineHealthConfigAdminApi(selectedReportingVessel.id, buildEngineHealthPayload());
 
-			showAlert('success', 'Konfigurasi engine health berhasil disimpan.');
+			showAlert('success', 'Engine health configuration saved successfully.');
 			await loadReportingVessels();
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal menyimpan konfigurasi engine health.');
+			showAlert('error', error.message || 'Failed to save engine health configuration.');
 		} finally {
 			reportingSaving = false;
 		}
@@ -373,12 +768,12 @@
 
 	async function downloadManualDailyReport() {
 		if (!selectedReportingVessel?.id) {
-			showAlert('error', 'Pilih vessel terlebih dahulu.');
+			showAlert('error', 'Please select a vessel first.');
 			return;
 		}
 
 		if (!manualReportDate) {
-			showAlert('error', 'Tanggal report wajib diisi.');
+			showAlert('error', 'Report date is required.');
 			return;
 		}
 
@@ -392,9 +787,9 @@
 				timezoneOffset: autoReportForm.timezoneOffset
 			});
 
-			showAlert('success', 'Daily report berhasil diunduh.');
+			showAlert('success', 'Daily report downloaded successfully.');
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal download daily report.');
+			showAlert('error', error.message || 'Failed to download daily report.');
 		} finally {
 			reportingActionLoadingId = null;
 		}
@@ -402,7 +797,7 @@
 
 	async function sendManualDailyReportEmail() {
 		if (!selectedReportingVessel?.id) {
-			showAlert('error', 'Pilih vessel terlebih dahulu.');
+			showAlert('error', 'Please select a vessel first.');
 			return;
 		}
 
@@ -414,9 +809,9 @@
 				date: manualReportDate || undefined
 			});
 
-			showAlert('success', 'Daily report berhasil dikirim via email.');
+			showAlert('success', 'Daily report sent by email successfully.');
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal mengirim daily report email.');
+			showAlert('error', error.message || 'Failed to send daily report email.');
 		} finally {
 			reportingActionLoadingId = null;
 		}
@@ -443,9 +838,10 @@
 			name: '',
 			chatId: '',
 			isActive: true,
-			vesselIdsText: '',
+			vesselIds: [],
 			alarmKeys: []
 		};
+		telegramVesselSearch = '';
 
 		clearAlert();
 	}
@@ -465,11 +861,12 @@
 				name: detail?.name || '',
 				chatId: detail?.chatId || '',
 				isActive: Boolean(detail?.isActive),
-				vesselIdsText: (detail?.rules?.vesselId || []).join(', '),
+				vesselIds: getTelegramRuleVesselIds(detail),
 				alarmKeys: detail?.rules?.alarmKeys || []
 			};
+			telegramVesselSearch = '';
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal mengambil detail Telegram group.');
+			showAlert('error', error.message || 'Failed to load Telegram group details.');
 		}
 	}
 
@@ -491,20 +888,20 @@
 			chatId: telegramForm.chatId.trim(),
 			isActive: Boolean(telegramForm.isActive),
 			rules: {
-				vesselId: parseIds(telegramForm.vesselIdsText),
+				vesselId: normalizeIds(telegramForm.vesselIds),
 				alarmKeys: telegramForm.alarmKeys
 			}
 		};
 	}
 
 	function validateTelegramForm() {
-		if (!telegramForm.name.trim()) return 'Nama Telegram group wajib diisi.';
-		if (!telegramForm.chatId.trim()) return 'Chat ID wajib diisi.';
-		if (parseIds(telegramForm.vesselIdsText).length === 0) {
-			return 'Minimal 1 vessel ID wajib dipilih.';
+		if (!telegramForm.name.trim()) return 'Telegram group name is required.';
+		if (!telegramForm.chatId.trim()) return 'Chat ID is required.';
+		if (normalizeIds(telegramForm.vesselIds).length === 0) {
+			return 'At least 1 vessel must be selected.';
 		}
 		if (telegramForm.alarmKeys.length === 0) {
-			return 'Minimal 1 alarm key wajib dipilih.';
+			return 'At least 1 alarm key must be selected.';
 		}
 
 		return null;
@@ -527,20 +924,20 @@
 			if (telegramMode === 'create') {
 				const created = await createTelegramGroupAdminApi(payload);
 
-				showAlert('success', 'Telegram group berhasil dibuat.');
+				showAlert('success', 'Telegram group created successfully.');
 				await loadTelegramGroups();
 				await openEditTelegramGroupForm(created);
 			} else if (selectedTelegramGroup?.id) {
 				const updated = await updateTelegramGroupAdminApi(selectedTelegramGroup.id, payload);
 
-				showAlert('success', 'Telegram group berhasil diperbarui.');
+				showAlert('success', 'Telegram group updated successfully.');
 				await loadTelegramGroups();
 				await openEditTelegramGroupForm(updated);
 			}
 
 			await loadReportingVessels();
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal menyimpan Telegram group.');
+			showAlert('error', error.message || 'Failed to save Telegram group.');
 		} finally {
 			telegramSaving = false;
 		}
@@ -549,7 +946,7 @@
 	async function deleteTelegramGroup(group) {
 		if (!group?.id) return;
 
-		const confirmed = window.confirm(`Hapus Telegram group "${group.name}"?`);
+		const confirmed = window.confirm(`Delete Telegram group "${group.name}"?`);
 
 		if (!confirmed) return;
 
@@ -559,7 +956,7 @@
 		try {
 			await deleteTelegramGroupAdminApi(group.id);
 
-			showAlert('success', 'Telegram group berhasil dihapus.');
+			showAlert('success', 'Telegram group deleted successfully.');
 
 			if (selectedTelegramGroup?.id === group.id) {
 				openCreateTelegramGroupForm();
@@ -568,7 +965,7 @@
 			await loadTelegramGroups();
 			await loadReportingVessels();
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal menghapus Telegram group.');
+			showAlert('error', error.message || 'Failed to delete Telegram group.');
 		} finally {
 			telegramActionLoadingId = null;
 		}
@@ -589,9 +986,9 @@
 
 		try {
 			await exportAutoReportAuditLogsCsvAdminApi();
-			showAlert('success', 'CSV audit log berhasil diunduh.');
+			showAlert('success', 'Audit log CSV downloaded successfully.');
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal export CSV audit log.');
+			showAlert('error', error.message || 'Failed to export audit log CSV.');
 		}
 	}
 
@@ -611,7 +1008,7 @@
 	function fileToBase64(file) {
 		return new Promise((resolve, reject) => {
 			if (!file) {
-				reject(new Error('File Excel tidak ditemukan.'));
+				reject(new Error('Excel file was not found.'));
 				return;
 			}
 
@@ -626,7 +1023,7 @@
 			};
 
 			reader.onerror = () => {
-				reject(new Error('Gagal membaca file Excel.'));
+				reject(new Error('Failed to read Excel file.'));
 			};
 
 			reader.readAsDataURL(file);
@@ -650,7 +1047,7 @@
 		const isExcel = allowedExtensions.some((ext) => lowerName.endsWith(ext));
 
 		if (!isExcel) {
-			showAlert('error', 'File harus berupa Excel dengan format .xlsx atau .xls.');
+			showAlert('error', 'The file must be an Excel file in .xlsx or .xls format.');
 
 			event.currentTarget.value = '';
 
@@ -740,11 +1137,29 @@
 
 		if (!keyword) return true;
 
+		const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
+
 		return [
 			vessel?.id ? String(vessel.id) : '',
 			vessel?.deviceId,
 			vessel?.vesselName,
-			vessel?.companyId ? String(vessel.companyId) : ''
+			vessel?.companyId ? String(vessel.companyId) : '',
+			company?.name,
+			getCompanyThingsboardId(company)
+		]
+			.filter(Boolean)
+			.some((value) => String(value).toLowerCase().includes(keyword));
+	});
+
+	$: filteredCompanies = companies.filter((company) => {
+		const keyword = searchCompany.trim().toLowerCase();
+
+		if (!keyword) return true;
+
+		return [
+			company?.id ? String(company.id) : '',
+			getCompanyDisplayName(company),
+			getCompanyThingsboardId(company)
 		]
 			.filter(Boolean)
 			.some((value) => String(value).toLowerCase().includes(keyword));
@@ -801,11 +1216,15 @@
 		}))
 	];
 
+	$: permissionSearchKeyword = searchPermission.trim().toLowerCase();
+
 	$: visiblePermissionGroups = moduleGroups
 		.filter((group) => activeModule === 'all' || group.moduleKey === activeModule)
 		.map((group) => ({
 			...group,
-			permissions: group.permissions.filter((permission) => matchPermission(permission))
+			permissions: group.permissions.filter((permission) =>
+				matchPermission(permission, permissionSearchKeyword)
+			)
 		}))
 		.filter((group) => group.permissions.length > 0);
 
@@ -824,6 +1243,19 @@
 
 	onMount(() => {
 		initializePage();
+		scheduleAdminTabIndicatorUpdate();
+
+		if (typeof window === 'undefined') return;
+
+		window.addEventListener('resize', scheduleAdminTabIndicatorUpdate);
+
+		return () => {
+			window.removeEventListener('resize', scheduleAdminTabIndicatorUpdate);
+
+			if (adminTabIndicatorFrame) {
+				cancelAnimationFrame(adminTabIndicatorFrame);
+			}
+		};
 	});
 
 	async function initializePage() {
@@ -835,6 +1267,7 @@
 			loadUsers(),
 			loadPermissions(),
 			loadVessels(),
+			loadCompanies(),
 			loadAssets(),
 			loadEngineCurves(),
 			loadReportingVessels(),
@@ -846,10 +1279,12 @@
 		const failed = results.find((result) => result.status === 'rejected');
 
 		if (failed) {
-			showAlert('error', failed.reason?.message || 'Gagal memuat sebagian data administrator.');
+			showAlert('error', failed.reason?.message || 'Failed to load some administrator data.');
 		}
 
 		bootLoading = false;
+		await tick();
+		scheduleAdminTabIndicatorUpdate();
 	}
 
 	async function loadCurrentUser() {
@@ -889,6 +1324,14 @@
 		} finally {
 			usersLoading = false;
 		}
+	}
+
+	function unwrapApiData(response) {
+		return response?.data || response;
+	}
+
+	function getApiMessage(response, fallback) {
+		return response?.message || response?.data?.message || fallback;
 	}
 
 	function normalizePermissionKeys(permissionAccess) {
@@ -933,6 +1376,85 @@
 		}
 	}
 
+	async function loadCompanies() {
+		companiesLoading = true;
+
+		try {
+			const response = await getAllCompaniesAdminApi();
+			const data = unwrapApiData(response);
+
+			companies = Array.isArray(data) ? data : [];
+		} finally {
+			companiesLoading = false;
+		}
+	}
+
+	async function syncCompanies() {
+		companiesSyncing = true;
+		clearAlert();
+
+		try {
+			const response = await syncCompaniesAdminApi();
+
+			showAlert(
+				'success',
+				getApiMessage(response, 'Company synchronization from ThingsBoard completed successfully.')
+			);
+
+			await loadCompanies();
+		} catch (error) {
+			showAlert('error', error.message || 'Failed to synchronize companies from ThingsBoard.');
+		} finally {
+			companiesSyncing = false;
+		}
+	}
+
+	async function syncAllCompaniesVesselsEngines() {
+		syncAllLoading = true;
+		clearAlert();
+
+		try {
+			const response = await syncAllVesselsAdminApi();
+			const details = response?.data || {};
+			const detailText = [details.companies, details.vessels].filter(Boolean).join(' | ');
+
+			showAlert(
+				'success',
+				detailText || getApiMessage(response, 'Companies, vessels, and engines synchronized successfully.')
+			);
+
+			await Promise.allSettled([loadCompanies(), loadVessels(), loadReportingVessels()]);
+		} catch (error) {
+			showAlert('error', error.message || 'Failed to synchronize companies, vessels, and engines.');
+		} finally {
+			syncAllLoading = false;
+		}
+	}
+
+	async function deleteCompany(company) {
+		if (!company?.id) return;
+
+		const confirmed = window.confirm(
+			`Delete company "${getCompanyDisplayName(company)}" from the local database?`
+		);
+
+		if (!confirmed) return;
+
+		companyActionLoadingId = company.id;
+		clearAlert();
+
+		try {
+			await deleteCompanyAdminApi(company.id);
+
+			showAlert('success', 'Company deleted successfully.');
+			await Promise.allSettled([loadCompanies(), loadVessels()]);
+		} catch (error) {
+			showAlert('error', error.message || 'Failed to delete company.');
+		} finally {
+			companyActionLoadingId = null;
+		}
+	}
+
 	function openCreateVesselForm() {
 		vesselMode = 'create';
 		selectedVessel = null;
@@ -957,11 +1479,11 @@
 
 	function validateVesselForm() {
 		if (!vesselForm.deviceId.trim()) {
-			return 'Device ID wajib diisi.';
+			return 'Device ID is required.';
 		}
 
 		if (!vesselForm.vesselName.trim()) {
-			return 'Vessel name wajib diisi.';
+			return 'Vessel name is required.';
 		}
 
 		return null;
@@ -997,7 +1519,7 @@
 
 				showAlert(
 					'success',
-					'Vessel berhasil dibuat. Engine akan otomatis diekstrak dari telemetry ThingsBoard.'
+					'Vessel created successfully. Engines will be automatically extracted from ThingsBoard telemetry.'
 				);
 
 				await loadVessels();
@@ -1007,14 +1529,14 @@
 
 				showAlert(
 					'success',
-					'Vessel berhasil diperbarui. Jika Device ID berubah, engine otomatis direfresh.'
+					'Vessel updated successfully. If the Device ID changes, engines will be refreshed automatically.'
 				);
 
 				await loadVessels();
 				openEditVesselForm(updated);
 			}
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal menyimpan vessel.');
+			showAlert('error', error.message || 'Failed to save vessel.');
 		} finally {
 			vesselSaving = false;
 		}
@@ -1024,7 +1546,7 @@
 		if (!vessel?.id) return;
 
 		const confirmed = window.confirm(
-			`Hapus vessel "${vessel.vesselName}"? Engine dan assignment terkait akan ikut terhapus.`
+			`Delete vessel "${vessel.vesselName}"? Related engines and assignments will also be deleted.`
 		);
 
 		if (!confirmed) return;
@@ -1035,7 +1557,7 @@
 		try {
 			await deleteVesselAdminApi(vessel.id);
 
-			showAlert('success', 'Vessel berhasil dihapus.');
+			showAlert('success', 'Vessel deleted successfully.');
 
 			if (selectedVessel?.id === vessel.id) {
 				openCreateVesselForm();
@@ -1043,7 +1565,7 @@
 
 			await loadVessels();
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal menghapus vessel.');
+			showAlert('error', error.message || 'Failed to delete vessel.');
 		} finally {
 			vesselActionLoadingId = null;
 		}
@@ -1094,17 +1616,17 @@
 				assetName: detail?.assetName || detail?.thingsboardName || ''
 			};
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal mengambil detail asset.');
+			showAlert('error', error.message || 'Failed to load asset details.');
 		}
 	}
 
 	function validateAssetForm() {
 		if (!assetForm.assetId.trim()) {
-			return 'Asset ID wajib diisi.';
+			return 'Asset ID is required.';
 		}
 
 		if (!assetForm.assetName.trim()) {
-			return 'Asset name wajib diisi.';
+			return 'Asset name is required.';
 		}
 
 		return null;
@@ -1135,18 +1657,18 @@
 			if (assetMode === 'create') {
 				const created = await createAssetAdminApi(payload);
 
-				showAlert('success', 'Asset berhasil dibuat.');
+				showAlert('success', 'Asset created successfully.');
 				await loadAssets();
 				await openEditAssetForm(created);
 			} else if (selectedAsset?.id) {
 				const updated = await updateAssetAdminApi(selectedAsset.id, payload);
 
-				showAlert('success', 'Asset berhasil diperbarui.');
+				showAlert('success', 'Asset updated successfully.');
 				await loadAssets();
 				await openEditAssetForm(updated);
 			}
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal menyimpan asset.');
+			showAlert('error', error.message || 'Failed to save asset.');
 		} finally {
 			assetSaving = false;
 		}
@@ -1155,7 +1677,7 @@
 	async function deleteAsset(asset) {
 		if (!asset?.id) return;
 
-		const confirmed = window.confirm(`Hapus asset "${asset.assetName || asset.assetId}"?`);
+		const confirmed = window.confirm(`Delete asset "${asset.assetName || asset.assetId}"?`);
 
 		if (!confirmed) return;
 
@@ -1165,7 +1687,7 @@
 		try {
 			await deleteAssetAdminApi(asset.id);
 
-			showAlert('success', 'Asset berhasil dihapus.');
+			showAlert('success', 'Asset deleted successfully.');
 
 			if (selectedAsset?.id === asset.id) {
 				openCreateAssetForm();
@@ -1173,7 +1695,7 @@
 
 			await loadAssets();
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal menghapus asset.');
+			showAlert('error', error.message || 'Failed to delete asset.');
 		} finally {
 			assetActionLoadingId = null;
 		}
@@ -1193,19 +1715,19 @@
 
 	function validateEngineCurveForm() {
 		if (!engineCurveForm.vesselId) {
-			return 'Vessel wajib dipilih.';
+			return 'Vessel is required.';
 		}
 
 		if (!engineCurveForm.curveType) {
-			return 'Curve type wajib dipilih.';
+			return 'Curve type is required.';
 		}
 
 		if (!engineCurveForm.curveName.trim()) {
-			return 'Curve name wajib diisi.';
+			return 'Curve name is required.';
 		}
 
 		if (!engineCurveForm.file) {
-			return 'File Excel wajib dipilih.';
+			return 'Excel file is required.';
 		}
 
 		return null;
@@ -1217,15 +1739,15 @@
 		const vesselId = engineCurveForm.vesselId;
 
 		if (!vesselId) {
-			showAlert('error', 'Pilih vessel terlebih dahulu untuk download template.');
+			showAlert('error', 'Please select a vessel before downloading the template.');
 			return;
 		}
 
 		try {
 			await downloadEngineCurveTemplateAdminApi(vesselId);
-			showAlert('success', 'Template engine curve berhasil diunduh.');
+			showAlert('success', 'Engine curve template downloaded successfully.');
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal download template engine curve.');
+			showAlert('error', error.message || 'Failed to download the engine curve template.');
 		}
 	}
 
@@ -1255,12 +1777,12 @@
 
 			await importEngineCurveAdminApi(payload);
 
-			showAlert('success', 'Engine curve berhasil diimport.');
+			showAlert('success', 'Engine curve imported successfully.');
 
 			resetEngineCurveForm();
 			await loadEngineCurves();
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal import engine curve.');
+			showAlert('error', error.message || 'Failed to import engine curve.');
 		} finally {
 			engineCurveSaving = false;
 		}
@@ -1278,7 +1800,7 @@
 			selectedEngineCurve = curve;
 			selectedEngineCurveDetail = await getEngineCurveDetailAdminApi(curveId);
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal mengambil detail engine curve.');
+			showAlert('error', error.message || 'Failed to load engine curve details.');
 		} finally {
 			selectedEngineCurveLoading = false;
 		}
@@ -1293,8 +1815,8 @@
 
 		const confirmed = window.confirm(
 			nextStatus
-				? `Aktifkan curve "${curve.curve_name}"? Curve lain dengan tipe yang sama pada vessel ini akan dinonaktifkan.`
-				: `Nonaktifkan curve "${curve.curve_name}"?`
+				? `Activate curve "${curve.curve_name}"? Other curves with the same type on this vessel will be deactivated.`
+				: `Deactivate curve "${curve.curve_name}"?`
 		);
 
 		if (!confirmed) return;
@@ -1307,7 +1829,7 @@
 
 			showAlert(
 				'success',
-				nextStatus ? 'Engine curve berhasil diaktifkan.' : 'Engine curve berhasil dinonaktifkan.'
+				nextStatus ? 'Engine curve activated successfully.' : 'Engine curve deactivated successfully.'
 			);
 
 			await loadEngineCurves();
@@ -1319,7 +1841,7 @@
 				});
 			}
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal mengubah status engine curve.');
+			showAlert('error', error.message || 'Failed to change engine curve status.');
 		} finally {
 			engineCurveActionLoadingId = null;
 		}
@@ -1330,7 +1852,7 @@
 
 		if (!curveId) return;
 
-		const confirmed = window.confirm(`Hapus engine curve "${curve.curve_name}"?`);
+		const confirmed = window.confirm(`Delete engine curve "${curve.curve_name}"?`);
 
 		if (!confirmed) return;
 
@@ -1340,7 +1862,7 @@
 		try {
 			await deleteEngineCurveAdminApi(curveId);
 
-			showAlert('success', 'Engine curve berhasil dihapus.');
+			showAlert('success', 'Engine curve deleted successfully.');
 
 			if (selectedEngineCurve && getCurveId(selectedEngineCurve) === curveId) {
 				selectedEngineCurve = null;
@@ -1349,7 +1871,7 @@
 
 			await loadEngineCurves();
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal menghapus engine curve.');
+			showAlert('error', error.message || 'Failed to delete engine curve.');
 		} finally {
 			engineCurveActionLoadingId = null;
 		}
@@ -1399,15 +1921,13 @@
 
 		if (Number.isNaN(date.getTime())) return '-';
 
-		return new Intl.DateTimeFormat('id-ID', {
+		return new Intl.DateTimeFormat('en-US', {
 			dateStyle: 'medium',
 			timeStyle: 'short'
 		}).format(date);
 	}
 
-	function matchPermission(permission) {
-		const keyword = searchPermission.trim().toLowerCase();
-
+	function matchPermission(permission, keyword = '') {
 		if (!keyword) return true;
 
 		return [
@@ -1415,6 +1935,7 @@
 			permission?.label,
 			permission?.description,
 			permission?.moduleLabel,
+			permission?.moduleKey,
 			permission?.category,
 			permission?.tableLabel,
 			permission?.columnLabel
@@ -1437,7 +1958,8 @@
 		clearAlert();
 
 		try {
-			const detail = await getUserDetailApi(user.id);
+			const response = await getUserDetailApi(user.id);
+			const detail = unwrapApiData(response);
 
 			selectedUser = detail;
 			mode = 'edit';
@@ -1464,7 +1986,7 @@
 				selectedPermissions: permissions
 			};
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal mengambil detail user.');
+			showAlert('error', error.message || 'Failed to load user details.');
 		} finally {
 			selectedUserLoading = false;
 		}
@@ -1501,23 +2023,23 @@
 	}
 
 	function validateForm() {
-		if (!form.name.trim()) return 'Nama wajib diisi.';
-		if (!form.username.trim()) return 'Username wajib diisi.';
+		if (!form.name.trim()) return 'Name is required.';
+		if (!form.username.trim()) return 'Username is required.';
 
 		if (mode === 'create' && !form.password.trim()) {
-			return 'Password wajib diisi saat membuat user baru.';
+			return 'Password is required when creating a new user.';
 		}
 
-		if (form.assetAccessMode === 'selected' && parseIds(form.assetIdsText).length === 0) {
-			return 'Asset access mode selected membutuhkan minimal 1 asset ID.';
+		if (mode === 'edit' && form.assetAccessMode === 'selected' && parseIds(form.assetIdsText).length === 0) {
+			return 'Selected asset access mode requires at least 1 asset ID.';
 		}
 
 		if (form.vesselAccessMode === 'selected' && parseIds(form.vesselIdsText).length === 0) {
-			return 'Vessel access mode selected membutuhkan minimal 1 vessel ID.';
+			return 'Selected vessel access mode requires at least 1 vessel ID.';
 		}
 
 		if (form.permissionAccessMode === 'selected' && form.selectedPermissions.length === 0) {
-			return 'Permission access mode selected membutuhkan minimal 1 permission.';
+			return 'Selected permission access mode requires at least 1 permission.';
 		}
 
 		return null;
@@ -1528,10 +2050,15 @@
 			name: form.name.trim(),
 			username: form.username.trim(),
 			email: form.email.trim() || null,
-			assetAccess: buildAccessPayload('asset'),
 			vesselAccess: buildAccessPayload('vessel'),
 			permissionAccess: buildAccessPayload('permission')
 		};
+
+		// The latest POST /users API endpoint does not accept assetAccess.
+		// Asset access is only sent during edit/update so user creation does not fail with 400 Invalid fields.
+		if (mode === 'edit') {
+			payload.assetAccess = buildAccessPayload('asset');
+		}
 
 		const password = String(form.password || '').trim();
 
@@ -1562,20 +2089,26 @@
 			const payload = buildPayload();
 
 			if (mode === 'create') {
-				const created = await createUserApi(payload);
+				const response = await createUserApi(payload);
+				const created = unwrapApiData(response);
 
-				showAlert('success', 'User berhasil dibuat.');
 				await loadUsers();
-				await openEditForm(created);
+
+				if (created?.id) {
+					await openEditForm({ id: created.id });
+				}
+
+				showAlert('success', 'User created successfully.');
 			} else if (selectedUser?.id) {
-				const updated = await updateUserApi(selectedUser.id, payload);
+				const response = await updateUserApi(selectedUser.id, payload);
+				const updated = unwrapApiData(response);
 
 				selectedUser = updated;
-				showAlert('success', 'User berhasil diperbarui.');
+				showAlert('success', 'User updated successfully.');
 				await loadUsers();
 			}
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal menyimpan user.');
+			showAlert('error', error.message || 'Failed to save user.');
 		} finally {
 			saving = false;
 		}
@@ -1587,8 +2120,8 @@
 		const isInactive = Boolean(user.deletedAt);
 
 		const confirmMessage = isInactive
-			? `Aktifkan kembali user "${user.name}"?`
-			: `Nonaktifkan user "${user.name}"?`;
+			? `Reactivate user "${user.name}"?`
+			: `Deactivate user "${user.name}"?`;
 
 		const confirmed = window.confirm(confirmMessage);
 
@@ -1606,7 +2139,7 @@
 
 			showAlert(
 				'success',
-				isInactive ? 'User berhasil diaktifkan.' : 'User berhasil dinonaktifkan.'
+				isInactive ? 'User activated successfully.' : 'User deactivated successfully.'
 			);
 
 			await loadUsers();
@@ -1615,7 +2148,7 @@
 				await openEditForm({ id: user.id });
 			}
 		} catch (error) {
-			showAlert('error', error.message || 'Gagal mengubah status user.');
+			showAlert('error', error.message || 'Failed to change user status.');
 		} finally {
 			actionLoadingId = null;
 		}
@@ -1730,8 +2263,7 @@
 			<div class="page-kicker">Super Admin</div>
 			<h1>Administrator Management</h1>
 			<p>
-				Kelola akun user, akses vessel, akses asset, permission module, dan registry vessel dari
-				satu halaman.
+				Manage user accounts, vessel access, asset access, module permissions, and vessel registries from one page.
 			</p>
 		</div>
 
@@ -1772,22 +2304,24 @@
 	{#if bootLoading}
 		<section class="state-card">
 			<div class="loader"></div>
-			<p>Memuat data administrator...</p>
+			<p>Loading administrator data...</p>
 		</section>
 	{:else if currentUser && !isSuperAdmin}
 		<section class="state-card danger-state">
-			<h2>Akses Ditolak</h2>
+			<h2>Access Denied</h2>
 			<p>
-				Halaman ini hanya untuk Super Admin. Pastikan user login memiliki
+				This page is only available for Super Admins. Make sure the logged-in user has
 				<code>permissionAccess.mode = all</code>.
 			</p>
 		</section>
 	{:else}
-		<section class="admin-tabs">
+		<section class="admin-tabs" bind:this={adminTabsElement}>
+			<span class="admin-tab-indicator" style={adminTabIndicatorStyle}></span>
+
 			<button
 				type="button"
 				class:active-tab={activeAdminTab === 'users'}
-				on:click={() => (activeAdminTab = 'users')}
+				on:click={() => setActiveAdminTab('users')}
 			>
 				User Access
 			</button>
@@ -1795,7 +2329,7 @@
 			<button
 				type="button"
 				class:active-tab={activeAdminTab === 'vessels'}
-				on:click={() => (activeAdminTab = 'vessels')}
+				on:click={() => setActiveAdminTab('vessels')}
 			>
 				Vessel Registry
 			</button>
@@ -1803,7 +2337,7 @@
 			<button
 				type="button"
 				class:active-tab={activeAdminTab === 'assets'}
-				on:click={() => (activeAdminTab = 'assets')}
+				on:click={() => setActiveAdminTab('assets')}
 			>
 				Asset Registry
 			</button>
@@ -1811,33 +2345,46 @@
 			<button
 				type="button"
 				class:active-tab={activeAdminTab === 'engine-curves'}
-				on:click={() => (activeAdminTab = 'engine-curves')}
+				on:click={() => setActiveAdminTab('engine-curves')}
 			>
 				Engine Curves
 			</button>
 			<button
 				type="button"
 				class:active-tab={activeAdminTab === 'reporting'}
-				on:click={() => (activeAdminTab = 'reporting')}
+				on:click={() => setActiveAdminTab('reporting')}
 			>
 				Reporting
 			</button>
 			<button
 				type="button"
+				class:active-tab={activeAdminTab === 'alarm'}
+				on:click={openAlarmTab}
+			>
+				Alarm
+			</button>
+			<button
+				type="button"
 				class:active-tab={activeAdminTab === 'global-audit-logs'}
-				on:click={() => (activeAdminTab = 'global-audit-logs')}
+				on:click={() => setActiveAdminTab('global-audit-logs')}
 			>
 				Audit Logs
 			</button>
 		</section>
 
-		{#if activeAdminTab === 'users'}
-			<section class="admin-workspace">
+		{#key activeAdminTab}
+			<div
+				class="admin-tab-content"
+				in:fly={{ x: 18 * adminTabDirection, duration: 220, easing: cubicOut }}
+				out:fade={{ duration: 90 }}
+			>
+				{#if activeAdminTab === 'users'}
+					<section class="admin-workspace">
 				<aside class="users-panel">
 					<div class="panel-title-row">
 						<div>
 							<h2>Users</h2>
-							<p>{filteredUsers.length} dari {users.length} user</p>
+							<p>{filteredUsers.length} of {users.length} user</p>
 						</div>
 
 						{#if usersLoading}
@@ -1849,12 +2396,12 @@
 						class="search-input"
 						type="search"
 						bind:value={searchUser}
-						placeholder="Cari nama, username, email..."
+						placeholder="Search name, username, email..."
 					/>
 
 					<div class="users-list">
 						{#if filteredUsers.length === 0}
-							<div class="empty-box">User tidak ditemukan.</div>
+							<div class="empty-box">User not found.</div>
 						{:else}
 							{#each filteredUsers as user}
 								<button
@@ -1893,9 +2440,9 @@
 							<h2>{mode === 'create' ? 'Create New User' : 'Edit User'}</h2>
 							<p>
 								{mode === 'create'
-									? 'Isi data user baru dan tentukan aksesnya.'
+									? 'Fill in the new user data and define access permissions.'
 									: selectedUserLoading
-										? 'Memuat detail user...'
+										? 'Loading user details...'
 										: `Editing ${selectedUser?.name || 'user'}`}
 							</p>
 						</div>
@@ -1934,12 +2481,12 @@
 							<input
 								type="password"
 								bind:value={form.password}
-								placeholder={mode === 'create' ? 'Password user' : 'Isi jika ingin ubah password'}
+								placeholder={mode === 'create' ? 'User password' : 'Enter only to change the password'}
 								autocomplete="new-password"
 							/>
 
 							{#if mode === 'edit'}
-								<small class="field-help"> Kosongkan jika tidak ingin mengubah password. </small>
+								<small class="field-help"> Leave blank if you do not want to change the password. </small>
 							{/if}
 						</label>
 					</div>
@@ -1949,7 +2496,7 @@
 							<div class="access-head">
 								<div>
 									<h3>Asset Access</h3>
-									<p>Gunakan mode all atau selected.</p>
+									<p>Use all or selected mode.</p>
 								</div>
 
 								<select bind:value={form.assetAccessMode}>
@@ -1979,11 +2526,11 @@
 									</div>
 								{:else}
 									<div class="muted-box">
-										Daftar asset tidak tersedia dari current-user. Masukkan ID asset secara manual.
+										Asset list is not available from the current user. Enter the asset ID manually.
 									</div>
 								{/if}
 							{:else}
-								<div class="muted-box">User akan mendapat akses ke semua asset.</div>
+								<div class="muted-box">The user will get access to all assets.</div>
 							{/if}
 						</article>
 
@@ -1991,7 +2538,7 @@
 							<div class="access-head">
 								<div>
 									<h3>Vessel Access</h3>
-									<p>Batasi user berdasarkan vessel.</p>
+									<p>Restrict the user by vessel.</p>
 								</div>
 
 								<select bind:value={form.vesselAccessMode}>
@@ -2021,12 +2568,11 @@
 									</div>
 								{:else}
 									<div class="muted-box">
-										Daftar vessel tidak tersedia dari current-user. Masukkan ID vessel secara
-										manual.
+										Vessel list is not available from the current user. Enter the vessel ID manually.
 									</div>
 								{/if}
 							{:else}
-								<div class="muted-box">User akan mendapat akses ke semua vessel.</div>
+								<div class="muted-box">The user will get access to all vessels.</div>
 							{/if}
 						</article>
 					</section>
@@ -2036,7 +2582,7 @@
 							<div>
 								<h3>Permission Access</h3>
 								<p>
-									Dipilih: <strong>{form.selectedPermissions.length}</strong> permission.
+									Selected: <strong>{form.selectedPermissions.length}</strong> permission.
 								</p>
 							</div>
 
@@ -2067,14 +2613,14 @@
 								<input
 									type="search"
 									bind:value={searchPermission}
-									placeholder="Cari permission key, label, deskripsi..."
+									placeholder="Search permission key, label, description..."
 								/>
 							</div>
 
 							{#if permissionsLoading}
-								<div class="empty-box">Memuat katalog permission...</div>
+								<div class="empty-box">Loading permission catalog...</div>
 							{:else if visiblePermissionGroups.length === 0}
-								<div class="empty-box">Permission tidak ditemukan.</div>
+								<div class="empty-box">Permission not found.</div>
 							{:else}
 								<div class="permission-groups">
 									{#each visiblePermissionGroups as group}
@@ -2128,7 +2674,7 @@
 								</div>
 							{/if}
 						{:else}
-							<div class="muted-box large">User akan mendapat semua permission.</div>
+							<div class="muted-box large">The user will get all permissions.</div>
 						{/if}
 					</section>
 
@@ -2149,7 +2695,7 @@
 					<div class="panel-title-row">
 						<div>
 							<h2>Vessels</h2>
-							<p>{filteredVessels.length} dari {vessels.length} vessel</p>
+							<p>{filteredVessels.length} of {vessels.length} vessel</p>
 						</div>
 
 						{#if vesselsLoading}
@@ -2161,12 +2707,12 @@
 						class="search-input"
 						type="search"
 						bind:value={searchVessel}
-						placeholder="Cari vessel, device ID, company ID..."
+						placeholder="Search vessel, device ID, company name..."
 					/>
 
 					<div class="vessel-list">
 						{#if filteredVessels.length === 0}
-							<div class="empty-box">Vessel tidak ditemukan.</div>
+							<div class="empty-box">Vessel not found.</div>
 						{:else}
 							{#each filteredVessels as vessel}
 								<button
@@ -2178,10 +2724,10 @@
 									<div>
 										<strong>{vessel.vesselName || '-'}</strong>
 										<span>ID {vessel.id}</span>
-										<small>{vessel.deviceId || '-'}</small>
+										<small>{getVesselDeviceLabel(vessel)}</small>
 									</div>
 
-									<em>{vessel.companyId ?? 'No Company'}</em>
+									<em>{getVesselCompanyLabel(vessel)}</em>
 								</button>
 							{/each}
 						{/if}
@@ -2194,14 +2740,34 @@
 							<h2>{vesselMode === 'create' ? 'Create New Vessel' : 'Edit Vessel'}</h2>
 							<p>
 								{vesselMode === 'create'
-									? 'Daftarkan vessel baru berdasarkan Device ID ThingsBoard.'
+									? 'Register a new vessel using a ThingsBoard Device ID.'
 									: `Editing ${selectedVessel?.vesselName || 'vessel'}`}
 							</p>
 						</div>
 
-						<button class="primary-button" type="button" on:click={openCreateVesselForm}>
-							+ New Vessel
-						</button>
+						<div class="vessel-toolbar-actions">
+							<button
+								type="button"
+								class="ghost-button small"
+								on:click={syncCompanies}
+								disabled={companiesSyncing}
+							>
+								{companiesSyncing ? 'Syncing Companies...' : 'Sync Companies'}
+							</button>
+
+							<button
+								type="button"
+								class="primary-button small"
+								on:click={syncAllCompaniesVesselsEngines}
+								disabled={syncAllLoading}
+							>
+								{syncAllLoading ? 'Syncing All...' : 'Sync All'}
+							</button>
+
+							<button class="primary-button" type="button" on:click={openCreateVesselForm}>
+								+ New Vessel
+							</button>
+						</div>
 					</div>
 
 					<div class="vessel-form-card">
@@ -2221,20 +2787,22 @@
 							</label>
 
 							<label>
-								<span>Company ID</span>
-								<input
-									type="number"
-									bind:value={vesselForm.companyId}
-									placeholder="Kosongkan jika null"
-								/>
+								<span>Company</span>
+								<select bind:value={vesselForm.companyId} disabled={companiesLoading}>
+									<option value="">No Company</option>
+									{#each companies as company}
+										<option value={String(company.id)}>
+											{getCompanyDisplayName(company)} — ID {company.id}
+										</option>
+									{/each}
+								</select>
+								<small class="field-help">Load the company list from GET /companies.</small>
 							</label>
 						</div>
 
 						<div class="vessel-note">
-							<strong>Catatan:</strong>
-							saat create/update vessel, backend hanya menerima
-							<code>deviceId</code>, <code>vesselName</code>, dan <code>companyId</code>. Engine
-							akan otomatis diambil dari telemetry ThingsBoard.
+							<strong>Note:</strong>
+							Company is loaded from <code>GET /companies</code>. The <code>Sync Companies</code> button runs <code>POST /companies/sync</code>, while <code>Sync All</code> runs <code>POST /vessels/sync/all</code> to synchronize companies, vessels, and engines sequentially from ThingsBoard.
 						</div>
 
 						<div class="editor-footer">
@@ -2268,11 +2836,74 @@
 						</div>
 					</div>
 
+					<section class="company-registry-card">
+						<div class="company-registry-head">
+							<div>
+								<h3>Company Registry</h3>
+								<p>{filteredCompanies.length} of {companies.length} local companies</p>
+							</div>
+
+							<div class="company-actions">
+								<button
+									type="button"
+									class="ghost-button small"
+									on:click={loadCompanies}
+									disabled={companiesLoading}
+								>
+									Refresh
+								</button>
+
+								<button
+									type="button"
+									class="primary-button small"
+									on:click={syncCompanies}
+									disabled={companiesSyncing}
+								>
+									{companiesSyncing ? 'Syncing...' : 'Sync Companies'}
+								</button>
+							</div>
+						</div>
+
+						<input
+							class="search-input"
+							type="search"
+							bind:value={searchCompany}
+							placeholder="Search company name or ThingsBoard ID..."
+						/>
+
+						{#if companiesLoading}
+							<div class="empty-box">Loading companies...</div>
+						{:else if filteredCompanies.length === 0}
+							<div class="empty-box">Company not found.</div>
+						{:else}
+							<div class="company-list">
+								{#each filteredCompanies as company}
+									<article class="company-row">
+										<div>
+											<strong>{getCompanyDisplayName(company)}</strong>
+											<span>ID {company.id}</span>
+											<small>{getCompanyThingsboardId(company)}</small>
+										</div>
+
+										<button
+											type="button"
+											class="danger-button small"
+											on:click={() => deleteCompany(company)}
+											disabled={companyActionLoadingId === company.id}
+										>
+											{companyActionLoadingId === company.id ? 'Deleting...' : 'Delete'}
+										</button>
+									</article>
+								{/each}
+							</div>
+						{/if}
+					</section>
+
 					{#if selectedVessel?.engines?.length}
 						<section class="engine-preview-card">
 							<div>
 								<h3>Detected Engines</h3>
-								<p>Engine hasil ekstraksi dari ThingsBoard telemetry keys.</p>
+								<p>Engines extracted from ThingsBoard telemetry keys.</p>
 							</div>
 
 							<div class="engine-grid">
@@ -2294,7 +2925,7 @@
 					<div class="panel-title-row">
 						<div>
 							<h2>Assets</h2>
-							<p>{filteredAssets.length} dari {assets.length} asset</p>
+							<p>{filteredAssets.length} of {assets.length} asset</p>
 						</div>
 
 						{#if assetsLoading}
@@ -2306,12 +2937,12 @@
 						class="search-input"
 						type="search"
 						bind:value={searchAsset}
-						placeholder="Cari asset name, asset ID..."
+						placeholder="Search asset name, asset ID..."
 					/>
 
 					<div class="asset-list">
 						{#if filteredAssets.length === 0}
-							<div class="empty-box">Asset tidak ditemukan.</div>
+							<div class="empty-box">Asset not found.</div>
 						{:else}
 							{#each filteredAssets as asset}
 								<button
@@ -2337,7 +2968,7 @@
 							<h2>{assetMode === 'create' ? 'Create New Asset' : 'Edit Asset'}</h2>
 							<p>
 								{assetMode === 'create'
-									? 'Daftarkan asset baru berdasarkan Asset ID ThingsBoard.'
+									? 'Register a new asset using a ThingsBoard Asset ID.'
 									: `Editing ${selectedAsset?.assetName || selectedAsset?.assetId || 'asset'}`}
 							</p>
 						</div>
@@ -2365,9 +2996,8 @@
 						</div>
 
 						<div class="asset-note">
-							<strong>Catatan:</strong>
-							backend asset menerima <code>assetId</code> dan <code>assetName</code>. Pastikan
-							<code>assetId</code> sesuai dengan Asset ID dari ThingsBoard.
+							<strong>Note:</strong>
+							the asset backend accepts <code>assetId</code> and <code>assetName</code>. Make sure <code>assetId</code> matches the Asset ID from ThingsBoard.
 						</div>
 
 						<div class="editor-footer">
@@ -2404,7 +3034,7 @@
 					<div class="panel-title-row">
 						<div>
 							<h2>Engine Curves</h2>
-							<p>{filteredEngineCurves.length} dari {engineCurves.length} curve</p>
+							<p>{filteredEngineCurves.length} of {engineCurves.length} curve</p>
 						</div>
 
 						{#if engineCurvesLoading}
@@ -2416,12 +3046,12 @@
 						class="search-input"
 						type="search"
 						bind:value={searchEngineCurve}
-						placeholder="Cari curve, vessel, type..."
+						placeholder="Search curve, vessel, type..."
 					/>
 
 					<div class="engine-curve-list">
 						{#if filteredEngineCurves.length === 0}
-							<div class="empty-box">Engine curve tidak ditemukan.</div>
+							<div class="empty-box">Engine curve not found.</div>
 						{:else}
 							{#each filteredEngineCurves as curve}
 								<button
@@ -2450,8 +3080,7 @@
 						<div>
 							<h2>Import Engine Curve</h2>
 							<p>
-								Download template sesuai vessel, isi Excel, lalu import sebagai engine maker atau
-								EMS curve.
+								Download the template for the selected vessel, fill in the Excel file, then import it as an engine maker or EMS curve.
 							</p>
 						</div>
 					</div>
@@ -2461,7 +3090,7 @@
 							<label>
 								<span>Vessel</span>
 								<select bind:value={engineCurveForm.vesselId}>
-									<option value="">Pilih vessel</option>
+									<option value="">Select vessel</option>
 									{#each vessels as vessel}
 										<option value={vessel.id}>
 											{vessel.vesselName || `Vessel ${vessel.id}`} — ID {vessel.id}
@@ -2501,13 +3130,12 @@
 
 						<label class="checkbox-line">
 							<input type="checkbox" bind:checked={engineCurveForm.activateAfterImport} />
-							<span>Aktifkan curve setelah import</span>
+							<span>Activate curve after import</span>
 						</label>
 
 						<div class="engine-curve-note">
-							<strong>Catatan:</strong>
-							template harus dibuat dari vessel yang sama. Main Engine mendukung RPM range, sedangkan
-							Auxiliary Engine memakai satu nilai L/H tetap pada baris pertama.
+							<strong>Note:</strong>
+							the template must be generated from the same vessel. Main Engines support RPM ranges, while Auxiliary Engines use one fixed L/H value on the first row.
 						</div>
 
 						<div class="editor-footer">
@@ -2533,7 +3161,7 @@
 					{#if selectedEngineCurveLoading}
 						<section class="engine-curve-detail-card">
 							<div class="loader"></div>
-							<p>Memuat detail engine curve...</p>
+							<p>Loading engine curve details...</p>
 						</section>
 					{:else if selectedEngineCurveDetail}
 						<section class="engine-curve-detail-card">
@@ -2644,7 +3272,7 @@
 						<input
 							type="search"
 							bind:value={reportingFilters.search}
-							placeholder="Cari vessel..."
+							placeholder="Search vessel..."
 						/>
 
 						<select bind:value={reportingFilters.status}>
@@ -2666,7 +3294,7 @@
 
 					<div class="reporting-vessel-list">
 						{#if reportingVessels.length === 0}
-							<div class="empty-box">Vessel reporting tidak ditemukan.</div>
+							<div class="empty-box">Reporting vessel not found.</div>
 						{:else}
 							{#each reportingVessels as vessel}
 								<button
@@ -2676,13 +3304,13 @@
 									on:click={() => openReportingVessel(vessel)}
 								>
 									<div>
-										<strong>{vessel.vessel_name || '-'}</strong>
+										<strong>{getVesselDisplayName(vessel)}</strong>
 										<span>ID {vessel.id} • {vessel.status || '-'}</span>
-										<small>{vessel.deviceId || '-'}</small>
+										<small>{getVesselDeviceLabel(vessel)}</small>
 									</div>
 
-									<em class:active-reporting={vessel.auto_report?.is_enabled}>
-										{vessel.auto_report?.is_enabled ? 'Auto On' : 'Auto Off'}
+									<em class:active-reporting={isAutoReportEnabled(vessel)}>
+										{isAutoReportEnabled(vessel) ? 'Auto On' : 'Auto Off'}
 									</em>
 								</button>
 							{/each}
@@ -2693,18 +3321,17 @@
 				<main class="reporting-editor-panel">
 					{#if !selectedReportingVessel}
 						<section class="reporting-empty-card">
-							<h2>Pilih Vessel</h2>
+							<h2>Select Vessel</h2>
 							<p>
-								Pilih vessel di sebelah kiri untuk mengatur auto-report, Telegram alarm, dan engine
-								health.
+								Select a vessel on the left to configure auto-report and manual daily report.
 							</p>
 						</section>
 					{:else}
 						<div class="editor-toolbar">
 							<div>
-								<h2>{selectedReportingVessel.vessel_name || 'Reporting Config'}</h2>
+								<h2>{getVesselDisplayName(selectedReportingVessel)}</h2>
 								<p>
-									{selectedReportingVessel.deviceId || '-'} • Status:
+									{getVesselDeviceLabel(selectedReportingVessel)} • Status:
 									{selectedReportingVessel.status || '-'}
 								</p>
 							</div>
@@ -2714,7 +3341,7 @@
 							<div class="reporting-section-head">
 								<div>
 									<h3>Auto Daily Report Email</h3>
-									<p>Atur penerima, jam kirim, timezone, dan status auto-report.</p>
+									<p>Configure recipients, send time, timezone, and auto-report status.</p>
 								</div>
 
 								<label class="switch-line">
@@ -2747,26 +3374,150 @@
 								</label>
 							</div>
 
-							<div class="form-grid recipient-grid">
-								<label>
-									<span>PIC Recipients</span>
-									<textarea
-										bind:value={autoReportForm.picText}
-										placeholder="pic@example.com, pic2@example.com"
-									></textarea>
-								</label>
+							<div class="recipient-picker-card">
+								<div class="recipient-picker-head">
+									<label>
+										<span>Assignable Users</span>
+										<input
+											type="search"
+											bind:value={reportingAssignableSearch}
+											placeholder="Search name, username, or email..."
+										/>
+									</label>
 
-								<label>
-									<span>CC</span>
-									<textarea bind:value={autoReportForm.ccText} placeholder="cc@example.com"
-									></textarea>
-								</label>
+									<div class="recipient-page-actions">
+										<button
+											type="button"
+											class="ghost-button small"
+											on:click={() => loadReportingAssignableUsers(selectedReportingVessel.id, reportingAssignablePagination.page || 1)}
+											disabled={reportingAssignableUsersLoading}
+										>
+											Refresh Users
+										</button>
 
-								<label>
-									<span>BCC</span>
-									<textarea bind:value={autoReportForm.bccText} placeholder="bcc@example.com"
-									></textarea>
-								</label>
+										<span>
+											Page {reportingAssignablePagination.page || 1} /
+											{reportingAssignablePagination.totalPages || 1}
+										</span>
+									</div>
+								</div>
+
+								{#if reportingAssignableUsersLoading}
+									<div class="empty-box">Loading assignable users...</div>
+								{:else if filteredReportingAssignableUsers.length === 0}
+									<div class="empty-box">No users with email are available for this vessel.</div>
+								{:else}
+									<div class="assignable-user-list">
+										{#each filteredReportingAssignableUsers as user}
+											<article class="assignable-user-row">
+												<div>
+													<strong>{getAssignableUserName(user)}</strong>
+													<span>@{user.username || '-'} • ID {user.id ?? '-'}</span>
+													<small>{user.email || 'No email'}</small>
+												</div>
+
+												<div class="recipient-role-checks">
+													<label>
+														<input
+															type="checkbox"
+															checked={hasAutoReportRecipient(user.email, 'pic')}
+															disabled={!user.email}
+															on:change={(event) =>
+																toggleAutoReportRecipient(user.email, 'pic', event.currentTarget.checked)}
+														/>
+														<span>PIC</span>
+													</label>
+
+													<label>
+														<input
+															type="checkbox"
+															checked={hasAutoReportRecipient(user.email, 'cc')}
+															disabled={!user.email}
+															on:change={(event) =>
+																toggleAutoReportRecipient(user.email, 'cc', event.currentTarget.checked)}
+														/>
+														<span>CC</span>
+													</label>
+
+													<label>
+														<input
+															type="checkbox"
+															checked={hasAutoReportRecipient(user.email, 'bcc')}
+															disabled={!user.email}
+															on:change={(event) =>
+																toggleAutoReportRecipient(user.email, 'bcc', event.currentTarget.checked)}
+														/>
+														<span>BCC</span>
+													</label>
+												</div>
+											</article>
+										{/each}
+									</div>
+								{/if}
+
+								<div class="assignable-pagination">
+									<button
+										type="button"
+										class="ghost-button small"
+										on:click={() => goToAssignableUserPage((reportingAssignablePagination.page || 1) - 1)}
+										disabled={(reportingAssignablePagination.page || 1) <= 1 || reportingAssignableUsersLoading}
+									>
+										Previous
+									</button>
+
+									<span>{reportingAssignablePagination.totalItems || 0} users</span>
+
+									<button
+										type="button"
+										class="ghost-button small"
+										on:click={() => goToAssignableUserPage((reportingAssignablePagination.page || 1) + 1)}
+										disabled={(reportingAssignablePagination.page || 1) >=
+											(reportingAssignablePagination.totalPages || 1) || reportingAssignableUsersLoading}
+									>
+										Next
+									</button>
+								</div>
+
+								<div class="selected-recipient-grid">
+									<div>
+										<span>PIC</span>
+										{#if autoReportForm.picEmails.length === 0}
+											<small>Not selected</small>
+										{:else}
+											{#each autoReportForm.picEmails as email}
+												<button type="button" on:click={() => removeAutoReportRecipient('pic', email)}>
+													{email} ×
+												</button>
+											{/each}
+										{/if}
+									</div>
+
+									<div>
+										<span>CC</span>
+										{#if autoReportForm.ccEmails.length === 0}
+											<small>Not selected</small>
+										{:else}
+											{#each autoReportForm.ccEmails as email}
+												<button type="button" on:click={() => removeAutoReportRecipient('cc', email)}>
+													{email} ×
+												</button>
+											{/each}
+										{/if}
+									</div>
+
+									<div>
+										<span>BCC</span>
+										{#if autoReportForm.bccEmails.length === 0}
+											<small>Not selected</small>
+										{:else}
+											{#each autoReportForm.bccEmails as email}
+												<button type="button" on:click={() => removeAutoReportRecipient('bcc', email)}>
+													{email} ×
+												</button>
+											{/each}
+										{/if}
+									</div>
+								</div>
 							</div>
 
 							<div class="editor-footer">
@@ -2785,7 +3536,7 @@
 							<div class="reporting-section-head">
 								<div>
 									<h3>Manual Daily Report</h3>
-									<p>Download Excel atau kirim email daily report secara manual.</p>
+									<p>Download Excel or send the daily report email manually.</p>
 								</div>
 							</div>
 
@@ -2818,8 +3569,137 @@
 						<section class="reporting-section-card">
 							<div class="reporting-section-head">
 								<div>
+									<h3>Auto Report Audit Logs</h3>
+									<p>Auto-report configuration change history.</p>
+								</div>
+
+								<div class="detail-actions">
+									<button
+										type="button"
+										class="ghost-button small"
+										on:click={loadAutoReportAuditLogs}
+									>
+										Refresh Logs
+									</button>
+
+									<button
+										type="button"
+										class="primary-button small"
+										on:click={exportAutoReportAuditCsv}
+									>
+										Export CSV
+									</button>
+								</div>
+							</div>
+
+							<div class="audit-log-list">
+								{#if autoReportAuditLoading}
+									<div class="empty-box">Loading audit logs...</div>
+								{:else if autoReportAuditLogs.length === 0}
+									<div class="empty-box">No audit logs yet.</div>
+								{:else}
+									{#each autoReportAuditLogs as log}
+										<article class="audit-log-row">
+											<div>
+												<strong>{log.action || '-'} • {log.module || '-'}</strong>
+												<span>{log.user?.username || '-'} • {formatDate(log.logged_at)}</span>
+											</div>
+
+											<div class="audit-change-list">
+												{#each log.changes || [] as change}
+													<small>
+														{change.fields}: {change.old_value} → {change.new_value}
+													</small>
+												{/each}
+											</div>
+										</article>
+									{/each}
+								{/if}
+							</div>
+						</section>
+					{/if}
+				</main>
+			</section>
+		{:else if activeAdminTab === 'alarm'}
+			<section class="reporting-admin-workspace">
+				<aside class="reporting-vessel-panel">
+					<div class="panel-title-row">
+						<div>
+							<h2>Alarm Vessels</h2>
+							<p>{reportingVessels.length} vessel</p>
+						</div>
+
+						{#if reportingVesselsLoading}
+							<span class="mini-loading">Loading</span>
+						{/if}
+					</div>
+
+					<div class="reporting-filter-box">
+						<input
+							type="search"
+							bind:value={reportingFilters.search}
+							placeholder="Search alarm vessel..."
+						/>
+
+						<select bind:value={reportingFilters.status}>
+							<option value="all">All Status</option>
+							<option value="online">Online</option>
+							<option value="offline">Offline</option>
+						</select>
+
+						<button type="button" class="ghost-button small" on:click={loadAlarmVessels}>
+							Apply
+						</button>
+					</div>
+
+					<div class="reporting-vessel-list">
+						{#if reportingVessels.length === 0}
+							<div class="empty-box">Alarm vessel not found.</div>
+						{:else}
+							{#each reportingVessels as vessel}
+								<button
+									type="button"
+									class:selected-user={selectedReportingVessel?.id === vessel.id}
+									class="reporting-vessel-row"
+									on:click={() => openReportingVessel(vessel, false)}
+								>
+									<div>
+										<strong>{vessel.vessel_name || '-'}</strong>
+										<span>ID {vessel.id} • {vessel.status || '-'}</span>
+										<small>{vessel.deviceId || '-'}</small>
+									</div>
+
+									<em class:active-reporting={isEngineHealthEnabled(vessel)}>
+										{isEngineHealthEnabled(vessel) ? 'Health On' : 'Health Off'}
+									</em>
+								</button>
+							{/each}
+						{/if}
+					</div>
+				</aside>
+
+				<main class="reporting-editor-panel">
+					<div class="editor-toolbar">
+						<div>
+							<h2>Alarm Configuration</h2>
+							<p>
+								Configure engine health alarms per vessel and Telegram alarm group routing in a separate tab.
+							</p>
+						</div>
+					</div>
+
+					{#if !selectedReportingVessel}
+						<section class="reporting-empty-card">
+							<h2>Select Vessel</h2>
+							<p>Select a vessel on the left to configure the Engine Health Alarm.</p>
+						</section>
+					{:else}
+
+						<section class="reporting-section-card">
+							<div class="reporting-section-head">
+								<div>
 									<h3>Engine Health Alarm</h3>
-									<p>Threshold untuk alarm ENGINE_HEALTH.</p>
+									<p>Thresholds for the ENGINE_HEALTH alarm.</p>
 								</div>
 
 								<label class="switch-line">
@@ -2875,11 +3755,13 @@
 							</div>
 						</section>
 
+					{/if}
+
 						<section class="reporting-section-card">
 							<div class="reporting-section-head">
 								<div>
 									<h3>Telegram Alarm Groups</h3>
-									<p>Routing notifikasi alarm ke Telegram group.</p>
+									<p>Route alarm notifications to Telegram groups.</p>
 								</div>
 
 								<button
@@ -2894,9 +3776,9 @@
 							<div class="telegram-layout">
 								<div class="telegram-list">
 									{#if telegramGroupsLoading}
-										<div class="empty-box">Memuat Telegram group...</div>
+										<div class="empty-box">Loading Telegram groups...</div>
 									{:else if telegramGroups.length === 0}
-										<div class="empty-box">Telegram group belum tersedia.</div>
+										<div class="empty-box">No Telegram groups are available yet.</div>
 									{:else}
 										{#each telegramGroups as group}
 											<button
@@ -2940,11 +3822,61 @@
 										</label>
 									</div>
 
-									<label>
-										<span>Vessel IDs</span>
-										<textarea bind:value={telegramForm.vesselIdsText} placeholder="1, 2, 3"
-										></textarea>
-									</label>
+									<div class="telegram-vessel-picker">
+										<div class="picker-head">
+											<div>
+												<span>Vessel Access</span>
+												<small>{telegramForm.vesselIds.length} vessels selected</small>
+											</div>
+
+											<input
+												type="search"
+												bind:value={telegramVesselSearch}
+												placeholder="Search vessel..."
+											/>
+										</div>
+
+										{#if telegramForm.vesselIds.length > 0}
+											<div class="selected-recipient-list">
+												{#each telegramForm.vesselIds as vesselId}
+													<span class="selected-pill">
+														{getTelegramVesselName(vesselId)}
+														<button
+															type="button"
+															on:click={() => toggleTelegramVessel(vesselId, false)}
+														>
+															×
+														</button>
+													</span>
+												{/each}
+											</div>
+										{/if}
+
+										<div class="option-list telegram-vessel-list">
+											{#if telegramVesselOptions.length === 0}
+												<div class="empty-box">Vessel list is not available yet.</div>
+											{:else if filteredTelegramVesselOptions.length === 0}
+												<div class="empty-box">Vessel not found.</div>
+											{:else}
+												{#each filteredTelegramVesselOptions as vessel}
+													<label class="option-chip">
+														<input
+															type="checkbox"
+															checked={hasTelegramVessel(vessel.id)}
+															on:change={(event) =>
+																toggleTelegramVessel(vessel.id, event.currentTarget.checked)}
+														/>
+														<span>
+															<strong>{vessel.label}</strong>
+															<small>
+																ID {vessel.id}{vessel.sublabel ? ` • ${vessel.sublabel}` : ''}
+															</small>
+														</span>
+													</label>
+												{/each}
+											{/if}
+										</div>
+									</div>
 
 									<div class="alarm-key-grid">
 										{#each alarmKeyOptions as alarmKey}
@@ -2998,60 +3930,9 @@
 							</div>
 						</section>
 
-						<section class="reporting-section-card">
-							<div class="reporting-section-head">
-								<div>
-									<h3>Auto Report Audit Logs</h3>
-									<p>Riwayat perubahan konfigurasi auto-report.</p>
-								</div>
-
-								<div class="detail-actions">
-									<button
-										type="button"
-										class="ghost-button small"
-										on:click={loadAutoReportAuditLogs}
-									>
-										Refresh Logs
-									</button>
-
-									<button
-										type="button"
-										class="primary-button small"
-										on:click={exportAutoReportAuditCsv}
-									>
-										Export CSV
-									</button>
-								</div>
-							</div>
-
-							<div class="audit-log-list">
-								{#if autoReportAuditLoading}
-									<div class="empty-box">Memuat audit log...</div>
-								{:else if autoReportAuditLogs.length === 0}
-									<div class="empty-box">Belum ada audit log.</div>
-								{:else}
-									{#each autoReportAuditLogs as log}
-										<article class="audit-log-row">
-											<div>
-												<strong>{log.action || '-'} • {log.module || '-'}</strong>
-												<span>{log.user?.username || '-'} • {formatDate(log.logged_at)}</span>
-											</div>
-
-											<div class="audit-change-list">
-												{#each log.changes || [] as change}
-													<small>
-														{change.fields}: {change.old_value} → {change.new_value}
-													</small>
-												{/each}
-											</div>
-										</article>
-									{/each}
-								{/if}
-							</div>
-						</section>
-					{/if}
 				</main>
 			</section>
+
 		{:else if activeAdminTab === 'global-audit-logs'}
 			<section class="global-audit-workspace">
 				<section class="global-audit-panel">
@@ -3059,8 +3940,7 @@
 						<div>
 							<h2>Global Audit Logs</h2>
 							<p>
-								Menampilkan semua aktivitas admin/user audit secara global. Bisa difilter
-								berdasarkan User ID.
+								Display all admin/user audit activities globally. The list can be filtered by User ID.
 							</p>
 						</div>
 
@@ -3091,7 +3971,7 @@
 							<input
 								type="number"
 								bind:value={globalAuditFilters.userId}
-								placeholder="Kosongkan untuk semua user"
+								placeholder="Leave blank for all users"
 							/>
 						</label>
 
@@ -3134,14 +4014,14 @@
 
 							<div>
 								<strong>{globalAuditPagination.page || 1}</strong>
-								<span>Page dari {globalAuditPagination.totalPages || 1}</span>
+								<span>Page of {globalAuditPagination.totalPages || 1}</span>
 							</div>
 						</div>
 
 						{#if globalAuditLoading}
-							<div class="empty-box">Memuat global audit logs...</div>
+							<div class="empty-box">Loading global audit logs...</div>
 						{:else if globalAuditLogs.length === 0}
-							<div class="empty-box">Audit log tidak ditemukan.</div>
+							<div class="empty-box">Audit log not found.</div>
 						{:else}
 							<div class="global-audit-table-wrap">
 								<table>
@@ -3208,7 +4088,9 @@
 					</div>
 				</section>
 			</section>
-		{/if}
+				{/if}
+			</div>
+		{/key}
 	{/if}
 </section>
 
@@ -3282,7 +4164,7 @@
 
 	.page-kicker {
 		margin-bottom: 6px;
-		color: #0f766e;
+		color: #1d4eda;
 		font-size: 12px;
 		font-weight: 800;
 		letter-spacing: 0.12em;
@@ -3332,7 +4214,7 @@
 
 	.primary-button {
 		color: #ffffff;
-		background: #0f766e;
+		background: #1d4eda;
 		box-shadow: 0 14px 25px rgba(15, 118, 110, 0.22);
 	}
 
@@ -3349,7 +4231,9 @@
 		border: 1px solid #dbe4ee;
 	}
 
-	.ghost-button.small {
+	.ghost-button.small,
+	.primary-button.small,
+	.danger-button.small {
 		min-height: 34px;
 		padding: 0 12px;
 		font-size: 12px;
@@ -3433,7 +4317,7 @@
 		height: 34px;
 		margin-bottom: 12px;
 		border: 4px solid #e2e8f0;
-		border-top-color: #0f766e;
+		border-top-color: #1d4eda;
 		border-radius: 999px;
 		animation: spin 0.8s linear infinite;
 	}
@@ -3477,6 +4361,8 @@
 	}
 
 	.admin-tabs {
+		position: relative;
+		isolation: isolate;
 		display: flex;
 		align-items: center;
 		gap: 10px;
@@ -3486,9 +4372,29 @@
 		border-radius: 18px;
 		background: #ffffff;
 		box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+		overflow-x: auto;
+		scroll-behavior: smooth;
+	}
+
+	.admin-tab-indicator {
+		position: absolute;
+		top: 8px;
+		bottom: 8px;
+		left: 0;
+		z-index: 0;
+		pointer-events: none;
+		border-radius: 13px;
+		background: #1d4eda;
+		box-shadow: 0 12px 22px rgba(15, 118, 110, 0.18);
+		transition:
+			transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+			width 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+			opacity 0.16s ease;
 	}
 
 	.admin-tabs button {
+		position: relative;
+		z-index: 1;
 		min-height: 38px;
 		border: 0;
 		border-radius: 13px;
@@ -3498,15 +4404,27 @@
 		font-size: 13px;
 		font-weight: 900;
 		transition:
-			background 0.18s ease,
-			color 0.18s ease,
-			box-shadow 0.18s ease;
+			color 0.2s ease,
+			transform 0.2s ease;
+	}
+
+	.admin-tabs button:hover {
+		color: #0f172a;
+		transform: translateY(-1px);
 	}
 
 	.admin-tabs button.active-tab {
 		color: #ffffff;
-		background: #0f766e;
-		box-shadow: 0 12px 22px rgba(15, 118, 110, 0.18);
+		background: transparent;
+		box-shadow: none;
+	}
+
+	.admin-tabs button.active-tab:hover {
+		color: #ffffff;
+	}
+
+	.admin-tab-content {
+		will-change: transform, opacity;
 	}
 
 	.field-help {
@@ -3657,7 +4575,7 @@
 		min-width: 16px;
 		height: 16px;
 		min-height: 16px;
-		accent-color: #0f766e;
+		accent-color: #1d4eda;
 	}
 
 	.checkbox-line span {
@@ -3766,7 +4684,7 @@
 		margin-top: 5px;
 		border-radius: 8px;
 		padding: 3px 7px;
-		color: #0f766e;
+		color: #1d4eda;
 		background: #ccfbf1;
 		font-size: 11px;
 		font-weight: 900;
@@ -3899,7 +4817,7 @@
 	.mini-loading {
 		border-radius: 999px;
 		padding: 5px 9px;
-		color: #0f766e;
+		color: #1d4eda;
 		background: #ccfbf1;
 		font-size: 11px;
 		font-weight: 900;
@@ -3921,7 +4839,7 @@
 	input:focus,
 	textarea:focus,
 	select:focus {
-		border-color: #0f766e;
+		border-color: #1d4eda;
 		box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.1);
 	}
 
@@ -4188,7 +5106,7 @@
 		height: 16px;
 		min-height: 16px;
 		margin-top: 2px;
-		accent-color: #0f766e;
+		accent-color: #1d4eda;
 	}
 
 	.option-chip strong,
@@ -4271,7 +5189,7 @@
 	.text-button {
 		border: 0;
 		background: transparent;
-		color: #0f766e;
+		color: #1d4eda;
 		font-size: 12px;
 		font-weight: 900;
 	}
@@ -4311,7 +5229,7 @@
 		margin-top: 5px;
 		border-radius: 8px;
 		padding: 3px 7px;
-		color: #0f766e;
+		color: #1d4eda;
 		background: #ccfbf1;
 		font-size: 11px;
 		font-weight: 900;
@@ -4351,7 +5269,7 @@
 	.vessel-note code {
 		border-radius: 7px;
 		padding: 2px 6px;
-		color: #0f766e;
+		color: #1d4eda;
 		background: #ccfbf1;
 		font-size: 11px;
 		font-weight: 900;
@@ -4371,14 +5289,71 @@
 	.asset-note code {
 		border-radius: 7px;
 		padding: 2px 6px;
-		color: #0f766e;
+		color: #1d4eda;
 		background: #ccfbf1;
 		font-size: 11px;
 		font-weight: 900;
 	}
 
-	.engine-preview-card {
+	.engine-preview-card,
+	.company-registry-card {
 		margin-top: 14px;
+	}
+
+	.vessel-toolbar-actions,
+	.company-registry-head,
+	.company-actions {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+
+	.vessel-toolbar-actions {
+		justify-content: flex-end;
+	}
+
+	.company-registry-head {
+		justify-content: space-between;
+		margin-bottom: 12px;
+	}
+
+	.company-list {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+		gap: 10px;
+		margin-top: 12px;
+	}
+
+	.company-row {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 10px;
+		border: 1px solid #e2e8f0;
+		border-radius: 14px;
+		padding: 12px;
+		background: #ffffff;
+	}
+
+	.company-row strong,
+	.company-row span,
+	.company-row small {
+		display: block;
+	}
+
+	.company-row span {
+		margin-top: 4px;
+		color: #64748b;
+		font-size: 12px;
+	}
+
+	.company-row small {
+		margin-top: 4px;
+		max-width: 300px;
+		color: #64748b;
+		font-size: 11px;
+		word-break: break-all;
 	}
 
 	.engine-grid {
@@ -4412,7 +5387,7 @@
 		margin-top: 6px;
 		border-radius: 8px;
 		padding: 3px 7px;
-		color: #0f766e;
+		color: #1d4eda;
 		background: #ccfbf1;
 		font-size: 11px;
 		font-weight: 900;
@@ -4602,6 +5577,162 @@
 		margin-top: 12px;
 	}
 
+	.recipient-picker-card {
+		display: grid;
+		gap: 12px;
+		margin-top: 12px;
+		border: 1px solid #e2e8f0;
+		border-radius: 16px;
+		padding: 12px;
+		background: #ffffff;
+	}
+
+	.recipient-picker-head {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 12px;
+		align-items: end;
+	}
+
+	.recipient-page-actions,
+	.assignable-pagination {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
+	.recipient-page-actions span,
+	.assignable-pagination span {
+		color: #64748b;
+		font-size: 12px;
+		font-weight: 800;
+	}
+
+	.assignable-user-list {
+		display: grid;
+		gap: 8px;
+		max-height: 340px;
+		overflow: auto;
+	}
+
+	.assignable-user-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 12px;
+		align-items: center;
+		border: 1px solid #e2e8f0;
+		border-radius: 14px;
+		padding: 11px 12px;
+		background: #f8fafc;
+	}
+
+	.assignable-user-row strong,
+	.assignable-user-row span,
+	.assignable-user-row small {
+		display: block;
+	}
+
+	.assignable-user-row strong {
+		color: #0f172a;
+		font-size: 13px;
+		font-weight: 900;
+	}
+
+	.assignable-user-row span {
+		margin-top: 3px;
+		color: #475569;
+		font-size: 12px;
+		font-weight: 800;
+	}
+
+	.assignable-user-row small {
+		margin-top: 3px;
+		color: #64748b;
+		font-size: 11px;
+		word-break: break-all;
+	}
+
+	.recipient-role-checks {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
+	.recipient-role-checks label {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		border: 1px solid #dbe4ee;
+		border-radius: 999px;
+		padding: 6px 9px;
+		background: #ffffff;
+	}
+
+	.recipient-role-checks input {
+		width: 14px;
+		min-width: 14px;
+		height: 14px;
+		min-height: 14px;
+		accent-color: #1d4eda;
+	}
+
+	.recipient-role-checks span {
+		margin: 0;
+		color: #334155;
+		font-size: 11px;
+		font-weight: 900;
+	}
+
+	.selected-recipient-grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 10px;
+	}
+
+	.selected-recipient-grid > div {
+		min-height: 74px;
+		border: 1px dashed #cbd5e1;
+		border-radius: 14px;
+		padding: 10px;
+		background: #f8fafc;
+	}
+
+	.selected-recipient-grid span,
+	.selected-recipient-grid small {
+		display: block;
+	}
+
+	.selected-recipient-grid span {
+		margin-bottom: 7px;
+		color: #334155;
+		font-size: 11px;
+		font-weight: 900;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+	}
+
+	.selected-recipient-grid small {
+		color: #94a3b8;
+		font-size: 11px;
+	}
+
+	.selected-recipient-grid button {
+		display: inline-flex;
+		max-width: 100%;
+		margin: 0 6px 6px 0;
+		border: 0;
+		border-radius: 999px;
+		padding: 5px 8px;
+		color: #1d4eda;
+		background: #ccfbf1;
+		font-size: 11px;
+		font-weight: 900;
+		word-break: break-all;
+	}
+
 	.manual-report-grid {
 		grid-template-columns: 220px 170px 170px;
 		align-items: end;
@@ -4622,7 +5753,7 @@
 		min-width: 16px;
 		height: 16px;
 		min-height: 16px;
-		accent-color: #0f766e;
+		accent-color: #1d4eda;
 	}
 
 	.switch-line span {
@@ -4661,6 +5792,78 @@
 	.telegram-form-grid {
 		grid-template-columns: 1fr 1fr 150px;
 		margin-bottom: 12px;
+	}
+
+	.telegram-vessel-picker {
+		display: grid;
+		gap: 10px;
+		border: 1px solid #e2e8f0;
+		border-radius: 16px;
+		padding: 12px;
+		background: #f8fafc;
+	}
+
+	.telegram-vessel-picker .picker-head {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(180px, 260px);
+		gap: 12px;
+		align-items: end;
+	}
+
+	.telegram-vessel-picker .picker-head span,
+	.telegram-vessel-picker .picker-head small {
+		display: block;
+	}
+
+	.telegram-vessel-picker .picker-head span {
+		color: #0f172a;
+		font-size: 12px;
+		font-weight: 900;
+	}
+
+	.telegram-vessel-picker .picker-head small {
+		margin-top: 3px;
+		color: #64748b;
+		font-size: 11px;
+		font-weight: 800;
+	}
+
+	.selected-recipient-list {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		flex-wrap: wrap;
+	}
+
+	.selected-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		max-width: 100%;
+		border-radius: 999px;
+		padding: 6px 8px 6px 10px;
+		color: #1d4eda;
+		background: #ccfbf1;
+		font-size: 11px;
+		font-weight: 900;
+	}
+
+	.selected-pill button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 18px;
+		height: 18px;
+		border: 0;
+		border-radius: 50%;
+		color: #1d4eda;
+		background: rgba(255, 255, 255, 0.8);
+		cursor: pointer;
+	}
+
+	.telegram-vessel-list {
+		max-height: 260px;
+		overflow: auto;
 	}
 
 	.alarm-key-grid {
@@ -4863,7 +6066,7 @@
 		max-width: 220px;
 		border-radius: 8px;
 		padding: 3px 7px;
-		color: #0f766e;
+		color: #1d4eda;
 		background: #ccfbf1;
 		font-size: 11px;
 		font-weight: 900;
@@ -4952,6 +6155,10 @@
 
 		.reporting-form-grid,
 		.recipient-grid,
+		.recipient-picker-head,
+		.telegram-vessel-picker .picker-head,
+		.selected-recipient-grid,
+		.assignable-user-row,
 		.manual-report-grid,
 		.health-grid,
 		.telegram-layout,
@@ -4965,6 +6172,12 @@
 		.reporting-vessel-row,
 		.telegram-row {
 			flex-direction: column;
+		}
+
+		.recipient-page-actions,
+		.assignable-pagination,
+		.recipient-role-checks {
+			justify-content: flex-start;
 		}
 	}
 
@@ -5196,7 +6409,9 @@
 		color: #0f172a;
 	}
 
-	.ghost-button.small {
+	.ghost-button.small,
+	.primary-button.small,
+	.danger-button.small {
 		min-height: 30px;
 		padding: 0 10px;
 		font-size: 11px;
@@ -5272,7 +6487,7 @@
 	}
 
 	.admin-tabs button.active-tab {
-		background: #2563eb;
+		background: transparent;
 		color: #ffffff;
 		box-shadow: none;
 	}
@@ -5748,6 +6963,18 @@
 		.danger-button,
 		.activate-button {
 			width: 100%;
+		}
+	}
+
+
+	@media (max-width: 760px) {
+		.admin-tab-indicator {
+			display: none;
+		}
+
+		.admin-tabs button.active-tab {
+			background: #1d4eda;
+			box-shadow: 0 10px 18px rgba(15, 118, 110, 0.16);
 		}
 	}
 

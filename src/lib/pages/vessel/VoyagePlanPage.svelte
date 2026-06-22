@@ -121,7 +121,7 @@
 		} catch (error) {
 			const message = error?.message || 'Request failed.';
 			if (message.toLowerCase().includes('unauthorized') || message.includes('401')) {
-				throw new Error('Unauthorized. Silakan login kembali.');
+				throw new Error('Unauthorized. Please log in again.');
 			}
 			throw new Error(message);
 		}
@@ -165,7 +165,7 @@
 		} catch (error) {
 			console.error('[VOYAGE_PLAN_VESSEL][ASSETS][ERROR]', error);
 			assets = [];
-			assetsError = error?.message || 'Gagal memuat asset fleet.';
+			assetsError = error?.message || 'Failed to load fleet assets.';
 			renderAssetMarkers();
 		} finally {
 			assetsLoading = false;
@@ -656,7 +656,7 @@
 
 	function formatDate(value) {
 		if (!value) return '-';
-		return new Intl.DateTimeFormat('id-ID', {
+		return new Intl.DateTimeFormat('en-US', {
 			day: '2-digit',
 			month: 'short',
 			year: 'numeric',
@@ -682,7 +682,7 @@
 <section class="voyage-vessel-page">
 	<section class="voyage-header-card">
 		<div class="header-copy">
-			<div class="page-kicker">Voyage Plan Vessel</div>
+			<div class="page-kicker">Vessel Voyage Plan</div>
 			<h1>{selectedVesselName}</h1>
 			<p>Active voyage route and assignment history for the selected vessel.</p>
 		</div>
@@ -706,10 +706,10 @@
 	{/if}
 
 	{#if loading}
-		<div class="status-box">Loading voyage plan vessel page...</div>
+		<div class="status-box">Loading vessel voyage plan page...</div>
 	{:else if !canView}
 		<div class="status-box error-box">
-			User ini belum memiliki permission <b>view_voyage_plan_vessel</b>.
+			This user does not have the required permission: <b>view_voyage_plan_vessel</b>.
 		</div>
 	{:else}
 		<section class="summary-grid">
@@ -752,7 +752,7 @@
 					<div class="section-actions map-actions">
 						<button type="button" on:click={fitMap}>Fit Map</button>
 						{#if activeAssignment}
-							<button type="button" on:click={showActivePlan} disabled={detailLoading}>Show Active</button>
+							<button type="button" on:click={showActivePlan} disabled={detailLoading}>Show Active Plan</button>
 						{/if}
 					</div>
 				</div>
@@ -763,7 +763,7 @@
 					{#if !routePointCount}
 						<div class="map-empty">
 							<strong>No route data</strong>
-							<span>Pilih vessel atau history yang memiliki route point.</span>
+							<span>Select a vessel or history item that has route points.</span>
 						</div>
 					{/if}
 				</div>
@@ -797,7 +797,7 @@
 						</div>
 					</div>
 				{:else}
-					<div class="empty-box">Belum ada assignment yang dipilih.</div>
+					<div class="empty-box">No assignment has been selected.</div>
 				{/if}
 			</section>
 		</section>
@@ -820,7 +820,7 @@
 								<th>Order</th>
 								<th>Latitude</th>
 								<th>Longitude</th>
-								<th>Speed kn</th>
+								<th>Speed (kn)</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -836,7 +836,7 @@
 					</table>
 				</div>
 			{:else}
-				<div class="empty-box">Route point belum tersedia.</div>
+				<div class="empty-box">Route points are not available yet.</div>
 			{/if}
 		</section>
 
@@ -909,7 +909,7 @@
 					</button>
 				</div>
 			{:else}
-				<div class="empty-box">History voyage plan belum tersedia.</div>
+				<div class="empty-box">Voyage plan history is not available yet.</div>
 			{/if}
 		</section>
 	{/if}

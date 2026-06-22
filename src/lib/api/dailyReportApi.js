@@ -97,3 +97,22 @@ export function getDailyReportExcelUrl({
 
   return `/daily-reports/export-excel?${query}`;
 }
+
+export function getDailyReportPdfUrl({
+	vesselId,
+	date,
+	timezoneMode = 'auto',
+	timezoneOffset
+}) {
+	const params = new URLSearchParams();
+
+	params.set('vesselId', vesselId);
+	params.set('date', date);
+	params.set('timezoneMode', timezoneMode || 'auto');
+
+	if (timezoneMode === 'manual' && timezoneOffset) {
+		params.set('timezoneOffset', timezoneOffset);
+	}
+
+	return `/daily-reports/export-pdf?${params.toString()}`;
+}

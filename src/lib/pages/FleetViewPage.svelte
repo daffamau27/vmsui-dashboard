@@ -7,6 +7,12 @@
 
 	const vesselMarkerUrl = '/assets/vessel-marker.svg';
 
+	const SHADCN_LIGHT_TILE_URL =
+		'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+
+	const SHADCN_TILE_ATTRIBUTION =
+		'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+
 	let vesselData = $state([]);
 	let fleetLoading = $state(false);
 	let fleetError = $state('');
@@ -35,6 +41,57 @@
 	let markers = new Map();
 	let isFleetMounted = false;
 
+	let showWindParticles = $state(true);
+	let windParticleLayer = null;
+	let windCanvas = null;
+	let windContext = null;
+	let windParticles = [];
+	let windFrame = null;
+	let windLastFrameAt = 0;
+
+	let showCurrentParticles = $state(true);
+	let currentParticleLayer = null;
+	let currentCanvas = null;
+	let currentContext = null;
+	let currentParticles = [];
+	let currentFrame = null;
+	let currentLastFrameAt = 0;
+
+	const CURRENT_INFLUENCE_RADIUS_METERS = 120000;
+
+	const WIND_PARTICLE_MIN_COUNT = 130;
+	const WIND_PARTICLE_MAX_COUNT = 460;
+	const WIND_PARTICLE_MAX_AGE = 90;
+	const WIND_PARTICLE_FRAME_INTERVAL_MS = 28;
+	const WIND_CANVAS_BUFFER_PX = 320;
+
+	const WIND_PARTICLE_STEP_MULTIPLIER = 1.55;
+	const WIND_PARTICLE_TRAIL_FADE_ALPHA = 0.16;
+	const WIND_PARTICLE_LINE_WIDTH = 1.15;
+
+	let windCanvasWidth = 0;
+	let windCanvasHeight = 0;
+	let windCanvasBuffer = 0;
+
+	const CURRENT_PARTICLE_MIN_COUNT = 120;
+	const CURRENT_PARTICLE_MAX_COUNT = 420;
+	const CURRENT_PARTICLE_MAX_AGE = 140;
+	const CURRENT_PARTICLE_FRAME_INTERVAL_MS = 32;
+	const CURRENT_CANVAS_BUFFER_PX = 320;
+
+	const CURRENT_PARTICLE_STEP_MULTIPLIER = 1.18;
+	const CURRENT_PARTICLE_TRAIL_FADE_ALPHA = 0.08;
+	const CURRENT_PARTICLE_LINE_WIDTH = 1.25;
+
+	let currentCanvasWidth = 0;
+	let currentCanvasHeight = 0;
+	let currentCanvasBuffer = 0;
+
+	let fleetRefreshTimer = null;
+	let fleetRefreshInProgress = false;
+
+	const FLEET_REFRESH_INTERVAL_MS = 30000;
+
 	let measureActive = $state(false);
 	let measureUnit = $state('NM');
 	let measurePoints = $state([]);
@@ -49,6 +106,25 @@
 		{ value: 'mi', label: 'mi' },
 		{ value: 'm', label: 'm' }
 	];
+
+	const CARDINAL_WIND_DEGREES = {
+		N: 0,
+		NNE: 22.5,
+		NE: 45,
+		ENE: 67.5,
+		E: 90,
+		ESE: 112.5,
+		SE: 135,
+		SSE: 157.5,
+		S: 180,
+		SSW: 202.5,
+		SW: 225,
+		WSW: 247.5,
+		W: 270,
+		WNW: 292.5,
+		NW: 315,
+		NNW: 337.5
+	};
 
 	function normalizeFleetVessel(vessel = {}) {
 		const id = vessel.vesselId ?? vessel.id;
@@ -220,6 +296,13 @@
 		return number.toFixed(digits);
 	}
 
+	function hasValidVesselCoordinate(vessel) {
+		const lat = Number(vessel?.lat ?? vessel?.latitude);
+		const lng = Number(vessel?.lng ?? vessel?.longitude);
+
+		return Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
+	}
+
 	function parseVesselDateTime(value) {
 		if (!value || value === '-') return null;
 
@@ -231,7 +314,7 @@
 		if (match) {
 			const [, dd, mm, yyyy, hh, min, ss] = match;
 
-			// Dibuat sebagai local time browser
+			// Created using the browser local time
 			const date = new Date(
 				Number(yyyy),
 				Number(mm) - 1,
@@ -873,6 +956,18 @@
 	function setupMapPanes() {
 		if (!map) return;
 
+		if (!map.getPane('currentPane')) {
+			map.createPane('currentPane');
+			map.getPane('currentPane').style.zIndex = '430';
+			map.getPane('currentPane').style.pointerEvents = 'none';
+		}
+
+		if (!map.getPane('windPane')) {
+			map.createPane('windPane');
+			map.getPane('windPane').style.zIndex = '420';
+			map.getPane('windPane').style.pointerEvents = 'none';
+		}
+
 		if (!map.getPane('assetPane')) {
 			map.createPane('assetPane');
 			map.getPane('assetPane').style.zIndex = '450';
@@ -949,6 +1044,698 @@
 		});
 	}
 
+
+	function normalizeWindDirectionDegrees(value) {
+		if (value === null || value === undefined || value === '') return null;
+
+		const numeric = Number(value);
+		if (Number.isFinite(numeric)) {
+			return ((numeric % 360) + 360) % 360;
+		}
+
+		const text = String(value).trim().toUpperCase().replace(/\s+/g, '');
+		const numericMatch = text.match(/-?\d+(\.\d+)?/);
+
+		if (numericMatch) {
+			const parsed = Number(numericMatch[0]);
+			return Number.isFinite(parsed) ? ((parsed % 360) + 360) % 360 : null;
+		}
+
+		return CARDINAL_WIND_DEGREES[text] ?? null;
+	}
+
+	function getWeatherWindSpeedKt(weather = {}) {
+		const directKt = Number(
+			weather.wind_speed_kt ??
+				weather.windSpeedKt ??
+				weather.wind_kt ??
+				weather.wind_kts ??
+				weather.wind_knots
+		);
+
+		if (Number.isFinite(directKt)) return Math.max(0, Math.min(80, directKt));
+
+		const kph = Number(weather.wind_kph ?? weather.windSpeedKph);
+		if (Number.isFinite(kph)) return Math.max(0, Math.min(80, kph / 1.852));
+
+		const mph = Number(weather.wind_mph ?? weather.windSpeedMph);
+		if (Number.isFinite(mph)) return Math.max(0, Math.min(80, mph * 0.868976));
+
+		const ms = Number(weather.wind_ms ?? weather.wind_mps ?? weather.windSpeedMs);
+		if (Number.isFinite(ms)) return Math.max(0, Math.min(80, ms * 1.94384));
+
+		const fallback = Number(weather.wind_speed ?? weather.windSpeed);
+		return Number.isFinite(fallback) ? Math.max(0, Math.min(80, fallback)) : 8;
+	}
+
+	function getWindSourcePoints() {
+		const sourceVessels = [...vesselData];
+
+		if (selectedVessel && !sourceVessels.some((item) => String(item.id) === String(selectedVessel.id))) {
+			sourceVessels.push(selectedVessel);
+		}
+
+		return sourceVessels
+			.map((vessel) => {
+				const currentWeather = getCurrentWeather(vessel) || vessel?.weather || {};
+				const lat = Number(vessel.lat ?? vessel.latitude);
+				const lng = Number(vessel.lng ?? vessel.longitude);
+
+				if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+				if (lat === 0 && lng === 0) return null;
+
+				const windFromDeg = normalizeWindDirectionDegrees(
+					currentWeather.wind_degree ??
+						currentWeather.wind_deg ??
+						currentWeather.wind_dir_degree ??
+						currentWeather.windDirectionDeg ??
+						currentWeather.wind_dir ??
+						currentWeather.windDirection ??
+						vessel.wind_degree ??
+						vessel.wind_deg ??
+						vessel.wind_dir
+				);
+
+				if (windFromDeg === null) return null;
+
+				return {
+					lat,
+					lng,
+					// weather wind direction umumnya menunjukkan arah asal angin.
+					// Particles move toward the wind direction.
+					directionToDeg: (windFromDeg + 180) % 360,
+					speedKt: getWeatherWindSpeedKt(currentWeather)
+				};
+			})
+			.filter(Boolean);
+	}
+
+	function getSeaCurrentData(vessel) {
+		return vessel?.oceanCurrent?.current || null;
+	}
+
+	function getSeaCurrentSpeedKt(current = {}) {
+		const speedKph = Number(current?.speed_kph);
+
+		if (!Number.isFinite(speedKph)) return 1.2;
+
+		return Math.max(0.1, Math.min(12, speedKph / 1.852));
+	}
+
+	function getSeaCurrentSourcePoints() {
+		const sourceVessels = [...vesselData];
+
+		if (selectedVessel && !sourceVessels.some((item) => String(item.id) === String(selectedVessel.id))) {
+			sourceVessels.push(selectedVessel);
+		}
+
+		return sourceVessels
+			.map((vessel) => {
+				const current = getSeaCurrentData(vessel);
+				const lat = Number(vessel.lat ?? vessel.latitude);
+				const lng = Number(vessel.lng ?? vessel.longitude);
+
+				if (!current) return null;
+				if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+				if (lat === 0 && lng === 0) return null;
+
+				const directionToDeg = normalizeWindDirectionDegrees(
+					current.direction_to_deg ?? current.direction_to
+				);
+
+				if (directionToDeg === null) return null;
+
+				return {
+					lat,
+					lng,
+					directionToDeg,
+					speedKt: getSeaCurrentSpeedKt(current)
+				};
+			})
+			.filter(Boolean);
+	}
+
+	function getWindParticleCount() {
+		if (!map) return WIND_PARTICLE_MIN_COUNT;
+
+		const size = map.getSize();
+		const width = Math.max(size.x, windCanvasWidth || size.x);
+		const height = Math.max(size.y, windCanvasHeight || size.y);
+		const count = Math.round((width * height) / 7200);
+
+		return Math.max(WIND_PARTICLE_MIN_COUNT, Math.min(WIND_PARTICLE_MAX_COUNT, count));
+	}
+
+	function resetWindParticle(particle = {}, randomAge = true) {
+		if (!map) return particle;
+
+		const size = map.getSize();
+		const width = windCanvasWidth || size.x;
+		const height = windCanvasHeight || size.y;
+
+		particle.x = Math.random() * Math.max(1, width);
+		particle.y = Math.random() * Math.max(1, height);
+		particle.age = randomAge ? Math.floor(Math.random() * WIND_PARTICLE_MAX_AGE) : 0;
+		particle.maxAge = WIND_PARTICLE_MAX_AGE + Math.floor(Math.random() * 44);
+		particle.speedJitter = 0.82 + Math.random() * 0.78;
+		particle.trailLength = 2.8 + Math.random() * 3.8;
+		particle.alpha = 0.34 + Math.random() * 0.34;
+
+		return particle;
+	}
+
+	function positionWindCanvas() {
+		if (!map || !L || !windCanvas) return;
+
+		const topLeft = map.containerPointToLayerPoint([
+			-windCanvasBuffer,
+			-windCanvasBuffer
+		]);
+
+		L.DomUtil.setPosition(windCanvas, topLeft);
+	}
+
+	function seedWindParticles(keepExisting = true) {
+		const targetCount = getWindParticleCount();
+		const nextParticles = keepExisting ? windParticles.slice(0, targetCount) : [];
+
+		while (nextParticles.length < targetCount) {
+			nextParticles.push(resetWindParticle({}, true));
+		}
+
+		windParticles = nextParticles;
+	}
+
+	function resizeWindCanvas({ reseed = true } = {}) {
+		if (!browser || !map || !windCanvas || !windContext) return;
+
+		const size = map.getSize();
+		const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+
+		windCanvasBuffer = WIND_CANVAS_BUFFER_PX;
+		windCanvasWidth = size.x + windCanvasBuffer * 2;
+		windCanvasHeight = size.y + windCanvasBuffer * 2;
+
+		positionWindCanvas();
+
+		windCanvas.width = Math.max(1, Math.floor(windCanvasWidth * pixelRatio));
+		windCanvas.height = Math.max(1, Math.floor(windCanvasHeight * pixelRatio));
+		windCanvas.style.width = `${windCanvasWidth}px`;
+		windCanvas.style.height = `${windCanvasHeight}px`;
+
+		windContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+
+		if (reseed) {
+			seedWindParticles(false);
+		}
+	}
+
+	function getFallbackWindVector() {
+		return {
+			x: 0.94,
+			y: -0.34,
+			speed: 8
+		};
+	}
+
+	function getWindVectorAtContainerPoint(point, sources = []) {
+		if (!map || !sources.length) return getFallbackWindVector();
+
+		const latLng = map.containerPointToLatLng([point.x, point.y]);
+		let totalWeight = 0;
+		let weightedX = 0;
+		let weightedY = 0;
+		let weightedSpeed = 0;
+
+		sources.forEach((source) => {
+			const distance = Math.max(18000, map.distance(latLng, [source.lat, source.lng]));
+			const weight = 1 / Math.pow(distance / 1000, 1.8);
+			const angleRad = (source.directionToDeg * Math.PI) / 180;
+			const speed = Math.max(1, source.speedKt || 8);
+
+			weightedX += Math.sin(angleRad) * weight * speed;
+			weightedY += -Math.cos(angleRad) * weight * speed;
+			weightedSpeed += speed * weight;
+			totalWeight += weight;
+		});
+
+		const magnitude = Math.hypot(weightedX, weightedY);
+
+		if (!totalWeight || !magnitude) return getFallbackWindVector();
+
+		return {
+			x: weightedX / magnitude,
+			y: weightedY / magnitude,
+			speed: weightedSpeed / totalWeight
+		};
+	}
+
+	function drawWindParticles() {
+		if (!map || !windCanvas || !windContext || !showWindParticles) return;
+
+		const size = map.getSize();
+		const canvasWidth = windCanvasWidth || size.x;
+		const canvasHeight = windCanvasHeight || size.y;
+		const sources = getWindSourcePoints();
+
+		windContext.globalCompositeOperation = 'destination-out';
+		windContext.fillStyle = `rgba(0, 0, 0, ${WIND_PARTICLE_TRAIL_FADE_ALPHA})`;
+		windContext.fillRect(0, 0, canvasWidth, canvasHeight);
+
+		windContext.globalCompositeOperation = 'source-over';
+
+		if (!sources.length) return;
+
+		windContext.lineCap = 'round';
+		windContext.lineJoin = 'round';
+		windContext.lineWidth = WIND_PARTICLE_LINE_WIDTH;
+		windContext.shadowBlur = 1.5;
+		windContext.shadowColor = 'rgba(15, 23, 42, 0.18)';
+
+		windParticles.forEach((particle) => {
+			const containerPoint = {
+				x: particle.x - windCanvasBuffer,
+				y: particle.y - windCanvasBuffer
+			};
+
+			const vector = getWindVectorAtContainerPoint(containerPoint, sources);
+			const speed = Math.max(2, Math.min(34, vector.speed || 8));
+
+			const velocity =
+				(0.42 + speed * 0.045) *
+				particle.speedJitter *
+				WIND_PARTICLE_STEP_MULTIPLIER;
+
+			const stepX = vector.x * velocity;
+			const stepY = vector.y * velocity;
+
+			const previousX = particle.x;
+			const previousY = particle.y;
+
+			const nextX = previousX + stepX;
+			const nextY = previousY + stepY;
+
+			const tailX = previousX - stepX * particle.trailLength;
+			const tailY = previousY - stepY * particle.trailLength;
+
+			particle.x = nextX;
+			particle.y = nextY;
+			particle.age += 1;
+
+			const headAlpha = particle.alpha;
+			const tailAlpha = Math.max(0.06, particle.alpha * 0.22);
+
+			const gradient = windContext.createLinearGradient(tailX, tailY, nextX, nextY);
+			gradient.addColorStop(0, `rgba(15, 23, 42, ${tailAlpha})`);
+			gradient.addColorStop(0.55, `rgba(15, 23, 42, ${particle.alpha * 0.42})`);
+			gradient.addColorStop(1, `rgba(15, 23, 42, ${headAlpha})`);
+
+			windContext.beginPath();
+			windContext.moveTo(tailX, tailY);
+			windContext.lineTo(nextX, nextY);
+			windContext.strokeStyle = gradient;
+			windContext.stroke();
+
+			if (
+				particle.age > particle.maxAge ||
+				particle.x < -40 ||
+				particle.x > canvasWidth + 40 ||
+				particle.y < -40 ||
+				particle.y > canvasHeight + 40
+			) {
+				resetWindParticle(particle, false);
+			}
+		});
+		windContext.shadowBlur = 0;
+		windContext.globalCompositeOperation = 'source-over';
+	}
+
+	function handleWindMapMove() {
+		positionWindCanvas();
+	}
+
+	function handleWindMapChange() {
+		resizeWindCanvas({ reseed: true });
+		drawWindParticles();
+	}
+
+	function startWindAnimation() {
+		if (!browser || windFrame) return;
+
+		const animate = (timestamp) => {
+			windFrame = requestAnimationFrame(animate);
+
+			if (timestamp - windLastFrameAt < WIND_PARTICLE_FRAME_INTERVAL_MS) return;
+
+			windLastFrameAt = timestamp;
+			drawWindParticles();
+		};
+
+		windFrame = requestAnimationFrame(animate);
+	}
+
+	function stopWindAnimation() {
+		if (!browser || !windFrame) return;
+
+		cancelAnimationFrame(windFrame);
+		windFrame = null;
+		windLastFrameAt = 0;
+	}
+
+	function addWindParticleLayer() {
+		if (!map || !L || windParticleLayer) return;
+
+		windParticleLayer = new L.Layer();
+
+		windParticleLayer.onAdd = (targetMap) => {
+			const pane = targetMap.getPane('windPane') || targetMap.getPanes().overlayPane;
+
+			windCanvas = L.DomUtil.create('canvas', 'wind-particle-canvas');
+			windCanvas.setAttribute('aria-hidden', 'true');
+			pane.appendChild(windCanvas);
+
+			windContext = windCanvas.getContext('2d');
+
+			targetMap.on('move zoom', handleWindMapMove);
+			targetMap.on('dragend resize moveend zoomend viewreset', handleWindMapChange);
+
+			resizeWindCanvas();
+			startWindAnimation();
+		};
+
+		windParticleLayer.onRemove = (targetMap) => {
+			targetMap.off('move zoom', handleWindMapMove);
+			targetMap.off('dragend resize moveend zoomend viewreset', handleWindMapChange);
+			stopWindAnimation();
+
+			if (windCanvas?.parentNode) {
+				windCanvas.parentNode.removeChild(windCanvas);
+			}
+
+			windCanvas = null;
+			windContext = null;
+			windParticles = [];
+		};
+
+		windParticleLayer.addTo(map);
+	}
+
+	function removeWindParticleLayer() {
+		if (windParticleLayer && map) {
+			map.removeLayer(windParticleLayer);
+		}
+
+		windParticleLayer = null;
+		stopWindAnimation();
+	}
+
+	function getCurrentParticleCount() {
+		if (!map) return CURRENT_PARTICLE_MIN_COUNT;
+
+		const size = map.getSize();
+		const width = Math.max(size.x, currentCanvasWidth || size.x);
+		const height = Math.max(size.y, currentCanvasHeight || size.y);
+		const count = Math.round((width * height) / 10500);
+
+		return Math.max(CURRENT_PARTICLE_MIN_COUNT, Math.min(CURRENT_PARTICLE_MAX_COUNT, count));
+	}
+
+	function resetCurrentParticle(particle = {}, randomAge = true) {
+		if (!map) return particle;
+
+		const size = map.getSize();
+		const width = currentCanvasWidth || size.x;
+		const height = currentCanvasHeight || size.y;
+
+		particle.x = Math.random() * Math.max(1, width);
+		particle.y = Math.random() * Math.max(1, height);
+		particle.age = randomAge ? Math.floor(Math.random() * CURRENT_PARTICLE_MAX_AGE) : 0;
+		particle.maxAge = CURRENT_PARTICLE_MAX_AGE + Math.floor(Math.random() * 60);
+		particle.speedJitter = 0.72 + Math.random() * 0.56;
+		particle.trailLength = 4.5 + Math.random() * 5.5;
+		particle.alpha = 0.34 + Math.random() * 0.28;
+
+		return particle;
+	}
+
+	function positionCurrentCanvas() {
+		if (!map || !L || !currentCanvas) return;
+
+		const topLeft = map.containerPointToLayerPoint([
+			-currentCanvasBuffer,
+			-currentCanvasBuffer
+		]);
+
+		L.DomUtil.setPosition(currentCanvas, topLeft);
+	}
+
+	function seedCurrentParticles(keepExisting = true) {
+		const targetCount = getCurrentParticleCount();
+		const nextParticles = keepExisting ? currentParticles.slice(0, targetCount) : [];
+
+		while (nextParticles.length < targetCount) {
+			nextParticles.push(resetCurrentParticle({}, true));
+		}
+
+		currentParticles = nextParticles;
+	}
+
+	function resizeCurrentCanvas({ reseed = true } = {}) {
+		if (!browser || !map || !currentCanvas || !currentContext) return;
+
+		const size = map.getSize();
+		const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+
+		currentCanvasBuffer = CURRENT_CANVAS_BUFFER_PX;
+		currentCanvasWidth = size.x + currentCanvasBuffer * 2;
+		currentCanvasHeight = size.y + currentCanvasBuffer * 2;
+
+		positionCurrentCanvas();
+
+		currentCanvas.width = Math.max(1, Math.floor(currentCanvasWidth * pixelRatio));
+		currentCanvas.height = Math.max(1, Math.floor(currentCanvasHeight * pixelRatio));
+		currentCanvas.style.width = `${currentCanvasWidth}px`;
+		currentCanvas.style.height = `${currentCanvasHeight}px`;
+
+		currentContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+
+		if (reseed) {
+			seedCurrentParticles(false);
+		}
+	}
+
+	function getFallbackCurrentVector() {
+		return {
+			x: 0.6,
+			y: 0.18,
+			speed: 1.2
+		};
+	}
+
+	function getCurrentVectorAtContainerPoint(point, sources = []) {
+		if (!map || !sources.length) return null;
+
+		const latLng = map.containerPointToLatLng([point.x, point.y]);
+		let totalWeight = 0;
+		let weightedX = 0;
+		let weightedY = 0;
+		let weightedSpeed = 0;
+
+		sources.forEach((source) => {
+			const rawDistance = map.distance(latLng, [source.lat, source.lng]);
+
+			if (rawDistance > CURRENT_INFLUENCE_RADIUS_METERS) {
+				return;
+			}
+
+			const distance = Math.max(25000, rawDistance);
+			const weight = 1 / Math.pow(distance / 1000, 1.65);
+			const angleRad = (source.directionToDeg * Math.PI) / 180;
+			const speed = Math.max(0.1, source.speedKt || 1.2);
+
+			weightedX += Math.sin(angleRad) * weight * speed;
+			weightedY += -Math.cos(angleRad) * weight * speed;
+			weightedSpeed += speed * weight;
+			totalWeight += weight;
+		});
+
+		const magnitude = Math.hypot(weightedX, weightedY);
+
+		if (!totalWeight || !magnitude) return null;
+
+		return {
+			x: weightedX / magnitude,
+			y: weightedY / magnitude,
+			speed: weightedSpeed / totalWeight
+		};
+	}
+
+	function drawCurrentParticles() {
+		if (!map || !currentCanvas || !currentContext || !showCurrentParticles) return;
+
+		const size = map.getSize();
+		const canvasWidth = currentCanvasWidth || size.x;
+		const canvasHeight = currentCanvasHeight || size.y;
+		const sources = getSeaCurrentSourcePoints();
+
+		currentContext.globalCompositeOperation = 'destination-out';
+		currentContext.fillStyle = `rgba(0, 0, 0, ${CURRENT_PARTICLE_TRAIL_FADE_ALPHA})`;
+		currentContext.fillRect(0, 0, canvasWidth, canvasHeight);
+
+		currentContext.globalCompositeOperation = 'source-over';
+
+		if (!sources.length) return;
+
+		currentContext.lineCap = 'round';
+		currentContext.lineJoin = 'round';
+		currentContext.lineWidth = CURRENT_PARTICLE_LINE_WIDTH;
+		currentContext.shadowBlur = 2;
+		currentContext.shadowColor = 'rgba(80, 190, 255, 0.22)';
+
+		currentParticles.forEach((particle) => {
+			const containerPoint = {
+				x: particle.x - currentCanvasBuffer,
+				y: particle.y - currentCanvasBuffer
+			};
+
+			const vector = getCurrentVectorAtContainerPoint(containerPoint, sources);
+
+			if (!vector) {
+				resetCurrentParticle(particle, false);
+				return;
+			}
+
+			const speed = Math.max(0.2, Math.min(12, vector.speed || 1.2));
+
+			const velocity =
+				(0.18 + speed * 0.08) *
+				particle.speedJitter *
+				CURRENT_PARTICLE_STEP_MULTIPLIER;
+
+			const stepX = vector.x * velocity;
+			const stepY = vector.y * velocity;
+
+			const previousX = particle.x;
+			const previousY = particle.y;
+
+			const nextX = previousX + stepX;
+			const nextY = previousY + stepY;
+
+			const tailX = previousX - stepX * particle.trailLength;
+			const tailY = previousY - stepY * particle.trailLength;
+
+			particle.x = nextX;
+			particle.y = nextY;
+			particle.age += 1;
+
+			const headAlpha = particle.alpha;
+			const tailAlpha = Math.max(0.04, particle.alpha * 0.2);
+
+			const gradient = currentContext.createLinearGradient(tailX, tailY, nextX, nextY);
+			gradient.addColorStop(0, `rgba(75, 190, 255, ${tailAlpha})`);
+			gradient.addColorStop(0.55, `rgba(90, 205, 255, ${particle.alpha * 0.42})`);
+			gradient.addColorStop(1, `rgba(125, 220, 255, ${headAlpha})`);
+
+			currentContext.beginPath();
+			currentContext.moveTo(tailX, tailY);
+			currentContext.lineTo(nextX, nextY);
+			currentContext.strokeStyle = gradient;
+			currentContext.stroke();
+
+			if (
+				particle.age > particle.maxAge ||
+				particle.x < -40 ||
+				particle.x > canvasWidth + 40 ||
+				particle.y < -40 ||
+				particle.y > canvasHeight + 40
+			) {
+				resetCurrentParticle(particle, false);
+			}
+		});
+
+		currentContext.shadowBlur = 0;
+		currentContext.globalCompositeOperation = 'source-over';
+	}
+
+	function handleCurrentMapMove() {
+		positionCurrentCanvas();
+	}
+
+	function handleCurrentMapChange() {
+		resizeCurrentCanvas({ reseed: true });
+		drawCurrentParticles();
+	}
+
+	function startCurrentAnimation() {
+		if (!browser || currentFrame) return;
+
+		const animate = (timestamp) => {
+			currentFrame = requestAnimationFrame(animate);
+
+			if (timestamp - currentLastFrameAt < CURRENT_PARTICLE_FRAME_INTERVAL_MS) return;
+
+			currentLastFrameAt = timestamp;
+			drawCurrentParticles();
+		};
+
+		currentFrame = requestAnimationFrame(animate);
+	}
+
+	function stopCurrentAnimation() {
+		if (!browser || !currentFrame) return;
+
+		cancelAnimationFrame(currentFrame);
+		currentFrame = null;
+		currentLastFrameAt = 0;
+	}
+
+	function addCurrentParticleLayer() {
+		if (!map || !L || currentParticleLayer) return;
+
+		currentParticleLayer = new L.Layer();
+
+		currentParticleLayer.onAdd = (targetMap) => {
+			const pane = targetMap.getPane('currentPane') || targetMap.getPanes().overlayPane;
+
+			currentCanvas = L.DomUtil.create('canvas', 'current-particle-canvas');
+			currentCanvas.setAttribute('aria-hidden', 'true');
+			pane.appendChild(currentCanvas);
+
+			currentContext = currentCanvas.getContext('2d');
+
+			targetMap.on('move zoom', handleCurrentMapMove);
+			targetMap.on('dragend resize moveend zoomend viewreset', handleCurrentMapChange);
+
+			resizeCurrentCanvas();
+			startCurrentAnimation();
+		};
+
+		currentParticleLayer.onRemove = (targetMap) => {
+			targetMap.off('move zoom', handleCurrentMapMove);
+			targetMap.off('dragend resize moveend zoomend viewreset', handleCurrentMapChange);
+			stopCurrentAnimation();
+
+			if (currentCanvas?.parentNode) {
+				currentCanvas.parentNode.removeChild(currentCanvas);
+			}
+
+			currentCanvas = null;
+			currentContext = null;
+			currentParticles = [];
+		};
+
+		currentParticleLayer.addTo(map);
+	}
+
+	function removeCurrentParticleLayer() {
+		if (currentParticleLayer && map) {
+			map.removeLayer(currentParticleLayer);
+		}
+
+		currentParticleLayer = null;
+		stopCurrentAnimation();
+	}
+
 	function focusVessel(vesselId, zoom = 7, openPopup = true) {
 		if (!map) return;
 
@@ -1002,23 +1789,41 @@
 		return null;
 	}
 
-	async function loadFleetVessels() {
-		fleetLoading = true;
-		fleetError = '';
+	async function loadFleetVessels({ silent = false, includeLiveDetails = false } = {}) {
+		if (fleetRefreshInProgress) return;
+
+		fleetRefreshInProgress = true;
+
+		if (!silent) {
+			fleetLoading = true;
+			fleetError = '';
+		}
 
 		try {
-			const vessels = await getFleetVessels({
-				search,
-				status: statusFilter === 'all' ? '' : statusFilter
-			});
+			const vessels = await getFleetVessels({});
 
-			const normalizedVessels = Array.isArray(vessels) ? vessels.map(normalizeFleetVessel) : [];
+			let normalizedVessels = Array.isArray(vessels) ? vessels.map(normalizeFleetVessel) : [];
 
-			console.log('[FLEET_VIEW][VESSELS_FROM_FLEET_ENDPOINT]', normalizedVessels);
+			if (includeLiveDetails) {
+				normalizedVessels = await loadLiveDetailsForAllVessels(normalizedVessels);
+			}
+
+			console.log('[FLEET_VIEW][VESSELS_REFRESHED]', normalizedVessels);
 
 			vesselData = normalizedVessels;
+			fleetError = '';
 
-			if (!selectedVesselId && vesselData.length > 0) {
+			if (selectedVesselId) {
+				const refreshedSelected = vesselData.find(
+					(item) => String(item.id) === String(selectedVesselId)
+				);
+
+				if (refreshedSelected) {
+					selectedVesselDetail = selectedVesselDetail
+						? mergeVesselWithLiveDetail(selectedVesselDetail, refreshedSelected)
+						: refreshedSelected;
+				}
+			} else if (vesselData.length > 0) {
 				selectedVesselId = String(vesselData[0].id);
 				selectedVesselDetail = vesselData[0];
 			}
@@ -1029,10 +1834,16 @@
 		} catch (error) {
 			console.error('[FLEET_VIEW_LOAD_ERROR]', error);
 
-			fleetError = error?.message || 'Gagal memuat data fleet.';
-			vesselData = [];
+			if (!silent) {
+				fleetError = error?.message || 'Failed to load fleet data.';
+				vesselData = [];
+			}
 		} finally {
-			fleetLoading = false;
+			if (!silent) {
+				fleetLoading = false;
+			}
+
+			fleetRefreshInProgress = false;
 		}
 	}
 
@@ -1068,7 +1879,7 @@
 		} catch (error) {
 			console.error('[FLEET_ASSET_LOAD_ERROR]', error);
 
-			assetError = error?.message || 'Gagal memuat data asset.';
+			assetError = error?.message || 'Failed to load asset data.';
 			assetData = [];
 		} finally {
 			assetLoading = false;
@@ -1104,23 +1915,48 @@
 		}
 	}
 
-	async function loadLiveDetailsForAllVessels(vessels = []) {
+	async function loadLiveDetailsForAllVessels(vessels = [], batchSize = 5) {
 		if (!Array.isArray(vessels) || !vessels.length) return vessels;
 
-		const results = await Promise.all(
-			vessels.map(async (vessel) => {
-				try {
-					const liveDetail = await getFleetVesselLiveDetail(vessel.vesselId || vessel.id);
+		const results = [];
 
-					return mergeVesselWithLiveDetail(vessel, liveDetail);
-				} catch (error) {
-					console.error('[FLEET_VIEW][LIVE_DETAIL_PRELOAD_ERROR]', vessel, error);
-					return vessel;
-				}
-			})
-		);
+		for (let i = 0; i < vessels.length; i += batchSize) {
+			const batch = vessels.slice(i, i + batchSize);
+
+			const batchResults = await Promise.all(
+				batch.map(async (vessel) => {
+					try {
+						const liveDetail = await getFleetVesselLiveDetail(vessel.vesselId || vessel.id);
+
+						return mergeVesselWithLiveDetail(vessel, liveDetail);
+					} catch (error) {
+						console.error('[FLEET_VIEW][LIVE_DETAIL_PRELOAD_ERROR]', vessel, error);
+						return vessel;
+					}
+				})
+			);
+
+			results.push(...batchResults);
+		}
 
 		return results;
+	}
+
+	function startFleetAutoRefresh() {
+		if (!browser) return;
+
+		if (fleetRefreshTimer) {
+			clearInterval(fleetRefreshTimer);
+		}
+
+		fleetRefreshTimer = setInterval(() => {
+			if (!isFleetMounted) return;
+
+			loadFleetVessels({
+				silent: true,
+				includeLiveDetails: true
+			});
+		}, FLEET_REFRESH_INTERVAL_MS);
 	}
 
 	onMount(async () => {
@@ -1146,18 +1982,28 @@
 
 		map = L.map(container, {
 			zoomControl: false,
-			attributionControl: false
+			attributionControl: true,
+			preferCanvas: true
 		}).setView([-2.8, 114.5], 5);
 
-		L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-			maxZoom: 19,
-			attribution: '&copy; OpenStreetMap contributors'
+		L.tileLayer(SHADCN_LIGHT_TILE_URL, {
+			maxZoom: 20,
+			subdomains: 'abcd',
+			detectRetina: true,
+			attribution: SHADCN_TILE_ATTRIBUTION
 		}).addTo(map);
 
 		setupMapPanes();
+		addCurrentParticleLayer();
+		addWindParticleLayer();
 
-		await loadFleetVessels();
+		await loadFleetVessels({
+			includeLiveDetails: true
+		});
+
 		await loadFleetAssets();
+
+		startFleetAutoRefresh();
 
 		map.on('contextmenu', handleMapRightClick);
 		map.on('click', handleMapMeasureClick);
@@ -1176,11 +2022,18 @@
 	onDestroy(() => {
 		isFleetMounted = false;
 
+		if (fleetRefreshTimer) {
+			clearInterval(fleetRefreshTimer);
+			fleetRefreshTimer = null;
+		}
+
 		if (browser) {
 			window.removeEventListener('mobile-panel-open', handleMobilePanelOpen);
 		}
 
 		cancelMeasure();
+		removeCurrentParticleLayer();
+		removeWindParticleLayer();
 
 		if (map) {
 			map.off('contextmenu', handleMapRightClick);
@@ -1210,6 +2063,34 @@
 		if (!map || !L) return;
 
 		buildAssetMarkers();
+	});
+
+	$effect(() => {
+		showCurrentParticles;
+		vesselData;
+
+		if (!map || !L) return;
+
+		if (showCurrentParticles) {
+			addCurrentParticleLayer();
+			seedCurrentParticles(true);
+		} else {
+			removeCurrentParticleLayer();
+		}
+	});
+
+	$effect(() => {
+		showWindParticles;
+		vesselData;
+
+		if (!map || !L) return;
+
+		if (showWindParticles) {
+			addWindParticleLayer();
+			seedWindParticles(true);
+		} else {
+			removeWindParticleLayer();
+		}
 	});
 </script>
 
@@ -1269,7 +2150,7 @@
 						class="stat-chip total-chip"
 						onclick={() => (statusFilter = 'all')}
 					>
-						Tot: {vesselData.length}
+						Total: {vesselData.length}
 					</button>
 				</div>
 
@@ -1281,7 +2162,7 @@
 			<div class="vessel-list">
 				{#each filteredVessels as vessel}
 					<article
-						class:selected-card={selectedVesselId === vessel.id}
+						class:selected-card={String(selectedVesselId) === String(vessel.id)}
 						class:offline-card={!vessel.online}
 						class="vessel-card"
 					>
@@ -1303,7 +2184,16 @@
 									</div>
 								</div>
 
-								<div class="location-button" title="Focus vessel on map">⌖</div>
+								<div
+									class="location-button"
+									class:has-coordinate={hasValidVesselCoordinate(vessel)}
+									title={hasValidVesselCoordinate(vessel)
+										? 'Coordinate available'
+										: 'Coordinate unavailable'}
+									aria-label={hasValidVesselCoordinate(vessel)
+										? 'Coordinate available'
+										: 'Coordinate unavailable'}
+								></div>
 							</div>
 
 							<div class="vessel-metric-row">
@@ -1347,7 +2237,7 @@
 
 				{#if !fleetLoading && !fleetError && vesselData.length && !vesselsWithCoordinate.length}
 					<div class="fleet-api-status">
-						Vessel berhasil dimuat, tetapi koordinat belum tersedia dari API.
+						Vessels were loaded, but coordinates are not available from the API.
 					</div>
 				{/if}
 
@@ -1478,7 +2368,7 @@
 											</div>
 										{/each}
 									{:else}
-										<div class="empty-voyage">Engine list belum tersedia.</div>
+										<div class="empty-voyage">Engine list is not available.</div>
 									{/if}
 								</div>
 							</section>
@@ -1507,7 +2397,7 @@
 										</div>
 									</div>
 								{:else}
-									<div class="empty-voyage">Weather belum tersedia.</div>
+									<div class="empty-voyage">Weather is not available.</div>
 								{/if}
 							</section>
 
@@ -1537,7 +2427,7 @@
 										</div>
 									</div>
 								{:else}
-									<div class="empty-voyage">Ocean current belum tersedia.</div>
+									<div class="empty-voyage">Ocean current is not available.</div>
 								{/if}
 							</section>
 						</div>
@@ -1559,6 +2449,26 @@
 
 					<button
 						type="button"
+						class:active-wind-toggle={showWindParticles}
+						class="wind-toggle-btn"
+						onclick={() => (showWindParticles = !showWindParticles)}
+					>
+						<span class="wind-legend-line"></span>
+						Wind: {showWindParticles ? 'On' : 'Off'}
+					</button>
+
+					<button
+						type="button"
+						class:active-current-toggle={showCurrentParticles}
+						class="current-toggle-btn"
+						onclick={() => (showCurrentParticles = !showCurrentParticles)}
+					>
+						<span class="current-legend-line"></span>
+						Current: {showCurrentParticles ? 'On' : 'Off'}
+					</button>
+
+					<button
+						type="button"
 						class:active-asset-toggle={showAssets}
 						class="asset-toggle-btn"
 						onclick={() => (showAssets = !showAssets)}
@@ -1573,6 +2483,14 @@
 </section>
 
 <style>
+	:global(.current-particle-canvas) {
+		position: absolute;
+		top: 0;
+		left: 0;
+		pointer-events: none;
+		mix-blend-mode: screen;
+		opacity: 0.86;
+	}
 	:global(.fleet-popup-actions) {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
@@ -1805,6 +2723,85 @@
 
 	.asset-toggle-btn:hover {
 		background: #fffbeb;
+	}
+
+	:global(.wind-particle-canvas) {
+		position: absolute;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		pointer-events: none;
+		opacity: 0.62;
+		mix-blend-mode: multiply;
+	}
+
+	.wind-legend-line {
+		width: 15px;
+		height: 2px;
+		border-radius: 999px;
+		background: linear-gradient(90deg, rgba(15, 23, 42, 0.16), #0f172a);
+		box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.1);
+		flex-shrink: 0;
+	}
+
+	.wind-toggle-btn {
+		height: 21px;
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		padding: 0 7px;
+		border: 1px solid #bae6fd;
+		border-radius: 999px;
+		background: #ffffff;
+		color: #0369a1;
+		font-size: 8px;
+		line-height: 1;
+		font-weight: 900;
+		cursor: pointer;
+	}
+
+	.wind-toggle-btn.active-wind-toggle {
+		background: #f0f9ff;
+		border-color: #0ea5e9;
+	}
+
+	.wind-toggle-btn:hover {
+		background: #f0f9ff;
+	}
+
+	.current-legend-line {
+		width: 15px;
+		height: 2px;
+		border-radius: 999px;
+		background: linear-gradient(90deg, rgba(56, 189, 248, 0.14), #38bdf8);
+		box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14);
+		flex-shrink: 0;
+	}
+
+	.current-toggle-btn {
+		height: 21px;
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		padding: 0 7px;
+		border: 1px solid #bae6fd;
+		border-radius: 999px;
+		background: #ffffff;
+		color: #075985;
+		font-size: 8px;
+		line-height: 1;
+		font-weight: 900;
+		cursor: pointer;
+	}
+
+	.current-toggle-btn.active-current-toggle {
+		background: #ecfeff;
+		border-color: #38bdf8;
+	}
+
+	.current-toggle-btn:hover {
+		background: #ecfeff;
 	}
 
 	.asset-api-status,
@@ -2355,20 +3352,45 @@
 		width: 23px;
 		height: 23px;
 		border-radius: 8px;
-		background: #eff6ff;
-		color: #1d4ed8;
+		background: #f1f5f9;
 		display: grid;
 		place-items: center;
-		font-size: 10px;
-		font-weight: 900;
 		flex-shrink: 0;
+		border: 1px solid #e2e8f0;
+		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.72);
+	}
+
+	.location-button::before {
+		content: '';
+		width: 13px;
+		height: 13px;
+		display: block;
+		background: #94a3b8;
+		-webkit-mask: url('/assets/gps.svg') center / contain no-repeat;
+		mask: url('/assets/gps.svg') center / contain no-repeat;
+	}
+
+	.location-button.has-coordinate {
+		background: #ecfdf5;
+		border-color: #bbf7d0;
+		box-shadow:
+			inset 0 0 0 1px rgba(255, 255, 255, 0.72),
+			0 0 0 3px rgba(34, 197, 94, 0.08);
+	}
+
+	.location-button.has-coordinate::before {
+		background: #22c55e;
 	}
 
 	.vessel-card.selected-card .location-button {
-		background: #2563eb;
-		color: #ffffff;
+		background: #eff6ff;
+		border-color: #bfdbfe;
 	}
 
+	.vessel-card.selected-card .location-button.has-coordinate {
+		background: #dcfce7;
+		border-color: #86efac;
+	}
 	.vessel-metric-row {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2442,21 +3464,30 @@
 		padding: 5px;
 	}
 
+	:global(.leaflet-control-attribution) {
+
+		display: none;
+	}
+
 	.map-stage {
 		position: relative;
 		flex: 1 1 auto;
 		height: 100%;
 		min-height: 0;
-		border-radius: 10px;
+		border-radius: 12px;
 		overflow: hidden;
-		border: 1px solid #dbe4ef;
-		background: #dceef8;
+		border: 1px solid #e2e8f0;
+		background: #f8fafc;
+		box-shadow:
+			0 1px 2px rgba(15, 23, 42, 0.04),
+			0 8px 24px rgba(15, 23, 42, 0.06);
 	}
 
 	.leaflet-map {
 		width: 100%;
 		height: 100%;
 		min-height: 0;
+		background: #f8fafc;
 	}
 
 	.map-legend {
@@ -2465,7 +3496,9 @@
 		bottom: 8px;
 		display: inline-flex;
 		align-items: center;
+		flex-wrap: wrap;
 		gap: 5px;
+		max-width: calc(100% - 16px);
 		padding: 5px 7px;
 		border-radius: 8px;
 		background: rgba(255, 255, 255, 0.96);

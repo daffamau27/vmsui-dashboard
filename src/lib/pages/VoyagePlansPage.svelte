@@ -725,7 +725,7 @@
 		} catch (error) {
 			const message = error?.message || 'Request failed.';
 			if (message.toLowerCase().includes('unauthorized') || message.includes('401')) {
-				throw new Error('Unauthorized. Silakan login kembali.');
+				throw new Error('Unauthorized. Please log in again.');
 			}
 			throw new Error(message);
 		}
@@ -778,7 +778,7 @@
 		} catch (error) {
 			console.error('[VOYAGE_PLANS][ASSETS][ERROR]', error);
 			assets = [];
-			assetsError = error?.message || 'Gagal memuat asset fleet.';
+			assetsError = error?.message || 'Failed to load fleet assets.';
 			renderAssetMarkers();
 		} finally {
 			assetsLoading = false;
@@ -849,7 +849,7 @@
 		if (response?.data instanceof Blob) return response.data;
 
 		throw new Error(
-			'Template Excel tidak dapat dibaca sebagai file. Cek kembali helper apiRequest untuk dukungan responseType blob.'
+			'The Excel template could not be read as a file. Check the apiRequest helper for blob responseType support.'
 		);
 	}
 
@@ -1072,8 +1072,8 @@
 	}
 
 	function validatePlanPayload() {
-		if (!form.voyageName.trim()) throw new Error('Voyage name wajib diisi.');
-		if (!form.planData.length) throw new Error('Minimal harus ada 1 route point.');
+		if (!form.voyageName.trim()) throw new Error('Voyage name is required.');
+		if (!form.planData.length) throw new Error('At least 1 route point is required.');
 
 		const planData = form.planData.map((point, index) => {
 			const latitude = Number(point.latitude);
@@ -1082,13 +1082,13 @@
 				point.speed_kn === '' || point.speed_kn === null ? null : Number(point.speed_kn);
 
 			if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
-				throw new Error(`Latitude pada baris ${index + 1} tidak valid.`);
+				throw new Error(`Latitude in row ${index + 1} is invalid.`);
 			}
 			if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
-				throw new Error(`Longitude pada baris ${index + 1} tidak valid.`);
+				throw new Error(`Longitude in row ${index + 1} is invalid.`);
 			}
 			if (speed !== null && (!Number.isFinite(speed) || speed < 0)) {
-				throw new Error(`Speed pada baris ${index + 1} tidak valid.`);
+				throw new Error(`Speed in row ${index + 1} is invalid.`);
 			}
 
 			const normalized = {
@@ -1121,7 +1121,7 @@
 				body: JSON.stringify(payload)
 			});
 
-			successMessage = result?.message || 'Voyage plan berhasil disimpan.';
+			successMessage = result?.message || 'Voyage plan saved successfully.';
 			closeForm();
 			await loadPlans(page);
 			await openPlan(result?.data?.id || selectedPlanId || plans[0]?.id);
@@ -1141,7 +1141,7 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ isActive: !plan.isActive })
 			});
-			successMessage = result?.message || 'Status voyage plan berhasil diubah.';
+			successMessage = result?.message || 'Voyage plan status updated successfully.';
 			await loadPlans(page);
 			if (selectedPlanId === plan.id) await openPlan(plan.id, false);
 		} catch (error) {
@@ -1156,7 +1156,7 @@
 		saving = true;
 		try {
 			const result = await apiFetch(`/voyage-plans/${id}`, { method: 'DELETE' });
-			successMessage = result?.message || 'Voyage plan berhasil dihapus.';
+			successMessage = result?.message || 'Voyage plan deleted successfully.';
 			confirmDeleteId = null;
 			if (selectedPlanId === id) {
 				selectedPlanId = null;
@@ -1214,22 +1214,22 @@
 	}
 
 	function validateExcelRows(rows) {
-		if (!rows.length) throw new Error('File Excel kosong.');
+		if (!rows.length) throw new Error('The Excel file is empty.');
 		const required = ['order', 'latitude', 'longitude'];
 		const headers = Object.keys(rows[0] || {}).map((key) => key.trim());
 		const missing = required.filter((key) => !headers.includes(key));
 		if (missing.length)
-			throw new Error(`Kolom Excel tidak lengkap. Kolom wajib: ${missing.join(', ')}.`);
+			throw new Error(`Excel columns are incomplete. Required columns: ${missing.join(', ')}.`);
 
 		rows.forEach((row, index) => {
 			const point = normalizeExcelRow(row);
-			if (!Number.isFinite(point.order)) throw new Error(`Order baris ${index + 2} tidak valid.`);
+			if (!Number.isFinite(point.order)) throw new Error(`Order in row ${index + 2} is invalid.`);
 			if (!Number.isFinite(point.latitude) || point.latitude < -90 || point.latitude > 90)
-				throw new Error(`Latitude baris ${index + 2} tidak valid.`);
+				throw new Error(`Latitude in row ${index + 2} is invalid.`);
 			if (!Number.isFinite(point.longitude) || point.longitude < -180 || point.longitude > 180)
-				throw new Error(`Longitude baris ${index + 2} tidak valid.`);
+				throw new Error(`Longitude in row ${index + 2} is invalid.`);
 			if (point.speed_kn !== '' && (!Number.isFinite(point.speed_kn) || point.speed_kn < 0))
-				throw new Error(`Speed baris ${index + 2} tidak valid.`);
+				throw new Error(`Speed in row ${index + 2} is invalid.`);
 		});
 	}
 
@@ -1258,11 +1258,11 @@
 	async function importExcel() {
 		clearMessages();
 		if (!importForm.voyageName.trim()) {
-			errorMessage = 'Voyage name untuk import wajib diisi.';
+			errorMessage = 'Voyage name for import is required.';
 			return;
 		}
 		if (!importForm.fileBase64) {
-			errorMessage = 'Pilih file Excel terlebih dahulu.';
+			errorMessage = 'Select an Excel file first.';
 			return;
 		}
 
@@ -1277,7 +1277,7 @@
 					isActive: !!importForm.isActive
 				})
 			});
-			successMessage = result?.message || 'Voyage plan berhasil diimport.';
+			successMessage = result?.message || 'Voyage plan imported successfully.';
 			importForm = {
 				voyageName: '',
 				isActive: true,
@@ -1297,7 +1297,7 @@
 	async function assignPlan() {
 		clearMessages();
 		if (!assignForm.voyagePlanId || !assignForm.vesselId || !assignForm.startDate) {
-			errorMessage = 'Voyage plan, vessel, dan start date wajib diisi.';
+			errorMessage = 'Voyage plan, vessel, and start date are required.';
 			return;
 		}
 
@@ -1312,7 +1312,7 @@
 					startDate: new Date(assignForm.startDate).toISOString()
 				})
 			});
-			successMessage = result?.message || 'Voyage plan berhasil diassign ke vessel.';
+			successMessage = result?.message || 'Voyage plan assigned to vessel successfully.';
 		} catch (error) {
 			errorMessage = error.message;
 		} finally {
@@ -1327,7 +1327,7 @@
 
 	function formatDate(value) {
 		if (!value) return '-';
-		return new Intl.DateTimeFormat('id-ID', {
+		return new Intl.DateTimeFormat('en-US', {
 			day: '2-digit',
 			month: 'short',
 			year: 'numeric',
@@ -1347,8 +1347,8 @@
 			<div class="page-kicker">Voyage Plan Fleet</div>
 			<h1>Voyage Plans</h1>
 			<p>
-				Kelola route point, status aktif, akses vessel, import Excel, dan assignment voyage plan ke
-				vessel.
+				Manage route points, active status, vessel access, Excel import, and voyage plan assignments
+				to vessels.
 			</p>
 		</div>
 
@@ -1374,7 +1374,7 @@
 	{:else if !canAccess}
 		<div class="empty-card">
 			<h3>Access Restricted</h3>
-			<p>User ini belum memiliki permission <b>access_voyage_plan_fleet</b>.</p>
+			<p>This user does not have the <b>access_voyage_plan_fleet</b> permission.</p>
 		</div>
 	{:else}
 		<section class="voyage-grid">
@@ -1382,7 +1382,7 @@
 				<div class="panel-toolbar">
 					<div>
 						<h2>Plan List</h2>
-						<span>{pagination.totalItems || 0} total plan</span>
+						<span>{pagination.totalItems || 0} total plans</span>
 					</div>
 					<input class="search-input" bind:value={search} placeholder="Search plan..." />
 				</div>
@@ -1492,7 +1492,7 @@
 								</tr>
 							{:else}
 								<tr>
-									<td colspan="5" class="empty-cell">Tidak ada data voyage plan.</td>
+									<td colspan="5" class="empty-cell">No voyage plan data is available.</td>
 								</tr>
 							{/each}
 						</tbody>
@@ -1560,7 +1560,7 @@
 						{#each selectedPlan.allowedVesselIds || [] as vesselId}
 							<span>{vesselLabel(vesselId)}</span>
 						{:else}
-							<em>Belum ada vessel yang diizinkan.</em>
+							<em>No allowed vessels yet.</em>
 						{/each}
 					</div>
 
@@ -1584,14 +1584,14 @@
 									</tr>
 								{:else}
 									<tr>
-										<td colspan="4" class="empty-cell">Belum ada route point.</td>
+										<td colspan="4" class="empty-cell">No route points yet.</td>
 									</tr>
 								{/each}
 							</tbody>
 						</table>
 					</div>
 				{:else}
-					<div class="empty-state">Pilih voyage plan untuk melihat detail.</div>
+					<div class="empty-state">Select a voyage plan to view details.</div>
 				{/if}
 			</section>
 		</section>
@@ -1657,7 +1657,7 @@
 						<div class="panel-toolbar">
 							<div>
 								<h2>Assign to Vessel</h2>
-								<span>Assign plan ke vessel sesuai periode aktif.</span>
+								<span>Assign a plan to a vessel according to the active period.</span>
 							</div>
 						</div>
 
@@ -1740,7 +1740,7 @@
 								{vessel.vesselName}
 							</button>
 						{:else}
-							<em>Data vessel tidak tersedia.</em>
+							<em>Vessel data is not available.</em>
 						{/each}
 					</div>
 				</div>
@@ -1749,7 +1749,7 @@
 					<div>
 						<h3>Route Points</h3>
 						<span
-							>Klik map untuk tambah titik, klik kanan marker untuk geser, urutkan, atau hapus.</span
+							>Click the map to add a point, right-click a marker to move, reorder, or delete it.</span
 						>
 					</div>
 
@@ -1781,8 +1781,8 @@
 				<div class="route-map-editor">
 					<aside class="route-point-panel">
 						<div class="point-hint">
-							Klik pada map untuk menambahkan titik. Marker dapat digeser untuk memperbarui
-							koordinat.
+							Click the map to add a point. Markers can be moved to update
+							coordinates.
 						</div>
 
 						<div class="route-editor">
@@ -1861,7 +1861,7 @@
 						<div class="map-mini-toolbar">
 							<strong>Map Point Editor</strong>
 							<div class="map-mini-meta">
-								<span>{getValidRoutePoints().length} valid point</span>
+								<span>{getValidRoutePoints().length} valid points</span>
 								<span>{assetsLoading ? 'Loading assets...' : `${assets.length} assets`}</span>
 								{#if assetsError}
 									<span class="asset-error">{assetsError}</span>
@@ -1917,7 +1917,7 @@
 										type="button"
 										on:click={() => startMovePointFromContext(pointContextMenu.index)}
 									>
-										↔ Geser Titik
+										↔ Move Point
 									</button>
 
 									<button

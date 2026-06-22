@@ -232,7 +232,7 @@
 		});
 
 		if (!effectiveVesselId) {
-			console.warn('[VESSEL_PAGE][LATEST_STATUS][SKIP] vesselId kosong');
+			console.warn('[VESSEL_PAGE][LATEST_STATUS][SKIP] vesselId is empty');
 
 			latestVesselStatus = {
 				queue: '-',
@@ -288,7 +288,7 @@
 		stopLatestStatusPolling();
 
 		if (!effectiveVesselId) {
-			console.warn('[VESSEL_PAGE][LATEST_STATUS][POLLING_SKIP] vesselId kosong');
+			console.warn('[VESSEL_PAGE][LATEST_STATUS][POLLING_SKIP] vesselId is empty');
 			return;
 		}
 
@@ -433,7 +433,7 @@
 			}
 		} catch (err) {
 			console.error('[VESSEL_PAGE][LOAD_VESSELS][ERROR]', err);
-			vesselError = err?.message || 'Gagal memuat vessel dari API.';
+			vesselError = err?.message || 'Failed to load vessels from the API.';
 			vessels = [];
 		} finally {
 			vesselLoading = false;
@@ -495,7 +495,7 @@
 								</button>
 							{/each}
 						{:else}
-							<div class="dropdown-empty">Tidak ada akses menu.</div>
+							<div class="dropdown-empty">No menu access.</div>
 						{/if}
 					</div>
 				{/if}
@@ -536,7 +536,7 @@
 					{:else if vesselError}
 						<div class="vessel-state error">{vesselError}</div>
 					{:else if vessels.length === 0}
-						<div class="vessel-state">No vessel available</div>
+						<div class="vessel-state">No vessels available</div>
 					{:else}
 						{#each vessels as vessel}
 							<button
@@ -559,14 +559,14 @@
 			<section class="vessel-page active-vessel-page">
 				<div class="no-access-card">
 					<h2>Loading access...</h2>
-					<p>Sedang memuat permission user.</p>
+					<p>Loading user permissions.</p>
 				</div>
 			</section>
 		{:else if !visibleVesselMenus.length}
 			<section class="vessel-page active-vessel-page">
 				<div class="no-access-card">
-					<h2>Tidak ada akses menu</h2>
-					<p>User ini belum memiliki permission untuk membuka halaman vessel.</p>
+					<h2>No Menu Access</h2>
+					<p>This user does not have permission to open the vessel page.</p>
 				</div>
 			</section>
 		{:else}

@@ -27,6 +27,29 @@
   let page = $state(1);
   let pageSize = $state(20);
 
+  const alarmTypeOptions = [
+    {
+      value: "DEVICE_OFFLINE",
+      label: "Device Offline"
+    },
+    {
+      value: "PANEL_OPEN",
+      label: "Panel Open"
+    },
+    {
+      value: "LOW_SPEED_HIGH_RPM",
+      label: "Low Speed High RPM"
+    },
+    {
+      value: "LOW_SPEED_OUTSIDE_BOUNDARY",
+      label: "Low Speed Outside Boundary"
+    },
+    {
+      value: "ENGINE_HEALTH",
+      label: "Engine Health"
+    }
+  ];
+
   let refreshTimer = null;
 
   let activeMonitorRows = $derived(
@@ -50,10 +73,15 @@
   );
 
   let vesselOptions = $derived(
-    monitorRows
+    [...monitorRows, ...eventRows]
       .map((row) => ({
         vesselId: row?.vesselId,
-        vesselName: row?.vesselName || `Vessel ${row?.vesselId}`
+        vesselName:
+          row?.vesselName ||
+          row?.vessel_name ||
+          row?.assetName ||
+          row?.deviceName ||
+          `Vessel ${row?.vesselId}`
       }))
       .filter((row) => row.vesselId !== undefined && row.vesselId !== null)
       .reduce((items, row) => {
@@ -91,6 +119,16 @@
       .replace(/\s+/g, " ")
       .trim()
       .toUpperCase();
+  }
+
+  function getVesselName(row) {
+    return (
+      row?.vesselName ||
+      row?.vessel_name ||
+      row?.assetName ||
+      row?.deviceName ||
+      (row?.vesselId ? `Vessel ${row.vesselId}` : "-")
+    );
   }
 
   function getStatusClass(status) {
@@ -132,14 +170,20 @@
         method: "GET"
       });
 
-      monitorRows = Array.isArray(response?.data)
-        ? response.data
-        : Array.isArray(response)
-          ? response
-          : [];
+      const payload = response?.data || {};
+
+      monitorRows = Array.isArray(payload?.monitor)
+        ? payload.monitor
+        : Array.isArray(response?.monitor)
+          ? response.monitor
+          : Array.isArray(response?.data)
+            ? response.data
+            : Array.isArray(response)
+              ? response
+              : [];
     } catch (err) {
       console.error("[ALARM_MONITOR_ERROR]", err);
-      error = err?.message || "Gagal memuat alarm monitor.";
+      error = err?.message || "Failed to load alarm monitor.";
       monitorRows = [];
     } finally {
       loadingMonitor = false;
@@ -159,11 +203,21 @@
 
       const payload = response?.data || {};
 
-      eventRows = Array.isArray(payload?.events)
+      const events = Array.isArray(payload?.events)
         ? payload.events
         : Array.isArray(response?.events)
           ? response.events
           : [];
+
+      eventRows = events.map((event) => ({
+        ...event,
+        vesselName:
+          event?.vesselName ||
+          event?.vessel_name ||
+          event?.assetName ||
+          event?.deviceName ||
+          (event?.vesselId ? `Vessel ${event.vesselId}` : "-")
+      }));
 
       pagination = {
         page: payload?.pagination?.page ?? page,
@@ -175,7 +229,7 @@
       };
     } catch (err) {
       console.error("[ALARM_EVENTS_ERROR]", err);
-      error = err?.message || "Gagal memuat alarm events.";
+      error = err?.message || "Failed to load alarm events.";
       eventRows = [];
       pagination = {
         page,
@@ -240,7 +294,7 @@
       await loadAllAlarmData();
     } catch (err) {
       console.error("[ALARM_MARK_ALL_READ_ERROR]", err);
-      error = err?.message || "Gagal acknowledge semua alarm.";
+      error = err?.message || "Failed to acknowledge all alarms.";
     } finally {
       acknowledging = false;
     }
@@ -326,7 +380,7 @@
 
   <section class="alarm-summary-grid">
     <article class="summary-card">
-      <span>Assigned Vessels</span>
+      <span>Active Alarm Vessels</span>
       <strong>{monitorRows.length}</strong>
     </article>
 
@@ -397,7 +451,7 @@
         {/each}
       </div>
     {:else}
-      <div class="empty-box">Tidak ada alarm monitor untuk vessel yang ditugaskan.</div>
+      <div class="empty-box">No alarm monitor data is available for assigned vessels.</div>
     {/if}
   </section>
 
@@ -435,11 +489,15 @@
 
       <label>
         <span>Alarm Type</span>
-        <input
-          type="text"
-          bind:value={selectedAlarmType}
-          placeholder="e.g. ENGINE_HEALTH"
-        />
+        <select bind:value={selectedAlarmType}>
+          <option value="">All Alarm Types</option>
+
+          {#each alarmTypeOptions as alarmType}
+            <option value={alarmType.value}>
+              {alarmType.label}
+            </option>
+          {/each}
+        </select>
       </label>
 
       <label>
@@ -480,7 +538,7 @@
         <table>
           <thead>
             <tr>
-              <th>Vessel ID</th>
+              <th>Vessel Name</th>
               <th>Alarm Type</th>
               <th>Status</th>
               <th>Event Time</th>
@@ -493,7 +551,7 @@
           <tbody>
             {#each eventRows as row}
               <tr>
-                <td>{row.vesselId ?? "-"}</td>
+                <td>{getVesselName(row)}</td>
                 <td>{formatAlarmType(row.alarmType)}</td>
                 <td>
                   <span class={`status-pill ${getStatusClass(row.status)}`}>
@@ -534,7 +592,7 @@
         </button>
       </div>
     {:else}
-      <div class="empty-box">Tidak ada alarm event yang sesuai filter.</div>
+      <div class="empty-box">No alarm events match the selected filters.</div>
     {/if}
   </section>
 </section>

@@ -282,6 +282,29 @@ export async function saveAutoReportConfigAdminApi(vesselId, payload) {
   return unwrap(response);
 }
 
+export async function getReportingAssignableUsersAdminApi(
+  vesselId,
+  { page = 1, pageSize = 20 } = {}
+) {
+  if (!vesselId) {
+    throw new Error("Vessel ID tidak valid.");
+  }
+
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize)
+  });
+
+  const response = await apiRequest(
+    `/reporting/vessels/${vesselId}/assignable-users?${params.toString()}`,
+    {
+      method: "GET"
+    }
+  );
+
+  return unwrap(response);
+}
+
 export async function downloadReportingDailyReportAdminApi(
   vesselId,
   { date, timezoneMode = "auto", timezoneOffset = "+00:00" }
@@ -441,4 +464,30 @@ export async function exportGlobalAuditLogsCsvAdminApi({
     `/audit-logs/export-csv${query ? `?${query}` : ""}`,
     `audit_logs_${Date.now()}.csv`
   );
+}
+
+export async function getAllCompaniesAdminApi() {
+	const response = await apiRequest('/companies', {
+		method: 'GET'
+	});
+
+	return response?.data || response || [];
+}
+
+export async function syncCompaniesAdminApi() {
+	return apiRequest('/companies/sync', {
+		method: 'POST'
+	});
+}
+
+export async function deleteCompanyAdminApi(id) {
+	return apiRequest(`/companies/${id}`, {
+		method: 'DELETE'
+	});
+}
+
+export async function syncAllVesselsAdminApi() {
+	return apiRequest('/vessels/sync/all', {
+		method: 'POST'
+	});
 }

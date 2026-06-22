@@ -61,7 +61,7 @@
 
 			syncProfileForm(currentUser);
 		} catch (error) {
-			errorMessage = error.message || 'Gagal memuat data profil.';
+			errorMessage = error.message || 'Failed to load profile data.';
 		} finally {
 			loading = false;
 		}
@@ -71,12 +71,12 @@
 		clearMessage();
 
 		if (!profileForm.name.trim()) {
-			errorMessage = 'Nama tidak boleh kosong.';
+			errorMessage = 'Name is required.';
 			return;
 		}
 
 		if (!profileForm.username.trim()) {
-			errorMessage = 'Username tidak boleh kosong.';
+			errorMessage = 'Username is required.';
 			return;
 		}
 
@@ -98,9 +98,9 @@
 
 			syncProfileForm(currentUser);
 
-			successMessage = response?.message || 'Profil berhasil diperbarui.';
+			successMessage = response?.message || 'Profile updated successfully.';
 		} catch (error) {
-			errorMessage = error.message || 'Gagal memperbarui profil.';
+			errorMessage = error.message || 'Failed to update profile.';
 		} finally {
 			savingProfile = false;
 		}
@@ -110,17 +110,17 @@
 		clearMessage();
 
 		if (!passwordForm.oldPassword || !passwordForm.newPassword) {
-			errorMessage = 'Password lama dan password baru wajib diisi.';
+			errorMessage = 'Current password and new password are required.';
 			return;
 		}
 
 		if (passwordForm.newPassword.length < 6) {
-			errorMessage = 'Password baru minimal 6 karakter.';
+			errorMessage = 'New password must be at least 6 characters.';
 			return;
 		}
 
 		if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-			errorMessage = 'Konfirmasi password baru tidak sama.';
+			errorMessage = 'New password confirmation does not match.';
 			return;
 		}
 
@@ -138,9 +138,9 @@
 				confirmPassword: ''
 			};
 
-			successMessage = response?.message || 'Password berhasil diganti.';
+			successMessage = response?.message || 'Password changed successfully.';
 		} catch (error) {
-			errorMessage = error.message || 'Gagal mengganti password.';
+			errorMessage = error.message || 'Failed to change password.';
 		} finally {
 			changingPassword = false;
 		}
@@ -165,7 +165,7 @@
 
 		if (Number.isNaN(date.getTime())) return '-';
 
-		return new Intl.DateTimeFormat('id-ID', {
+		return new Intl.DateTimeFormat('en-US', {
 			day: '2-digit',
 			month: 'long',
 			year: 'numeric',
@@ -191,8 +191,8 @@
 		<div class="loading-card">
 			<div class="loader"></div>
 			<div>
-				<h2>Memuat Profil</h2>
-				<p>Mengambil data user, vessel, dan asset yang dapat diakses.</p>
+				<h2>Loading Profile</h2>
+				<p>Fetching user data, accessible vessels, and accessible assets.</p>
 			</div>
 		</div>
 	{:else}
@@ -206,7 +206,7 @@
 					<div>
 						<div class="page-kicker">User Profile</div>
 						<h1>{currentUser?.name || '-'}</h1>
-						<p>Kelola informasi akun, akses vessel, akses asset, dan keamanan password.</p>
+						<p>Manage account information, vessel access, asset access, and password security.</p>
 
 						<div class="hero-badges">
 							<span class:super-admin={isSuperAdmin}>
@@ -237,7 +237,7 @@
 				<article class="summary-card">
 					<div class="summary-label">Username</div>
 					<strong>{currentUser?.username || '-'}</strong>
-					<p>{currentUser?.email || 'Email belum diisi'}</p>
+					<p>{currentUser?.email || 'Email not provided'}</p>
 				</article>
 
 				<article class="summary-card">
@@ -255,7 +255,7 @@
 				<article class="summary-card">
 					<div class="summary-label">Permission</div>
 					<strong>{permissionMode}</strong>
-					<p>{isSuperAdmin ? 'Akses penuh sistem' : 'Akses terbatas'}</p>
+					<p>{isSuperAdmin ? 'Full system access' : 'Limited access'}</p>
 				</article>
 			</section>
 
@@ -263,18 +263,18 @@
 				<article class="panel profile-panel">
 					<div class="panel-header">
 						<div>
-							<h2>Informasi Profil</h2>
-							<p>Perbarui nama, username, dan email akun.</p>
+							<h2>Profile Information</h2>
+							<p>Update the account name, username, and email.</p>
 						</div>
 					</div>
 
 					<form class="form-grid" on:submit|preventDefault={updateProfile}>
 						<label>
-							<span>Nama</span>
+							<span>Name</span>
 							<input
 								type="text"
 								bind:value={profileForm.name}
-								placeholder="Masukkan nama"
+								placeholder="Enter name"
 								autocomplete="name"
 							/>
 						</label>
@@ -284,7 +284,7 @@
 							<input
 								type="text"
 								bind:value={profileForm.username}
-								placeholder="Masukkan username"
+								placeholder="Enter username"
 								autocomplete="username"
 							/>
 						</label>
@@ -294,14 +294,14 @@
 							<input
 								type="email"
 								bind:value={profileForm.email}
-								placeholder="Masukkan email"
+								placeholder="Enter email"
 								autocomplete="email"
 							/>
 						</label>
 
 						<div class="form-actions">
 							<button class="primary-button" type="submit" disabled={savingProfile}>
-								{savingProfile ? 'Menyimpan...' : 'Simpan Profil'}
+								{savingProfile ? 'Saving...' : 'Save Profile'}
 							</button>
 						</div>
 					</form>
@@ -310,45 +310,45 @@
 				<article class="panel password-panel">
 					<div class="panel-header">
 						<div>
-							<h2>Ganti Password</h2>
-							<p>Gunakan password baru yang kuat dan mudah diingat.</p>
+							<h2>Change Password</h2>
+							<p>Use a strong new password that you can remember.</p>
 						</div>
 					</div>
 
 					<form class="form-grid" on:submit|preventDefault={changePassword}>
 						<label>
-							<span>Password Lama</span>
+							<span>Current Password</span>
 							<input
 								type="password"
 								bind:value={passwordForm.oldPassword}
-								placeholder="Masukkan password lama"
+								placeholder="Enter current password"
 								autocomplete="current-password"
 							/>
 						</label>
 
 						<label>
-							<span>Password Baru</span>
+							<span>New Password</span>
 							<input
 								type="password"
 								bind:value={passwordForm.newPassword}
-								placeholder="Masukkan password baru"
+								placeholder="Enter new password"
 								autocomplete="new-password"
 							/>
 						</label>
 
 						<label>
-							<span>Konfirmasi Password Baru</span>
+							<span>Confirm New Password</span>
 							<input
 								type="password"
 								bind:value={passwordForm.confirmPassword}
-								placeholder="Ulangi password baru"
+								placeholder="Re-enter new password"
 								autocomplete="new-password"
 							/>
 						</label>
 
 						<div class="form-actions">
 							<button class="primary-button danger" type="submit" disabled={changingPassword}>
-								{changingPassword ? 'Mengganti...' : 'Ganti Password'}
+								{changingPassword ? 'Changing...' : 'Change Password'}
 							</button>
 						</div>
 					</form>
@@ -357,8 +357,8 @@
 				<article class="panel access-panel">
 					<div class="panel-header">
 						<div>
-							<h2>Vessel Saya</h2>
-							<p>Daftar vessel yang dapat diakses oleh user saat ini.</p>
+							<h2>My Vessels</h2>
+							<p>List of vessels accessible by the current user.</p>
 						</div>
 
 						<span class="count-pill">{vessels.length}</span>
@@ -378,15 +378,15 @@
 							{/each}
 						</div>
 					{:else}
-						<div class="empty-state">Belum ada vessel yang dapat diakses.</div>
+						<div class="empty-state">No accessible vessels yet.</div>
 					{/if}
 				</article>
 
 				<article class="panel access-panel">
 					<div class="panel-header">
 						<div>
-							<h2>Asset Saya</h2>
-							<p>Daftar asset yang dapat diakses oleh user saat ini.</p>
+							<h2>My Assets</h2>
+							<p>List of assets accessible by the current user.</p>
 						</div>
 
 						<span class="count-pill">{assets.length}</span>
@@ -406,7 +406,7 @@
 							{/each}
 						</div>
 					{:else}
-						<div class="empty-state">Belum ada asset yang dapat diakses.</div>
+						<div class="empty-state">No accessible assets yet.</div>
 					{/if}
 				</article>
 			</section>
@@ -415,139 +415,141 @@
 </section>
 
 <style>
-	:global(body) {
-		background: #f4f6f8;
-	}
-
 	.profile-page {
 		width: 100%;
 		height: 100%;
-		min-height: 100vh;
-		padding: 18px;
+		max-height: 100%;
+		min-height: 0;
+		padding: 14px;
+		background: #f4f6f8;
+		color: #0f172a;
+		overflow-y: auto;
+		overflow-x: hidden;
 		box-sizing: border-box;
-		background:
-			radial-gradient(circle at top left, rgba(33, 150, 243, 0.12), transparent 34%),
-			linear-gradient(180deg, #f7f9fc 0%, #eef2f7 100%);
-		color: #162033;
-		overflow: auto;
 	}
 
 	.profile-shell {
 		width: 100%;
-		max-width: 1440px;
-		margin: 0 auto;
 		display: flex;
 		flex-direction: column;
-		gap: 16px;
+		gap: 14px;
+	}
+
+	.profile-hero,
+	.summary-card,
+	.panel,
+	.loading-card {
+		background: #ffffff;
+		border: 1px solid #d9e2ec;
+		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
 	}
 
 	.profile-hero {
-		min-height: 150px;
-		padding: 22px;
-		border-radius: 28px;
-		background: linear-gradient(135deg, rgba(17, 24, 39, 0.96), rgba(30, 64, 175, 0.9)), #111827;
-		color: #ffffff;
+		padding: 16px;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 18px;
-		box-shadow: 0 20px 50px rgba(15, 23, 42, 0.18);
+		gap: 16px;
 	}
 
 	.hero-left {
 		display: flex;
 		align-items: center;
-		gap: 18px;
+		gap: 14px;
 		min-width: 0;
 	}
 
 	.avatar {
-		width: 82px;
-		height: 82px;
-		border-radius: 26px;
+		width: 58px;
+		height: 58px;
+		border-radius: 12px;
 		display: grid;
 		place-items: center;
 		flex-shrink: 0;
-		background: rgba(255, 255, 255, 0.16);
-		border: 1px solid rgba(255, 255, 255, 0.22);
-		color: #ffffff;
-		font-size: 28px;
-		font-weight: 800;
-		letter-spacing: 0.04em;
-		backdrop-filter: blur(10px);
+		background: #eff6ff;
+		border: 1px solid #bfdbfe;
+		color: #1d4ed8;
+		font-size: 19px;
+		font-weight: 900;
+		letter-spacing: 0.05em;
 	}
 
-	.page-kicker {
-		margin-bottom: 6px;
-		font-size: 12px;
-		font-weight: 800;
-		letter-spacing: 0.14em;
+	.page-kicker,
+	.section-kicker {
+		display: inline-flex;
+		width: fit-content;
+		padding: 4px 9px;
+		border-radius: 999px;
+		background: #dbeafe;
+		color: #1d4ed8;
+		font-size: 10px;
+		font-weight: 900;
+		letter-spacing: 0.07em;
 		text-transform: uppercase;
-		color: #bfdbfe;
 	}
 
 	.profile-hero h1 {
-		margin: 0;
-		font-size: clamp(26px, 3vw, 40px);
-		line-height: 1.1;
-		font-weight: 850;
-		letter-spacing: -0.04em;
+		margin: 8px 0 0;
+		font-size: 22px;
+		line-height: 1.2;
+		font-weight: 900;
+		color: #0f172a;
+		overflow-wrap: anywhere;
 	}
 
 	.profile-hero p {
-		max-width: 720px;
-		margin: 8px 0 0;
-		color: #dbeafe;
-		font-size: 14px;
-		line-height: 1.6;
+		margin: 7px 0 0;
+		color: #64748b;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 1.45;
 	}
 
 	.hero-badges {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 8px;
-		margin-top: 14px;
+		margin-top: 12px;
 	}
 
 	.hero-badges span {
 		display: inline-flex;
 		align-items: center;
-		min-height: 30px;
-		padding: 0 11px;
+		min-height: 26px;
+		padding: 0 10px;
 		border-radius: 999px;
-		background: rgba(255, 255, 255, 0.12);
-		border: 1px solid rgba(255, 255, 255, 0.16);
-		color: #e5efff;
-		font-size: 12px;
-		font-weight: 700;
+		background: #eff6ff;
+		border: 1px solid #bfdbfe;
+		color: #1d4ed8;
+		font-size: 10px;
+		font-weight: 900;
+		letter-spacing: 0.03em;
 	}
 
 	.hero-badges span.super-admin {
-		background: rgba(34, 197, 94, 0.2);
-		border-color: rgba(134, 239, 172, 0.35);
-		color: #dcfce7;
+		background: #ecfdf5;
+		border-color: #bbf7d0;
+		color: #047857;
+	}
+
+	.refresh-button,
+	.primary-button {
+		height: 32px;
+		padding: 0 12px;
+		border: none;
+		font-size: 11px;
+		font-weight: 900;
+		cursor: pointer;
 	}
 
 	.refresh-button {
-		height: 42px;
-		padding: 0 16px;
-		border: 0;
-		border-radius: 14px;
-		background: #ffffff;
-		color: #172554;
-		font-weight: 800;
-		cursor: pointer;
-		box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
-		transition:
-			transform 0.18s ease,
-			box-shadow 0.18s ease,
-			background 0.18s ease;
+		flex-shrink: 0;
+		background: #e2e8f0;
+		color: #0f172a;
 	}
 
-	.refresh-button:hover {
-		transform: translateY(-1px);
-		background: #eff6ff;
-		box-shadow: 0 14px 30px rgba(15, 23, 42, 0.22);
+	.refresh-button:hover:not(:disabled) {
+		background: #cbd5e1;
 	}
 
 	.summary-grid {
@@ -557,173 +559,167 @@
 	}
 
 	.summary-card {
-		padding: 18px;
-		border-radius: 22px;
-		background: rgba(255, 255, 255, 0.88);
-		border: 1px solid rgba(226, 232, 240, 0.9);
-		box-shadow: 0 14px 36px rgba(15, 23, 42, 0.06);
+		min-height: 96px;
+		padding: 16px;
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		box-sizing: border-box;
 	}
 
 	.summary-label {
-		margin-bottom: 8px;
-		font-size: 12px;
-		font-weight: 800;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
 		color: #64748b;
+		font-size: 11px;
+		font-weight: 900;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
 	}
 
 	.summary-card strong {
 		display: block;
-		font-size: 24px;
-		line-height: 1.1;
+		margin-top: 10px;
 		color: #0f172a;
+		font-size: 22px;
+		line-height: 1.1;
+		font-weight: 900;
 		overflow-wrap: anywhere;
 	}
 
 	.summary-card p {
 		margin: 8px 0 0;
 		color: #64748b;
-		font-size: 13px;
+		font-size: 12px;
+		font-weight: 700;
 		line-height: 1.4;
 		overflow-wrap: anywhere;
 	}
 
 	.content-grid {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-		gap: 16px;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 14px;
 		align-items: start;
 	}
 
 	.panel {
 		min-width: 0;
-		padding: 20px;
-		border-radius: 26px;
-		background: rgba(255, 255, 255, 0.94);
-		border: 1px solid rgba(226, 232, 240, 0.92);
-		box-shadow: 0 18px 45px rgba(15, 23, 42, 0.07);
+		overflow: hidden;
 	}
 
 	.panel-header {
+		min-height: 58px;
+		padding: 12px 14px;
+		border-bottom: 1px solid #e5edf5;
 		display: flex;
+		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
-		align-items: flex-start;
-		margin-bottom: 18px;
+		background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+		box-sizing: border-box;
 	}
 
 	.panel-header h2 {
 		margin: 0;
-		font-size: 18px;
-		letter-spacing: -0.02em;
 		color: #0f172a;
+		font-size: 17px;
+		font-weight: 900;
 	}
 
 	.panel-header p {
-		margin: 5px 0 0;
+		margin: 6px 0 0;
 		color: #64748b;
-		font-size: 13px;
-		line-height: 1.5;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 1.45;
 	}
 
 	.form-grid {
+		padding: 14px;
 		display: grid;
-		gap: 14px;
-	}
-
-	label {
-		display: grid;
-		gap: 7px;
-	}
-
-	label span {
-		color: #334155;
-		font-size: 13px;
-		font-weight: 800;
-	}
-
-	input {
-		width: 100%;
-		height: 44px;
-		padding: 0 13px;
-		box-sizing: border-box;
-		border-radius: 14px;
-		border: 1px solid #dbe3ef;
-		background: #f8fafc;
-		color: #0f172a;
-		font-size: 14px;
-		outline: none;
-		transition:
-			border-color 0.18s ease,
-			box-shadow 0.18s ease,
-			background 0.18s ease;
-	}
-
-	input:focus {
-		border-color: #2563eb;
+		gap: 12px;
 		background: #ffffff;
-		box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+	}
+
+	.form-grid label {
+		display: grid;
+		gap: 5px;
+	}
+
+	.form-grid label span {
+		color: #475569;
+		font-size: 10px;
+		font-weight: 900;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.form-grid input {
+		width: 100%;
+		height: 32px;
+		border: 1px solid #cbd5e1;
+		background: #ffffff;
+		padding: 0 9px;
+		color: #0f172a;
+		font-size: 12px;
+		font-weight: 700;
+		outline: none;
+		box-sizing: border-box;
+	}
+
+	.form-grid input:focus {
+		border-color: #2563eb;
+		box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 	}
 
 	.form-actions {
 		display: flex;
 		justify-content: flex-end;
-		margin-top: 4px;
+		gap: 8px;
+		margin-top: 2px;
 	}
 
 	.primary-button {
-		min-height: 42px;
-		padding: 0 16px;
-		border: 0;
-		border-radius: 14px;
-		background: linear-gradient(135deg, #2563eb, #1d4ed8);
+		background: #2563eb;
 		color: #ffffff;
-		font-size: 13px;
-		font-weight: 850;
-		cursor: pointer;
-		box-shadow: 0 12px 24px rgba(37, 99, 235, 0.25);
-		transition:
-			transform 0.18s ease,
-			box-shadow 0.18s ease,
-			opacity 0.18s ease;
 	}
 
 	.primary-button:hover:not(:disabled) {
-		transform: translateY(-1px);
-		box-shadow: 0 16px 30px rgba(37, 99, 235, 0.32);
-	}
-
-	.primary-button:disabled {
-		cursor: not-allowed;
-		opacity: 0.65;
+		background: #1d4ed8;
 	}
 
 	.primary-button.danger {
-		background: linear-gradient(135deg, #ef4444, #b91c1c);
-		box-shadow: 0 12px 24px rgba(239, 68, 68, 0.23);
+		background: #b5150c;
+	}
+
+	.primary-button.danger:hover:not(:disabled) {
+		background: #991b1b;
+	}
+
+	.refresh-button:disabled,
+	.primary-button:disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
 	}
 
 	.count-pill {
-		min-width: 34px;
-		height: 30px;
-		padding: 0 10px;
+		flex-shrink: 0;
+		padding: 5px 10px;
 		border-radius: 999px;
 		background: #eff6ff;
+		border: 1px solid #bfdbfe;
 		color: #1d4ed8;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		font-size: 13px;
-		font-weight: 850;
+		font-size: 11px;
+		font-weight: 900;
 	}
 
 	.list-scroll {
 		max-height: 360px;
 		overflow: auto;
-		padding-right: 4px;
+		padding: 14px;
 		display: grid;
 		gap: 10px;
+		background: #f8fafc;
+		box-sizing: border-box;
 	}
 
 	.access-row {
@@ -732,34 +728,43 @@
 		gap: 12px;
 		align-items: center;
 		padding: 12px;
-		border-radius: 18px;
+		border-radius: 12px;
+		background: #ffffff;
+		border: 1px solid #d9e2ec;
+		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+	}
+
+	.access-row:hover {
 		background: #f8fafc;
-		border: 1px solid #e2e8f0;
 	}
 
 	.access-icon {
 		width: 42px;
 		height: 42px;
-		border-radius: 15px;
+		border-radius: 12px;
 		display: grid;
 		place-items: center;
-		color: #ffffff;
 		font-weight: 900;
-		font-size: 14px;
+		font-size: 13px;
 	}
 
 	.vessel-icon {
-		background: linear-gradient(135deg, #0ea5e9, #2563eb);
+		background: #eff6ff;
+		border: 1px solid #bfdbfe;
+		color: #1d4ed8;
 	}
 
 	.asset-icon {
-		background: linear-gradient(135deg, #10b981, #047857);
+		background: #ecfdf5;
+		border: 1px solid #bbf7d0;
+		color: #047857;
 	}
 
 	.access-row strong {
 		display: block;
 		color: #0f172a;
-		font-size: 14px;
+		font-size: 13px;
+		font-weight: 900;
 		overflow-wrap: anywhere;
 	}
 
@@ -767,6 +772,7 @@
 		margin: 4px 0 0;
 		color: #64748b;
 		font-size: 12px;
+		font-weight: 700;
 		overflow-wrap: anywhere;
 	}
 
@@ -775,69 +781,65 @@
 		margin-top: 4px;
 		color: #94a3b8;
 		font-size: 11px;
+		font-weight: 700;
 		overflow-wrap: anywhere;
 	}
 
 	.empty-state {
-		padding: 24px;
-		border-radius: 18px;
-		background: #f8fafc;
-		border: 1px dashed #cbd5e1;
+		padding: 18px 14px;
+		background: #ffffff;
 		color: #64748b;
-		text-align: center;
-		font-size: 13px;
-		font-weight: 700;
+		font-size: 12px;
+		font-weight: 800;
 	}
 
 	.alert {
-		padding: 13px 15px;
-		border-radius: 16px;
-		font-size: 13px;
-		font-weight: 750;
-		border: 1px solid transparent;
+		padding: 10px 12px;
+		border-radius: 10px;
+		font-size: 12px;
+		font-weight: 900;
 	}
 
 	.alert.error {
 		background: #fef2f2;
-		color: #991b1b;
-		border-color: #fecaca;
+		color: #b91c1c;
+		border: 1px solid #fecaca;
 	}
 
 	.alert.success {
 		background: #ecfdf5;
-		color: #065f46;
-		border-color: #bbf7d0;
+		color: #047857;
+		border: 1px solid #bbf7d0;
 	}
 
 	.loading-card {
 		width: min(520px, calc(100vw - 32px));
 		margin: 14vh auto 0;
-		padding: 24px;
-		border-radius: 26px;
-		background: #ffffff;
-		border: 1px solid #e2e8f0;
-		box-shadow: 0 20px 50px rgba(15, 23, 42, 0.1);
+		padding: 16px;
 		display: flex;
 		align-items: center;
 		gap: 16px;
+		box-sizing: border-box;
 	}
 
 	.loading-card h2 {
 		margin: 0;
 		color: #0f172a;
-		font-size: 18px;
+		font-size: 17px;
+		font-weight: 900;
 	}
 
 	.loading-card p {
-		margin: 6px 0 0;
+		margin: 7px 0 0;
 		color: #64748b;
-		font-size: 13px;
-		line-height: 1.5;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 1.45;
 	}
 
 	.loader {
-		width: 42px;
-		height: 42px;
+		width: 36px;
+		height: 36px;
 		border-radius: 999px;
 		border: 4px solid #dbeafe;
 		border-top-color: #2563eb;
@@ -861,15 +863,14 @@
 		}
 	}
 
-	@media (max-width: 720px) {
+	@media (max-width: 760px) {
 		.profile-page {
-			padding: 12px;
+			padding: 8px;
 		}
 
 		.profile-hero {
 			flex-direction: column;
-			align-items: stretch;
-			border-radius: 22px;
+			align-items: flex-start;
 		}
 
 		.hero-left {
@@ -877,10 +878,9 @@
 		}
 
 		.avatar {
-			width: 64px;
-			height: 64px;
-			border-radius: 20px;
-			font-size: 22px;
+			width: 52px;
+			height: 52px;
+			font-size: 17px;
 		}
 
 		.refresh-button {
@@ -888,16 +888,29 @@
 		}
 
 		.summary-grid {
-			grid-template-columns: 1fr;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 8px;
 		}
 
-		.panel {
-			padding: 16px;
-			border-radius: 22px;
+		.summary-card {
+			min-height: 72px;
+			padding: 10px 12px;
+		}
+
+		.summary-label {
+			font-size: 9px;
+			line-height: 1.2;
+			letter-spacing: 0.03em;
+		}
+
+		.summary-card strong {
+			margin-top: 6px;
+			font-size: 18px;
+			line-height: 1.1;
 		}
 
 		.form-actions {
-			justify-content: stretch;
+			width: 100%;
 		}
 
 		.primary-button {

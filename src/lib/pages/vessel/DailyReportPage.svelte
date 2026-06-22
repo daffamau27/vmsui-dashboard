@@ -4,20 +4,18 @@
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import {
 		getDailyReportData,
-		recalculateDailyReport,
-		recalculateDailySummary,
-		getDailyReportExcelUrl
+		getDailyReportExcelUrl,
+		getDailyReportPdfUrl
 	} from '$lib/api/dailyReportApi.js';
 	import Chart from 'chart.js/auto';
 	import { getEngineCurvesForVessel } from '$lib/api/engineCurveApi.js';
 	import { getFleetVesselDetail } from '$lib/api/fleetApi.js';
 	import { downloadApiFile, apiRequest } from '$lib/api/authApi.js';
-
+	
 	let loading = $state(false);
-	let recalculating = $state(false);
 	let exporting = $state(false);
+	let exportingPdf = $state(false);
 	let error = $state('');
-	let successMessage = $state('');
 	let reportData = $state(null);
 	let engineCurveData = $state(null);
 
@@ -29,6 +27,21 @@
 	let reportDate = $state('');
 	let timezoneMode = $state('auto');
 	let timezoneOffset = $state('+07:00');
+
+	let zoomPluginRegistered = false;
+
+	async function ensureChartZoomPlugin() {
+		if (zoomPluginRegistered) return true;
+		if (typeof window === 'undefined') return false;
+
+		const module = await import('chartjs-plugin-zoom');
+		const zoomPlugin = module.default || module;
+
+		Chart.register(zoomPlugin);
+		zoomPluginRegistered = true;
+
+		return true;
+	}
 
 	let currentUser = $state(null);
 	let currentUserLoading = $state(false);
@@ -52,7 +65,7 @@
 			return currentUser;
 		} catch (err) {
 			console.error('[CURRENT_USER_PERMISSION_ERROR]', err);
-			currentUserError = err?.message || 'Gagal memuat permission user.';
+			currentUserError = err?.message || 'Failed to load user permissions.';
 			currentUser = null;
 			return null;
 		} finally {
@@ -570,7 +583,7 @@
 	function isConfiguredEngine(engineName) {
 		const configuredNames = getConfiguredEngineNames();
 
-		// Kalau engine detail belum berhasil dimuat, jangan filter agar data tetap tampil.
+		// If engine details have not loaded successfully, do not filter so data remains visible.
 		if (!configuredNames.length) return true;
 
 		return configuredNames.includes(normalizeEngineText(engineName));
@@ -767,7 +780,7 @@
 			return [...rows15, ...rows20];
 		}
 
-		// Fallback lama: hitung dari rpm_vs_fuel_chart jika backend belum mengirim high_rpm_outside_safety_zone
+		// Legacy fallback: calculate from rpm_vs_fuel_chart if the backend has not sent high_rpm_outside_safety_zone.
 		const pathCoordinates = data?.path_coordinates || data?.pathCoordinates || [];
 
 		const rpmVsFuelChart = data?.rpm_vs_fuel_chart || data?.rpmVsFuelChart || {};
@@ -1046,7 +1059,7 @@
 			];
 		}
 
-		// Fallback kalau curve tidak punya ranges/value_lh:
+		// Fallback when the curve has no ranges/value_lh:
 		// buat range dari data RPM yang ada agar tetap bisa tampil.
 		const rpmValues = chartRows
 			.map((row) => Number(row?.rpm))
@@ -1335,7 +1348,7 @@
 
 				const runtimeMinutes = matchedRows.length;
 
-				// Jangan tampilkan RPM range yang tidak punya runtime
+				// Do not display RPM ranges without runtime.
 				if (runtimeMinutes <= 0) return null;
 
 				const runtimeHours = runtimeMinutes / 60;
@@ -1374,7 +1387,7 @@
 			})
 			.filter(Boolean);
 
-		// Kalau engine ini tidak punya runtime di semua RPM range, jangan tampilkan engine table
+		// If this engine has no runtime across all RPM ranges, do not display the engine table.
 		if (!rows.length) return [];
 
 		const totalRuntimeMinutes = rows.reduce((sum, row) => {
@@ -1483,18 +1496,32 @@
 
 	function rpmFuelCurveChart(node, group) {
 		let chart;
+		let disposed = false;
 
-		function render(chartGroup) {
-			if (!chartGroup) return;
+		node.style.touchAction = 'none';
+
+		const handleResetZoom = () => {
+			chart?.resetZoom?.();
+		};
+
+		node.addEventListener('dblclick', handleResetZoom);
+
+		async function render(chartGroup) {
+			if (!chartGroup || disposed) return;
+
+			await ensureChartZoomPlugin();
+
+			if (disposed) return;
 
 			if (chart) {
 				chart.destroy();
+				chart = null;
 			}
 
 			const datasets = [
 				{
 					label: 'RPM',
-					data: group.rpmData,
+					data: chartGroup.rpmData,
 					yAxisID: 'rpm',
 					borderWidth: 2,
 					tension: 0.25,
@@ -1564,6 +1591,36 @@
 									return `${label}: ${formatNumber(value, 2)} L/h`;
 								}
 							}
+						},
+						zoom: {
+							limits: {
+								x: {
+									min: 'original',
+									max: 'original',
+									minRange: 5
+								}
+							},
+							pan: {
+								enabled: true,
+								mode: 'x',
+								modifierKey: 'shift'
+							},
+							zoom: {
+								wheel: {
+									enabled: true,
+									speed: 0.08
+								},
+								pinch: {
+									enabled: true
+								},
+								drag: {
+									enabled: true,
+									backgroundColor: 'rgba(37, 99, 235, 0.12)',
+									borderColor: 'rgba(37, 99, 235, 0.35)',
+									borderWidth: 1
+								},
+								mode: 'x'
+							}
 						}
 					},
 					scales: {
@@ -1581,6 +1638,8 @@
 						rpm: {
 							type: 'linear',
 							position: 'left',
+							min: 0,
+							beginAtZero: true,
 							title: {
 								display: true,
 								text: 'RPM'
@@ -1594,6 +1653,8 @@
 						fuel: {
 							type: 'linear',
 							position: 'right',
+							min: 0,
+							beginAtZero: true,
 							title: {
 								display: true,
 								text: 'Fuel L/h'
@@ -1619,7 +1680,13 @@
 				render(nextGroup);
 			},
 			destroy() {
-				if (chart) chart.destroy();
+				disposed = true;
+				node.removeEventListener('dblclick', handleResetZoom);
+
+				if (chart) {
+					chart.destroy();
+					chart = null;
+				}
 			}
 		};
 	}
@@ -2395,7 +2462,7 @@
 			console.log('[DAILY][VESSEL_ENGINES]', detail?.engines || []);
 		} catch (err) {
 			console.error('[DAILY][VESSEL_DETAIL_ERROR]', err);
-			vesselEnginesError = err?.message || 'Gagal memuat detail engine kapal.';
+			vesselEnginesError = err?.message || 'Failed to load vessel engine details.';
 			vesselDetail = null;
 		} finally {
 			vesselEnginesLoading = false;
@@ -2404,7 +2471,7 @@
 
 	async function loadDailyReport() {
 		if (!$selectedVesselId) {
-			error = 'Belum ada vessel yang dipilih dari Fleet View.';
+			error = 'No vessel has been selected from Fleet View.';
 			reportData = null;
 			return;
 		}
@@ -2413,7 +2480,6 @@
 
 		loading = true;
 		error = '';
-		successMessage = '';
 
 		try {
 			const [result, curveResult] = await Promise.all([
@@ -2436,7 +2502,7 @@
 			console.log('[DAILY_ENGINE_CURVES]', curveResult);
 		} catch (err) {
 			console.error('[DAILY_REPORT_ERROR]', err);
-			error = err?.message || 'Gagal memuat daily report.';
+			error = err?.message || 'Failed to load daily report.';
 			reportData = null;
 			engineCurveData = null;
 		} finally {
@@ -2444,71 +2510,14 @@
 		}
 	}
 
-	async function handleRecalculate() {
-		if (!$selectedVesselId) {
-			error = 'Belum ada vessel yang dipilih.';
-			return;
-		}
-
-		recalculating = true;
-		error = '';
-		successMessage = '';
-
-		try {
-			await recalculateDailyReport({
-				vesselId: $selectedVesselId,
-				date: reportDate,
-				timezoneMode,
-				timezoneOffset
-			});
-
-			successMessage = 'Daily report berhasil direcalculate.';
-			await loadDailyReport();
-		} catch (err) {
-			console.error('[DAILY_RECALCULATE_ERROR]', err);
-			error = err?.message || 'Gagal recalculate daily report.';
-		} finally {
-			recalculating = false;
-		}
-	}
-
-	async function handleRecalculateSummary() {
-		if (!$selectedVesselId) {
-			error = 'Belum ada vessel yang dipilih.';
-			return;
-		}
-
-		recalculating = true;
-		error = '';
-		successMessage = '';
-
-		try {
-			await recalculateDailySummary({
-				vesselId: $selectedVesselId,
-				date: reportDate,
-				timezoneMode,
-				timezoneOffset
-			});
-
-			successMessage = 'Daily summary berhasil disimpan.';
-			await loadDailyReport();
-		} catch (err) {
-			console.error('[DAILY_RECALCULATE_SUMMARY_ERROR]', err);
-			error = err?.message || 'Gagal recalculate daily summary.';
-		} finally {
-			recalculating = false;
-		}
-	}
-
 	async function handleExportExcel() {
 		if (!$selectedVesselId) {
-			error = 'Belum ada vessel yang dipilih.';
+			error = 'No vessel has been selected.';
 			return;
 		}
 
 		exporting = true;
 		error = '';
-		successMessage = '';
 
 		try {
 			const url = getDailyReportExcelUrl({
@@ -2525,9 +2534,44 @@
 			await downloadApiFile(url, `Daily_Report_${safeVesselName}_${reportDate}.xlsx`);
 		} catch (err) {
 			console.error('[DAILY_EXPORT_EXCEL_ERROR]', err);
-			error = err?.message || 'Gagal export Excel daily report.';
+			error = err?.message || 'Failed to export the daily report to Excel.';
 		} finally {
 			exporting = false;
+		}
+	}
+
+	async function handleExportPdf() {
+		if (!$selectedVesselId) {
+			error = 'No vessel has been selected.';
+			return;
+		}
+
+		if (!reportDate) {
+			error = 'No report date has been selected.';
+			return;
+		}
+
+		exportingPdf = true;
+		error = '';
+
+		try {
+			const url = getDailyReportPdfUrl({
+				vesselId: $selectedVesselId,
+				date: reportDate,
+				timezoneMode,
+				timezoneOffset
+			});
+
+			const safeVesselName = String(vesselName || 'vessel')
+				.replace(/[^\w\s-]/g, '')
+				.replace(/\s+/g, '_');
+
+			await downloadApiFile(url, `Daily_Report_${safeVesselName}_${reportDate}.pdf`);
+		} catch (err) {
+			console.error('[DAILY_EXPORT_PDF_ERROR]', err);
+			error = err?.message || 'Failed to export the daily report to PDF.';
+		} finally {
+			exportingPdf = false;
 		}
 	}
 
@@ -2605,36 +2649,18 @@
 				{loading ? 'Loading...' : 'Load Data'}
 			</button>
 
-			<button
-				type="button"
-				class="secondary-btn"
-				onclick={handleRecalculateSummary}
-				disabled={recalculating}
-			>
-				{recalculating ? 'Processing...' : 'Recalculate Summary'}
-			</button>
-
-			<button
-				type="button"
-				class="secondary-btn"
-				onclick={handleRecalculate}
-				disabled={recalculating}
-			>
-				{recalculating ? 'Processing...' : 'Force Recalculate'}
-			</button>
-
-			<button type="button" class="export-btn" onclick={handleExportExcel} disabled={exporting}>
+			<button type="button" class="export-btn excel" onclick={handleExportExcel} disabled={exporting}>
 				{exporting ? 'Exporting...' : 'Export Excel'}
+			</button>
+
+			<button type="button" class="export-btn pdf" onclick={handleExportPdf} disabled={exportingPdf}>
+				{exportingPdf ? 'Exporting PDF...' : 'Export PDF'}
 			</button>
 		</div>
 	</section>
 
 	{#if error}
 		<div class="status-box error-box">{error}</div>
-	{/if}
-
-	{#if successMessage}
-		<div class="status-box success-box">{successMessage}</div>
 	{/if}
 
 	{#if vesselEnginesLoading}
@@ -2787,7 +2813,9 @@
 							</div>
 						</div>
 
-						<div class="trip-route-map trip-leaflet-map" use:tripLeafletMap={tripMapPoints}></div>
+						<div class="trip-route-map">
+							<div class="trip-leaflet-map" use:tripLeafletMap={tripMapPoints}></div>
+						</div>
 					</article>
 
 					<article class="trip-summary-card">
@@ -2837,7 +2865,7 @@
 					</article>
 				</div>
 			{:else}
-				<div class="empty-box">Daily trip path belum tersedia.</div>
+				<div class="empty-box">Daily trip path is not available yet.</div>
 			{/if}
 		</section>
 	{/if}
@@ -2878,7 +2906,7 @@
 					</table>
 				</div>
 			{:else}
-				<div class="empty-box">Runtime data belum tersedia.</div>
+				<div class="empty-box">Runtime data is not available yet.</div>
 			{/if}
 		</section>
 	{/if}
@@ -2944,7 +2972,7 @@
 					{/each}
 				</div>
 			{:else}
-				<div class="empty-box">Event status history belum tersedia.</div>
+				<div class="empty-box">Event status history is not available yet.</div>
 			{/if}
 		</section>
 	{/if}
@@ -3012,7 +3040,7 @@
 					{/each}
 				</div>
 			{:else}
-				<div class="empty-box">Engine ON/OFF timeline belum tersedia.</div>
+				<div class="empty-box">Engine ON/OFF timeline is not available yet.</div>
 			{/if}
 		</section>
 	{/if}
@@ -3132,7 +3160,7 @@
 					</table>
 				</div>
 			{:else}
-				<div class="empty-box">Fuel data belum tersedia.</div>
+				<div class="empty-box">Fuel data is not available yet.</div>
 			{/if}
 		</section>
 	{/if}
@@ -3171,7 +3199,7 @@
 					</table>
 				</div>
 			{:else}
-				<div class="empty-box">RPM statistics data belum tersedia.</div>
+				<div class="empty-box">RPM statistics data is not available yet.</div>
 			{/if}
 		</section>
 	{/if}
@@ -3243,7 +3271,7 @@
 					{/each}
 				</div>
 			{:else}
-				<div class="empty-box">RPM range data belum tersedia.</div>
+				<div class="empty-box">RPM range data is not available yet.</div>
 			{/if}
 		</section>
 	{/if}
@@ -3283,11 +3311,15 @@
 							<div class="rpm-fuel-chart-canvas">
 								<canvas use:rpmFuelCurveChart={group}></canvas>
 							</div>
+
+							<div class="rpm-fuel-chart-hint">
+								Scroll to zoom in/out, drag to select a zoom area, Shift + drag to pan, double click to reset.
+							</div>
 						</article>
 					{/each}
 				</div>
 			{:else}
-				<div class="empty-box">RPM vs fuel curve chart belum tersedia.</div>
+				<div class="empty-box">RPM vs fuel curve chart is not available yet.</div>
 			{/if}
 		</section>
 	{/if}
@@ -3342,7 +3374,7 @@
 					{/each}
 				</div>
 			{:else}
-				<div class="empty-box">High RPM outside safety zone data belum tersedia.</div>
+				<div class="empty-box">High RPM outside safety zone data is not available yet.</div>
 			{/if}
 		</section>
 	{/if}
@@ -3427,7 +3459,7 @@
 					</article>
 				</div>
 			{:else}
-				<div class="empty-box">High RPM low speed data belum tersedia.</div>
+				<div class="empty-box">High RPM low speed data is not available yet.</div>
 			{/if}
 		</section>
 	{/if}
@@ -3590,8 +3622,15 @@
 	}
 
 	.export-btn {
-		background: #16a34a;
 		color: #ffffff;
+	}
+
+	.excel {
+		background: #16a34a;
+	}
+
+	.pdf {
+		background: #b5150c;
 	}
 
 	.primary-btn:disabled,
@@ -3694,20 +3733,20 @@
 		margin: 14px;
 		border-radius: 12px;
 		border: 1px solid #d9e2ec;
-		background:
-			linear-gradient(90deg, rgba(148, 163, 184, 0.12) 1px, transparent 1px),
-			linear-gradient(180deg, rgba(148, 163, 184, 0.12) 1px, transparent 1px), #eff6ff;
-		background-size: 28px 28px;
+		background: #e5edf5;
 		overflow: hidden;
+		box-sizing: border-box;
 	}
 
 	.trip-leaflet-map {
 		width: 100%;
-		height: 280px;
-		border: 1px solid #d9e2ec;
+		height: 100%;
+	}
+
+	.trip-leaflet-map :global(.leaflet-container) {
+		width: 100%;
+		height: 100%;
 		border-radius: 12px;
-		overflow: hidden;
-		background: #e5edf5;
 	}
 
 	.trip-leaflet-map :global(.trip-map-marker) {
@@ -4541,6 +4580,14 @@
 		height: 100%;
 	}
 
+	.rpm-fuel-chart-hint {
+		padding: 0 14px 14px;
+		color: #64748b;
+		font-size: 10px;
+		font-weight: 800;
+		line-height: 1.4;
+	}
+
 	@media (max-width: 1000px) {
 		.rpm-fuel-chart-grid {
 			grid-template-columns: 1fr;
@@ -4773,7 +4820,7 @@
 
 	@media (max-width: 760px) {
 		.daily-page {
-			padding: 10px;
+			padding: 8px;
 		}
 
 		.daily-header-card {
@@ -4787,7 +4834,25 @@
 		}
 
 		.summary-grid {
-			grid-template-columns: 1fr;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 8px;
+		}
+
+		.summary-card {
+			min-height: 72px;
+			padding: 10px 12px;
+		}
+
+		.summary-card span {
+			font-size: 9px;
+			line-height: 1.2;
+			letter-spacing: 0.03em;
+		}
+
+		.summary-card strong {
+			margin-top: 6px;
+			font-size: 18px;
+			line-height: 1.1;
 		}
 
 		.filter-card input,

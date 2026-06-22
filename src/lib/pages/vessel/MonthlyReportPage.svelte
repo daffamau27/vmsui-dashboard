@@ -38,7 +38,7 @@
 			return currentUser;
 		} catch (err) {
 			console.error('[MONTHLY][CURRENT_USER_PERMISSION_ERROR]', err);
-			currentUserError = err?.message || 'Gagal memuat permission user.';
+			currentUserError = err?.message || 'Failed to load user permissions.';
 			currentUser = null;
 			return null;
 		} finally {
@@ -326,18 +326,18 @@
 
 		const text = String(rawDay).trim();
 
-		// Format YYYY-MM-DD
+		// YYYY-MM-DD format
 		if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
 			return Number(text.slice(8, 10));
 		}
 
-		// Format DD/MM/YYYY atau DD-MM-YYYY
+		// DD/MM/YYYY or DD-MM-YYYY format
 		const dateLikeMatch = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
 		if (dateLikeMatch) {
 			return Number(dateLikeMatch[1]);
 		}
 
-		// Format angka hari: 1, 2, 10, 31
+		// Numeric day format: 1, 2, 10, 31
 		if (/^\d{1,2}$/.test(text)) {
 			return Number(text);
 		}
@@ -900,7 +900,7 @@
 
 	async function loadMonthlyReport() {
 		if (!$selectedVesselId) {
-			error = 'Belum ada vessel yang dipilih dari Fleet View.';
+			error = 'No vessel has been selected from Fleet View.';
 			reportData = null;
 			return;
 		}
@@ -954,7 +954,7 @@
 			console.log('[MONTHLY_REPORT_DATA]', result);
 		} catch (err) {
 			console.error('[MONTHLY_REPORT_ERROR]', err);
-			error = err?.message || 'Gagal memuat monthly report.';
+			error = err?.message || 'Failed to load monthly report.';
 			reportData = null;
 		} finally {
 			loading = false;
@@ -963,7 +963,7 @@
 
 	async function handleExportExcel() {
 		if (!$selectedVesselId) {
-			error = 'Belum ada vessel yang dipilih.';
+			error = 'No vessel has been selected.';
 			return;
 		}
 
@@ -990,7 +990,7 @@
 			);
 		} catch (err) {
 			console.error('[MONTHLY_EXPORT_EXCEL_ERROR]', err);
-			error = err?.message || 'Gagal export Excel monthly report.';
+			error = err?.message || 'Failed to export monthly report to Excel.';
 		} finally {
 			exporting = false;
 		}
@@ -1086,7 +1086,7 @@
 	{/if}
 
 	{#if currentUserLoading}
-		<div class="status-box">Loading user permission...</div>
+		<div class="status-box">Loading user permissions...</div>
 	{/if}
 
 	{#if currentUserError}
@@ -1276,7 +1276,7 @@
 				</table>
 			</div>
 		{:else}
-			<div class="empty-box">Monthly report per date belum tersedia.</div>
+			<div class="empty-box">Monthly report by date is not available yet.</div>
 		{/if}
 	</section>
 
@@ -1519,7 +1519,7 @@
 
 	.monthly-table-wrapper {
 		width: 100%;
-		max-height: calc(100vh - 310px);
+		max-height: 100vh;
 		min-height: 260px;
 		overflow: auto;
 		background: #ffffff;

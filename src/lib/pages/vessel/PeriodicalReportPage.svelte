@@ -335,13 +335,13 @@
 
 	async function loadPeriodicalReport() {
 		if (!$selectedVesselId) {
-			error = 'Belum ada vessel yang dipilih dari Fleet View.';
+			error = 'No vessel has been selected from Fleet View.';
 			reportData = null;
 			return;
 		}
 
 		if (!startDateTime || !endDateTime) {
-			error = 'Start dan End wajib diisi.';
+			error = 'Start and End are required.';
 			reportData = null;
 			return;
 		}
@@ -377,7 +377,7 @@
 			console.log('[PERIODICAL_REPORT_DATA]', result);
 		} catch (err) {
 			console.error('[PERIODICAL_REPORT_ERROR]', err);
-			error = err?.message || 'Gagal memuat periodical report.';
+			error = err?.message || 'Failed to load the periodical report.';
 			reportData = null;
 		} finally {
 			loading = false;
@@ -386,12 +386,12 @@
 
 	async function handleExportExcel() {
 		if (!$selectedVesselId) {
-			error = 'Belum ada vessel yang dipilih.';
+			error = 'No vessel has been selected.';
 			return;
 		}
 
 		if (!startDateTime || !endDateTime) {
-			error = 'Start dan End wajib diisi.';
+			error = 'Start and End are required.';
 			return;
 		}
 
@@ -420,7 +420,7 @@
 			);
 		} catch (err) {
 			console.error('[PERIODICAL_EXPORT_ERROR]', err);
-			error = err?.message || 'Gagal export Excel periodical report.';
+			error = err?.message || 'Failed to export the periodical report to Excel.';
 		} finally {
 			exporting = false;
 		}
@@ -615,7 +615,7 @@
 				</table>
 			</div>
 		{:else}
-			<div class="empty-box">Engine runtime belum tersedia.</div>
+			<div class="empty-box">Engine runtime data is not available yet.</div>
 		{/if}
 	</section>
 
@@ -683,7 +683,7 @@
 				</table>
 			</div>
 		{:else}
-			<div class="empty-box">Fuel consumption belum tersedia.</div>
+			<div class="empty-box">Fuel consumption data is not available yet.</div>
 		{/if}
 	</section>
 

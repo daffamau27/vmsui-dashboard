@@ -8,6 +8,13 @@ function safeJsonParse(text) {
   }
 }
 
+function createApiError(message, status, data = null) {
+  const error = new Error(message);
+  error.status = status;
+  error.data = data;
+  return error;
+}
+
 export function getAccessToken() {
   if (typeof localStorage === "undefined") return null;
   return localStorage.getItem("accessToken");
@@ -51,6 +58,18 @@ export function clearAuthStorage() {
   localStorage.removeItem("currentUser");
 }
 
+export function redirectToLogin() {
+  if (typeof window === "undefined") return;
+
+  clearAuthStorage();
+
+  const currentPath = window.location.pathname;
+
+  if (currentPath !== "/") {
+    window.location.href = "/";
+  }
+}
+
 export async function apiRequest(path, options = {}) {
   const token = getAccessToken();
 
@@ -87,7 +106,28 @@ export async function apiRequest(path, options = {}) {
       text ||
       `Request failed with status ${response.status}`;
 
-    throw new Error(message);
+    const isAuthEndpoint =
+      path.includes("/auth/") ||
+      path.includes("/auth/refresh");
+
+    if (response.status === 401 && !isAuthEndpoint) {
+      redirectToLogin();
+      throw createApiError(
+        "Sesi login telah berakhir. Silakan login kembali.",
+        response.status,
+        data
+      );
+    }
+
+    if (response.status === 403) {
+      throw createApiError(
+        message || "Anda tidak memiliki akses ke fitur ini.",
+        response.status,
+        data
+      );
+    }
+
+    throw createApiError(message, response.status, data);
   }
 
   if (rawResponse) {
@@ -198,7 +238,32 @@ export async function downloadApiFile(path, fileName = "download.xlsx") {
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(text || `Download gagal. Status ${response.status}`);
+    const data = safeJsonParse(text);
+
+    const message =
+      data?.message ||
+      data?.error ||
+      text ||
+      `Download gagal. Status ${response.status}`;
+
+    if (response.status === 401) {
+      redirectToLogin();
+      throw createApiError(
+        "Sesi login telah berakhir. Silakan login kembali.",
+        response.status,
+        data
+      );
+    }
+
+    if (response.status === 403) {
+      throw createApiError(
+        message || "Anda tidak memiliki akses untuk mengunduh file ini.",
+        response.status,
+        data
+      );
+    }
+
+    throw createApiError(message, response.status, data);
   }
 
   const blob = await response.blob();
