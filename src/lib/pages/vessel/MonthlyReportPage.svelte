@@ -1295,8 +1295,8 @@
 		max-height: 100%;
 		min-height: 0;
 		padding: 14px;
-		background: #f4f6f8;
-		color: #0f172a;
+		background: var(--color-base);
+		color: var(--text-primary);
 		overflow-y: auto;
 		overflow-x: hidden;
 		box-sizing: border-box;
@@ -1307,7 +1307,7 @@
 	.summary-card,
 	.table-section,
 	.raw-box {
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
 	}
@@ -1326,7 +1326,7 @@
 		width: fit-content;
 		padding: 4px 9px;
 		border-radius: 999px;
-		background: #dbeafe;
+		background: var(--color-accent-muted);
 		color: #1d4ed8;
 		font-size: 10px;
 		font-weight: 900;
@@ -1339,12 +1339,12 @@
 		font-size: 21px;
 		line-height: 1.2;
 		font-weight: 900;
-		color: #0f172a;
+		color: var(--text-primary);
 	}
 
 	.monthly-header-card p {
 		margin: 7px 0 0;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 700;
 	}
@@ -1353,14 +1353,14 @@
 		min-width: 120px;
 		padding: 10px 12px;
 		border-radius: 12px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 		border: 1px solid #e2e8f0;
 		text-align: right;
 	}
 
 	.header-meta span {
 		display: block;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -1369,7 +1369,7 @@
 	.header-meta strong {
 		display: block;
 		margin-top: 5px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 14px;
 		font-weight: 900;
 	}
@@ -1389,7 +1389,7 @@
 	}
 
 	.filter-card label span {
-		color: #475569;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -1400,9 +1400,9 @@
 		height: 32px;
 		min-width: 130px;
 		border: 1px solid #cbd5e1;
-		background: #ffffff;
+		background: var(--color-surface);
 		padding: 0 9px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 700;
 		outline: none;
@@ -1449,7 +1449,7 @@
 	}
 
 	.error-box {
-		background: #fef2f2;
+		background: var(--color-danger-muted);
 		color: #b91c1c;
 		border: 1px solid #fecaca;
 	}
@@ -1470,7 +1470,7 @@
 	}
 
 	.summary-card span {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10.5px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -1478,7 +1478,7 @@
 
 	.summary-card strong {
 		margin-top: 9px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 19px;
 		line-height: 1.1;
 		font-weight: 900;
@@ -1497,12 +1497,12 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
-		background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+		background: var(--color-surface);
 	}
 
 	.section-header h2 {
 		margin: 6px 0 0;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 16px;
 		font-weight: 900;
 	}
@@ -1510,7 +1510,7 @@
 	.section-header > strong {
 		padding: 5px 10px;
 		border-radius: 999px;
-		background: #eff6ff;
+		background: var(--color-accent-muted);
 		border: 1px solid #bfdbfe;
 		color: #1d4ed8;
 		font-size: 11px;
@@ -1522,7 +1522,7 @@
 		max-height: 100vh;
 		min-height: 260px;
 		overflow: auto;
-		background: #ffffff;
+		background: var(--color-surface);
 	}
 
 	.monthly-report-table {
@@ -1568,16 +1568,16 @@
 		white-space: nowrap;
 		font-size: 11px;
 		font-weight: 700;
-		color: #0f172a;
-		background: #ffffff;
+		color: var(--text-primary);
+		background: var(--color-surface);
 	}
 
 	.monthly-report-table tbody tr:nth-child(even) td {
-		background: #f8fbff;
+		background: var(--color-elevated);
 	}
 
 	.monthly-report-table tbody tr:hover td {
-		background: #eef6ff;
+		background: var(--color-elevated);
 	}
 
 	.monthly-report-table .sticky-col {
@@ -1600,13 +1600,13 @@
 
 	.monthly-report-table .date-cell {
 		font-weight: 900;
-		color: #0f172a;
+		color: var(--text-primary);
 	}
 
 	.monthly-report-table .total-col {
 		font-weight: 900;
-		color: #0f172a;
-		background: #f3f8ff;
+		color: var(--text-primary);
+		background: var(--color-elevated);
 	}
 
 	.raw-box {
@@ -1634,14 +1634,14 @@
 
 	.empty-box {
 		padding: 18px 14px;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 800;
 	}
 
 	.future-row td {
 		color: #94a3b8;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	@media (max-width: 1100px) {

@@ -113,7 +113,7 @@ export async function apiRequest(path, options = {}) {
     if (response.status === 401 && !isAuthEndpoint) {
       redirectToLogin();
       throw createApiError(
-        "Sesi login telah berakhir. Silakan login kembali.",
+        "The login session has expired. Please log in again.",
         response.status,
         data
       );
@@ -121,7 +121,7 @@ export async function apiRequest(path, options = {}) {
 
     if (response.status === 403) {
       throw createApiError(
-        message || "Anda tidak memiliki akses ke fitur ini.",
+        message || "You do not have access to this feature.",
         response.status,
         data
       );
@@ -172,7 +172,7 @@ export async function refreshTokenApi() {
   const refreshToken = getRefreshToken();
 
   if (!refreshToken) {
-    throw new Error("Refresh token tidak tersedia.");
+    throw new Error("Refresh token is not available.");
   }
 
   const response = await apiRequest("/auth/refresh", {
@@ -257,7 +257,7 @@ export async function downloadApiFile(path, fileName = "download.xlsx") {
 
     if (response.status === 403) {
       throw createApiError(
-        message || "Anda tidak memiliki akses untuk mengunduh file ini.",
+        message || "You do not have access to download this file.",
         response.status,
         data
       );

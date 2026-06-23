@@ -20,7 +20,7 @@ function normalizeEngineCurve(curve) {
 
 export async function getEngineCurvesForVessel(vesselId) {
   if (!vesselId) {
-    throw new Error("vesselId wajib diisi.");
+    throw new Error("vesselId is required.");
   }
 
   const response = await apiRequest(`/engine-curves/vessels/${vesselId}`, {

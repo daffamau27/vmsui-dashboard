@@ -73,7 +73,7 @@ export async function importFuelVdor({ vesselId, fileBase64 }) {
 export async function downloadVdorTemplate() {
 	return apiRequest('/fuel-management/vdor-template', {
 		method: 'GET',
-		raw: true,
+		rawResponse: true,
 		headers: {
 			Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 		}

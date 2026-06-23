@@ -587,27 +587,62 @@
 		actionLoading = 'template';
 
 		try {
-			const raw = await downloadVdorTemplate();
-			let blob;
+			const response = await downloadVdorTemplate();
 
-			if (raw instanceof Blob) {
-				blob = raw;
-			} else if (typeof raw?.blob === 'function') {
-				blob = await raw.blob();
-			} else {
-				blob = new Blob([raw], {
-					type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-				});
+			if (!(response instanceof Response)) {
+				throw new Error('The VDOR template endpoint did not return a file response.');
 			}
+
+			const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+			const contentDisposition = response.headers.get('content-disposition') || '';
+			const blob = await response.blob();
+
+			if (
+				contentType.includes('application/json') ||
+				contentType.includes('text/html') ||
+				contentType.includes('text/plain')
+			) {
+				const text = await blob.text();
+				let message = text;
+
+				try {
+					const payload = JSON.parse(text);
+					message = payload?.message || payload?.error || text;
+				} catch {
+					// Use the plain response text as the error message.
+				}
+
+				throw new Error(message || 'The server returned an invalid VDOR template response.');
+			}
+
+			const signature = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+			const isZipXlsx =
+				signature[0] === 0x50 &&
+				signature[1] === 0x4b &&
+				(signature[2] === 0x03 || signature[2] === 0x05 || signature[2] === 0x07) &&
+				(signature[3] === 0x04 || signature[3] === 0x06 || signature[3] === 0x08);
+
+			if (!isZipXlsx) {
+				throw new Error('The server response is not a valid XLSX file.');
+			}
+
+			const encodedFileName =
+				contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1] ||
+				contentDisposition.match(/filename="?([^";]+)"?/i)?.[1];
+			const fileName = encodedFileName
+				? decodeURIComponent(encodedFileName)
+				: 'vdor_import_template.xlsx';
 
 			const url = URL.createObjectURL(blob);
 			const link = document.createElement('a');
 			link.href = url;
-			link.download = 'vdor_import_template.xlsx';
+			link.download = fileName.toLowerCase().endsWith('.xlsx') ? fileName : `${fileName}.xlsx`;
 			document.body.appendChild(link);
 			link.click();
 			link.remove();
-			URL.revokeObjectURL(url);
+			window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+			successMessage = 'VDOR template downloaded successfully.';
 		} catch (err) {
 			console.error('[FUEL_MANAGEMENT][DOWNLOAD_TEMPLATE][ERROR]', err);
 			errorMessage = getErrorMessage(err, 'Failed to download the VDOR template.');
@@ -1090,8 +1125,8 @@
 		overflow-y: auto;
 		overflow-x: hidden;
 		padding: 14px;
-		background: #f4f6f8;
-		color: #0f172a;
+		background: var(--color-base);
+		color: var(--text-primary);
 	}
 
 	h1,
@@ -1104,7 +1139,7 @@
 	.fuel-header-card,
 	.panel,
 	.summary-card {
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
 	}
@@ -1123,7 +1158,7 @@
 		width: fit-content;
 		padding: 4px 9px;
 		border-radius: 999px;
-		background: #dbeafe;
+		background: var(--color-accent-muted);
 		color: #1d4ed8;
 		font-size: 10px;
 		font-weight: 900;
@@ -1136,12 +1171,12 @@
 		font-size: 22px;
 		line-height: 1.2;
 		font-weight: 900;
-		color: #0f172a;
+		color: var(--text-primary);
 	}
 
 	.fuel-header-card p {
 		margin-top: 7px;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 700;
 		line-height: 1.45;
@@ -1162,7 +1197,7 @@
 	}
 
 	label span {
-		color: #475569;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -1173,9 +1208,9 @@
 		height: 32px;
 		min-width: 140px;
 		border: 1px solid #cbd5e1;
-		background: #ffffff;
+		background: var(--color-surface);
 		padding: 0 9px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 700;
 		outline: none;
@@ -1224,8 +1259,8 @@
 
 	.secondary-button {
 		border: 1px solid #cbd5e1;
-		background: #e2e8f0;
-		color: #0f172a;
+		background: rgba(255, 255, 255, 0.06);
+		color: var(--text-primary);
 	}
 
 	.secondary-button:hover:not(:disabled) {
@@ -1235,17 +1270,17 @@
 	.danger-button {
 		height: 28px;
 		border: 1px solid #fecaca;
-		background: #fff1f2;
+		background: var(--color-danger-muted);
 		color: #be123c;
 	}
 
 	.danger-button:hover:not(:disabled) {
-		background: #ffe4e6;
+		background: var(--color-danger-muted);
 	}
 
 	.fuel-toast-layer {
 		position: fixed;
-		top: 48px;
+		top: 68px;
 		right: 18px;
 		z-index: 9999;
 		display: grid;
@@ -1262,7 +1297,7 @@
 		padding: 11px 12px;
 		border: 1px solid #d9e2ec;
 		border-radius: 12px;
-		background: rgba(255, 255, 255, 0.96);
+		background: rgba(17, 24, 39, 0.94);
 		box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14);
 		backdrop-filter: blur(10px);
 		pointer-events: auto;
@@ -1278,14 +1313,14 @@
 	.fuel-toast strong {
 		font-size: 12px;
 		font-weight: 900;
-		color: #0f172a;
+		color: var(--text-primary);
 	}
 
 	.fuel-toast span {
 		font-size: 12px;
 		font-weight: 700;
 		line-height: 1.35;
-		color: #475569;
+		color: var(--text-secondary);
 		text-transform: none;
 	}
 
@@ -1326,7 +1361,7 @@
 		border: 0;
 		border-radius: 999px;
 		background: rgba(15, 23, 42, 0.08);
-		color: #334155;
+		color: var(--text-secondary);
 		font-size: 17px;
 		font-weight: 900;
 		line-height: 1;
@@ -1360,19 +1395,19 @@
 
 	.alert.warning {
 		border: 1px solid #fde68a;
-		background: #fffbeb;
+		background: var(--color-warning-muted);
 		color: #92400e;
 	}
 
 	.alert.danger {
 		border: 1px solid #fecaca;
-		background: #fff1f2;
+		background: var(--color-danger-muted);
 		color: #be123c;
 	}
 
 	.alert.success {
 		border: 1px solid #bbf7d0;
-		background: #f0fdf4;
+		background: var(--color-success-muted);
 		color: #166534;
 	}
 
@@ -1396,7 +1431,7 @@
 	.summary-card span,
 	.comparison-grid span {
 		display: block;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 11px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -1406,7 +1441,7 @@
 	.comparison-grid strong {
 		display: block;
 		margin-top: 10px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 22px;
 		line-height: 1.1;
 		font-weight: 900;
@@ -1418,7 +1453,7 @@
 	.summary-card small {
 		display: block;
 		margin-top: 8px;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 11px;
 		font-weight: 700;
 		white-space: nowrap;
@@ -1454,11 +1489,11 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
-		background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+		background: var(--color-surface);
 	}
 
 	.panel-header h2 {
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 17px;
 		font-weight: 900;
 		line-height: 1.2;
@@ -1466,7 +1501,7 @@
 
 	.panel-header p {
 		margin-top: 5px;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 700;
 		line-height: 1.4;
@@ -1479,7 +1514,7 @@
 		min-height: 25px;
 		padding: 5px 10px;
 		border-radius: 999px;
-		background: #eff6ff;
+		background: var(--color-accent-muted);
 		border: 1px solid #bfdbfe;
 		color: #1d4ed8;
 		font-size: 11px;
@@ -1492,30 +1527,30 @@
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 10px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.comparison-grid > div {
 		min-width: 0;
 		padding: 14px;
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		border-radius: 10px;
 	}
 
 	.comparison-grid > div.positive {
 		border-color: #bbf7d0;
-		background: #f0fdf4;
+		background: var(--color-success-muted);
 	}
 
 	.comparison-grid > div.negative {
 		border-color: #fecaca;
-		background: #fff1f2;
+		background: var(--color-danger-muted);
 	}
 
 	.comparison-grid > div.neutral {
 		border-color: #d9e2ec;
-		background: #ffffff;
+		background: var(--color-surface);
 	}
 
 	.operation-grid {
@@ -1523,7 +1558,7 @@
 		display: grid;
 		grid-template-columns: repeat(3, minmax(190px, 1fr));
 		gap: 12px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.mini-form {
@@ -1532,13 +1567,13 @@
 		gap: 9px;
 		min-width: 0;
 		padding: 12px;
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		border-radius: 10px;
 	}
 
 	.mini-form h3 {
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 13px;
 		font-weight: 900;
 	}
@@ -1556,7 +1591,7 @@
 	.file-picker small {
 		font-size: 11px;
 		font-weight: 700;
-		color: #64748b;
+		color: var(--text-secondary);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -1584,8 +1619,8 @@
 		position: sticky;
 		top: 0;
 		z-index: 1;
-		background: #f8fafc;
-		color: #475569;
+		background: var(--color-elevated);
+		color: var(--text-secondary);
 		font-size: 10.5px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -1595,7 +1630,7 @@
 	}
 
 	td {
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 700;
 		padding: 10px 12px;
@@ -1603,12 +1638,12 @@
 	}
 
 	tbody tr:hover td {
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	tfoot td {
-		background: #eff6ff;
-		color: #0f172a;
+		background: var(--color-accent-muted);
+		color: var(--text-primary);
 		font-weight: 900;
 	}
 
@@ -1626,7 +1661,7 @@
 		gap: 8px;
 		font-size: 12px;
 		font-weight: 900;
-		color: #475569;
+		color: var(--text-secondary);
 	}
 
 	.history-control button {
@@ -1642,7 +1677,7 @@
 		min-height: 24px;
 		padding: 0 10px;
 		border-radius: 999px;
-		background: #eff6ff;
+		background: var(--color-accent-muted);
 		border: 1px solid #bfdbfe;
 		color: #1d4ed8;
 		font-size: 10px;
@@ -1656,8 +1691,8 @@
 		padding: 18px 14px;
 		border: 1px dashed #cbd5e1;
 		border-radius: 10px;
-		background: #ffffff;
-		color: #64748b;
+		background: var(--color-surface);
+		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 800;
 		text-align: center;

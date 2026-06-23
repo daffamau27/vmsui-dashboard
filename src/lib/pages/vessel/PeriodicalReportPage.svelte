@@ -729,8 +729,8 @@
 		max-height: 100%;
 		min-height: 0;
 		padding: 14px;
-		background: #f4f6f8;
-		color: #0f172a;
+		background: var(--color-base);
+		color: var(--text-primary);
 		overflow-y: auto;
 		overflow-x: hidden;
 		box-sizing: border-box;
@@ -747,7 +747,7 @@
 	.raw-box,
 	.data-received-card,
 	.speed-detail-grid article {
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		border-radius: 0;
 		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
@@ -767,7 +767,7 @@
 		width: fit-content;
 		padding: 4px 9px;
 		border-radius: 999px;
-		background: #dbeafe;
+		background: var(--color-accent-muted);
 		color: #1d4ed8;
 		font-size: 10px;
 		font-weight: 900;
@@ -777,7 +777,7 @@
 
 	.periodical-header-card h1 {
 		margin: 8px 0 0;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 22px;
 		line-height: 1.2;
 		font-weight: 900;
@@ -785,7 +785,7 @@
 
 	.periodical-header-card p {
 		margin: 7px 0 0;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 12px;
 		line-height: 1.45;
 		font-weight: 700;
@@ -795,14 +795,14 @@
 		min-width: 120px;
 		padding: 10px 12px;
 		border-radius: 12px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 		border: 1px solid #e2e8f0;
 		text-align: right;
 	}
 
 	.header-meta span {
 		display: block;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -811,7 +811,7 @@
 	.header-meta strong {
 		display: block;
 		margin-top: 5px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 14px;
 		font-weight: 900;
 	}
@@ -831,7 +831,7 @@
 	}
 
 	.filter-card label span {
-		color: #475569;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -843,9 +843,9 @@
 		min-width: 150px;
 		border: 1px solid #cbd5e1;
 		border-radius: 0;
-		background: #ffffff;
+		background: var(--color-surface);
 		padding: 0 9px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 700;
 		outline: none;
@@ -904,7 +904,7 @@
 	}
 
 	.error-box {
-		background: #fef2f2;
+		background: var(--color-danger-muted);
 		color: #b91c1c;
 		border: 1px solid #fecaca;
 	}
@@ -919,14 +919,14 @@
 	}
 
 	.data-received-card span {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 11px;
 		font-weight: 900;
 		text-transform: uppercase;
 	}
 
 	.data-received-card strong {
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 16px;
 		line-height: 1.2;
 		font-weight: 900;
@@ -948,7 +948,7 @@
 	}
 
 	.summary-card span {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 11px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -956,7 +956,7 @@
 
 	.summary-card strong {
 		margin-top: 10px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 22px;
 		line-height: 1.1;
 		font-weight: 900;
@@ -975,12 +975,12 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
-		background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+		background: var(--color-surface);
 	}
 
 	.section-header h2 {
 		margin: 7px 0 0;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 17px;
 		line-height: 1.2;
 		font-weight: 900;
@@ -989,7 +989,7 @@
 	.section-header > strong {
 		padding: 5px 10px;
 		border-radius: 999px;
-		background: #eff6ff;
+		background: var(--color-accent-muted);
 		border: 1px solid #bfdbfe;
 		color: #1d4ed8;
 		font-size: 11px;
@@ -1009,8 +1009,8 @@
 	}
 
 	th {
-		background: #f8fafc;
-		color: #475569;
+		background: var(--color-elevated);
+		color: var(--text-secondary);
 		font-size: 10.5px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -1022,7 +1022,7 @@
 	}
 
 	td {
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 700;
 		padding: 10px 12px;
@@ -1031,18 +1031,18 @@
 	}
 
 	tr:hover td {
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.total-row td {
-		background: #eff6ff;
-		color: #0f172a;
+		background: var(--color-accent-muted);
+		color: var(--text-primary);
 		font-weight: 900;
 	}
 
 	.empty-box {
 		padding: 18px 14px;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 800;
 	}
@@ -1052,13 +1052,13 @@
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 10px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.fod-usage-summary article {
 		min-height: 68px;
 		padding: 12px 14px;
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		border-radius: 10px;
 		display: flex;
@@ -1068,7 +1068,7 @@
 
 	.fod-usage-summary span,
 	.speed-detail-grid span {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -1078,14 +1078,14 @@
 	.fod-usage-summary strong,
 	.speed-detail-grid strong {
 		margin-top: 6px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 18px;
 		line-height: 1.15;
 		font-weight: 900;
 	}
 
 	.fod-total-card {
-		background: #eff6ff !important;
+		background: var(--color-accent-muted) !important;
 		border-color: #bfdbfe !important;
 	}
 
@@ -1098,7 +1098,7 @@
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 12px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.speed-detail-grid article {

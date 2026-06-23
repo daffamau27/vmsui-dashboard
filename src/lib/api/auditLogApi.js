@@ -25,7 +25,7 @@ export async function getMyAuditLogs({ page = 1, pageSize = 20 } = {}) {
 
 export async function getAuditLogDetail(id) {
   if (!id) {
-    throw new Error("ID audit log tidak valid.");
+    throw new Error("Invalid audit log ID.");
   }
 
   const response = await apiRequest(`/audit-logs/${id}`, {
@@ -69,7 +69,7 @@ export async function exportMyAuditLogsCsv({ startDate, endDate } = {}) {
   }
 
   if (!authorization) {
-    throw new Error("Token tidak ditemukan. Silakan login ulang.");
+    throw new Error("Token not found. Please log in again.");
   }
 
   const query = params.toString();
@@ -84,7 +84,7 @@ export async function exportMyAuditLogsCsv({ startDate, endDate } = {}) {
   });
 
   if (!response.ok) {
-    let message = "Gagal export audit log CSV.";
+    let message = "Failed to export audit log to CSV.";
 
     try {
       const text = await response.text();

@@ -76,7 +76,7 @@
     min-width: 0;
     height: 100vh;
     overflow: hidden;
-    background: #f4f6f8;
+    background: var(--color-base);
   }
 
   .keep-page {

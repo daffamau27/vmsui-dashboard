@@ -492,13 +492,16 @@
 
 <style>
 	.topbar {
-		height: 36px;
-		background: #eeeeee;
-		border-bottom: 1px solid #bdbdbd;
+		height: 48px;
+		padding: 0 10px;
+		gap: 10px;
+		background: var(--color-surface);
+		border-bottom: 1px solid var(--color-border);
+		box-shadow: 0 1px 0 rgba(59, 130, 246, 0.08);
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		font-size: 13px;
+		font-size: 12px;
 		flex-shrink: 0;
 		position: relative;
 		z-index: 900;
@@ -509,33 +512,37 @@
 		align-items: center;
 		height: 100%;
 		min-width: 0;
-		overflow: hidden;
+		overflow: visible;
+		gap: 6px;
 	}
 
 	.dropdown {
 		position: relative;
-		height: 100%;
+		height: auto;
 		flex-shrink: 0;
 	}
 
 	.dropdown-button {
-		height: 100%;
-		min-width: 145px;
-		padding: 0 12px;
-		border: none;
-		border-right: 1px solid #c4c4c4;
-		background: #eeeeee;
+		height: 34px;
+		min-width: 150px;
+		padding: 0 14px;
+		border: 1px solid rgba(59, 130, 246, 0.25);
+		border-radius: 8px;
+		background: rgba(59, 130, 246, 0.1);
+		color: var(--text-accent);
 		font-weight: 700;
 		cursor: pointer;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: 10px;
-		font-size: 13px;
+		font-size: 12px;
+		transition: background var(--duration-fast), border-color var(--duration-fast);
 	}
 
 	.dropdown-button:hover {
-		background: #e0e0e0;
+		background: rgba(59, 130, 246, 0.18);
+		border-color: rgba(59, 130, 246, 0.42);
 	}
 
 	.arrow {
@@ -544,71 +551,90 @@
 
 	.dropdown-menu {
 		position: absolute;
-		top: 36px;
+		top: 40px;
 		left: 0;
 		min-width: 210px;
-		background: white;
-		border: 1px solid #bdbdbd;
-		box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+		padding: 6px;
+		background: var(--color-elevated);
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		border-radius: 12px;
+		box-shadow: var(--shadow-md);
+		backdrop-filter: blur(16px);
+		animation: dropdown-in 0.15s ease;
 		z-index: 999;
 	}
 
 	.dropdown-item {
 		width: 100%;
-		padding: 10px 14px;
+		padding: 9px 12px;
 		border: none;
-		background: white;
+		border-radius: 8px;
+		background: transparent;
+		color: var(--text-secondary);
 		text-align: left;
 		cursor: pointer;
-		font-size: 13px;
+		font-size: 12px;
 	}
 
 	.dropdown-empty {
 		padding: 10px 14px;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 700;
 		white-space: nowrap;
 	}
 
 	.dropdown-item:hover {
-		background: #f1f1f1;
+		background: rgba(255, 255, 255, 0.05);
+		color: var(--text-primary);
 	}
 
 	.active-item {
-		background: #e7efff;
+		background: var(--color-accent-muted);
+		color: var(--text-accent);
 		font-weight: 700;
 	}
 
 	.topbar-item {
-		height: 100%;
-		padding: 0 12px;
+		height: 28px;
+		padding: 0 10px;
 		display: flex;
 		align-items: center;
-		border-right: 1px solid #c4c4c4;
+		border: 1px solid rgba(255, 255, 255, 0.06);
+		border-radius: 999px;
+		background: rgba(255, 255, 255, 0.035);
+		color: var(--text-secondary);
 		white-space: nowrap;
-		font-weight: 600;
+		font-size: 11px;
+		font-weight: 700;
 	}
 
 	.source-box {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 12px;
 	}
 
 	.online-box {
 		gap: 6px;
+		border-color: rgba(16, 185, 129, 0.2);
+		background: var(--color-success-muted);
+		color: #34d399;
 	}
 
 	.dot {
 		width: 8px;
 		height: 8px;
 		border-radius: 50%;
-		background: #12b886;
+		background: var(--color-success);
 		display: inline-block;
+		box-shadow: 0 0 8px rgba(16, 185, 129, 0.55);
+		animation: pulse-dot 1.8s ease-in-out infinite;
 	}
 
 	.offline-box {
-		color: #64748b;
+		border-color: rgba(100, 116, 139, 0.18);
+		background: rgba(100, 116, 139, 0.15);
+		color: var(--text-secondary);
 	}
 
 	.offline-box .dot {
@@ -617,28 +643,31 @@
 
 	.vessel-dropdown {
 		position: relative;
-		height: 100%;
+		height: auto;
 		flex-shrink: 0;
 	}
 
 	.vessel-selector {
-		height: 100%;
-		min-width: 170px;
+		height: 34px;
+		min-width: 190px;
 		padding: 0 12px;
-		border: none;
-		border-left: 1px solid #bdbdbd;
-		background: #d9d9d9;
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		border-radius: 8px;
+		background: rgba(255, 255, 255, 0.04);
+		color: var(--text-primary);
 		font-weight: 700;
 		cursor: pointer;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: 10px;
-		font-size: 13px;
+		font-size: 12px;
+		transition: background var(--duration-fast), border-color var(--duration-fast);
 	}
 
 	.vessel-selector:hover {
-		background: #cfcfcf;
+		background: var(--color-accent-muted);
+		border-color: rgba(59, 130, 246, 0.35);
 	}
 
 	.vessel-selector:disabled {
@@ -648,14 +677,17 @@
 
 	.vessel-menu {
 		position: absolute;
-		top: 36px;
+		top: 40px;
 		right: 0;
 		min-width: 240px;
 		max-height: 420px;
 		overflow: auto;
-		background: white;
-		border: 1px solid #bdbdbd;
-		box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+		padding: 6px;
+		background: var(--color-elevated);
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		border-radius: 12px;
+		box-shadow: var(--shadow-md);
+		backdrop-filter: blur(16px);
 		z-index: 999;
 	}
 
@@ -663,8 +695,9 @@
 		width: 100%;
 		padding: 9px 12px;
 		border: none;
-		border-bottom: 1px solid #eef2f7;
-		background: white;
+		border: none;
+		border-radius: 8px;
+		background: transparent;
 		text-align: left;
 		cursor: pointer;
 		display: grid;
@@ -672,28 +705,28 @@
 	}
 
 	.vessel-item strong {
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 13px;
 		font-weight: 800;
 	}
 
 	.vessel-item small {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 11px;
 		font-weight: 700;
 	}
 
 	.vessel-item:hover {
-		background: #f1f1f1;
+		background: rgba(255, 255, 255, 0.05);
 	}
 
 	.active-vessel {
-		background: #e7efff;
+		background: var(--color-accent-muted);
 	}
 
 	.vessel-empty {
 		padding: 12px;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 700;
 	}
@@ -707,5 +740,15 @@
 			position: sticky;
 			right: 0;
 		}
+	}
+
+	@keyframes pulse-dot {
+		0%, 100% { opacity: 1; transform: scale(1); }
+		50% { opacity: 0.6; transform: scale(0.85); }
+	}
+
+	@keyframes dropdown-in {
+		from { opacity: 0; transform: translateY(-6px); }
+		to { opacity: 1; transform: translateY(0); }
 	}
 </style>

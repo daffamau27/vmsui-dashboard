@@ -20,8 +20,8 @@ export async function getMonthlyReportData({
   timezoneMode = "auto",
   timezoneOffset = ""
 }) {
-  if (!vesselId) throw new Error("vesselId wajib diisi.");
-  if (!month) throw new Error("Bulan laporan wajib diisi.");
+  if (!vesselId) throw new Error("vesselId required.");
+  if (!month) throw new Error("The reporting month must be filled in.");
 
   const query = buildQuery({
     vesselId,
@@ -47,8 +47,8 @@ export function getMonthlyReportExcelUrl({
   timezoneMode = "auto",
   timezoneOffset = ""
 }) {
-  if (!vesselId) throw new Error("vesselId wajib diisi.");
-  if (!month) throw new Error("Bulan laporan wajib diisi.");
+  if (!vesselId) throw new Error("vesselId required.");
+  if (!month) throw new Error("The reporting month must be filled in.");
 
   const query = buildQuery({
     vesselId,

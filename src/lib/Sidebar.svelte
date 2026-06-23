@@ -66,7 +66,7 @@
 		}
 	];
 
-	const itemHeight = 46;
+	const itemHeight = 48;
 	const alarmBadgeRefreshMs = 10000;
 
 	let alarmBadgeTimer = null;
@@ -309,6 +309,8 @@
 
 		<button type="button" class="sidebar-close-btn" onclick={closeMobileSidebar}> × </button>
 	</div>
+<!-- 
+	<div class="sidebar-brand" title="VMS Dashboard">⚓</div> -->
 
 	<div class="sidebar-menu">
 		{#if activeIndex >= 0}
@@ -402,21 +404,34 @@
 	}
 
 	.sidebar {
-		width: 48px;
+		width: 64px;
 		height: 100vh;
 		min-height: 100vh;
-		background: #d5d7d9;
-		border-right: 1px solid #b6b6b6;
+		background: var(--color-surface);
+		border-right: 1px solid var(--color-border);
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		padding-top: 12px;
+		padding-top: 8px;
 		padding-bottom: 12px;
 		flex-shrink: 0;
 		position: sticky;
 		top: 0;
 		left: 0;
 		z-index: 1000;
+	}
+
+	.sidebar-brand {
+		width: 44px;
+		height: 44px;
+		margin-bottom: 10px;
+		display: grid;
+		place-items: center;
+		border-radius: 13px;
+		background: linear-gradient(135deg, var(--color-accent), var(--color-accent-hover));
+		color: #fff;
+		font-size: 20px;
+		box-shadow: 0 8px 20px rgba(37, 99, 235, 0.3);
 	}
 
 	.side-icon-img {
@@ -431,18 +446,18 @@
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		gap: 8px;
+		gap: 0;
 	}
 
 	.active-menu-bg {
 		position: absolute;
 		top: 0;
-		left: 3px;
-		width: 42px;
-		height: 38px;
-		border-radius: 8px;
-		background: #b9bbbd;
-		box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+		left: 0;
+		width: 48px;
+		height: 48px;
+		border-radius: 10px;
+		background: var(--color-accent-muted);
+		box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.08);
 		z-index: 1;
 		pointer-events: none;
 		transition:
@@ -453,11 +468,12 @@
 	.active-menu-indicator {
 		position: absolute;
 		top: 0;
-		left: 0;
-		width: 5px;
-		height: 38px;
-		border-radius: 0 999px 999px 0;
-		background: #111;
+		left: -8px;
+		width: 4px;
+		height: 48px;
+		border-radius: 0 4px 4px 0;
+		background: var(--color-accent);
+		box-shadow: 0 0 12px var(--color-accent-glow);
 		z-index: 4;
 		pointer-events: none;
 		transition:
@@ -468,14 +484,14 @@
 	.side-item {
 		position: relative;
 		z-index: 3;
-		width: 42px;
-		height: 38px;
+		width: 48px;
+		height: 48px;
 		border: none;
 		border-radius: 8px;
 		background: transparent;
 		font-size: 20px;
 		cursor: pointer;
-		color: #333;
+		color: var(--text-secondary);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -486,7 +502,7 @@
 	}
 
 	.side-item:hover {
-		background: rgba(199, 201, 203, 0.65);
+		background: rgba(255, 255, 255, 0.05);
 		transform: translateX(2px);
 	}
 
@@ -514,6 +530,16 @@
 		height: 22px;
 		display: block;
 		object-fit: contain;
+		filter: brightness(0) invert(0.62);
+		transition: filter var(--duration-base), transform var(--duration-slow) var(--ease-spring);
+	}
+
+	.side-item:hover .side-icon-img {
+		filter: brightness(0) invert(0.9);
+	}
+
+	.side-item.active .side-icon-img {
+		filter: brightness(0) invert(1) sepia(1) saturate(3) hue-rotate(190deg);
 	}
 
 	@keyframes menuPop {
@@ -539,7 +565,7 @@
 		padding: 0 4px;
 		border-radius: 999px;
 		background: #dc2626;
-		border: 2px solid #d5d7d9;
+		border: 2px solid var(--color-surface);
 		color: #ffffff;
 		font-size: 9px;
 		line-height: 12px;
@@ -548,17 +574,17 @@
 		align-items: center;
 		justify-content: center;
 		box-sizing: border-box;
-		box-shadow: 0 3px 8px rgba(220, 38, 38, 0.35);
+		box-shadow: 0 2px 8px rgba(239, 68, 68, 0.45);
 		pointer-events: none;
 	}
 
 	.side-item.active .alarm-count-badge {
-		border-color: #b9bbbd;
+		border-color: var(--color-surface);
 	}
 
 	.logout-button {
 		margin-top: auto;
-		width: 42px;
+		width: 48px;
 		min-height: 38px;
 		padding: 0;
 		border: none;
@@ -577,8 +603,8 @@
 		height: 30px;
 		border: none;
 		border-radius: 10px;
-		background: #fee2e2;
-		color: #991b1b;
+		background: var(--color-danger-muted);
+		color: #f87171;
 		font-size: 0;
 		font-weight: 900;
 		cursor: pointer;
@@ -616,19 +642,17 @@
 		display: grid;
 		place-items: center;
 		padding: 16px;
-		background: rgba(15, 23, 42, 0.42);
-		backdrop-filter: blur(4px);
+		background: rgba(0, 0, 0, 0.65);
+		backdrop-filter: blur(8px);
 		animation: logoutOverlayFade 0.18s ease;
 	}
 
 	.logout-confirm-box {
 		width: min(360px, 100%);
-		border: 1px solid rgba(226, 232, 240, 0.95);
-		border-radius: 18px;
-		background: #ffffff;
-		box-shadow:
-			0 24px 60px rgba(15, 23, 42, 0.28),
-			0 4px 14px rgba(15, 23, 42, 0.12);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		border-radius: 20px;
+		background: var(--color-elevated);
+		box-shadow: var(--shadow-lg);
 		padding: 18px;
 		outline: none;
 		animation: logoutBoxPop 0.22s cubic-bezier(0.22, 1, 0.36, 1);
@@ -641,7 +665,7 @@
 		display: grid;
 		place-items: center;
 		border-radius: 16px;
-		background: #fee2e2;
+		background: var(--color-danger-muted);
 		color: #dc2626;
 		font-size: 22px;
 		font-weight: 900;
@@ -653,7 +677,7 @@
 
 	.logout-confirm-content h3 {
 		margin: 0;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 16px;
 		font-weight: 900;
 		line-height: 1.2;
@@ -661,7 +685,7 @@
 
 	.logout-confirm-content p {
 		margin: 6px 0 0;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 600;
 		line-height: 1.45;
@@ -692,12 +716,12 @@
 	}
 
 	.logout-cancel-btn {
-		background: #f1f5f9;
-		color: #334155;
+		background: rgba(255, 255, 255, 0.06);
+		color: var(--text-secondary);
 	}
 
 	.logout-cancel-btn:hover {
-		background: #e2e8f0;
+		background: rgba(255, 255, 255, 0.1);
 		transform: translateY(-1px);
 	}
 
@@ -742,6 +766,10 @@
 	}
 
 	@media (max-width: 760px) {
+		.sidebar-brand {
+			display: none;
+		}
+
 		.main-sidebar-toggle {
 			display: inline-flex;
 			position: fixed;
@@ -753,10 +781,10 @@
 			justify-content: center;
 			gap: 6px;
 			padding: 0 9px;
-			border: 1px solid #bfdbfe;
+			border: 1px solid rgba(59, 130, 246, 0.35);
 			border-radius: 0 999px 999px 0;
-			background: rgba(255, 255, 255, 0.96);
-			color: #1d4ed8;
+			background: rgba(17, 24, 39, 0.94);
+			color: var(--text-accent);
 			font-size: 10px;
 			font-weight: 900;
 			box-shadow: 0 6px 14px rgba(15, 23, 42, 0.12);
@@ -769,8 +797,8 @@
 			inset: 0;
 			z-index: 1100;
 			border: none;
-			background: rgba(15, 23, 42, 0.36);
-			backdrop-filter: blur(2px);
+			background: rgba(0, 0, 0, 0.58);
+			backdrop-filter: blur(5px);
 			cursor: pointer;
 		}
 
@@ -787,12 +815,12 @@
 			z-index: 1200;
 			align-items: stretch;
 			padding: 0;
-			background: #ffffff;
-			border: 1px solid #d9e2ec;
+			background: var(--color-surface);
+			border: 1px solid var(--color-border);
 			border-radius: 12px;
 			box-shadow:
-				0 16px 38px rgba(15, 23, 42, 0.2),
-				0 2px 8px rgba(15, 23, 42, 0.08);
+				0 16px 38px rgba(0, 0, 0, 0.5),
+				0 2px 8px rgba(0, 0, 0, 0.3);
 			overflow: hidden;
 			transform: translateX(calc(-100% - 16px));
 			opacity: 0;
@@ -814,13 +842,13 @@
 			justify-content: space-between;
 			gap: 8px;
 			padding: 9px 10px;
-			border-bottom: 1px solid #eef2f7;
-			background: #ffffff;
+			border-bottom: 1px solid var(--color-border);
+			background: var(--color-surface);
 		}
 
 		.sidebar-mobile-header h2 {
 			margin: 0;
-			color: #0f172a;
+			color: var(--text-primary);
 			font-size: 14px;
 			line-height: 1.05;
 			font-weight: 900;
@@ -828,7 +856,7 @@
 
 		.sidebar-mobile-header p {
 			margin: 2px 0 0;
-			color: #64748b;
+			color: var(--text-secondary);
 			font-size: 9px;
 			line-height: 1.15;
 			font-weight: 700;
@@ -841,8 +869,8 @@
 			place-items: center;
 			border: none;
 			border-radius: 8px;
-			background: #f1f5f9;
-			color: #64748b;
+			background: rgba(255, 255, 255, 0.06);
+			color: var(--text-secondary);
 			font-size: 15px;
 			font-weight: 900;
 			line-height: 1;
@@ -853,11 +881,11 @@
 		.alarm-count-badge {
 			top: -8px;
 			right: -10px;
-			border-color: #f8fafc;
+			border-color: var(--color-surface);
 		}
 
 		.side-item.active .alarm-count-badge {
-			border-color: #eff6ff;
+			border-color: var(--color-surface);
 		}
 
 		.side-icon-img {
@@ -866,7 +894,7 @@
 		}
 
 		.sidebar-close-btn:hover {
-			background: #fee2e2;
+			background: var(--color-danger-muted);
 			color: #dc2626;
 		}
 
@@ -885,10 +913,10 @@
 		.side-item {
 			width: 100%;
 			height: 32px;
-			border: 1px solid #e2e8f0;
+			border: 1px solid rgba(255, 255, 255, 0.08);
 			border-radius: 8px;
-			background: #f8fafc;
-			color: #0f172a;
+			background: rgba(255, 255, 255, 0.035);
+			color: var(--text-primary);
 			font-size: 10px;
 			font-weight: 800;
 			justify-content: flex-start;
@@ -897,15 +925,15 @@
 		}
 
 		.side-item:hover {
-			border-color: #bfdbfe;
-			background: #eff6ff;
+			border-color: rgba(59, 130, 246, 0.3);
+			background: var(--color-accent-muted);
 		}
 
 		.side-item.active {
 			border-left: 1px solid #60a5fa;
-			border-color: #60a5fa;
-			background: #eff6ff;
-			color: #1d4ed8;
+			border-color: var(--color-accent);
+			background: var(--color-accent-muted);
+			color: var(--text-accent);
 			box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.12);
 		}
 
@@ -933,7 +961,7 @@
 			padding: 10px;
 			border: 1px solid #fecaca;
 			border-radius: 12px;
-			background: linear-gradient(180deg, #fff7f7 0%, #fee2e2 100%);
+			background: var(--color-surface);
 			color: #7f1d1d;
 			display: flex;
 			align-items: center;
@@ -943,7 +971,7 @@
 		}
 
 		.logout-button:hover {
-			background: linear-gradient(180deg, #fff1f1 0%, #fecaca 100%);
+			background: var(--color-surface);
 			border-color: #fca5a5;
 		}
 

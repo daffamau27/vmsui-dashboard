@@ -20,9 +20,9 @@ export async function getDataLogData({
   timezoneOffset = "",
   columns = ""
 }) {
-  if (!vesselId) throw new Error("vesselId wajib diisi.");
-  if (!start) throw new Error("Waktu mulai wajib diisi.");
-  if (!end) throw new Error("Waktu akhir wajib diisi.");
+  if (!vesselId) throw new Error("vesselId is required..");
+  if (!start) throw new Error("Start time must be filled in.");
+  if (!end) throw new Error("End time must be filled in.");
 
   const query = buildQuery({
     vesselId,
@@ -48,9 +48,9 @@ export function getDataLogExcelUrl({
   timezoneOffset = "",
   columns = ""
 }) {
-  if (!vesselId) throw new Error("vesselId wajib diisi.");
-  if (!start) throw new Error("Waktu mulai wajib diisi.");
-  if (!end) throw new Error("Waktu akhir wajib diisi.");
+  if (!vesselId) throw new Error("vesselId must be filled in.");
+  if (!start) throw new Error("Start time must be filled in.");
+  if (!end) throw new Error("End time must be filled in.");
 
   const query = buildQuery({
     vesselId,

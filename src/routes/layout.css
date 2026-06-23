@@ -8,22 +8,22 @@
 
 @custom-variant dark (&:is(.dark *));
 
-:global(*) {
+* {
   box-sizing: border-box;
 }
 
-:global(body) {
+body {
   margin: 0;
   font-family: "Inter", Arial, Helvetica, sans-serif;
-  background: #e5e5e5;
-  color: #111;
+  background: var(--color-base);
+  color: var(--text-primary);
 }
 
-:global(button) {
+button {
   font-family: inherit;
 }
 
-:global(a) {
+a {
   color: inherit;
 }
 
@@ -31,7 +31,7 @@
   width: 100%;
   min-height: 100vh;
   display: flex;
-  background: #e5e5e5;
+  background: var(--color-base);
 }
 
 .main-area {
@@ -85,38 +85,66 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  color-scheme: dark;
+  --color-base: #0a0e1a;
+  --color-surface: #111827;
+  --color-elevated: #1c2438;
+  --color-border: #1e2d45;
+  --color-border-subtle: rgba(255, 255, 255, 0.06);
+  --color-accent: #3b82f6;
+  --color-accent-hover: #2563eb;
+  --color-accent-muted: rgba(59, 130, 246, 0.12);
+  --color-accent-glow: rgba(59, 130, 246, 0.25);
+  --color-success: #10b981;
+  --color-success-muted: rgba(16, 185, 129, 0.15);
+  --color-warning: #f59e0b;
+  --color-warning-muted: rgba(245, 158, 11, 0.15);
+  --color-danger: #ef4444;
+  --color-danger-muted: rgba(239, 68, 68, 0.15);
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #475569;
+  --text-accent: #93c5fd;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.4), 0 0 1px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.5), 0 1px 4px rgba(0,0,0,0.3);
+  --shadow-lg: 0 16px 48px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4);
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 280ms;
+
+  --background: oklch(0.08 0.04 250);
+  --foreground: oklch(0.95 0.01 240);
+  --card: oklch(0.13 0.03 250);
+  --card-foreground: oklch(0.95 0.01 240);
+  --popover: oklch(0.18 0.04 250);
+  --popover-foreground: oklch(0.95 0.01 240);
+  --primary: oklch(0.58 0.22 264);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.18 0.04 250);
+  --secondary-foreground: oklch(0.95 0.01 240);
+  --muted: oklch(0.18 0.04 250);
+  --muted-foreground: oklch(0.68 0.04 240);
+  --accent: oklch(0.58 0.22 264);
+  --accent-foreground: oklch(0.95 0.01 240);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: oklch(0.22 0.05 240);
+  --input: oklch(1 0 0 / 10%);
+  --ring: oklch(0.58 0.22 264);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar: oklch(0.13 0.03 250);
+  --sidebar-foreground: oklch(0.95 0.01 240);
+  --sidebar-primary: oklch(0.58 0.22 264);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar-accent: oklch(0.18 0.04 250);
+  --sidebar-accent-foreground: oklch(0.95 0.01 240);
+  --sidebar-border: oklch(0.22 0.05 240);
+  --sidebar-ring: oklch(0.58 0.22 264);
 }
 
 .dark {
@@ -169,8 +197,11 @@
   .leaflet-div-icon {
     @apply !bg-transparent !border-none;
   }
-  .leaflet-popup-content-wrapper, .leaflet-popup-content, .leaflet-popup-content p {
-    @apply ![all:unset];
+  .leaflet-popup-content-wrapper, .leaflet-popup-content {
+    box-sizing: border-box;
+  }
+  .leaflet-popup-content p {
+    margin: 0;
   }
   .leaflet-popup {
     @apply !animate-none;
@@ -210,5 +241,779 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+/* Shared VMS dark-surface treatment for the existing data-heavy pages. */
+:is(
+  .profile-page,
+  .fleet-page,
+  .vessel-page,
+  .avs-page,
+  .alarm-page,
+  .audit-page,
+  .voyage-page,
+  .administrator-page,
+  .data-log-page,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page
+) {
+  background: var(--color-base) !important;
+  color: var(--text-primary) !important;
+}
+
+:is(
+  .profile-page,
+  .fleet-page,
+  .vessel-page,
+  .avs-page,
+  .alarm-page,
+  .audit-page,
+  .voyage-page,
+  .administrator-page,
+  .data-log-page,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page
+) :is(
+  [class$="-card"],
+  [class*="-card "],
+  [class$="-panel"],
+  [class*="-panel "],
+  [class$="-section"],
+  [class*="-section "],
+  .panel,
+  .table-wrapper,
+  .table-wrap,
+  .route-table-wrap,
+  .range-table-wrap,
+  .data-log-table-wrapper,
+  .monthly-table-wrapper,
+  .event-table-wrapper,
+  .high-rpm-table-wrapper,
+  .low-speed-table-wrapper
+) {
+  background-color: var(--color-surface) !important;
+  border-color: var(--color-border-subtle) !important;
+  box-shadow: var(--shadow-sm);
+}
+
+:is(
+  .profile-page,
+  .fleet-page,
+  .vessel-page,
+  .avs-page,
+  .alarm-page,
+  .audit-page,
+  .voyage-page,
+  .administrator-page,
+  .data-log-page,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page
+) :is(h1, h2, h3, h4, strong, th, .card-title) {
+  color: var(--text-primary) !important;
+}
+
+:is(
+  .profile-page,
+  .fleet-page,
+  .vessel-page,
+  .avs-page,
+  .alarm-page,
+  .audit-page,
+  .voyage-page,
+  .administrator-page,
+  .data-log-page,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page
+) :is(p, small, label, td, .card-subtitle, [class*="subtitle"], [class*="description"], [class*="meta"]) {
+  color: var(--text-secondary) !important;
+}
+
+:is(
+  .profile-page,
+  .fleet-page,
+  .vessel-page,
+  .avs-page,
+  .alarm-page,
+  .audit-page,
+  .voyage-page,
+  .administrator-page,
+  .data-log-page,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page
+) :is(input, select, textarea) {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: var(--text-primary) !important;
+}
+
+:is(
+  .profile-page,
+  .fleet-page,
+  .vessel-page,
+  .avs-page,
+  .alarm-page,
+  .audit-page,
+  .voyage-page,
+  .administrator-page,
+  .data-log-page,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page
+) :is(input, select, textarea):focus {
+  border-color: var(--color-accent) !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
+  outline: none;
+}
+
+:is(
+  .profile-page,
+  .fleet-page,
+  .vessel-page,
+  .avs-page,
+  .alarm-page,
+  .audit-page,
+  .voyage-page,
+  .administrator-page,
+  .data-log-page,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page
+) table {
+  background: var(--color-surface) !important;
+  color: var(--text-secondary) !important;
+}
+
+:is(
+  .profile-page,
+  .fleet-page,
+  .vessel-page,
+  .avs-page,
+  .alarm-page,
+  .audit-page,
+  .voyage-page,
+  .administrator-page,
+  .data-log-page,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page
+) :is(thead, th) {
+  background: var(--color-elevated) !important;
+  border-color: var(--color-border) !important;
+}
+
+:is(
+  .profile-page,
+  .fleet-page,
+  .vessel-page,
+  .avs-page,
+  .alarm-page,
+  .audit-page,
+  .voyage-page,
+  .administrator-page,
+  .data-log-page,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page
+) :is(td, tr) {
+  border-color: var(--color-border-subtle) !important;
+}
+
+:is(
+  .profile-page,
+  .fleet-page,
+  .vessel-page,
+  .avs-page,
+  .alarm-page,
+  .audit-page,
+  .voyage-page,
+  .administrator-page,
+  .data-log-page,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page
+) tbody tr:hover {
+  background: rgba(59, 130, 246, 0.07) !important;
+}
+
+::selection {
+  background: rgba(59, 130, 246, 0.38);
+  color: var(--text-primary);
+}
+
+* {
+  scrollbar-color: #334155 var(--color-base);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+ * High-specificity application skin.
+ * Many legacy screens still define light colors in component-scoped CSS,
+ * including a few !important declarations. Keep these rules after every
+ * component import so the dark design system remains authoritative.
+ */
+body .app-shell .app-main .topbar {
+  background: var(--color-surface) !important;
+  border-color: var(--color-border) !important;
+  color: var(--text-primary) !important;
+}
+
+body .app-shell .app-main .topbar :is(.dropdown-button, .vessel-selector) {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: var(--text-primary) !important;
+}
+
+body .app-shell .app-main .topbar .dropdown-button {
+  background: var(--color-accent-muted) !important;
+  border-color: rgba(59, 130, 246, 0.3) !important;
+  color: var(--text-accent) !important;
+}
+
+body .app-shell .app-main .topbar :is(.topbar-item, .online-box, .offline-box) {
+  border-color: var(--color-border-subtle) !important;
+  color: var(--text-secondary) !important;
+}
+
+body .app-shell .app-main .topbar .online-box {
+  background: var(--color-success-muted) !important;
+  color: #34d399 !important;
+}
+
+body .app-shell .app-main .topbar :is(.dropdown-menu, .vessel-menu) {
+  background: var(--color-elevated) !important;
+  border-color: var(--color-border-subtle) !important;
+}
+
+body .app-shell .app-main .topbar :is(.dropdown-item, .vessel-item) {
+  background: transparent !important;
+  color: var(--text-secondary) !important;
+}
+
+body .app-shell .app-main .topbar :is(.dropdown-item, .vessel-item):hover,
+body .app-shell .app-main .topbar :is(.active-item, .active-vessel) {
+  background: var(--color-accent-muted) !important;
+  color: var(--text-primary) !important;
+}
+
+body .app-content :is(
+  .administrator-page,
+  .fleet-page,
+  .dashboard-content,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .data-log-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page,
+  .profile-page,
+  .avs-page,
+  .alarm-page,
+  .audit-page,
+  .voyage-page
+) {
+  background: var(--color-base) !important;
+  color: var(--text-primary) !important;
+}
+
+body .app-content :is(
+  .administrator-page,
+  .fleet-page,
+  .dashboard-content,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .data-log-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page,
+  .profile-page,
+  .avs-page,
+  .alarm-page,
+  .audit-page,
+  .voyage-page
+) :is(
+  [class$="-card"],
+  [class*="-card "],
+  [class$="-panel"],
+  [class*="-panel "],
+  [class$="-section"],
+  [class*="-section "],
+  [class$="-workspace"],
+  [class*="-workspace "],
+  .panel,
+  .fleet-sidebar,
+  .admin-tabs,
+  .users-panel,
+  .asset-list,
+  .vessel-list,
+  .engine-curve-list,
+  .permission-list,
+  .reporting-vessel-list,
+  .telegram-list,
+  .audit-log-list,
+  .assignable-user-list,
+  .option-list,
+  .selected-recipient-list,
+  .cctv-box,
+  .empty-box,
+  .muted-box,
+  .raw-box
+) {
+  background: var(--color-surface) !important;
+  background-image: none !important;
+  border-color: var(--color-border-subtle) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+body .app-content :is(
+  .administrator-page,
+  .fleet-page,
+  .dashboard-content,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .data-log-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page,
+  .profile-page,
+  .avs-page,
+  .alarm-page,
+  .audit-page,
+  .voyage-page
+) :is(
+  [class$="-header"],
+  [class*="-header "],
+  [class$="-head"],
+  [class*="-head "],
+  .section-header,
+  .column-header,
+  .detail-panel-header,
+  .global-audit-table-head
+) {
+  background: transparent !important;
+  background-image: none !important;
+  border-color: var(--color-border-subtle) !important;
+  color: var(--text-primary) !important;
+  box-shadow: none !important;
+}
+
+/* Internal headers inherit their card surface. Visual hierarchy comes from
+   spacing, typography, and a subtle divider—not a second background color. */
+body .app-content :is(
+  .administrator-page,
+  .fleet-page,
+  .dashboard-content,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .data-log-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page,
+  .profile-page,
+  .avs-page,
+  .alarm-page,
+  .audit-page,
+  .voyage-page
+) :is(
+  [class$="-header"],
+  [class*="-header "],
+  [class$="-head"],
+  [class*="-head "],
+  .section-header,
+  .column-header,
+  .panel-header,
+  .card-header
+) {
+  border-bottom-color: rgba(255, 255, 255, 0.065) !important;
+}
+
+body .app-content :is(
+  .administrator-page,
+  .fleet-page,
+  .dashboard-content,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .data-log-page
+) :is(
+  .user-row,
+  .asset-row,
+  .vessel-row,
+  .engine-curve-row,
+  .permission-item,
+  .reporting-vessel-row,
+  .telegram-row,
+  .audit-log-row,
+  .assignable-user-row,
+  .company-row,
+  .column-item,
+  .detail-item,
+  .mini-metric,
+  .fuel-metric,
+  .simple-row,
+  .compact-status-row,
+  .header-meta,
+  .ae-value-box
+) {
+  background: var(--color-elevated) !important;
+  background-image: none !important;
+  border-color: var(--color-border-subtle) !important;
+  color: var(--text-primary) !important;
+}
+
+body .app-content :is(.user-row, .asset-row, .vessel-row, .engine-curve-row, .company-row):hover {
+  background: rgba(59, 130, 246, 0.1) !important;
+  border-color: rgba(59, 130, 246, 0.28) !important;
+}
+
+body .app-content :is(
+  .administrator-page,
+  .fleet-page,
+  .dashboard-content,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .data-log-page
+) :is(
+  .access-card,
+  .permission-group,
+  .reporting-section-card,
+  .recipient-picker-card,
+  .trip-route-card,
+  .trip-summary-card,
+  .event-card,
+  .rpm-curve-table-card,
+  .rpm-fuel-chart-card,
+  .high-rpm-card,
+  .low-speed-card,
+  .low-speed-summary-card,
+  .monitoring-card,
+  .compact-info-card,
+  .summary-card,
+  .table-section,
+  .column-card
+) {
+  background: var(--color-surface) !important;
+  background-image: none !important;
+  border-color: var(--color-border) !important;
+  color: var(--text-primary) !important;
+}
+
+body .app-content :is(
+  .administrator-page,
+  .fleet-page,
+  .dashboard-content,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .data-log-page
+) :is(
+  input,
+  select,
+  textarea,
+  .search-input,
+  .vessel-select,
+  .reporting-filter-box,
+  .permission-filter
+) {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: var(--text-primary) !important;
+}
+
+body .app-content :is(
+  .administrator-page,
+  .fleet-page,
+  .dashboard-content,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .data-log-page
+) :is(
+  .ghost-button,
+  .ghost-btn,
+  .secondary-btn,
+  .text-button,
+  .header-refresh-button,
+  .column-actions button
+) {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: var(--text-primary) !important;
+}
+
+body .app-content :is(
+  .administrator-page,
+  .fleet-page,
+  .dashboard-content,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .data-log-page
+) table :is(th, td),
+body .app-content :is(
+  .administrator-page,
+  .fleet-page,
+  .dashboard-content,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .data-log-page
+) :is(.column-item, .grand-total-row, .total-row) {
+  background: var(--color-surface) !important;
+  border-color: var(--color-border-subtle) !important;
+  color: var(--text-secondary) !important;
+}
+
+body .app-content :is(
+  .administrator-page,
+  .fleet-page,
+  .dashboard-content,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .data-log-page
+) table th {
+  background: var(--color-elevated) !important;
+  color: var(--text-primary) !important;
+}
+
+body .app-content :is(.status-box.error-box, .alert-card.danger-state) {
+  background: var(--color-danger-muted) !important;
+  border-color: rgba(239, 68, 68, 0.28) !important;
+  color: #fca5a5 !important;
+}
+
+body .app-content :is(.status-box.success-box) {
+  background: var(--color-success-muted) !important;
+  border-color: rgba(16, 185, 129, 0.28) !important;
+  color: #6ee7b7 !important;
+}
+
+body .app-content :is(.status-box.loading-box, .selected-pill, .option-chip.selected) {
+  background: var(--color-accent-muted) !important;
+  border-color: rgba(59, 130, 246, 0.28) !important;
+  color: var(--text-accent) !important;
+}
+
+body .app-content :is(
+  .administrator-page,
+  .fleet-page,
+  .dashboard-content,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .data-log-page
+) :is(h1, h2, h3, h4, strong, .user-main, .card-title, .high-rpm-title) {
+  color: var(--text-primary) !important;
+}
+
+body .app-content :is(
+  .administrator-page,
+  .fleet-page,
+  .dashboard-content,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .data-log-page
+) :is(p, small, label, td, .user-meta, .field-help, .asset-note, .vessel-note, .engine-curve-note) {
+  color: var(--text-secondary) !important;
+}
+
+/* Unified full-color OpenStreetMap treatment for every Leaflet instance. */
+body .app-content .leaflet-container {
+  background: #dce7ed !important;
+  border-color: var(--color-border) !important;
+  font-family: inherit !important;
+}
+
+body .app-content .leaflet-tile-pane {
+  filter: none !important;
+  opacity: 1 !important;
+}
+
+body .app-content :is(
+  .leaflet-control,
+  .map-legend,
+  .dashboard-map-legend,
+  .fleet-popup,
+  .dashboard-map-popup
+) {
+  background: rgba(17, 24, 39, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: var(--text-primary) !important;
+  backdrop-filter: blur(12px);
+}
+
+body .app-content .leaflet-control-attribution {
+  padding: 3px 6px !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 7px 0 0 0 !important;
+  background: rgba(10, 14, 26, 0.8) !important;
+  color: var(--text-muted) !important;
+  font-size: 8px !important;
+}
+
+body .app-content .leaflet-control-attribution a {
+  color: var(--text-secondary) !important;
+}
+
+body .app-content .leaflet-bar {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--shadow-md) !important;
+}
+
+body .app-content .leaflet-bar a {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  background: rgba(17, 24, 39, 0.94) !important;
+  color: var(--text-primary) !important;
+}
+
+body .app-content .leaflet-bar a:hover {
+  background: var(--color-accent-muted) !important;
+  color: var(--text-accent) !important;
+}
+
+/* Keep native select menus readable across all dark dashboard pages. */
+body .app-content select {
+  color-scheme: dark;
+}
+
+body .app-content select :is(option, optgroup) {
+  background: #111827;
+  color: #f1f5f9;
+}
+
+/* Fleet View popup dimensions must win over Leaflet defaults and component
+   styles loaded by other route modules. */
+body .app-content .fleet-page .measure-context-popup .leaflet-popup-content {
+  width: 300px !important;
+  max-width: calc(100vw - 42px) !important;
+  margin: 0 !important;
+}
+
+body .app-content .fleet-page .measure-context-popup .measure-start-info strong {
+  white-space: nowrap !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
+}
+
+body .app-content .fleet-page .measure-toolbar {
+  background: #111827 !important;
+  background-image: none !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+  box-shadow:
+    0 9px 20px rgba(0, 0, 0, 0.32),
+    0 2px 7px rgba(0, 0, 0, 0.2) !important;
+}
+
+body .app-content .fleet-page .asset-leaflet-popup .fleet-asset-popup-heading > strong {
+  font-size: 11px !important;
+  line-height: 1.2 !important;
+}
+
+body .app-content .fleet-page .asset-leaflet-popup :is(
+  .fleet-asset-popup-eyebrow,
+  .fleet-asset-popup-badge,
+  .fleet-asset-popup-coordinates span
+) {
+  font-size: 7.5px !important;
+}
+
+body .app-content .fleet-page .asset-leaflet-popup .fleet-asset-popup-coordinates strong {
+  font-size: 9px !important;
+}
+
+body .app-content .fleet-page .asset-leaflet-popup .leaflet-popup-content {
+  width: 224px !important;
+  max-width: calc(100vw - 42px) !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+}
+
+body .app-content .fleet-page .fleet-leaflet-popup .leaflet-popup-content {
+  width: 254px !important;
+  max-width: calc(100vw - 42px) !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+}
+
+body .app-content .fleet-page :is(
+  .fleet-asset-popup,
+  .fleet-asset-popup-hero,
+  .fleet-asset-popup-coordinates,
+  .fleet-popup,
+  .fleet-popup-hero,
+  .fleet-popup-metrics,
+  .fleet-popup-meta,
+  .fleet-popup-actions
+) {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+@media (max-width: 760px) {
+  body .app-content .fleet-page .measure-context-popup .leaflet-popup-content {
+    width: min(280px, calc(100vw - 42px)) !important;
+  }
+
+  body .app-content .fleet-page .asset-leaflet-popup .leaflet-popup-content {
+    width: min(224px, calc(100vw - 42px)) !important;
+  }
+
+  body .app-content .fleet-page .fleet-leaflet-popup .leaflet-popup-content {
+    width: min(254px, calc(100vw - 42px)) !important;
   }
 }

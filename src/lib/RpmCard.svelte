@@ -90,7 +90,7 @@
     min-width: 0;
     min-height: 175px;
     padding: 8px 10px 10px;
-    background: #ffffff;
+    background: var(--color-surface);
     border: 1px solid #d8d8d8;
     overflow: hidden;
   }
@@ -123,7 +123,7 @@
   .rpm-date {
     margin-top: 5px;
     font-size: 8.5px;
-    color: #666;
+    color: var(--text-secondary);
     line-height: 1.2;
     white-space: nowrap;
   }
@@ -152,7 +152,7 @@
     font-size: 22px;
     font-weight: 900;
     line-height: 1;
-    color: #000;
+    color: var(--text-primary);
   }
 
   .gauge-wrap {
@@ -210,7 +210,7 @@
     display: block;
     margin-bottom: 2px;
     font-size: 10px;
-    color: #555;
+    color: var(--text-secondary);
     line-height: 1;
   }
 
@@ -218,7 +218,7 @@
     display: block;
     font-size: 11px;
     font-weight: 800;
-    color: #111;
+    color: var(--text-primary);
     line-height: 1.2;
   }
 
@@ -227,7 +227,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #777;
+    color: var(--text-secondary);
     font-size: 10px;
   }
 </style>

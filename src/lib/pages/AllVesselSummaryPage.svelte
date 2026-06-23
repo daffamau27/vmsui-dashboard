@@ -928,7 +928,10 @@
 					<div class="empty-box">Loading vessels...</div>
 				{:else if filteredDevices.length}
 					{#each filteredDevices as device}
-						<label class="vessel-check-card">
+						<label
+							class="vessel-check-card"
+							class:selected-vessel={selectedDeviceIds.includes(device.id)}
+						>
 							<input
 								type="checkbox"
 								checked={selectedDeviceIds.includes(device.id)}
@@ -1091,7 +1094,6 @@
 
 											<div class="vessel-request-name">
 												<strong>{device.name}</strong>
-												<small>{device.deviceId || 'No device id'}</small>
 											</div>
 
 											<span class="vessel-utc-pill">
@@ -1328,8 +1330,8 @@
 	.avs-page {
 		min-height: 100vh;
 		padding: 16px;
-		background: #f3f6fa;
-		color: #0f172a;
+		background: var(--color-base);
+		color: var(--text-primary);
 		display: grid;
 		gap: 14px;
 		box-sizing: border-box;
@@ -1340,7 +1342,7 @@
 	.summary-card,
 	.vessel-panel,
 	.status-box {
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
 	}
@@ -1358,7 +1360,7 @@
 		display: inline-flex;
 		padding: 4px 10px;
 		border-radius: 999px;
-		background: #dbeafe;
+		background: var(--color-accent-muted);
 		color: #1d4ed8;
 		font-size: 11px;
 		font-weight: 900;
@@ -1374,7 +1376,7 @@
 
 	.avs-header-card p {
 		margin: 0;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 13px;
 		font-weight: 700;
 	}
@@ -1401,8 +1403,8 @@
 	}
 
 	.secondary-btn {
-		background: #f8fafc;
-		color: #0f172a;
+		background: var(--color-elevated);
+		color: var(--text-primary);
 		border: 1px solid #cbd5e1;
 	}
 
@@ -1419,7 +1421,7 @@
 	}
 
 	.error-box {
-		background: #fef2f2;
+		background: var(--color-danger-muted);
 		color: #b91c1c;
 		border-color: #fecaca;
 	}
@@ -1439,7 +1441,7 @@
 	}
 
 	.summary-card span {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 11px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -1482,7 +1484,7 @@
 	.section-header strong {
 		padding: 5px 10px;
 		border-radius: 999px;
-		background: #eff6ff;
+		background: var(--color-accent-muted);
 		border: 1px solid #bfdbfe;
 		color: #1d4ed8;
 		font-size: 11px;
@@ -1493,7 +1495,7 @@
 		padding: 12px;
 		display: grid;
 		gap: 10px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 		border-bottom: 1px solid #e2e8f0;
 	}
 
@@ -1503,8 +1505,8 @@
 		height: 40px;
 		padding: 0 10px;
 		border: 1px solid #cbd5e1;
-		background: #ffffff;
-		color: #0f172a;
+		background: var(--color-surface);
+		color: var(--text-primary);
 		font-size: 13px;
 		font-weight: 800;
 		box-sizing: border-box;
@@ -1520,14 +1522,81 @@
 	}
 
 	.vessel-check-card {
+		position: relative;
 		padding: 10px;
 		display: grid;
 		grid-template-columns: auto minmax(0, 1fr) auto;
 		align-items: center;
 		gap: 10px;
 		border: 1px solid #e2e8f0;
-		background: #ffffff;
+		background: var(--color-surface);
 		cursor: pointer;
+		border-radius: 10px;
+		transition:
+			background 120ms ease,
+			border-color 120ms ease,
+			box-shadow 120ms ease;
+	}
+
+	.vessel-check-card:hover {
+		border-color: rgba(59, 130, 246, 0.3);
+		background: rgba(59, 130, 246, 0.055);
+	}
+
+	.vessel-check-card.selected-vessel {
+		border-color: rgba(59, 130, 246, 0.52);
+		background: var(--color-accent-muted);
+		box-shadow: inset 3px 0 0 var(--color-accent);
+	}
+
+	.vessel-check-card input[type='checkbox'],
+	.check-row input[type='checkbox'] {
+		appearance: none;
+		-webkit-appearance: none;
+		width: 18px;
+		height: 18px;
+		min-width: 18px;
+		margin: 0;
+		display: grid;
+		place-content: center;
+		border: 1px solid rgba(148, 163, 184, 0.55);
+		border-radius: 5px;
+		background: rgba(255, 255, 255, 0.045);
+		cursor: pointer;
+		transition:
+			background 120ms ease,
+			border-color 120ms ease,
+			box-shadow 120ms ease;
+	}
+
+	.vessel-check-card input[type='checkbox']::before,
+	.check-row input[type='checkbox']::before {
+		content: '';
+		width: 8px;
+		height: 5px;
+		border-left: 2px solid #ffffff;
+		border-bottom: 2px solid #ffffff;
+		transform: rotate(-45deg) scale(0);
+		transform-origin: center;
+		transition: transform 100ms ease;
+	}
+
+	.vessel-check-card input[type='checkbox']:checked,
+	.check-row input[type='checkbox']:checked {
+		border-color: var(--color-accent);
+		background: var(--color-accent);
+		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.16);
+	}
+
+	.vessel-check-card input[type='checkbox']:checked::before,
+	.check-row input[type='checkbox']:checked::before {
+		transform: rotate(-45deg) scale(1);
+	}
+
+	.vessel-check-card input[type='checkbox']:focus-visible,
+	.check-row input[type='checkbox']:focus-visible {
+		outline: none;
+		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.36);
 	}
 
 	.vessel-info {
@@ -1542,7 +1611,7 @@
 	}
 
 	.vessel-info small {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 11px;
 		font-weight: 800;
 	}
@@ -1583,12 +1652,12 @@
 		padding: 14px;
 		display: grid;
 		gap: 12px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.request-config-card {
 		padding: 14px;
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
 		display: grid;
@@ -1615,7 +1684,7 @@
 		display: grid;
 		place-items: center;
 		border-radius: 10px;
-		background: #dbeafe;
+		background: var(--color-accent-muted);
 		color: #1d4ed8;
 		font-size: 18px;
 		font-weight: 900;
@@ -1625,7 +1694,7 @@
 	.request-title-block h3,
 	.vessel-request-head h3 {
 		margin: 0;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 15px;
 		font-weight: 900;
 	}
@@ -1633,7 +1702,7 @@
 	.request-title-block p,
 	.vessel-request-head p {
 		margin: 4px 0 0;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 700;
 	}
@@ -1643,7 +1712,7 @@
 	.vessel-utc-pill {
 		padding: 6px 10px;
 		border-radius: 999px;
-		background: #eff6ff;
+		background: var(--color-accent-muted);
 		border: 1px solid #bfdbfe;
 		color: #1d4ed8;
 		font-size: 11px;
@@ -1664,7 +1733,7 @@
 	}
 
 	.request-field span {
-		color: #475569;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -1677,8 +1746,8 @@
 		height: 40px;
 		padding: 0 10px;
 		border: 1px solid #cbd5e1;
-		background: #ffffff;
-		color: #0f172a;
+		background: var(--color-surface);
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 800;
 		box-sizing: border-box;
@@ -1692,7 +1761,7 @@
 	}
 
 	.request-field select:disabled {
-		background: #f1f5f9;
+		background: rgba(255, 255, 255, 0.06);
 		color: #94a3b8;
 		cursor: not-allowed;
 	}
@@ -1703,12 +1772,12 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 10px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 		border: 1px solid #e2e8f0;
 	}
 
 	.request-presets > span {
-		color: #475569;
+		color: var(--text-secondary);
 		font-size: 11px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -1727,8 +1796,8 @@
 		height: 34px;
 		padding: 0 12px;
 		border: 1px solid #cbd5e1;
-		background: #ffffff;
-		color: #0f172a;
+		background: var(--color-surface);
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 900;
 		cursor: pointer;
@@ -1736,7 +1805,7 @@
 
 	.request-preset-buttons button.active-preset {
 		border-color: #2563eb;
-		background: #dbeafe;
+		background: var(--color-accent-muted);
 		color: #1d4ed8;
 	}
 
@@ -1751,7 +1820,7 @@
 		width: auto;
 		height: 36px;
 		padding: 0 14px;
-		background: #ffffff;
+		background: var(--color-surface);
 	}
 
 	.request-summary-strip {
@@ -1763,14 +1832,14 @@
 	.request-summary-item {
 		min-width: 0;
 		padding: 12px;
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		display: grid;
 		gap: 5px;
 	}
 
 	.request-summary-item span {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -1778,7 +1847,7 @@
 	}
 
 	.request-summary-item strong {
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 900;
 		overflow-wrap: anywhere;
@@ -1786,7 +1855,7 @@
 
 	.vessel-request-panel {
 		padding: 14px;
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		display: grid;
 		gap: 12px;
@@ -1810,7 +1879,7 @@
 
 	.vessel-request-card {
 		padding: 12px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 		border: 1px solid #e2e8f0;
 		display: grid;
 		gap: 12px;
@@ -1842,7 +1911,7 @@
 	}
 
 	.vessel-request-name strong {
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 900;
 		overflow: hidden;
@@ -1851,7 +1920,7 @@
 	}
 
 	.vessel-request-name small {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 800;
 		overflow: hidden;
@@ -1912,7 +1981,7 @@
 
 	.column-selector {
 		padding: 14px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.column-toolbar {
@@ -1930,7 +1999,7 @@
 
 	.column-group {
 		padding: 12px;
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 	}
 
@@ -1946,7 +2015,7 @@
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		color: #334155;
+		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 800;
 		cursor: pointer;
@@ -1969,14 +2038,14 @@
 	}
 
 	.loading-row span {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 800;
 	}
 
 	.progress-track {
 		height: 9px;
-		background: #e2e8f0;
+		background: rgba(255, 255, 255, 0.06);
 		overflow: hidden;
 	}
 
@@ -2028,7 +2097,7 @@
 		z-index: 6;
 		min-width: 54px;
 		width: 54px;
-		background: #ffffff;
+		background: var(--color-surface);
 	}
 
 	.table-wrapper th:nth-child(2),
@@ -2038,7 +2107,7 @@
 		z-index: 6;
 		min-width: 180px;
 		width: 180px;
-		background: #ffffff;
+		background: var(--color-surface);
 	}
 
 	.table-wrapper th:nth-child(3),
@@ -2048,14 +2117,14 @@
 		z-index: 6;
 		min-width: 300px;
 		width: 300px;
-		background: #ffffff;
+		background: var(--color-surface);
 	}
 
 	.table-wrapper thead th:nth-child(1),
 	.table-wrapper thead th:nth-child(2),
 	.table-wrapper thead th:nth-child(3) {
 		z-index: 8;
-		background: #f1f5f9;
+		background: rgba(255, 255, 255, 0.06);
 	}
 
 	.table-wrapper tbody td:nth-child(1),
@@ -2066,9 +2135,9 @@
 
 	.table-wrapper th {
 		padding: 10px 12px;
-		background: #f1f5f9;
+		background: rgba(255, 255, 255, 0.06);
 		border-bottom: 1px solid #d9e2ec;
-		color: #334155;
+		color: var(--text-secondary);
 		font-size: 11px;
 		font-weight: 900;
 		text-align: left;
@@ -2079,14 +2148,14 @@
 	.table-wrapper td {
 		padding: 10px 12px;
 		border-bottom: 1px solid #edf2f7;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-weight: 800;
 		white-space: nowrap;
-		background: #ffffff;
+		background: var(--color-surface);
 	}
 
 	.total-cell {
-		background: #f0f9ff;
+		background: var(--color-elevated);
 		color: #0369a1;
 		font-weight: 900;
 	}
@@ -2102,14 +2171,14 @@
 	}
 
 	.vessel-name-cell span {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 800;
 	}
 
 	.empty-box {
 		padding: 18px;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-weight: 800;
 	}
 

@@ -478,10 +478,8 @@
 				<div class="card-header">
 					<div>
 						<div class="card-title">CCTV Monitoring</div>
-						<div class="card-subtitle">Live camera overview</div>
+						<div class="card-subtitle">Camera overview</div>
 					</div>
-
-					<span class="live-badge">LIVE</span>
 				</div>
 
 				<div class="cctv-layout">
@@ -675,8 +673,8 @@
 		width: 100%;
 		height: 100vh;
 		max-height: 100vh;
-		background: #f4f6f8;
-		color: #0f172a;
+		background: var(--color-base);
+		color: var(--text-primary);
 		overflow: hidden;
 	}
 
@@ -694,7 +692,7 @@
 	.compact-filter-card {
 		min-height: 64px;
 		padding: 10px 18px;
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d8dde3;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
 		display: grid;
@@ -712,7 +710,7 @@
 
 	.filter-title strong {
 		display: block;
-		color: #111827;
+		color: var(--text-primary);
 		font-size: 13px;
 		font-weight: 950;
 		line-height: 1.1;
@@ -721,7 +719,7 @@
 	.filter-title span {
 		display: block;
 		margin-top: 4px;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 800;
 		white-space: nowrap;
@@ -743,7 +741,7 @@
 	}
 
 	.filter-controls label span {
-		color: #475569;
+		color: var(--text-secondary);
 		font-size: 9px;
 		font-weight: 950;
 		text-transform: uppercase;
@@ -755,9 +753,9 @@
 		height: 28px;
 		min-width: 135px;
 		border: 1px solid #cbd5e1;
-		background: #ffffff;
+		background: var(--color-surface);
 		padding: 0 8px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 10px;
 		font-weight: 750;
 		outline: none;
@@ -793,7 +791,7 @@
 	}
 
 	.error-box {
-		background: #fef2f2;
+		background: var(--color-danger-muted);
 		color: #b91c1c;
 		border: 1px solid #fecaca;
 	}
@@ -809,7 +807,7 @@
 	.playback-card,
 	.info-card,
 	.rpm-panel {
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d8dde3;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
 	}
@@ -834,7 +832,7 @@
 	}
 
 	.card-title {
-		color: #111827;
+		color: var(--text-primary);
 		font-size: 13px;
 		font-weight: 950;
 		line-height: 1.15;
@@ -842,7 +840,7 @@
 
 	.card-subtitle {
 		margin-top: 2px;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 750;
 		white-space: nowrap;
@@ -850,20 +848,11 @@
 		text-overflow: ellipsis;
 	}
 
-	.live-badge {
-		padding: 4px 8px;
-		border-radius: 999px;
-		background: #dcfce7;
-		color: #15803d;
-		font-size: 9px;
-		font-weight: 950;
-	}
-
 	.coordinate-badge {
 		padding: 4px 7px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 		border: 1px solid #e2e8f0;
-		color: #334155;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 850;
 		white-space: nowrap;
@@ -1065,7 +1054,7 @@
 		grid-template-columns: auto minmax(0, 1fr) 190px;
 		align-items: center;
 		gap: 10px;
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d8dde3;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
 		overflow: hidden;
@@ -1160,14 +1149,14 @@
 		display: grid;
 		gap: 3px;
 		text-align: right;
-		color: #475569;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 850;
 		white-space: nowrap;
 	}
 
 	.timeline-time strong {
-		color: #334155;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 850;
 		overflow: hidden;
@@ -1191,21 +1180,21 @@
 		align-content: center;
 		gap: 5px;
 		text-align: center;
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d8dde3;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
 		box-sizing: border-box;
 	}
 
 	.info-card span {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 9px;
 		font-weight: 950;
 		text-transform: uppercase;
 	}
 
 	.info-card strong {
-		color: #111827;
+		color: var(--text-primary);
 		font-size: 14px;
 		font-weight: 950;
 		line-height: 1.1;
@@ -1220,7 +1209,7 @@
 		display: grid;
 		grid-template-rows: auto minmax(0, 1fr);
 		gap: 7px;
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d8dde3;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
 		overflow: hidden;
@@ -1234,13 +1223,13 @@
 	}
 
 	.rpm-header span {
-		color: #111827;
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 950;
 	}
 
 	.rpm-header strong {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 	}
@@ -1257,7 +1246,7 @@
 		min-width: 0;
 		min-height: 0;
 		padding: 6px 8px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 		border: 1px solid #e2e8f0;
 		display: grid;
 		align-content: center;
@@ -1267,7 +1256,7 @@
 	}
 
 	.rpm-card span {
-		color: #475569;
+		color: var(--text-secondary);
 		font-size: 9px;
 		font-weight: 900;
 		white-space: nowrap;
@@ -1276,7 +1265,7 @@
 	}
 
 	.rpm-card strong {
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 950;
 		white-space: nowrap;
@@ -1284,9 +1273,9 @@
 
 	.rpm-empty {
 		padding: 12px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 		border: 1px dashed #cbd5e1;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 11px;
 		font-weight: 850;
 		text-align: center;

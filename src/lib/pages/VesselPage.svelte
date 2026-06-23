@@ -475,7 +475,11 @@
 		<div class="topbar-left">
 			<div class="dropdown">
 				<button type="button" class="dropdown-button" onclick={() => (menuOpen = !menuOpen)}>
-					<span>{activeLabel}</span>
+					<span class="menu-icon" aria-hidden="true">▦</span>
+					<span class="selector-copy">
+						<small>Workspace</small>
+						<strong>{activeLabel}</strong>
+					</span>
 					<span class="arrow">▾</span>
 				</button>
 
@@ -491,7 +495,10 @@
 									class:active-item={$activeVesselMenu === menu.key}
 									onclick={() => selectVesselMenu(menu.key)}
 								>
-									{menu.label}
+									<span>{menu.label}</span>
+									{#if $activeVesselMenu === menu.key}
+										<span class="active-check">✓</span>
+									{/if}
 								</button>
 							{/each}
 						{:else}
@@ -501,21 +508,36 @@
 				{/if}
 			</div>
 
-			<div class="topbar-item">
-				Data Received : {status.dataReceived}
+			<div class="topbar-item data-status">
+				<span class="status-icon" aria-hidden="true">↙</span>
+				<span class="status-copy">
+					<small>Data received</small>
+					<strong>{status.dataReceived}</strong>
+				</span>
 			</div>
 
 			<div class="topbar-item">
-				Queue : {status.queue}
+				<span class="status-icon" aria-hidden="true">≡</span>
+				<span class="status-copy">
+					<small>Queue</small>
+					<strong>{status.queue}</strong>
+				</span>
 			</div>
 
-			<div class="topbar-item">
-				SD Card : {status.sdcard}
+			<div class="topbar-item storage-status">
+				<span class="status-icon" aria-hidden="true">▣</span>
+				<span class="status-copy">
+					<small>SD card</small>
+					<strong>{status.sdcard}</strong>
+				</span>
 			</div>
 
 			<div class="topbar-item online-box" class:offline-box={!status.online}>
 				<span class="dot"></span>
-				{status.online ? 'Online' : 'Offline'}
+				<span class="status-copy">
+					<small>Connection</small>
+					<strong>{status.online ? 'Online' : 'Offline'}</strong>
+				</span>
 			</div>
 		</div>
 
@@ -525,7 +547,11 @@
 				class="vessel-selector"
 				onclick={() => (vesselDropdownOpen = !vesselDropdownOpen)}
 			>
-				<span>{selectedVessel}</span>
+				<span class="vessel-selector-icon" aria-hidden="true">⚓</span>
+				<span class="selector-copy">
+					<small>Active vessel</small>
+					<strong>{selectedVessel}</strong>
+				</span>
 				<span class="arrow">▾</span>
 			</button>
 
@@ -545,7 +571,14 @@
 								class:active-vessel={Number($selectedVesselId) === Number(getVesselId(vessel))}
 								onclick={() => selectVessel(vessel)}
 							>
-								{vessel.vesselName || vessel.name}
+								<span class="vessel-item-icon" aria-hidden="true">⚓</span>
+								<span class="vessel-item-copy">
+									<strong>{vessel.vesselName || vessel.name}</strong>
+									<small>{vessel.companyName || vessel.deviceName || 'Vessel monitoring'}</small>
+								</span>
+								{#if Number($selectedVesselId) === Number(getVesselId(vessel))}
+									<span class="active-check">✓</span>
+								{/if}
 							</button>
 						{/each}
 					{/if}
@@ -630,7 +663,7 @@
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
-		background: #f4f6f8;
+		background: var(--color-base);
 	}
 
 	.vessel-content {
@@ -639,7 +672,7 @@
 		min-height: 0;
 		min-width: 0;
 		overflow: hidden;
-		background: #f4f6f8;
+		background: var(--color-base);
 	}
 
 	.vessel-page {
@@ -677,7 +710,7 @@
 	.vessel-topbar {
 		height: 36px;
 		min-height: 36px;
-		background: #eeeeee;
+		background: rgba(255, 255, 255, 0.06);
 		border-bottom: 1px solid #bdbdbd;
 		display: flex;
 		align-items: center;
@@ -706,7 +739,7 @@
 		padding: 0 12px;
 		border: none;
 		border-right: 1px solid #c4c4c4;
-		background: #eeeeee;
+		background: rgba(255, 255, 255, 0.06);
 		font-weight: 700;
 		cursor: pointer;
 		display: flex;
@@ -717,7 +750,7 @@
 	}
 
 	.dropdown-button:hover {
-		background: #e0e0e0;
+		background: var(--color-elevated);
 	}
 
 	.arrow {
@@ -729,7 +762,7 @@
 		top: 36px;
 		left: 0;
 		min-width: 210px;
-		background: white;
+		background: var(--color-surface);
 		border: 1px solid #bdbdbd;
 		box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
 		z-index: 999;
@@ -739,18 +772,18 @@
 		width: 100%;
 		padding: 10px 14px;
 		border: none;
-		background: white;
+		background: var(--color-surface);
 		text-align: left;
 		cursor: pointer;
 		font-size: 13px;
 	}
 
 	.dropdown-item:hover {
-		background: #f1f1f1;
+		background: var(--color-elevated);
 	}
 
 	.active-item {
-		background: #e7efff;
+		background: var(--color-accent-muted);
 		font-weight: 700;
 	}
 
@@ -792,7 +825,6 @@
 		padding: 0 12px;
 		border: none;
 		border-left: 1px solid #bdbdbd;
-		background: #d9d9d9;
 		font-weight: 700;
 		cursor: pointer;
 		display: flex;
@@ -803,7 +835,7 @@
 	}
 
 	.vessel-selector:hover {
-		background: #cfcfcf;
+		background: #d0d0d0;
 	}
 
 	.vessel-menu {
@@ -811,7 +843,7 @@
 		top: 36px;
 		right: 0;
 		min-width: 150px;
-		background: white;
+		background: var(--color-surface);
 		border: 1px solid #bdbdbd;
 		box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
 		z-index: 999;
@@ -821,7 +853,7 @@
 		width: 100%;
 		padding: 10px 14px;
 		border: none;
-		background: white;
+		background: var(--color-surface);
 		text-align: left;
 		cursor: pointer;
 		font-size: 13px;
@@ -829,11 +861,11 @@
 	}
 
 	.vessel-item:hover {
-		background: #f1f1f1;
+		background: var(--color-elevated);
 	}
 
 	.active-vessel {
-		background: #e7efff;
+		background: var(--color-accent-muted);
 		font-weight: 800;
 	}
 
@@ -843,7 +875,7 @@
 		min-height: 0;
 		min-width: 0;
 		overflow: hidden;
-		background: #f4f6f8;
+		background: var(--color-base);
 	}
 
 	.vessel-page {
@@ -870,7 +902,7 @@
 		font-size: 13px;
 		font-weight: 600;
 		color: #6b7280;
-		background: #ffffff;
+		background: var(--color-surface);
 		white-space: nowrap;
 	}
 
@@ -880,9 +912,9 @@
 		padding: 22px 24px;
 		border: 1px solid #d1d5db;
 		border-radius: 14px;
-		background: #ffffff;
+		background: var(--color-surface);
 		box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
-		color: #111827;
+		color: var(--text-primary);
 	}
 
 	.no-access-card h2 {
@@ -917,7 +949,7 @@
 			display: flex;
 			align-items: center;
 			justify-content: space-between;
-			background: #eeeeee;
+			background: rgba(255, 255, 255, 0.06);
 			border-bottom: 1px solid #bdbdbd;
 			overflow-x: auto;
 			overflow-y: visible;
@@ -931,7 +963,7 @@
 
 		.vessel-topbar::-webkit-scrollbar-track,
 		.topbar::-webkit-scrollbar-track {
-			background: #e5e7eb;
+			background: var(--color-elevated);
 		}
 
 		.vessel-topbar::-webkit-scrollbar-thumb,
@@ -961,8 +993,8 @@
 			padding: 0 9px;
 			border: none;
 			border-right: 1px solid #c4c4c4;
-			background: #eeeeee;
-			color: #000000;
+			background: rgba(255, 255, 255, 0.06);
+			color: var(--text-primary);
 			font-size: 11px;
 			font-weight: 800;
 			display: flex;
@@ -980,7 +1012,7 @@
 		}
 
 		.dropdown-button:hover {
-			background: #e0e0e0;
+			background: var(--color-elevated);
 		}
 
 		.arrow {
@@ -994,8 +1026,8 @@
 			border-right: 1px solid #c4c4c4;
 			display: flex;
 			align-items: center;
-			background: #eeeeee;
-			color: #000000;
+			background: rgba(255, 255, 255, 0.06);
+			color: var(--text-primary);
 			font-size: 11px;
 			font-weight: 700;
 			white-space: nowrap;
@@ -1034,7 +1066,7 @@
 			border: none;
 			border-left: 1px solid #bdbdbd;
 			background: #d9d9d9;
-			color: #000000;
+			color: var(--text-primary);
 			font-size: 11px;
 			font-weight: 800;
 			display: flex;
@@ -1061,7 +1093,7 @@
 			left: 52px;
 			min-width: 170px;
 			max-width: calc(100vw - 16px);
-			background: #ffffff;
+			background: var(--color-surface);
 			border: 1px solid #bdbdbd;
 			border-radius: 0 0 8px 8px;
 			box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
@@ -1073,7 +1105,7 @@
 			width: 100%;
 			padding: 9px 12px;
 			border: none;
-			background: #ffffff;
+			background: var(--color-surface);
 			text-align: left;
 			cursor: pointer;
 			font-size: 11px;
@@ -1081,11 +1113,11 @@
 		}
 
 		.dropdown-item:hover {
-			background: #f1f1f1;
+			background: var(--color-elevated);
 		}
 
 		.active-item {
-			background: #e7efff;
+			background: var(--color-accent-muted);
 			font-weight: 800;
 		}
 
@@ -1095,7 +1127,7 @@
 			right: 4px;
 			min-width: 132px;
 			max-width: calc(100vw - 16px);
-			background: #ffffff;
+			background: var(--color-surface);
 			border: 1px solid #bdbdbd;
 			border-radius: 0 0 8px 8px;
 			box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
@@ -1107,7 +1139,7 @@
 			width: 100%;
 			padding: 9px 12px;
 			border: none;
-			background: #ffffff;
+			background: var(--color-surface);
 			text-align: left;
 			cursor: pointer;
 			font-size: 11px;
@@ -1115,12 +1147,474 @@
 		}
 
 		.vessel-item:hover {
-			background: #f1f1f1;
+			background: var(--color-elevated);
 		}
 
 		.active-vessel {
-			background: #e7efff;
+			background: var(--color-accent-muted);
 			font-weight: 800;
+		}
+	}
+
+	/* Vessel workspace navigation */
+	.vessel-topbar {
+		height: 58px;
+		min-height: 58px;
+		padding: 0 10px;
+		gap: 8px;
+		background: rgba(10, 14, 26, 0.96);
+		border-bottom: 1px solid var(--color-border);
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+		backdrop-filter: blur(18px) saturate(1.25);
+	}
+
+	.topbar-left {
+		flex: 1 1 auto;
+		gap: 6px;
+		overflow: visible;
+	}
+
+	.dropdown {
+		z-index: 20;
+	}
+
+	.dropdown,
+	.vessel-dropdown {
+		height: auto;
+		flex: 0 0 auto;
+	}
+
+	.dropdown-button,
+	.vessel-selector {
+		height: 42px;
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		border-radius: 12px;
+		background: rgba(255, 255, 255, 0.04);
+		color: var(--text-primary);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+		transition:
+			border-color 120ms ease,
+			background 120ms ease,
+			transform 120ms ease;
+	}
+
+	.dropdown-button {
+		min-width: 180px;
+		padding: 0 11px;
+		border-color: rgba(59, 130, 246, 0.24);
+		background: rgba(59, 130, 246, 0.09);
+	}
+
+	.dropdown-button:hover,
+	.vessel-selector:hover {
+		border-color: rgba(59, 130, 246, 0.4);
+		background: rgba(59, 130, 246, 0.14);
+		transform: translateY(-1px);
+	}
+
+	.menu-icon,
+	.vessel-selector-icon,
+	.status-icon {
+		display: grid;
+		place-items: center;
+		flex: 0 0 auto;
+		color: #60a5fa;
+	}
+
+	.menu-icon,
+	.vessel-selector-icon {
+		width: 26px;
+		height: 26px;
+		border-radius: 8px;
+		background: rgba(59, 130, 246, 0.13);
+		font-size: 13px;
+	}
+
+	.selector-copy,
+	.status-copy,
+	.vessel-item-copy {
+		min-width: 0;
+		display: grid;
+		text-align: left;
+	}
+
+	.selector-copy {
+		flex: 1 1 auto;
+		gap: 1px;
+	}
+
+	.selector-copy small,
+	.status-copy small {
+		color: var(--text-muted);
+		font-size: 8px;
+		font-weight: 900;
+		letter-spacing: 0.08em;
+		line-height: 1.1;
+		text-transform: uppercase;
+	}
+
+	.selector-copy strong {
+		overflow: hidden;
+		color: var(--text-primary);
+		font-size: 11px;
+		font-weight: 900;
+		line-height: 1.25;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.arrow {
+		flex: 0 0 auto;
+		color: var(--text-secondary);
+		font-size: 0;
+	}
+
+	.arrow::before {
+		content: '⌄';
+		font-size: 12px;
+	}
+
+	.topbar-item {
+		height: 42px;
+		min-width: 78px;
+		padding: 0 10px;
+		gap: 7px;
+		border: 1px solid rgba(255, 255, 255, 0.065);
+		border-radius: 11px;
+		background: rgba(255, 255, 255, 0.028);
+		color: var(--text-secondary);
+	}
+
+	.topbar-item.data-status {
+		min-width: 145px;
+	}
+
+	.topbar-item.storage-status {
+		min-width: 190px;
+	}
+
+	.status-icon {
+		width: 21px;
+		height: 21px;
+		border-radius: 7px;
+		background: rgba(255, 255, 255, 0.045);
+		font-size: 11px;
+	}
+
+	.status-copy {
+		gap: 2px;
+	}
+
+	.status-copy strong {
+		overflow: hidden;
+		color: var(--text-primary);
+		font-size: 10px;
+		font-weight: 800;
+		line-height: 1.15;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.online-box {
+		min-width: 96px;
+		border-color: rgba(16, 185, 129, 0.18);
+		background: rgba(16, 185, 129, 0.08);
+		color: #34d399;
+	}
+
+	.online-box .status-copy strong {
+		color: #34d399;
+	}
+
+	.offline-box {
+		border-color: rgba(239, 68, 68, 0.18);
+		background: rgba(239, 68, 68, 0.08);
+	}
+
+	.offline-box .status-copy strong {
+		color: #f87171;
+	}
+
+	.dot {
+		width: 8px;
+		height: 8px;
+		box-shadow: 0 0 10px rgba(16, 185, 129, 0.65);
+		animation: vesselStatusPulse 1.8s ease-in-out infinite;
+	}
+
+	.offline-box .dot {
+		box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+	}
+
+	.vessel-selector {
+		width: 210px;
+		min-width: 210px;
+		padding: 0 10px;
+		border-left: 1px solid rgba(255, 255, 255, 0.08);
+	}
+
+	.dropdown-menu,
+	.vessel-menu {
+		top: calc(100% + 8px);
+		padding: 6px;
+		border: 1px solid rgba(255, 255, 255, 0.09);
+		border-radius: 13px;
+		background: rgba(17, 24, 39, 0.98);
+		box-shadow: 0 18px 48px rgba(0, 0, 0, 0.48);
+		backdrop-filter: blur(18px);
+		animation: vesselMenuIn 150ms ease;
+		z-index: 3200;
+	}
+
+	.dropdown-menu {
+		min-width: 220px;
+	}
+
+	.vessel-menu {
+		width: 280px;
+		max-height: min(420px, calc(100vh - 90px));
+		overflow-y: auto;
+	}
+
+	.dropdown-item,
+	.vessel-item {
+		min-height: 40px;
+		padding: 8px 10px;
+		border: 1px solid transparent;
+		border-radius: 9px;
+		background: transparent;
+		color: var(--text-secondary);
+		transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+	}
+
+	.dropdown-item {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		font-size: 11px;
+		font-weight: 800;
+	}
+
+	.vessel-item {
+		display: grid;
+		grid-template-columns: 30px minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 9px;
+	}
+
+	.dropdown-item:hover,
+	.vessel-item:hover {
+		border-color: rgba(255, 255, 255, 0.06);
+		background: rgba(255, 255, 255, 0.05);
+		color: var(--text-primary);
+	}
+
+	.dropdown-item.active-item,
+	.vessel-item.active-vessel {
+		border-color: rgba(59, 130, 246, 0.18);
+		background: var(--color-accent-muted);
+		color: var(--text-accent);
+	}
+
+	.vessel-item-icon {
+		width: 30px;
+		height: 30px;
+		display: grid;
+		place-items: center;
+		border-radius: 9px;
+		background: rgba(59, 130, 246, 0.1);
+		color: #60a5fa;
+		font-size: 13px;
+	}
+
+	.vessel-item-copy {
+		gap: 2px;
+	}
+
+	.vessel-item-copy strong {
+		overflow: hidden;
+		color: var(--text-primary);
+		font-size: 11px;
+		font-weight: 900;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.vessel-item-copy small {
+		overflow: hidden;
+		color: var(--text-secondary);
+		font-size: 8px;
+		font-weight: 700;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.active-check {
+		color: #60a5fa;
+		font-size: 11px;
+		font-weight: 900;
+	}
+
+	.vessel-state,
+	.dropdown-empty {
+		padding: 12px;
+		border-radius: 9px;
+		background: rgba(255, 255, 255, 0.025);
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 700;
+	}
+
+	.vessel-state.error {
+		background: var(--color-danger-muted);
+		color: #fca5a5;
+	}
+
+	@keyframes vesselMenuIn {
+		from {
+			opacity: 0;
+			transform: translateY(-5px) scale(0.985);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0) scale(1);
+		}
+	}
+
+	@keyframes vesselStatusPulse {
+		0%, 100% { opacity: 1; transform: scale(1); }
+		50% { opacity: 0.62; transform: scale(0.86); }
+	}
+
+	@media (max-width: 1180px) {
+		.topbar-item.storage-status {
+			max-width: 160px;
+			min-width: 150px;
+		}
+
+		.vessel-selector {
+			width: 185px;
+			min-width: 185px;
+		}
+	}
+
+	@media (max-width: 900px) {
+		.vessel-topbar {
+			height: 54px;
+			min-height: 54px;
+			overflow-x: auto;
+			overflow-y: hidden;
+			scrollbar-width: none;
+		}
+
+		.vessel-topbar::-webkit-scrollbar {
+			display: none;
+		}
+
+		.topbar-left {
+			min-width: max-content;
+			overflow: visible;
+		}
+
+		.dropdown-button,
+		.vessel-selector,
+		.topbar-item {
+			height: 38px;
+		}
+
+		.dropdown-button {
+			min-width: 150px;
+		}
+
+		.topbar-item.data-status {
+			min-width: 126px;
+		}
+
+		.topbar-item.storage-status {
+			min-width: 145px;
+		}
+
+		.vessel-dropdown {
+			position: sticky;
+			right: 0;
+			padding-left: 5px;
+			background: linear-gradient(90deg, transparent, rgba(10, 14, 26, 0.98) 16%);
+		}
+
+		.vessel-selector {
+			width: 165px;
+			min-width: 165px;
+		}
+
+		.dropdown-menu,
+		.vessel-menu {
+			position: fixed;
+			top: 58px;
+		}
+
+		.dropdown-menu {
+			left: 70px;
+		}
+
+		.vessel-menu {
+			right: 8px;
+			width: min(280px, calc(100vw - 16px));
+		}
+	}
+
+	@media (max-width: 560px) {
+		.vessel-topbar {
+			height: 50px;
+			min-height: 50px;
+			padding-inline: 6px;
+		}
+
+		.dropdown-button,
+		.vessel-selector,
+		.topbar-item {
+			height: 36px;
+		}
+
+		.dropdown-button {
+			min-width: 132px;
+			max-width: 132px;
+		}
+
+		.menu-icon,
+		.vessel-selector-icon,
+		.status-icon {
+			display: none;
+		}
+
+		.selector-copy small,
+		.status-copy small {
+			display: none;
+		}
+
+		.topbar-item {
+			min-width: auto;
+			padding-inline: 9px;
+		}
+
+		.topbar-item.data-status,
+		.topbar-item.storage-status {
+			min-width: auto;
+			max-width: 145px;
+		}
+
+		.online-box {
+			min-width: auto;
+		}
+
+		.vessel-selector {
+			width: 128px;
+			min-width: 128px;
+		}
+
+		.dropdown-menu,
+		.vessel-menu {
+			top: 54px;
 		}
 	}
 </style>

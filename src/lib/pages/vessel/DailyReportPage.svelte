@@ -11,6 +11,7 @@
 	import { getEngineCurvesForVessel } from '$lib/api/engineCurveApi.js';
 	import { getFleetVesselDetail } from '$lib/api/fleetApi.js';
 	import { downloadApiFile, apiRequest } from '$lib/api/authApi.js';
+	import { VMS_TILE_URL, VMS_TILE_OPTIONS } from '$lib/mapStyle.js';
 	
 	let loading = $state(false);
 	let exporting = $state(false);
@@ -1755,11 +1756,7 @@
 					attributionControl: false
 				});
 
-				leaflet
-					.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-						maxZoom: 19
-					})
-					.addTo(map);
+				leaflet.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(map);
 			}
 
 			if (routeLayer) {
@@ -3479,8 +3476,8 @@
 		max-height: 100%;
 		min-height: 0;
 		padding: 14px;
-		background: #f4f6f8;
-		color: #0f172a;
+		background: var(--color-base);
+		color: var(--text-primary);
 		overflow-y: auto;
 		overflow-x: hidden;
 		box-sizing: border-box;
@@ -3493,7 +3490,7 @@
 	.raw-box,
 	.data-received-card,
 	.speed-detail-grid article {
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
 	}
@@ -3512,7 +3509,7 @@
 		width: fit-content;
 		padding: 4px 9px;
 		border-radius: 999px;
-		background: #dbeafe;
+		background: var(--color-accent-muted);
 		color: #1d4ed8;
 		font-size: 10px;
 		font-weight: 900;
@@ -3525,12 +3522,12 @@
 		font-size: 22px;
 		line-height: 1.2;
 		font-weight: 900;
-		color: #0f172a;
+		color: var(--text-primary);
 	}
 
 	.daily-header-card p {
 		margin: 7px 0 0;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 700;
 	}
@@ -3539,14 +3536,14 @@
 		min-width: 120px;
 		padding: 10px 12px;
 		border-radius: 12px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 		border: 1px solid #e2e8f0;
 		text-align: right;
 	}
 
 	.header-meta span {
 		display: block;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -3555,7 +3552,7 @@
 	.header-meta strong {
 		display: block;
 		margin-top: 5px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 14px;
 		font-weight: 900;
 	}
@@ -3575,7 +3572,7 @@
 	}
 
 	.filter-card label span {
-		color: #475569;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -3586,9 +3583,9 @@
 		height: 32px;
 		min-width: 150px;
 		border: 1px solid #cbd5e1;
-		background: #ffffff;
+		background: var(--color-surface);
 		padding: 0 9px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 700;
 		outline: none;
@@ -3617,8 +3614,8 @@
 	}
 
 	.secondary-btn {
-		background: #e2e8f0;
-		color: #0f172a;
+		background: rgba(255, 255, 255, 0.06);
+		color: var(--text-primary);
 	}
 
 	.export-btn {
@@ -3649,13 +3646,13 @@
 	}
 
 	.error-box {
-		background: #fef2f2;
+		background: var(--color-danger-muted);
 		color: #b91c1c;
 		border: 1px solid #fecaca;
 	}
 
 	.success-box {
-		background: #ecfdf5;
+		background: var(--color-success-muted);
 		color: #047857;
 		border: 1px solid #bbf7d0;
 	}
@@ -3670,14 +3667,14 @@
 	}
 
 	.data-received-card span {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 11px;
 		font-weight: 900;
 		text-transform: uppercase;
 	}
 
 	.data-received-card strong {
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 16px;
 		font-weight: 900;
 	}
@@ -3691,12 +3688,12 @@
 		display: grid;
 		grid-template-columns: minmax(320px, 0.9fr) minmax(360px, 1.1fr);
 		gap: 14px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.trip-route-card,
 	.trip-summary-card {
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		border-radius: 12px;
 		overflow: hidden;
@@ -3707,12 +3704,12 @@
 		min-height: 58px;
 		padding: 12px 14px;
 		border-bottom: 1px solid #e5edf5;
-		background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+		background: var(--color-surface);
 	}
 
 	.trip-route-header span {
 		display: block;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -3722,7 +3719,7 @@
 	.trip-route-header strong {
 		display: block;
 		margin-top: 4px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 15px;
 		font-weight: 900;
 	}
@@ -3733,7 +3730,7 @@
 		margin: 14px;
 		border-radius: 12px;
 		border: 1px solid #d9e2ec;
-		background: #e5edf5;
+		background: var(--color-elevated);
 		overflow: hidden;
 		box-sizing: border-box;
 	}
@@ -3797,7 +3794,7 @@
 
 	.trip-summary-list span {
 		display: block;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -3807,7 +3804,7 @@
 	.trip-summary-list strong {
 		display: block;
 		margin-top: 6px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 13px;
 		font-weight: 900;
 		word-break: break-word;
@@ -3843,7 +3840,7 @@
 	}
 
 	.summary-card span {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 11px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -3851,7 +3848,7 @@
 
 	.summary-card strong {
 		margin-top: 10px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 22px;
 		line-height: 1.1;
 		font-weight: 900;
@@ -3870,7 +3867,7 @@
 	}
 
 	.speed-detail-grid span {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -3879,7 +3876,7 @@
 	.speed-detail-grid strong {
 		display: block;
 		margin-top: 10px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 18px;
 		font-weight: 900;
 	}
@@ -3897,12 +3894,12 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
-		background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+		background: var(--color-surface);
 	}
 
 	.section-header h2 {
 		margin: 7px 0 0;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 17px;
 		font-weight: 900;
 	}
@@ -3910,7 +3907,7 @@
 	.section-header > strong {
 		padding: 5px 10px;
 		border-radius: 999px;
-		background: #eff6ff;
+		background: var(--color-accent-muted);
 		border: 1px solid #bfdbfe;
 		color: #1d4ed8;
 		font-size: 11px;
@@ -3929,8 +3926,8 @@
 	}
 
 	th {
-		background: #f8fafc;
-		color: #475569;
+		background: var(--color-elevated);
+		color: var(--text-secondary);
 		font-size: 10.5px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -3942,7 +3939,7 @@
 	}
 
 	td {
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 700;
 		padding: 10px 12px;
@@ -3951,18 +3948,18 @@
 	}
 
 	tr:hover td {
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.total-row td {
-		background: #eff6ff;
-		color: #0f172a;
+		background: var(--color-accent-muted);
+		color: var(--text-primary);
 		font-weight: 900;
 	}
 
 	.empty-box {
 		padding: 18px 14px;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 800;
 	}
@@ -3995,13 +3992,13 @@
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 10px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.fod-usage-summary article {
 		min-height: 68px;
 		padding: 12px 14px;
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		border-radius: 10px;
 		display: flex;
@@ -4010,7 +4007,7 @@
 	}
 
 	.fod-usage-summary span {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -4019,13 +4016,13 @@
 
 	.fod-usage-summary strong {
 		margin-top: 6px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 18px;
 		font-weight: 900;
 	}
 
 	.fod-total-card {
-		background: #eff6ff !important;
+		background: var(--color-accent-muted) !important;
 		border-color: #bfdbfe !important;
 	}
 
@@ -4058,11 +4055,11 @@
 		display: grid;
 		grid-template-columns: repeat(2, minmax(340px, 1fr));
 		gap: 14px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.event-card {
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		border-radius: 12px;
 		overflow: hidden;
@@ -4073,7 +4070,7 @@
 		min-height: 58px;
 		padding: 12px 14px;
 		border-bottom: 1px solid #e5edf5;
-		background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+		background: var(--color-surface);
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -4082,7 +4079,7 @@
 
 	.event-card-header span {
 		display: block;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -4092,7 +4089,7 @@
 	.event-card-header strong {
 		display: block;
 		margin-top: 4px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 15px;
 		font-weight: 900;
 	}
@@ -4101,7 +4098,7 @@
 		flex-shrink: 0;
 		padding: 5px 10px;
 		border-radius: 999px;
-		background: #eff6ff;
+		background: var(--color-accent-muted);
 		border: 1px solid #bfdbfe;
 		color: #1d4ed8;
 		font-size: 11px;
@@ -4120,8 +4117,8 @@
 	}
 
 	.event-table th {
-		background: #f8fafc;
-		color: #475569;
+		background: var(--color-elevated);
+		color: var(--text-secondary);
 		font-size: 10.5px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -4133,7 +4130,7 @@
 	}
 
 	.event-table td {
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 700;
 		padding: 10px 12px;
@@ -4143,7 +4140,7 @@
 	}
 
 	.event-table tbody tr:hover td {
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.event-status {
@@ -4160,14 +4157,14 @@
 	}
 
 	.event-status.on-status {
-		background: #ecfdf5;
+		background: var(--color-success-muted);
 		color: #047857;
 		border: 1px solid #bbf7d0;
 	}
 
 	.event-status.off-status {
-		background: #f1f5f9;
-		color: #64748b;
+		background: rgba(255, 255, 255, 0.06);
+		color: var(--text-secondary);
 		border: 1px solid #cbd5e1;
 	}
 
@@ -4183,14 +4180,14 @@
 		padding: 12px 14px;
 		display: grid;
 		gap: 10px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.compact-status-legend {
 		display: flex;
 		justify-content: flex-end;
 		gap: 12px;
-		color: #475569;
+		color: var(--text-secondary);
 		font-size: 11px;
 		font-weight: 900;
 	}
@@ -4219,7 +4216,7 @@
 	.compact-status-row {
 		min-height: 74px;
 		padding: 10px 12px;
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		border-radius: 12px;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
@@ -4235,7 +4232,7 @@
 
 	.compact-engine-name strong {
 		display: block;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 13px;
 		font-weight: 900;
 		line-height: 1.2;
@@ -4246,7 +4243,7 @@
 		margin-top: 5px;
 		padding: 3px 8px;
 		border-radius: 999px;
-		background: #eff6ff;
+		background: var(--color-accent-muted);
 		border: 1px solid #bfdbfe;
 		color: #1d4ed8;
 		font-size: 10px;
@@ -4272,9 +4269,9 @@
 		transform: translateX(-50%);
 		padding: 1px 4px;
 		border-radius: 6px;
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
-		color: #475569;
+		color: var(--text-secondary);
 		font-size: 9px;
 		font-weight: 900;
 		line-height: 1.1;
@@ -4299,7 +4296,7 @@
 		overflow: hidden;
 		border: 1px solid #d9e2ec;
 		border-radius: 999px;
-		background: #f1f5f9;
+		background: rgba(255, 255, 255, 0.06);
 	}
 
 	.compact-segment {
@@ -4362,7 +4359,7 @@
 		margin-top: 5px;
 		display: flex;
 		justify-content: space-between;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 800;
 	}
@@ -4386,11 +4383,11 @@
 		padding: 14px;
 		display: grid;
 		gap: 14px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.rpm-curve-table-card {
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		border-radius: 12px;
 		overflow: hidden;
@@ -4401,7 +4398,7 @@
 		min-height: 52px;
 		padding: 10px 14px;
 		border-bottom: 1px solid #e5edf5;
-		background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+		background: var(--color-surface);
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -4410,7 +4407,7 @@
 
 	.rpm-curve-table-header span {
 		display: block;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -4420,7 +4417,7 @@
 	.rpm-curve-table-header strong {
 		display: block;
 		margin-top: 3px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 15px;
 		font-weight: 900;
 	}
@@ -4429,7 +4426,7 @@
 		flex-shrink: 0;
 		padding: 5px 10px;
 		border-radius: 999px;
-		background: #eff6ff;
+		background: var(--color-accent-muted);
 		border: 1px solid #bfdbfe;
 		color: #1d4ed8;
 		font-size: 11px;
@@ -4440,12 +4437,12 @@
 		padding: 14px;
 		display: grid;
 		gap: 14px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.rpm-curve-card,
 	.rpm-engine-card {
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		border-radius: 12px;
 		overflow: hidden;
@@ -4455,7 +4452,7 @@
 	.rpm-curve-header,
 	.rpm-engine-header {
 		border-bottom: 1px solid #e5edf5;
-		background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+		background: var(--color-surface);
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -4475,7 +4472,7 @@
 	.rpm-curve-header span,
 	.rpm-engine-header span {
 		display: block;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -4486,7 +4483,7 @@
 	.rpm-engine-header strong {
 		display: block;
 		margin-top: 4px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 15px;
 		font-weight: 900;
 	}
@@ -4496,7 +4493,7 @@
 		display: grid;
 		grid-template-columns: repeat(2, minmax(340px, 1fr));
 		gap: 14px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	@media (max-width: 1000px) {
@@ -4514,11 +4511,11 @@
 		display: grid;
 		grid-template-columns: repeat(2, minmax(360px, 1fr));
 		gap: 14px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.rpm-fuel-chart-card {
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		border-radius: 12px;
 		overflow: hidden;
@@ -4529,7 +4526,7 @@
 		min-height: 58px;
 		padding: 12px 14px;
 		border-bottom: 1px solid #e5edf5;
-		background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+		background: var(--color-surface);
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -4538,7 +4535,7 @@
 
 	.rpm-fuel-chart-header span {
 		display: block;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -4548,7 +4545,7 @@
 	.rpm-fuel-chart-header strong {
 		display: block;
 		margin-top: 4px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 15px;
 		font-weight: 900;
 	}
@@ -4563,7 +4560,7 @@
 	.rpm-fuel-chart-badges span {
 		padding: 5px 8px;
 		border-radius: 999px;
-		background: #eff6ff;
+		background: var(--color-accent-muted);
 		border: 1px solid #bfdbfe;
 		color: #1d4ed8;
 		font-size: 10px;
@@ -4582,7 +4579,7 @@
 
 	.rpm-fuel-chart-hint {
 		padding: 0 14px 14px;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 800;
 		line-height: 1.4;
@@ -4602,11 +4599,11 @@
 		padding: 14px;
 		display: grid;
 		gap: 14px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.high-rpm-card {
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		border-radius: 12px;
 		overflow: hidden;
@@ -4616,9 +4613,9 @@
 	.high-rpm-title {
 		min-height: 44px;
 		padding: 11px 14px;
-		background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+		background: var(--color-surface);
 		border-bottom: 1px solid #e5edf5;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 14px;
 		font-weight: 900;
 		display: flex;
@@ -4637,8 +4634,8 @@
 	}
 
 	.high-rpm-table th {
-		background: #f8fafc;
-		color: #475569;
+		background: var(--color-elevated);
+		color: var(--text-secondary);
 		font-size: 10.5px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -4650,7 +4647,7 @@
 	}
 
 	.high-rpm-table td {
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 700;
 		padding: 10px 12px;
@@ -4660,7 +4657,7 @@
 	}
 
 	.high-rpm-table tbody tr:hover td {
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.high-rpm-table td:first-child {
@@ -4676,7 +4673,7 @@
 		padding: 14px;
 		display: grid;
 		gap: 14px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.low-speed-grid {
@@ -4687,7 +4684,7 @@
 
 	.low-speed-card,
 	.low-speed-summary-card {
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		border-radius: 12px;
 		overflow: hidden;
@@ -4699,7 +4696,7 @@
 		min-height: 58px;
 		padding: 12px 14px;
 		border-bottom: 1px solid #e5edf5;
-		background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+		background: var(--color-surface);
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -4709,7 +4706,7 @@
 	.low-speed-card-header span,
 	.low-speed-summary-header span {
 		display: block;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -4720,7 +4717,7 @@
 	.low-speed-summary-header strong {
 		display: block;
 		margin-top: 4px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 15px;
 		font-weight: 900;
 	}
@@ -4729,7 +4726,7 @@
 		flex-shrink: 0;
 		padding: 5px 10px;
 		border-radius: 999px;
-		background: #eff6ff;
+		background: var(--color-accent-muted);
 		border: 1px solid #bfdbfe;
 		color: #1d4ed8;
 		font-size: 11px;
@@ -4748,8 +4745,8 @@
 	}
 
 	.low-speed-table th {
-		background: #f8fafc;
-		color: #475569;
+		background: var(--color-elevated);
+		color: var(--text-secondary);
 		font-size: 10.5px;
 		font-weight: 900;
 		text-transform: uppercase;
@@ -4761,7 +4758,7 @@
 	}
 
 	.low-speed-table td {
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 700;
 		padding: 10px 12px;
@@ -4771,7 +4768,7 @@
 	}
 
 	.low-speed-table tbody tr:hover td {
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.low-speed-table td:first-child {
@@ -4780,8 +4777,8 @@
 	}
 
 	.low-speed-table .grand-total-row td {
-		background: #f8fafc;
-		color: #0f172a;
+		background: var(--color-elevated);
+		color: var(--text-primary);
 		font-size: 12.5px;
 		font-weight: 900;
 		border-top: 1px solid #d9e2ec;

@@ -18,8 +18,8 @@ export async function getDailyReportData({
   timezoneMode = "auto",
   timezoneOffset = ""
 }) {
-  if (!vesselId) throw new Error("vesselId wajib diisi.");
-  if (!date) throw new Error("Tanggal laporan wajib diisi.");
+  if (!vesselId) throw new Error("vesselId is required.");
+  if (!date) throw new Error("The report date is mandatory.");
 
   const query = buildQuery({
     vesselId,
@@ -41,8 +41,8 @@ export async function recalculateDailyReport({
   timezoneMode = "auto",
   timezoneOffset = ""
 }) {
-  if (!vesselId) throw new Error("vesselId wajib diisi.");
-  if (!date) throw new Error("Tanggal laporan wajib diisi.");
+  if (!vesselId) throw new Error("vesselId is required.");
+  if (!date) throw new Error("The report date is mandatory.");
 
   const response = await apiRequest("/daily-reports/recalculate", {
     method: "POST",
@@ -63,8 +63,8 @@ export async function recalculateDailySummary({
   timezoneMode = "auto",
   timezoneOffset = ""
 }) {
-  if (!vesselId) throw new Error("vesselId wajib diisi.");
-  if (!date) throw new Error("Tanggal laporan wajib diisi.");
+  if (!vesselId) throw new Error("vesselId is required.");
+  if (!date) throw new Error("The report date is mandatory.");
 
   const response = await apiRequest("/daily-reports/recalculate-summary", {
     method: "POST",
@@ -85,8 +85,8 @@ export function getDailyReportExcelUrl({
   timezoneMode = "auto",
   timezoneOffset = ""
 }) {
-  if (!vesselId) throw new Error("vesselId wajib diisi.");
-  if (!date) throw new Error("Tanggal laporan wajib diisi.");
+  if (!vesselId) throw new Error("vesselId is required.");
+  if (!date) throw new Error("The report date is mandatory.");
 
   const query = buildQuery({
     vesselId,

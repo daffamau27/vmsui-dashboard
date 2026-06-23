@@ -9,6 +9,7 @@
   import { getVesselDashboard } from "$lib/api/dashboardApi.js";
   import { getFleetVesselLiveDetail } from "$lib/api/fleetApi.js";
   import { apiRequest } from "$lib/api/authApi.js";
+  import { VMS_TILE_URL, VMS_TILE_OPTIONS } from "$lib/mapStyle.js";
 
   let loading = $state(false);
   let error = $state("");
@@ -18,12 +19,6 @@
   let currentUser = $state(null);
   let currentUserLoading = $state(false);
   let currentUserError = $state("");
-
-    const SHADCN_LIGHT_TILE_URL =
-      'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
-
-    const SHADCN_TILE_ATTRIBUTION =
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
 
   let { active = false } = $props();
   let loadedKeys = $state({});
@@ -715,16 +710,18 @@
         preferCanvas: true
       }).setView(center, coords ? 12 : 5);
 
-      L.tileLayer(SHADCN_LIGHT_TILE_URL, {
-        maxZoom: 20,
-        subdomains: "abcd",
-        detectRetina: true,
-        attribution: SHADCN_TILE_ATTRIBUTION
-      }).addTo(dashboardMap);
+      L.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(dashboardMap);
 
       setupDashboardMapPanes();
-      addCurrentParticleLayer();
-      addWindParticleLayer();
+
+      if (active && showCurrentParticles) {
+        addCurrentParticleLayer();
+      }
+
+      if (active && showWindParticles) {
+        addWindParticleLayer();
+      }
+
       updateDashboardMapMarker({ center: Boolean(coords) });
 
       setTimeout(() => {
@@ -870,7 +867,7 @@
     windContext.lineJoin = "round";
     windContext.lineWidth = WIND_PARTICLE_LINE_WIDTH;
     windContext.shadowBlur = 2;
-    windContext.shadowColor = "rgba(255, 255, 255, 0.28)";
+    windContext.shadowColor = "rgba(255, 255, 255, 0.35)";
 
     windParticles.forEach((particle) => {
       const containerPoint = {
@@ -903,9 +900,9 @@
       const tailAlpha = Math.max(0.06, particle.alpha * 0.22);
       const gradient = windContext.createLinearGradient(tailX, tailY, nextX, nextY);
 
-      gradient.addColorStop(0, `rgba(255, 255, 255, ${tailAlpha})`);
-      gradient.addColorStop(0.55, `rgba(255, 255, 255, ${particle.alpha * 0.42})`);
-      gradient.addColorStop(1, `rgba(255, 255, 255, ${headAlpha})`);
+      gradient.addColorStop(0, `rgba(0, 0, 0, ${tailAlpha})`);
+      gradient.addColorStop(0.55, `rgba(0, 0, 0, ${particle.alpha * 0.58})`);
+      gradient.addColorStop(1, `rgba(0, 0, 0, ${headAlpha})`);
 
       windContext.beginPath();
       windContext.moveTo(tailX, tailY);
@@ -1450,7 +1447,13 @@
     vesselInfo.heading;
     vesselInfo.vesselName;
 
-    if (!active || !canViewDailyPathMap || !dashboardMap || !L) return;
+    if (!dashboardMap || !L) return;
+
+    if (!active || !canViewDailyPathMap) {
+      removeWindParticleLayer();
+      removeCurrentParticleLayer();
+      return;
+    }
 
     dashboardMap.invalidateSize();
     updateDashboardMapMarker();
@@ -1895,8 +1898,8 @@
       BlinkMacSystemFont,
       "Segoe UI",
       sans-serif;
-    color: #0f172a;
-    background: #f4f6f8;
+    color: var(--text-primary);
+    background: var(--color-base);
   }
 
   button,
@@ -1927,8 +1930,8 @@
     max-height: 100%;
     min-height: 0;
     padding: 14px;
-    background: #f4f6f8;
-    color: #0f172a;
+    background: var(--color-base);
+    color: var(--text-primary);
     overflow-y: auto;
     overflow-x: hidden;
   }
@@ -1939,7 +1942,7 @@
   .rpm-panel,
   .summary-card,
   .table-section {
-    background: #ffffff;
+    background: var(--color-surface);
     border: 1px solid #d9e2ec;
     border-radius: 12px;
     box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
@@ -1960,7 +1963,7 @@
     width: fit-content;
     padding: 4px 9px;
     border-radius: 999px;
-    background: #dbeafe;
+    background: var(--color-accent-muted);
     color: #1d4ed8;
     font-size: 10px;
     font-weight: 900;
@@ -1973,12 +1976,12 @@
     font-size: 22px;
     line-height: 1.2;
     font-weight: 900;
-    color: #0f172a;
+    color: var(--text-primary);
   }
 
   .dashboard-header-card p {
     margin: 7px 0 0;
-    color: #64748b;
+    color: var(--text-secondary);
     font-size: 12px;
     line-height: 1.5;
     font-weight: 700;
@@ -1996,14 +1999,14 @@
     min-width: 120px;
     padding: 10px 12px;
     border-radius: 12px;
-    background: #f8fafc;
+    background: var(--color-elevated);
     border: 1px solid #e2e8f0;
     text-align: right;
   }
 
   .header-meta span {
     display: block;
-    color: #64748b;
+    color: var(--text-secondary);
     font-size: 10px;
     font-weight: 900;
     text-transform: uppercase;
@@ -2012,7 +2015,7 @@
   .header-meta strong {
     display: block;
     margin-top: 5px;
-    color: #0f172a;
+    color: var(--text-primary);
     font-size: 14px;
     font-weight: 900;
   }
@@ -2022,7 +2025,7 @@
   }
 
   .offline-text {
-    color: #64748b !important;
+    color: var(--text-secondary) !important;
   }
 
   .primary-btn,
@@ -2044,8 +2047,8 @@
   }
 
   .secondary-btn {
-    background: #e2e8f0;
-    color: #0f172a;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary);
   }
 
   .secondary-btn:hover {
@@ -2061,13 +2064,13 @@
   }
 
   .loading-box {
-    background: #eff6ff;
+    background: var(--color-accent-muted);
     color: #1d4ed8;
     border: 1px solid #bfdbfe;
   }
 
   .error-box {
-    background: #fef2f2;
+    background: var(--color-danger-muted);
     color: #b91c1c;
     border: 1px solid #fecaca;
   }
@@ -2096,12 +2099,12 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    background: var(--color-surface);
   }
 
   .section-header h2 {
     margin: 7px 0 0;
-    color: #0f172a;
+    color: var(--text-primary);
     font-size: 17px;
     line-height: 1.2;
     font-weight: 900;
@@ -2111,7 +2114,7 @@
     flex-shrink: 0;
     padding: 5px 10px;
     border-radius: 999px;
-    background: #eff6ff;
+    background: var(--color-accent-muted);
     border: 1px solid #bfdbfe;
     color: #1d4ed8;
     font-size: 11px;
@@ -2125,7 +2128,7 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
     padding: 14px;
-    background: #f8fafc;
+    background: var(--color-elevated);
   }
 
   .empty-cctv {
@@ -2230,9 +2233,9 @@
   .cctv-empty {
     min-height: 260px;
     border-radius: 12px;
-    background: #ffffff;
+    background: var(--color-surface);
     border: 1px dashed #bfdbfe;
-    color: #64748b;
+    color: var(--text-secondary);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -2244,17 +2247,17 @@
 
   .cctv-empty .cctv-icon {
     color: #2563eb;
-    background: #eff6ff;
+    background: var(--color-accent-muted);
   }
 
   .cctv-empty strong {
-    color: #0f172a;
+    color: var(--text-primary);
     font-size: 15px;
     font-weight: 900;
   }
 
   .cctv-empty span {
-    color: #64748b;
+    color: var(--text-secondary);
     font-size: 12px;
     font-weight: 700;
   }
@@ -2263,7 +2266,7 @@
     flex: 1;
     width: 100%;
     min-height: 320px;
-    background: #f8fafc;
+    background: var(--color-elevated);
     overflow: hidden;
     position: relative;
   }
@@ -2272,7 +2275,7 @@
     width: 100%;
     height: 100%;
     min-height: 320px;
-    background: #f8fafc;
+    background: var(--color-elevated);
   }
 
   .dashboard-map-status {
@@ -2286,7 +2289,7 @@
     align-items: center;
     padding: 0 12px;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.96);
+    background: rgba(17, 24, 39, 0.94);
     border: 1px solid #bfdbfe;
     color: #1d4ed8;
     font-size: 10px;
@@ -2306,7 +2309,7 @@
     max-width: calc(100% - 16px);
     padding: 5px 7px;
     border-radius: 8px;
-    background: rgba(255, 255, 255, 0.96);
+    background: rgba(17, 24, 39, 0.94);
     border: 1px solid #dbe4ef;
     box-shadow: 0 4px 10px rgba(15, 23, 42, 0.07);
   }
@@ -2320,7 +2323,7 @@
   }
 
   .wind-legend-line {
-    background: linear-gradient(90deg, rgba(255, 255, 255, 0.16), #ffffff);
+    background: var(--color-surface);
     box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12);
   }
 
@@ -2337,7 +2340,7 @@
     gap: 5px;
     padding: 0 7px;
     border-radius: 999px;
-    background: #ffffff;
+    background: var(--color-surface);
     font-size: 8px;
     line-height: 1;
     font-weight: 900;
@@ -2351,7 +2354,7 @@
 
   .wind-toggle-btn.active-wind-toggle,
   .wind-toggle-btn:hover {
-    background: #f0f9ff;
+    background: var(--color-elevated);
     border-color: #0ea5e9;
   }
 
@@ -2362,7 +2365,7 @@
 
   .current-toggle-btn.active-current-toggle,
   .current-toggle-btn:hover {
-    background: #ecfeff;
+    background: var(--color-elevated);
     border-color: #38bdf8;
   }
 
@@ -2372,15 +2375,16 @@
     top: 0;
     left: 0;
     pointer-events: none;
-    mix-blend-mode: screen;
   }
 
   :global(.wind-particle-canvas) {
-    opacity: 0.82;
+    opacity: 0.9;
+    mix-blend-mode: normal;
   }
 
   :global(.current-particle-canvas) {
     opacity: 0.86;
+    mix-blend-mode: screen;
   }
 
   :global(.dashboard-vessel-leaflet-icon) {
@@ -2411,8 +2415,8 @@
   }
 
   :global(.dashboard-vessel-leaflet-icon.offline .dashboard-vessel-marker-shell) {
-    background: #f8fafc;
-    border-color: #64748b;
+    background: var(--color-elevated);
+    border-color: var(--text-secondary);
     box-shadow:
       0 0 0 5px rgba(100, 116, 139, 0.2),
       0 0 0 10px rgba(100, 116, 139, 0.08),
@@ -2421,8 +2425,8 @@
   }
 
   :global(.dashboard-leaflet-popup .leaflet-popup-content-wrapper) {
-    background: #ffffff;
-    color: #0f172a;
+    background: var(--color-surface);
+    color: var(--text-primary);
     border-radius: 10px;
     border: 1px solid #dbe4ef;
     box-shadow:
@@ -2437,14 +2441,14 @@
   }
 
   :global(.dashboard-leaflet-popup .leaflet-popup-tip) {
-    background: #ffffff;
+    background: var(--color-surface);
     border: 1px solid #dbe4ef;
   }
 
   :global(.dashboard-map-popup-title) {
     padding: 8px 30px 7px 9px;
-    background: linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(37, 99, 235, 0)), #f8fafc;
-    color: #0f172a;
+    background: linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(37, 99, 235, 0)), var(--color-elevated);
+    color: var(--text-primary);
     font-size: 11.5px;
     font-weight: 900;
     line-height: 1.1;
@@ -2461,13 +2465,13 @@
   }
 
   :global(.dashboard-map-popup-row span) {
-    color: #64748b;
+    color: var(--text-secondary);
     font-size: 8px;
     font-weight: 800;
   }
 
   :global(.dashboard-map-popup-row strong) {
-    color: #0f172a;
+    color: var(--text-primary);
     font-size: 8.8px;
     line-height: 1.25;
     font-weight: 900;
@@ -2476,8 +2480,8 @@
 
   :global(.leaflet-control-attribution) {
     border-radius: 8px 0 0 0;
-    background: rgba(255, 255, 255, 0.86) !important;
-    color: #64748b !important;
+    background: rgba(17, 24, 39, 0.94) !important;
+    color: var(--text-secondary) !important;
     font-size: 8px !important;
     font-weight: 700;
     backdrop-filter: blur(8px);
@@ -2497,17 +2501,17 @@
     min-height: 220px;
     padding: 20px;
     text-align: center;
-    color: #64748b;
+    color: var(--text-secondary);
   }
 
   .permission-empty strong {
-    color: #0f172a;
+    color: var(--text-primary);
     font-size: 15px;
     font-weight: 900;
   }
 
   .permission-empty span {
-    color: #64748b;
+    color: var(--text-secondary);
     font-size: 12px;
     font-weight: 700;
   }
@@ -2530,7 +2534,7 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
     padding: 14px;
-    background: #f8fafc;
+    background: var(--color-elevated);
   }
 
   .compact-info-card {
@@ -2538,7 +2542,7 @@
     padding: 12px;
     border: 1px solid #d9e2ec;
     border-radius: 10px;
-    background: #ffffff;
+    background: var(--color-surface);
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -2546,11 +2550,11 @@
 
   .compact-info-card.highlight {
     border-color: #bfdbfe;
-    background: #eff6ff;
+    background: var(--color-accent-muted);
   }
 
   .info-label {
-    color: #64748b;
+    color: var(--text-secondary);
     font-size: 10px;
     font-weight: 900;
     letter-spacing: 0.05em;
@@ -2560,7 +2564,7 @@
   .compact-info-card strong {
     display: block;
     margin-top: 7px;
-    color: #0f172a;
+    color: var(--text-primary);
     font-size: 13px;
     line-height: 1.25;
     font-weight: 900;
@@ -2580,7 +2584,7 @@
     min-height: 30px;
     padding: 0 11px;
     border-radius: 999px;
-    background: #ecfdf5;
+    background: var(--color-success-muted);
     border: 1px solid #bbf7d0;
     color: #047857;
     font-size: 12px;
@@ -2589,9 +2593,9 @@
   }
 
   .online-badge.offline-badge {
-    background: #f8fafc;
+    background: var(--color-elevated);
     border-color: #cbd5e1;
-    color: #64748b;
+    color: var(--text-secondary);
   }
 
   .online-badge span {
@@ -2610,7 +2614,7 @@
     grid-template-columns: repeat(2, minmax(180px, 1fr));
     gap: 10px;
     padding: 14px;
-    background: #f8fafc;
+    background: var(--color-elevated);
     min-width: 0;
   }
 
@@ -2630,7 +2634,7 @@
   }
 
   .summary-card span {
-    color: #64748b;
+    color: var(--text-secondary);
     font-size: 11px;
     font-weight: 900;
     text-transform: uppercase;
@@ -2638,7 +2642,7 @@
 
   .summary-card strong {
     margin-top: 10px;
-    color: #0f172a;
+    color: var(--text-primary);
     font-size: 22px;
     line-height: 1.1;
     font-weight: 900;
@@ -2656,21 +2660,21 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
     padding: 14px;
-    background: #f8fafc;
+    background: var(--color-elevated);
   }
 
   .environment-grid article {
     min-height: 82px;
     padding: 12px;
     border-radius: 10px;
-    background: #ffffff;
+    background: var(--color-surface);
     border: 1px solid #d9e2ec;
   }
 
   .environment-grid span,
   .environment-grid small {
     display: block;
-    color: #64748b;
+    color: var(--text-secondary);
     font-size: 10px;
     font-weight: 900;
     text-transform: uppercase;
@@ -2680,7 +2684,7 @@
   .environment-grid strong {
     display: block;
     margin-top: 9px;
-    color: #0f172a;
+    color: var(--text-primary);
     font-size: 17px;
     line-height: 1.1;
     font-weight: 900;
@@ -2705,7 +2709,7 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
     padding: 14px;
-    background: #f8fafc;
+    background: var(--color-elevated);
   }
 
   .fuel-metric {
@@ -2713,12 +2717,12 @@
     padding: 14px;
     border-radius: 10px;
     border: 1px solid #d9e2ec;
-    background: #ffffff;
+    background: var(--color-surface);
   }
 
   .fuel-label {
     display: block;
-    color: #64748b;
+    color: var(--text-secondary);
     font-size: 11px;
     font-weight: 900;
     text-transform: uppercase;
@@ -2728,7 +2732,7 @@
   .fuel-value {
     display: block;
     margin-top: 12px;
-    color: #0f172a;
+    color: var(--text-primary);
     font-size: 24px;
     font-weight: 900;
     line-height: 1.1;
@@ -2736,8 +2740,8 @@
 
   .empty-box {
     padding: 18px 14px;
-    color: #64748b;
-    background: #f8fafc;
+    color: var(--text-secondary);
+    background: var(--color-elevated);
     font-size: 12px;
     font-weight: 800;
   }
@@ -2747,13 +2751,13 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
-    background: #f8fafc;
+    background: var(--color-elevated);
   }
 
   .fod-usage-summary article {
     min-height: 68px;
     padding: 12px 14px;
-    background: #ffffff;
+    background: var(--color-surface);
     border: 1px solid #d9e2ec;
     border-radius: 10px;
     display: flex;
@@ -2762,7 +2766,7 @@
   }
 
   .fod-usage-summary span {
-    color: #64748b;
+    color: var(--text-secondary);
     font-size: 10px;
     font-weight: 900;
     text-transform: uppercase;
@@ -2771,13 +2775,13 @@
 
   .fod-usage-summary strong {
     margin-top: 6px;
-    color: #0f172a;
+    color: var(--text-primary);
     font-size: 18px;
     font-weight: 900;
   }
 
   .fod-total-card {
-    background: #eff6ff !important;
+    background: var(--color-accent-muted) !important;
     border-color: #bfdbfe !important;
   }
 
@@ -2791,11 +2795,11 @@
 
   .rob-content {
     padding: 18px 16px;
-    background: #f8fafc;
+    background: var(--color-elevated);
   }
 
   .rob-content span {
-    color: #64748b;
+    color: var(--text-secondary);
     font-size: 11px;
     font-weight: 900;
     text-transform: uppercase;

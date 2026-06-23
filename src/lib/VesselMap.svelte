@@ -1,6 +1,7 @@
 <script>
   import { onMount, onDestroy, tick } from "svelte";
   import { browser } from "$app/environment";
+  import { VMS_TILE_URL, VMS_TILE_OPTIONS } from "$lib/mapStyle.js";
 
   let {
     latitude = 0,
@@ -338,10 +339,7 @@ function refreshMap() {
       attributionControl: false
     }).setView([lat, lng], zoom);
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "&copy; OpenStreetMap contributors"
-    }).addTo(map);
+    L.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(map);
 
     traceLayerGroup = L.layerGroup().addTo(map);
 
@@ -398,7 +396,7 @@ $effect(() => {
     width: 100%;
     height: 100%;
     min-height: 260px;
-    background: #dbeafe;
+    background: var(--color-accent-muted);
   }
 
   :global(.vessel-map-leaflet-icon) {
@@ -412,7 +410,7 @@ $effect(() => {
     border-radius: 999px;
     display: grid;
     place-items: center;
-    background: #ffffff;
+    background: white;
     border: 2px solid #2563eb;
     box-shadow:
       0 0 0 6px rgba(37, 99, 235, 0.18),
@@ -468,8 +466,8 @@ $effect(() => {
   }
 
   :global(.vessel-map-popup-wrapper .leaflet-popup-content-wrapper) {
-    background: #ffffff;
-    color: #0f172a;
+    background: var(--color-surface);
+    color: var(--text-primary);
     border-radius: 10px;
     border: 1px solid #dbe4ef;
     box-shadow:
@@ -484,7 +482,7 @@ $effect(() => {
   }
 
   :global(.vessel-map-popup-wrapper .leaflet-popup-tip) {
-    background: #ffffff;
+    background: var(--color-surface);
     border: 1px solid #dbe4ef;
   }
 
@@ -493,7 +491,7 @@ $effect(() => {
     background:
       linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(37, 99, 235, 0)),
       #f8fafc;
-    color: #0f172a;
+    color: var(--text-primary);
     font-size: 12px;
     font-weight: 900;
     border-bottom: 1px solid #e2e8f0;
@@ -512,13 +510,13 @@ $effect(() => {
   }
 
   :global(.vessel-map-popup-row span) {
-    color: #64748b;
+    color: var(--text-secondary);
     font-size: 8.8px;
     font-weight: 800;
   }
 
   :global(.vessel-map-popup-row strong) {
-    color: #0f172a;
+    color: var(--text-primary);
     font-size: 9px;
     font-weight: 900;
     text-align: right;

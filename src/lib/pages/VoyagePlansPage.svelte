@@ -396,9 +396,23 @@
 		return Number(Number(value).toFixed(6));
 	}
 
+	function isFilledCoordinateValue(value) {
+		return value !== '' && value !== null && value !== undefined;
+	}
+
+	const INDONESIA_CENTER = [-2.5489, 118.0149];
+	const INDONESIA_ZOOM = 5;
+
+	function hasCoordinateValue(value) {
+		return value !== '' && value !== null && value !== undefined && String(value).trim() !== '';
+	}
+
 	function isValidCoordinate(point) {
-		const lat = Number(point?.latitude);
-		const lng = Number(point?.longitude);
+		if (!hasCoordinateValue(point?.latitude)) return false;
+		if (!hasCoordinateValue(point?.longitude)) return false;
+
+		const lat = Number(point.latitude);
+		const lng = Number(point.longitude);
 
 		return (
 			Number.isFinite(lat) &&
@@ -414,11 +428,14 @@
 		return form.planData
 			.map((point, index) => ({
 				...point,
-				index,
+				index
+			}))
+			.filter(isValidCoordinate)
+			.map((point) => ({
+				...point,
 				latitude: Number(point.latitude),
 				longitude: Number(point.longitude)
-			}))
-			.filter(isValidCoordinate);
+			}));
 	}
 
 	async function ensureLeaflet() {
@@ -488,7 +505,7 @@
 				routeMap.setView([existingPoints[0].latitude, existingPoints[0].longitude], 11);
 				refreshRouteMap();
 			} else {
-				routeMap.setView([-7.2575, 112.7521], 10);
+				routeMap.setView(INDONESIA_CENTER, INDONESIA_ZOOM);
 			}
 
 			setTimeout(() => {
@@ -657,6 +674,8 @@
 			});
 		} else if (shouldFit && validPoints.length === 1) {
 			routeMap.setView(latLngs[0], Math.max(routeMap.getZoom(), 12));
+		} else if (shouldFit && validPoints.length === 0) {
+			routeMap.setView(INDONESIA_CENTER, INDONESIA_ZOOM);
 		}
 
 		setTimeout(() => {
@@ -1076,6 +1095,14 @@
 		if (!form.planData.length) throw new Error('At least 1 route point is required.');
 
 		const planData = form.planData.map((point, index) => {
+			if (!isFilledCoordinateValue(point.latitude)) {
+				throw new Error(`Latitude in row ${index + 1} is required.`);
+			}
+
+			if (!isFilledCoordinateValue(point.longitude)) {
+				throw new Error(`Longitude in row ${index + 1} is required.`);
+			}
+
 			const latitude = Number(point.latitude);
 			const longitude = Number(point.longitude);
 			const speed =
@@ -1712,45 +1739,12 @@
 			</div>
 
 			<div class="modal-body">
-				<div class="form-grid">
-					<label>
-						<span>Voyage Name</span>
-						<input bind:value={form.voyageName} placeholder="Plan Jakarta to Surabaya" />
-					</label>
-					<label class="switch-line">
-						<input type="checkbox" bind:checked={form.isActive} />
-						<span>Active</span>
-					</label>
-				</div>
-
-				<div class="vessel-picker">
-					<div class="section-title compact-title">
-						<div>
-							<h3>Allowed Vessels</h3>
-							<span>{selectedAllowedVessels.length} selected vessel</span>
-						</div>
-					</div>
-					<div class="vessel-chips">
-						{#each vessels as vessel}
-							<button
-								type="button"
-								class:selected={form.allowedVesselIds.includes(vessel.id)}
-								on:click={() => toggleVessel(vessel.id)}
-							>
-								{vessel.vesselName}
-							</button>
-						{:else}
-							<em>Vessel data is not available.</em>
-						{/each}
-					</div>
-				</div>
-
-				<div class="section-title route-section-title">
+				<div class="section-title route-section-title" style="margin:-16px -16px 0; border-radius: 0px;">
 					<div>
 						<h3>Route Points</h3>
-						<span
-							>Click the map to add a point, right-click a marker to move, reorder, or delete it.</span
-						>
+						<span>
+							Click the map to add a point, right-click a marker to move, reorder, or delete it.
+						</span>
 					</div>
 
 					<div class="route-title-actions">
@@ -1766,8 +1760,14 @@
 							↶ Undo
 						</button>
 
-						<button class="toolbar-button" type="button" on:click={addPoint}>+ Add Point</button>
-						<button class="toolbar-button" type="button" on:click={fitRouteMap}>Fit Map</button>
+						<button class="toolbar-button" type="button" on:click={addPoint}>
+							+ Add Point
+						</button>
+
+						<button class="toolbar-button" type="button" on:click={fitRouteMap}>
+							Fit Map
+						</button>
+
 						<button
 							class="toolbar-button danger ghost-danger"
 							type="button"
@@ -1781,8 +1781,7 @@
 				<div class="route-map-editor">
 					<aside class="route-point-panel">
 						<div class="point-hint">
-							Click the map to add a point. Markers can be moved to update
-							coordinates.
+							Click the map to add a point. Markers can be moved to update coordinates.
 						</div>
 
 						<div class="route-editor">
@@ -1804,7 +1803,11 @@
 											on:click={() => selectPoint(index)}
 										>
 											<td>
-												<input type="number" bind:value={point.order} on:change={reorderPoints} />
+												<input
+													type="number"
+													bind:value={point.order}
+													on:change={reorderPoints}
+												/>
 											</td>
 
 											<td>
@@ -1858,17 +1861,6 @@
 					</aside>
 
 					<section class="route-map-card">
-						<div class="map-mini-toolbar">
-							<strong>Map Point Editor</strong>
-							<div class="map-mini-meta">
-								<span>{getValidRoutePoints().length} valid points</span>
-								<span>{assetsLoading ? 'Loading assets...' : `${assets.length} assets`}</span>
-								{#if assetsError}
-									<span class="asset-error">{assetsError}</span>
-								{/if}
-							</div>
-						</div>
-
 						<div class="route-map-shell">
 							<div class="route-map" bind:this={mapContainer}></div>
 
@@ -1902,6 +1894,7 @@
 									</button>
 								</div>
 							{/if}
+
 							{#if pointContextMenu.visible}
 								<div
 									class="point-context-menu"
@@ -1949,6 +1942,41 @@
 						</div>
 					</section>
 				</div>
+
+				<div class="form-grid">
+					<label>
+						<span>Voyage Name</span>
+						<input bind:value={form.voyageName} placeholder="Plan Jakarta to Surabaya" />
+					</label>
+
+					<label class="switch-line">
+						<input type="checkbox" bind:checked={form.isActive} />
+						<span>Active</span>
+					</label>
+				</div>
+
+				<div class="vessel-picker">
+					<div class="section-title compact-title">
+						<div>
+							<h3>Allowed Vessels</h3>
+							<span>{selectedAllowedVessels.length} selected vessel</span>
+						</div>
+					</div>
+
+					<div class="vessel-chips">
+						{#each vessels as vessel}
+							<button
+								type="button"
+								class:selected={form.allowedVesselIds.includes(vessel.id)}
+								on:click={() => toggleVessel(vessel.id)}
+							>
+								{vessel.vesselName}
+							</button>
+						{:else}
+							<em>Vessel data is not available.</em>
+						{/each}
+					</div>
+				</div>
 			</div>
 
 			<div class="modal-footer">
@@ -1968,8 +1996,8 @@
 		max-height: 100%;
 		min-height: 0;
 		padding: 14px;
-		background: #f4f6f8;
-		color: #0f172a;
+		background: var(--color-base);
+		color: var(--text-primary);
 		overflow-y: auto;
 		overflow-x: hidden;
 		box-sizing: border-box;
@@ -2005,7 +2033,7 @@
 		border-radius: 999px;
 		display: grid;
 		place-items: center;
-		background: rgba(255, 255, 255, 0.96);
+		background: rgba(17, 24, 39, 0.94);
 		border: 2px solid #f59e0b;
 		box-shadow:
 			0 0 0 4px rgba(245, 158, 11, 0.16),
@@ -2024,7 +2052,7 @@
 		border: 1px solid #d9e2ec;
 		border-radius: 10px;
 		box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 11px;
 		font-weight: 900;
 	}
@@ -2078,7 +2106,7 @@
 	.voyage-header-card,
 	.panel,
 	.empty-card {
-		background: #ffffff;
+		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
 	}
@@ -2096,7 +2124,7 @@
 		width: fit-content;
 		padding: 4px 9px;
 		border-radius: 999px;
-		background: #dbeafe;
+		background: var(--color-accent-muted);
 		color: #1d4ed8;
 		font-size: 10px;
 		font-weight: 900;
@@ -2110,13 +2138,13 @@
 		line-height: 1.2;
 		font-weight: 900;
 		letter-spacing: -0.02em;
-		color: #0f172a;
+		color: var(--text-primary);
 	}
 
 	.voyage-header-card p {
 		max-width: 760px;
 		margin: 7px 0 0;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 700;
 		line-height: 1.45;
@@ -2149,13 +2177,13 @@
 	}
 
 	.alert.error {
-		background: #fef2f2;
+		background: var(--color-danger-muted);
 		color: #b91c1c;
 		border: 1px solid #fecaca;
 	}
 
 	.alert.success {
-		background: #ecfdf5;
+		background: var(--color-success-muted);
 		color: #047857;
 		border: 1px solid #bbf7d0;
 	}
@@ -2164,7 +2192,7 @@
 	.empty-state,
 	.empty-cell {
 		padding: 28px;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 700;
 		line-height: 1.5;
@@ -2177,7 +2205,7 @@
 
 	.empty-card h3 {
 		margin-bottom: 8px;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 18px;
 		font-weight: 900;
 	}
@@ -2213,13 +2241,13 @@
 		gap: 12px;
 		padding: 12px 14px;
 		border-bottom: 1px solid #e5edf5;
-		background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+		background: var(--color-surface);
 	}
 
 	.panel-toolbar h2,
 	.modal-header h2,
 	.section-title h3 {
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 15px;
 		line-height: 1.25;
 		font-weight: 900;
@@ -2231,7 +2259,7 @@
 	.section-title span,
 	.map-mini-toolbar span,
 	label {
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		letter-spacing: 0.05em;
@@ -2250,8 +2278,8 @@
 		padding: 4px 8px;
 		border-radius: 999px;
 		border: 1px solid #d9e2ec;
-		background: #ffffff;
-		color: #64748b;
+		background: var(--color-surface);
+		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
 		letter-spacing: 0.05em;
@@ -2260,7 +2288,7 @@
 
 	.map-mini-meta .asset-error {
 		border-color: #fecaca;
-		background: #fef2f2;
+		background: var(--color-danger-muted);
 		color: #b91c1c;
 	}
 
@@ -2279,8 +2307,8 @@
 		height: 32px;
 		min-height: 32px;
 		border: none;
-		background: #e2e8f0;
-		color: #0f172a;
+		background: rgba(255, 255, 255, 0.06);
+		color: var(--text-primary);
 		padding: 0 12px;
 		font-size: 11px;
 		font-weight: 900;
@@ -2312,8 +2340,8 @@
 
 	.ghost-button,
 	.toolbar-button {
-		background: #e2e8f0;
-		color: #0f172a;
+		background: rgba(255, 255, 255, 0.06);
+		color: var(--text-primary);
 	}
 
 	.ghost-button:hover:not(:disabled),
@@ -2323,13 +2351,13 @@
 
 	.danger,
 	.ghost-danger {
-		background: #fee2e2;
+		background: var(--color-danger-muted);
 		color: #b91c1c;
 	}
 
 	.danger:hover:not(:disabled),
 	.ghost-danger:hover:not(:disabled) {
-		background: #fecaca;
+		background: var(--color-danger-muted);
 		color: #991b1b;
 	}
 
@@ -2341,8 +2369,8 @@
 		min-height: 32px;
 		min-width: 0;
 		border: 1px solid #cbd5e1;
-		background: #ffffff;
-		color: #0f172a;
+		background: var(--color-surface);
+		color: var(--text-primary);
 		padding: 0 9px;
 		font-size: 12px;
 		font-weight: 700;
@@ -2361,7 +2389,7 @@
 	select:focus {
 		border-color: #2563eb;
 		box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
-		background: #fbfdff;
+		background: var(--color-elevated);
 	}
 
 	.table-wrap,
@@ -2369,7 +2397,7 @@
 	.route-editor,
 	.preview-box {
 		overflow: auto;
-		background: #ffffff;
+		background: var(--color-surface);
 	}
 
 	.table-wrap,
@@ -2420,26 +2448,26 @@
 	}
 
 	tbody td {
-		background: #ffffff;
-		color: #0f172a;
+		background: var(--color-surface);
+		color: var(--text-primary);
 		font-weight: 700;
 	}
 
 	tbody tr:nth-child(even) td {
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	tbody tr:hover td {
-		background: #eff6ff;
+		background: var(--color-accent-muted);
 	}
 
 	tr.active-row td,
 	.selected-point-row td {
-		background: #dbeafe !important;
+		background: var(--color-accent-muted) !important;
 	}
 
 	.strong {
-		color: #0f172a;
+		color: var(--text-primary);
 		font-weight: 900;
 	}
 
@@ -2479,24 +2507,24 @@
 	}
 
 	.icon-action:hover:not(:disabled) {
-		background: #dbeafe;
+		background: var(--color-accent-muted);
 		transform: translateY(-1px);
 	}
 
 	.icon-action.active-toggle {
-		background: #dbeafe;
+		background: var(--color-accent-muted);
 		color: #1d4ed8;
 	}
 
 	.icon-action.danger,
 	.icon-action.ghost-danger {
-		background: #fee2e2;
+		background: var(--color-danger-muted);
 		color: #b91c1c;
 	}
 
 	.icon-action.danger:hover:not(:disabled),
 	.icon-action.ghost-danger:hover:not(:disabled) {
-		background: #fecaca;
+		background: var(--color-danger-muted);
 		color: #991b1b;
 	}
 
@@ -2519,23 +2547,23 @@
 
 	.badge-active {
 		border: 1px solid #bbf7d0;
-		background: #ecfdf5;
+		background: var(--color-success-muted);
 		color: #047857;
 	}
 
 	.badge-muted {
 		border: 1px solid #e2e8f0;
-		background: #f8fafc;
-		color: #64748b;
+		background: var(--color-elevated);
+		color: var(--text-secondary);
 	}
 
 	.pagination-bar {
 		justify-content: flex-end;
 		flex-wrap: wrap;
 		border-top: 1px solid #e5edf5;
-		background: #f8fafc;
+		background: var(--color-elevated);
 		padding: 10px 12px;
-		color: #64748b;
+		color: var(--text-secondary);
 		font-size: 11px;
 		font-weight: 800;
 	}
@@ -2549,7 +2577,7 @@
 		grid-template-columns: repeat(4, minmax(0, 1fr));
 		gap: 12px;
 		padding: 14px;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.detail-summary div {
@@ -2557,7 +2585,7 @@
 		padding: 14px;
 		border: 1px solid #d9e2ec;
 		border-radius: 12px;
-		background: #ffffff;
+		background: var(--color-surface);
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
 	}
 
@@ -2565,7 +2593,7 @@
 		display: block;
 		margin-top: 7px;
 		overflow: hidden;
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 18px;
 		font-weight: 900;
 		line-height: 1.15;
@@ -2581,9 +2609,6 @@
 		padding: 12px 14px 14px;
 	}
 
-	.allowed-list {
-		padding-top: 0;
-	}
 
 	.allowed-list span,
 	.vessel-chips button {
@@ -2591,20 +2616,20 @@
 		min-height: 28px;
 		border: 1px solid #d9e2ec;
 		border-radius: 999px;
-		background: #f8fafc;
-		color: #334155;
+		background: var(--color-elevated);
+		color: var(--text-secondary);
 		padding: 6px 10px;
 		font-size: 11px;
 		font-weight: 900;
 	}
 
 	.vessel-chips button:hover:not(:disabled) {
-		background: #eff6ff;
+		background: var(--color-accent-muted);
 	}
 
 	.vessel-chips button.selected {
 		border-color: #bfdbfe;
-		background: #dbeafe;
+		background: var(--color-accent-muted);
 		color: #1d4ed8;
 	}
 
@@ -2615,9 +2640,13 @@
 		padding: 14px;
 	}
 
+	.modal-body .route-section-title {
+		margin-top: 0;
+	}
+
 	.modal-body > .form-grid {
 		padding: 0;
-		margin-bottom: 14px;
+		margin: 14px 0;
 	}
 
 	.form-grid.compact {
@@ -2650,7 +2679,7 @@
 		min-height: 42px;
 		border: 1px dashed #93c5fd;
 		border-radius: 12px;
-		background: #eff6ff;
+		background: var(--color-accent-muted);
 		padding: 12px;
 		cursor: pointer;
 		text-transform: none;
@@ -2675,8 +2704,8 @@
 		display: block;
 		padding: 10px 12px;
 		border-bottom: 1px solid #e5edf5;
-		background: #f8fafc;
-		color: #0f172a;
+		background: var(--color-elevated);
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 900;
 	}
@@ -2695,14 +2724,14 @@
 	}
 
 	.modal-card {
-		width: min(1080px, calc(100vw - 144px));
+		width: min(1480px, calc(100vw - 104px));
 		max-height: calc(100vh - 48px);
 		display: grid;
 		grid-template-rows: auto 1fr auto;
 		overflow: hidden;
 		border: 1px solid #d9e2ec;
 		border-radius: 14px;
-		background: #ffffff;
+		background: var(--color-surface);
 		box-shadow: 0 22px 60px rgba(15, 23, 42, 0.22);
 	}
 
@@ -2716,13 +2745,13 @@
 		justify-content: flex-end;
 		border-top: 1px solid #e5edf5;
 		border-bottom: 0;
-		background: #f8fafc;
+		background: var(--color-elevated);
 	}
 
 	.modal-body {
 		overflow: auto;
 		padding: 16px;
-		background: #ffffff;
+		background: var(--color-surface);
 	}
 
 	.icon-button {
@@ -2736,7 +2765,7 @@
 	.vessel-picker {
 		border: 1px solid #d9e2ec;
 		border-radius: 12px;
-		background: #ffffff;
+		background: var(--color-surface);
 		margin-bottom: 14px;
 		overflow: hidden;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
@@ -2750,7 +2779,7 @@
 		border: 1px solid #d9e2ec;
 		border-bottom: 0;
 		border-radius: 12px 12px 0 0;
-		background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+		background: var(--color-surface);
 	}
 
 	.route-title-actions {
@@ -2769,10 +2798,12 @@
 		display: grid;
 		grid-template-columns: minmax(360px, 0.78fr) minmax(480px, 1.42fr);
 		gap: 0;
-		min-height: 540px;
+		margin:0 -16px;
+		min-height: 400px;
+		max-height: 450px;
 		border: 1px solid #d9e2ec;
 		border-radius: 0 0 12px 12px;
-		background: #ffffff;
+		background: var(--color-surface);
 		overflow: hidden;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
 	}
@@ -2780,7 +2811,7 @@
 	.route-point-panel,
 	.route-map-card {
 		min-width: 0;
-		background: #ffffff;
+		background: var(--color-surface);
 	}
 
 	.route-point-panel {
@@ -2792,8 +2823,8 @@
 
 	.point-hint {
 		border-bottom: 1px solid #e5edf5;
-		background: #f8fafc;
-		color: #64748b;
+		background: var(--color-elevated);
+		color: var(--text-secondary);
 		padding: 10px 12px;
 		font-size: 11px;
 		font-weight: 800;
@@ -2812,7 +2843,7 @@
 	}
 
 	.map-mini-toolbar strong {
-		color: #0f172a;
+		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 900;
 	}
@@ -2829,7 +2860,7 @@
 		width: 100%;
 		height: 100%;
 		min-height: 500px;
-		background: #dbeafe;
+		background: var(--color-accent-muted);
 	}
 
 	.route-editor {
@@ -2898,7 +2929,7 @@
 		min-width: 160px;
 		border: 1px solid #d9e2ec;
 		border-radius: 12px;
-		background: #ffffff;
+		background: var(--color-surface);
 		box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
 		transform: translate(8px, 8px);
 		overflow: hidden;
@@ -2906,8 +2937,8 @@
 
 	.context-title {
 		border-bottom: 1px solid #e5edf5;
-		background: #f8fafc;
-		color: #0f172a;
+		background: var(--color-elevated);
+		color: var(--text-primary);
 		padding: 9px 11px;
 		font-size: 11px;
 		font-weight: 900;
@@ -2922,8 +2953,8 @@
 		justify-content: flex-start;
 		border: 0;
 		border-bottom: 1px solid #edf2f7;
-		background: #ffffff;
-		color: #0f172a;
+		background: var(--color-surface);
+		color: var(--text-primary);
 		padding: 0 11px;
 		font-size: 11px;
 		font-weight: 800;
@@ -2935,7 +2966,7 @@
 	}
 
 	.point-context-menu button:hover:not(:disabled) {
-		background: #eff6ff;
+		background: var(--color-accent-muted);
 		color: #1d4ed8;
 	}
 
@@ -2949,7 +2980,7 @@
 	}
 
 	.point-context-menu .danger-action:hover:not(:disabled) {
-		background: #fee2e2;
+		background: var(--color-danger-muted);
 		color: #991b1b;
 	}
 
@@ -2986,12 +3017,12 @@
 
 	.move-point-btn.cancel {
 		border: 2px solid #ef4444;
-		background: #fee2e2;
+		background: var(--color-danger-muted);
 		color: #991b1b;
 	}
 
 	.move-point-btn.cancel:hover:not(:disabled) {
-		background: #fecaca;
+		background: var(--color-danger-muted);
 		color: #7f1d1d;
 	}
 
@@ -3001,7 +3032,7 @@
 		min-height: 28px;
 		border-radius: 999px;
 		border: 1px solid #fde68a;
-		background: #fef9c3;
+		background: var(--color-warning-muted);
 		color: #854d0e;
 		padding: 6px 10px;
 		font-size: 11px;
@@ -3026,7 +3057,7 @@
 
 	.cancel-move-btn,
 	.move-cancel-btn {
-		background: #fee2e2;
+		background: var(--color-danger-muted);
 		color: #b91c1c;
 	}
 
