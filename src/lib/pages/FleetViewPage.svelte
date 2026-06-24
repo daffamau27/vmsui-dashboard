@@ -26,8 +26,10 @@
 	let assetError = $state('');
 	let showAssets = $state(true);
 	let assetMarkers = new Map();
+	let assetBoundaryCircles = new Map();
 
 	let ignoreNextPopupCloseForVesselId = null;
+	let openingDetailFromPopupForVesselId = null;
 
 	let isMobileSidebarOpen = $state(false);
 
@@ -237,6 +239,27 @@
 		return '-';
 	}
 
+	function normalizeHireStatus(value) {
+		const text = String(value ?? '').trim();
+
+		if (!text || text === '-') return 'Hire unknown';
+
+		const normalized = text.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+
+		if (normalized.includes('off')) return 'Off Hire';
+		if (normalized.includes('on')) return 'On Hire';
+
+		return text;
+	}
+
+	function isOnHireStatus(value) {
+		return normalizeHireStatus(value).toLowerCase() === 'on hire';
+	}
+
+	function isOffHireStatus(value) {
+		return normalizeHireStatus(value).toLowerCase() === 'off hire';
+	}
+
 	async function openVesselDashboard(vessel) {
 		if (!vessel) return;
 
@@ -370,6 +393,60 @@
 		}
 
 		return value;
+	}
+
+	function stripUtcLabel(value) {
+		if (!value || value === '-') return '-';
+
+		const cleaned = String(value)
+			.replace(/\s*\(?\bUTC\s*[+-]\d{1,2}(?::?\d{2})?\)?\s*/gi, ' ')
+			.replace(/\s{2,}/g, ' ')
+			.trim();
+
+		return cleaned || '-';
+	}
+
+	function getUtcLabel(value) {
+		if (!value || value === '-') return null;
+
+		const match = String(value).match(/\bUTC\s*([+-]\d{1,2})(?::?(\d{2}))?/i);
+		if (!match) return null;
+
+		const rawHour = match[1];
+		const sign = rawHour.startsWith('-') ? '-' : '+';
+		const hour = rawHour.replace(/^[+-]/, '').padStart(2, '0');
+		const minute = (match[2] || '00').padStart(2, '0');
+
+		return `UTC${sign}${hour}:${minute}`;
+	}
+
+	function getTelemetryUtcLabel(vessel) {
+		return (
+			getUtcLabel(vessel?.lastUpdated) ||
+			getUtcLabel(vessel?.lastConnectTime) ||
+			getUtcLabel(vessel?.lastDisconnectTime) ||
+			'UTC'
+		);
+	}
+
+	function formatTelemetryTime(value) {
+		return stripUtcLabel(formatValue(value, '-'));
+	}
+
+	function formatLastUpdatedBadge(value) {
+		return stripUtcLabel(formatLastUpdated(value));
+	}
+
+	function getLatestConnectionEvent(vessel) {
+		const connectedAt = parseVesselDateTime(vessel?.lastConnectTime);
+		const disconnectedAt = parseVesselDateTime(vessel?.lastDisconnectTime);
+
+		if (!connectedAt && !disconnectedAt) return null;
+		if (connectedAt && !disconnectedAt) return 'connected';
+		if (!connectedAt && disconnectedAt) return 'disconnected';
+
+		if (connectedAt.getTime() === disconnectedAt.getTime()) return null;
+		return connectedAt > disconnectedAt ? 'connected' : 'disconnected';
 	}
 
 	function getEngineRpm(vessel, keyword) {
@@ -661,6 +738,9 @@
 	}
 
 	function createPopupHtml(vessel) {
+		const latitude = vessel.latitude ?? vessel.lat;
+		const longitude = vessel.longitude ?? vessel.lng;
+
 		return `
       <div class="fleet-popup">
         <div class="fleet-popup-hero">
@@ -683,6 +763,17 @@
           <div class="fleet-popup-metric">
           <span>Heading</span>
           <strong>${formatNumber(vessel.heading, 1, '0.0')}<small>°</small></strong>
+          </div>
+        </div>
+
+        <div class="fleet-popup-coordinates">
+          <div>
+            <span>Latitude</span>
+            <strong>${formatNumber(latitude, 6, '-')}</strong>
+          </div>
+          <div>
+            <span>Longitude</span>
+            <strong>${formatNumber(longitude, 6, '-')}</strong>
           </div>
         </div>
 
@@ -823,6 +914,73 @@
 		await loadVesselDetail(id);
 	}
 
+	async function openVesselDetailFromPopup(id, marker) {
+		const normalizedId = String(id);
+
+		ignoreNextPopupCloseForVesselId = normalizedId;
+		openingDetailFromPopupForVesselId = normalizedId;
+
+		marker?.closePopup?.();
+
+		selectedVesselId = normalizedId;
+		selectedVesselDetail = null;
+		showDetailPanel = true;
+		isMobileSidebarOpen = false;
+
+		refreshMarkerSelection();
+
+		await loadVesselDetail(normalizedId);
+
+		if (String(openingDetailFromPopupForVesselId) === normalizedId) {
+			openingDetailFromPopupForVesselId = null;
+		}
+	}
+
+	function handleFleetPopupAction(event) {
+		const actionButton = event.target?.closest?.('[data-action][data-vessel-id]');
+
+		if (!actionButton || !mapContainer?.contains?.(actionButton)) return;
+
+		const action = actionButton.dataset.action;
+		const vesselId = String(actionButton.dataset.vesselId || '');
+
+		if (!vesselId || (action !== 'detail' && action !== 'dashboard')) return;
+
+		event.preventDefault();
+		event.stopPropagation();
+		event.stopImmediatePropagation?.();
+
+		const marker = markers.get(vesselId);
+
+		if (action === 'detail') {
+			void openVesselDetailFromPopup(vesselId, marker);
+			return;
+		}
+
+		const vessel = vesselData.find((item) => String(item.id) === vesselId);
+
+		if (!vessel) return;
+
+		ignoreNextPopupCloseForVesselId = vesselId;
+
+		void (async () => {
+			await openVesselDashboard(vessel);
+			marker?.closePopup?.();
+		})();
+	}
+
+	function openVesselPopupFromInteraction(id, { zoom = 7 } = {}) {
+		const normalizedId = String(id);
+
+		selectedVesselId = normalizedId;
+		selectedVesselDetail = null;
+		showDetailPanel = false;
+		isMobileSidebarOpen = false;
+
+		refreshMarkerSelection();
+		focusVessel(normalizedId, zoom, true);
+	}
+
 	function closeVesselDetail() {
 		clearSelectedVessel();
 	}
@@ -883,6 +1041,11 @@
 			});
 
 			marker.on('click', () => {
+				if (showDetailPanel) {
+					openVesselPopupFromInteraction(vesselId, { zoom: map?.getZoom?.() ?? 7 });
+					return;
+				}
+
 				const isDifferentVessel = String(selectedVesselId) !== vesselId;
 
 				selectedVesselId = vesselId;
@@ -895,42 +1058,11 @@
 				refreshMarkerSelection();
 			});
 
-			marker.on('popupopen', () => {
-				const popupElement = marker.getPopup()?.getElement();
-				if (!popupElement) return;
-
-				const detailButton = popupElement.querySelector('[data-action="detail"]');
-				const dashboardButton = popupElement.querySelector('[data-action="dashboard"]');
-
-				if (detailButton) {
-					detailButton.onclick = async (event) => {
-						event.preventDefault();
-						event.stopPropagation();
-
-						ignoreNextPopupCloseForVesselId = vesselId;
-
-						await openVesselDetail(vesselId);
-
-						marker.closePopup();
-					};
-				}
-
-				if (dashboardButton) {
-					dashboardButton.onclick = async (event) => {
-						event.preventDefault();
-						event.stopPropagation();
-
-						ignoreNextPopupCloseForVesselId = vesselId;
-
-						await openVesselDashboard(vessel);
-
-						marker.closePopup();
-					};
-				}
-			});
-
 			marker.on('popupclose', () => {
-				if (String(ignoreNextPopupCloseForVesselId) === vesselId) {
+				if (
+					String(ignoreNextPopupCloseForVesselId) === vesselId ||
+					String(openingDetailFromPopupForVesselId) === vesselId
+				) {
 					ignoreNextPopupCloseForVesselId = null;
 					return;
 				}
@@ -966,6 +1098,12 @@
 		if (!map.getPane('assetPane')) {
 			map.createPane('assetPane');
 			map.getPane('assetPane').style.zIndex = '450';
+		}
+
+		if (!map.getPane('assetBoundaryPane')) {
+			map.createPane('assetBoundaryPane');
+			map.getPane('assetBoundaryPane').style.zIndex = '440';
+			map.getPane('assetBoundaryPane').style.pointerEvents = 'none';
 		}
 
 		if (!map.getPane('vesselPane')) {
@@ -1010,6 +1148,8 @@
 
 		assetMarkers.forEach((marker) => marker.remove());
 		assetMarkers = new Map();
+		assetBoundaryCircles.forEach((circle) => circle.remove());
+		assetBoundaryCircles = new Map();
 
 		if (!showAssets) return;
 
@@ -1021,6 +1161,21 @@
 			if (lat === 0 && lng === 0) return;
 
 			const assetId = String(asset.id);
+
+			const boundaryCircle = L.circle([lat, lng], {
+				radius: 500,
+				pane: 'assetBoundaryPane',
+				interactive: false,
+				stroke: true,
+				color: '#f59e0b',
+				weight: 2,
+				opacity: 0.9,
+				fill: true,
+				fillColor: '#f59e0b',
+				fillOpacity: 0.12,
+				dashArray: '8 8',
+				className: 'asset-boundary-circle'
+			}).addTo(map);
 
 			const marker = L.marker([lat, lng], {
 				icon: createAssetIcon(asset),
@@ -1036,6 +1191,7 @@
 			});
 
 			assetMarkers.set(assetId, marker);
+			assetBoundaryCircles.set(assetId, boundaryCircle);
 		});
 	}
 
@@ -1755,19 +1911,10 @@
 		}
 	}
 
-	async function selectVessel(id) {
+	function selectVessel(id) {
 		const normalizedId = String(id);
 
-		selectedVesselId = normalizedId;
-		selectedVesselDetail = null;
-		showDetailPanel = true;
-		isMobileSidebarOpen = false;
-
-		refreshMarkerSelection();
-
-		await loadVesselDetail(normalizedId);
-
-		focusVessel(normalizedId, 7, false);
+		openVesselPopupFromInteraction(normalizedId);
 	}
 
 	async function waitForMapContainer(maxRetry = 20) {
@@ -2003,6 +2150,7 @@
 
 		map.on('contextmenu', handleMapRightClick);
 		map.on('click', handleMapMeasureClick);
+		container.addEventListener('click', handleFleetPopupAction, true);
 
 		setTimeout(() => {
 			if (!map) return;
@@ -2027,6 +2175,8 @@
 			window.removeEventListener('mobile-panel-open', handleMobilePanelOpen);
 		}
 
+		mapContainer?.removeEventListener?.('click', handleFleetPopupAction, true);
+
 		cancelMeasure();
 		removeCurrentParticleLayer();
 		removeWindParticleLayer();
@@ -2041,6 +2191,8 @@
 		markers.clear();
 		assetMarkers.forEach((marker) => marker.remove());
 		assetMarkers.clear();
+		assetBoundaryCircles.forEach((circle) => circle.remove());
+		assetBoundaryCircles.clear();
 	});
 
 	$effect(() => {
@@ -2164,7 +2316,14 @@
 						class:offline-card={!vessel.online}
 						class="vessel-card"
 					>
-						<button type="button" class="vessel-select" onclick={() => selectVessel(vessel.id)}>
+						<button
+							type="button"
+							class:selected-select={String(selectedVesselId) === String(vessel.id)}
+							class:offline-select={!vessel.online}
+							class="vessel-select"
+							aria-pressed={String(selectedVesselId) === String(vessel.id)}
+							onclick={() => selectVessel(vessel.id)}
+						>
 							<div class="vessel-main-row">
 								<div class="vessel-identity">
 									<span
@@ -2176,7 +2335,9 @@
 									<div class="vessel-name-block">
 										<h3>{vessel.name}</h3>
 										<p>
-											{vessel.online ? 'Online' : 'Offline'} · Last Updated:
+											Last Updated: 
+										</p>
+										<p>
 											{formatLastUpdated(vessel.lastUpdated)}
 										</p>
 									</div>
@@ -2192,18 +2353,6 @@
 										? 'Coordinate available'
 										: 'Coordinate unavailable'}
 								></div>
-							</div>
-
-							<div class="vessel-metric-row">
-								<div class="mini-metric">
-									<span>Speed</span>
-									<strong>{vessel.speed}</strong>
-								</div>
-
-								<div class="mini-metric">
-									<span>Heading</span>
-									<strong>{vessel.heading}°</strong>
-								</div>
 							</div>
 						</button>
 					</article>
@@ -2273,9 +2422,23 @@
 									<h2>{selectedVessel.name}</h2>
 									<p>{selectedVessel.companyName || 'Company information unavailable'}</p>
 								</div>
+
+								<button type="button" class="detail-close-btn" onclick={closeVesselDetail}>
+									×
+								</button>
 							</div>
 
 							<div class="detail-header-actions">
+								<span
+									class="detail-hire-pill"
+									class:on-hire={isOnHireStatus(selectedVessel.hireStatus)}
+									class:off-hire={isOffHireStatus(selectedVessel.hireStatus)}
+									class:unknown-hire={!isOnHireStatus(selectedVessel.hireStatus) &&
+										!isOffHireStatus(selectedVessel.hireStatus)}
+								>
+									{normalizeHireStatus(selectedVessel.hireStatus)}
+								</span>
+
 								<span
 									class="detail-status-pill"
 									class:online-pill={selectedVessel.online}
@@ -2301,15 +2464,29 @@
 						</div>
 
 						<div class="detail-panel-body">
+							<button
+								type="button"
+								class="detail-dashboard-cta"
+								onclick={() => openVesselDashboard(selectedVessel)}
+							>
+								<span>Open dashboard</span>
+								<span aria-hidden="true">↗</span>
+							</button>
+
 							<section class="detail-section">
 								<div class="detail-section-heading">
 									<div>
 										<span class="detail-section-kicker">Telemetry</span>
 										<h3>Operational snapshot</h3>
 									</div>
-									<span class="detail-updated-badge">
-										{formatLastUpdated(selectedVessel.lastUpdated)}
-									</span>
+									<div class="detail-time-stack">
+										<span class="detail-utc-badge">
+											{getTelemetryUtcLabel(selectedVessel)}
+										</span>
+										<span class="detail-updated-badge">
+											{formatLastUpdatedBadge(selectedVessel.lastUpdated)}
+										</span>
+									</div>
 								</div>
 
 								<div class="detail-hero-metrics">
@@ -2326,19 +2503,20 @@
 								</div>
 
 								<div class="detail-grid two-col">
-									<div class="detail-item">
-										<span>Hire Status</span>
-										<strong>{selectedVessel.hireStatus}</strong>
-									</div>
-
-									<div class="detail-item">
+									<div
+										class="detail-item connection-time-item"
+										class:latest-connected={getLatestConnectionEvent(selectedVessel) === 'connected'}
+									>
 										<span>Last Connect</span>
-										<strong>{selectedVessel.lastConnectTime}</strong>
+										<strong>{formatTelemetryTime(selectedVessel.lastConnectTime)}</strong>
 									</div>
 
-									<div class="detail-item">
+									<div
+										class="detail-item connection-time-item"
+										class:latest-disconnected={getLatestConnectionEvent(selectedVessel) === 'disconnected'}
+									>
 										<span>Last Disconnect</span>
-										<strong>{selectedVessel.lastDisconnectTime}</strong>
+										<strong>{formatTelemetryTime(selectedVessel.lastDisconnectTime)}</strong>
 									</div>
 
 									<div class="detail-item">
@@ -2592,6 +2770,12 @@
 		display: grid;
 		grid-template-columns: 280px minmax(0, 1fr);
 		gap: 5px;
+	}
+
+	@media (min-width: 1280px) and (max-height: 1080px) {
+		.fleet-layout {
+			grid-template-columns: 340px minmax(0, 1fr);
+		}
 	}
 
 	.fleet-sidebar,
@@ -3472,6 +3656,7 @@
      ========================= */
 
 	.vessel-card {
+		position: relative;
 		min-height: 0;
 		border: 1px solid #e2e8f0;
 		border-radius: 10px;
@@ -3491,21 +3676,70 @@
 
 	.vessel-card.selected-card {
 		border-color: #60a5fa;
-		background: var(--color-surface);
-		box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
+		background:
+			linear-gradient(135deg, rgba(59, 130, 246, 0.24), rgba(125, 211, 252, 0.1) 58%),
+			#1f2a44;
+		box-shadow:
+			0 0 0 2px rgba(96, 165, 250, 0.22),
+			0 12px 26px rgba(15, 23, 42, 0.2);
+	}
+
+	.vessel-card.selected-card::before {
+		content: '';
+		position: absolute;
+		inset: 8px auto 8px 0;
+		width: 4px;
+		border-radius: 0 999px 999px 0;
+		background: #3b82f6;
+		box-shadow: 0 0 14px rgba(59, 130, 246, 0.7);
 	}
 
 	.vessel-card.offline-card {
-		background: var(--color-elevated);
+		border-color: rgba(71, 85, 105, 0.75);
+		background:
+			linear-gradient(135deg, rgba(15, 23, 42, 0.82), rgba(30, 41, 59, 0.88)),
+			var(--color-elevated);
+		opacity: 0.72;
+		filter: saturate(0.72);
+	}
+
+	.vessel-card.offline-card:hover {
+		opacity: 0.86;
+		border-color: rgba(148, 163, 184, 0.72);
+	}
+
+	.vessel-card.selected-card.offline-card {
+		opacity: 1;
+		filter: saturate(0.9);
+		border-color: #60a5fa;
+		background:
+			linear-gradient(135deg, rgba(59, 130, 246, 0.22), rgba(30, 41, 59, 0.9)),
+			#1d2740;
 	}
 
 	.vessel-select {
+		position: relative;
+		z-index: 1;
 		width: 100%;
 		border: none;
 		background: transparent;
 		padding: 7px;
 		text-align: left;
 		cursor: pointer;
+		transition:
+			background 0.15s ease,
+			box-shadow 0.15s ease;
+	}
+
+	.vessel-select.selected-select {
+		background:
+			linear-gradient(135deg, rgba(96, 165, 250, 0.16), rgba(14, 165, 233, 0.08)),
+			rgba(30, 64, 175, 0.2);
+		box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.2);
+	}
+
+	.vessel-select.offline-select {
+		color: rgba(226, 232, 240, 0.78);
 	}
 
 	.vessel-main-row {
@@ -3538,6 +3772,10 @@
 		white-space: nowrap;
 	}
 
+	.vessel-card.offline-card .vessel-name-block h3 {
+		color: rgba(226, 232, 240, 0.78);
+	}
+
 	.vessel-name-block p {
 		margin: 3px 0 0;
 		color: var(--text-secondary);
@@ -3547,6 +3785,11 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.vessel-card.offline-card .vessel-name-block p,
+	.vessel-card.offline-card .mini-metric span {
+		color: rgba(148, 163, 184, 0.78);
 	}
 
 	.location-button {
@@ -3607,9 +3850,14 @@
 		background: var(--color-elevated);
 	}
 
+	.vessel-card.offline-card .mini-metric {
+		border-color: rgba(71, 85, 105, 0.8);
+		background: rgba(15, 23, 42, 0.62);
+	}
+
 	.vessel-card.selected-card .mini-metric {
-		background: var(--color-surface);
-		border-color: #bfdbfe;
+		background: rgba(96, 165, 250, 0.12);
+		border-color: rgba(147, 197, 253, 0.42);
 	}
 
 	.mini-metric span {
@@ -3629,6 +3877,10 @@
 		font-size: 10px;
 		line-height: 1.05;
 		font-weight: 900;
+	}
+
+	.vessel-card.offline-card .mini-metric strong {
+		color: rgba(241, 245, 249, 0.84);
 	}
 
 	.vessel-top,
@@ -3726,8 +3978,17 @@
 		pointer-events: none;
 	}
 
+	:global(.fleet-page .leaflet-assetBoundary-pane) {
+		z-index: 440;
+		pointer-events: none;
+	}
+
 	:global(.fleet-page .leaflet-asset-pane) {
 		z-index: 450;
+	}
+
+	:global(.fleet-page .asset-boundary-circle) {
+		filter: drop-shadow(0 0 7px rgba(245, 158, 11, 0.5));
 	}
 
 	:global(.fleet-page .leaflet-shadow-pane) {
@@ -3830,7 +4091,7 @@
 	:global(.vessel-leaflet-icon.selected .vessel-marker-shell) {
 		width: 29px;
 		height: 29px;
-		background: var(--color-accent-muted);
+		background: var(--color-accent);
 		border: 2px solid #2563eb;
 		box-shadow:
 			0 0 0 5px rgba(37, 99, 235, 0.22),
@@ -4369,7 +4630,7 @@
 	}
 
 	:global(.fleet-leaflet-popup .leaflet-popup-content) {
-		width: 254px !important;
+		width: 300px !important;
 	}
 
 	:global(.fleet-leaflet-popup .leaflet-popup-tip) {
@@ -4403,7 +4664,8 @@
 		max-width: 100%;
 		box-sizing: border-box;
 		background:
-			radial-gradient(circle at 5% 0%, rgba(59, 130, 246, 0.12), transparent 34%),
+			radial-gradient(circle at 5% 0%, rgba(59, 130, 246, 0.16), transparent 36%),
+			linear-gradient(180deg, rgba(30, 41, 59, 0.25), rgba(10, 14, 26, 0)),
 			#0a0e1a;
 	}
 
@@ -4412,7 +4674,7 @@
 		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: flex-start;
 		gap: 12px;
-		padding: 11px 38px 10px 11px;
+		padding: 12px 44px 11px 12px;
 		border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 	}
 
@@ -4484,16 +4746,16 @@
 	:global(.fleet-popup-metrics) {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 6px;
-		padding: 8px 11px 6px;
+		gap: 7px;
+		padding: 9px 12px 7px;
 	}
 
 	:global(.fleet-popup-metric) {
 		min-width: 0;
-		padding: 8px;
-		border: 1px solid rgba(255, 255, 255, 0.07);
-		border-radius: 11px;
-		background: rgba(255, 255, 255, 0.035);
+		padding: 9px 10px;
+		border: 1px solid rgba(96, 165, 250, 0.13);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.72);
 	}
 
 	:global(.fleet-popup-metric > span) {
@@ -4520,7 +4782,43 @@
 	}
 
 	:global(.fleet-popup-meta) {
-		padding: 2px 11px 6px;
+		padding: 3px 12px 7px;
+	}
+
+	:global(.fleet-popup-coordinates) {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 7px;
+		padding: 0 12px 8px;
+	}
+
+	:global(.fleet-popup-coordinates > div) {
+		min-width: 0;
+		padding: 8px 9px;
+		border: 1px solid rgba(255, 255, 255, 0.07);
+		border-radius: 11px;
+		background: rgba(255, 255, 255, 0.028);
+	}
+
+	:global(.fleet-popup-coordinates span) {
+		display: block;
+		margin-bottom: 4px;
+		color: var(--text-muted);
+		font-size: 8px;
+		font-weight: 900;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+	}
+
+	:global(.fleet-popup-coordinates strong) {
+		display: block;
+		overflow: hidden;
+		color: var(--text-primary);
+		font-size: 10px;
+		font-weight: 900;
+		line-height: 1.1;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	:global(.fleet-popup-meta .fleet-popup-row) {
@@ -4550,8 +4848,8 @@
 	}
 
 	:global(.fleet-popup-actions) {
-		gap: 6px;
-		padding: 7px 11px 11px;
+		gap: 7px;
+		padding: 8px 12px 12px;
 	}
 
 	:global(.fleet-popup-actions .fleet-popup-detail-btn),
@@ -4582,6 +4880,7 @@
 
 	:global(.fleet-popup-hero),
 	:global(.fleet-popup-metrics),
+	:global(.fleet-popup-coordinates),
 	:global(.fleet-popup-meta),
 	:global(.fleet-popup-actions) {
 		width: 100%;
@@ -4596,7 +4895,7 @@
 		top: 20px;
 		right: 14px;
 		bottom: 20px;
-		width: 320px;
+		width: 360px;
 		max-width: calc(100% - 28px);
 		max-height: none;
 		border: 1px solid rgba(59, 130, 246, 0.2);
@@ -4619,7 +4918,8 @@
 		background:
 			radial-gradient(circle at 0% 0%, rgba(59, 130, 246, 0.16), transparent 48%),
 			rgba(17, 24, 39, 0.88);
-		align-items: center;
+		align-items: flex-start;
+		flex-wrap: wrap;
 	}
 
 	.detail-title-wrap,
@@ -4629,11 +4929,17 @@
 	}
 
 	.detail-title-wrap {
+		flex: 1 1 180px;
 		min-width: 0;
 		gap: 8px;
 	}
 
+	.detail-title-wrap .detail-close-btn {
+		margin-left: auto;
+	}
+
 	.detail-title-group {
+		flex: 1 1 auto;
 		min-width: 0;
 	}
 
@@ -4666,7 +4972,7 @@
 	}
 
 	.detail-panel-header h2 {
-		max-width: 130px;
+		max-width: 210px;
 		margin-top: 3px;
 		overflow: hidden;
 		color: var(--text-primary);
@@ -4677,7 +4983,7 @@
 	}
 
 	.detail-panel-header p {
-		max-width: 140px;
+		max-width: 210px;
 		margin-top: 4px;
 		overflow: hidden;
 		color: var(--text-secondary);
@@ -4687,10 +4993,23 @@
 	}
 
 	.detail-header-actions {
-		flex: 0 0 auto;
+		flex: 1 1 100%;
 		gap: 6px;
+		flex-wrap: wrap;
+		justify-content: flex-start;
+		max-width: none;
+		padding-left: 19px;
 	}
 
+	.detail-header-actions .detail-close-btn {
+		display: none;
+	}
+
+	.detail-header-actions .detail-dashboard-btn {
+		display: none;
+	}
+
+	.detail-hire-pill,
 	.detail-status-pill {
 		display: inline-flex;
 		align-items: center;
@@ -4698,6 +5017,30 @@
 		border-radius: 999px;
 		font-size: 8px;
 		font-weight: 900;
+	}
+
+	.detail-hire-pill {
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		letter-spacing: 0.02em;
+		text-transform: uppercase;
+	}
+
+	.detail-hire-pill.on-hire {
+		background: rgba(16, 185, 129, 0.14);
+		color: #5eead4;
+		border-color: rgba(45, 212, 191, 0.25);
+	}
+
+	.detail-hire-pill.off-hire {
+		background: rgba(245, 158, 11, 0.14);
+		color: #fbbf24;
+		border-color: rgba(251, 191, 36, 0.28);
+	}
+
+	.detail-hire-pill.unknown-hire {
+		background: rgba(100, 116, 139, 0.14);
+		color: #cbd5e1;
+		border-color: rgba(148, 163, 184, 0.2);
 	}
 
 	.detail-status-pill.online-pill {
@@ -4733,6 +5076,34 @@
 		background: rgba(59, 130, 246, 0.2);
 	}
 
+	.detail-dashboard-cta {
+		width: 100%;
+		min-height: 34px;
+		margin: 0 0 8px;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		padding: 0 12px;
+		border: 1px solid rgba(96, 165, 250, 0.22);
+		border-radius: 11px;
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.2), rgba(14, 165, 233, 0.08)),
+			rgba(15, 23, 42, 0.74);
+		color: #bfdbfe;
+		font-size: 10px;
+		font-weight: 900;
+		cursor: pointer;
+	}
+
+	.detail-dashboard-cta:hover {
+		border-color: rgba(147, 197, 253, 0.42);
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.28), rgba(14, 165, 233, 0.12)),
+			rgba(15, 23, 42, 0.86);
+		color: #eff6ff;
+	}
+
 	.detail-close-btn {
 		width: 28px;
 		background: rgba(255, 255, 255, 0.05);
@@ -4766,6 +5137,15 @@
 		margin-bottom: 7px;
 	}
 
+	.detail-time-stack {
+		display: flex;
+		flex: 0 0 auto;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 4px;
+		min-width: 0;
+	}
+
 	.detail-section h3 {
 		margin: 3px 0 0;
 		color: var(--text-primary);
@@ -4774,7 +5154,7 @@
 	}
 
 	.detail-updated-badge {
-		max-width: 132px;
+		max-width: 150px;
 		overflow: hidden;
 		padding: 4px 7px;
 		border: 1px solid rgba(255, 255, 255, 0.07);
@@ -4785,6 +5165,21 @@
 		font-weight: 800;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.detail-utc-badge {
+		padding: 4px 8px;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.18);
+		color: #bfdbfe;
+		font-size: 8px;
+		font-weight: 900;
+		letter-spacing: 0.08em;
+		line-height: 1;
+		text-transform: uppercase;
+		white-space: nowrap;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 	}
 
 	.detail-hero-metrics {
@@ -4841,6 +5236,32 @@
 		margin-top: 5px;
 		color: var(--text-primary);
 		font-size: 10px;
+	}
+
+	.connection-time-item.latest-connected {
+		border-color: rgba(34, 197, 94, 0.42);
+		background:
+			linear-gradient(145deg, rgba(34, 197, 94, 0.16), rgba(34, 197, 94, 0.045)),
+			rgba(255, 255, 255, 0.025);
+		box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.86);
+	}
+
+	.connection-time-item.latest-connected span,
+	.connection-time-item.latest-connected strong {
+		color: #bbf7d0;
+	}
+
+	.connection-time-item.latest-disconnected {
+		border-color: rgba(248, 113, 113, 0.44);
+		background:
+			linear-gradient(145deg, rgba(239, 68, 68, 0.16), rgba(239, 68, 68, 0.045)),
+			rgba(255, 255, 255, 0.025);
+		box-shadow: inset 3px 0 0 rgba(239, 68, 68, 0.88);
+	}
+
+	.connection-time-item.latest-disconnected span,
+	.connection-time-item.latest-disconnected strong {
+		color: #fecaca;
 	}
 
 	.voyage-progress-mini {
@@ -5160,6 +5581,10 @@
 			padding: 10px 13px 7px;
 		}
 
+		:global(.fleet-popup-coordinates) {
+			padding-inline: 13px;
+		}
+
 		:global(.fleet-popup-meta) {
 			padding-inline: 13px;
 		}
@@ -5191,6 +5616,12 @@
 			width: 30px;
 			justify-content: center;
 			padding: 0;
+		}
+
+		.detail-dashboard-cta {
+			min-height: 32px;
+			margin-top: 8px;
+			font-size: 9px;
 		}
 
 		.detail-panel-body {

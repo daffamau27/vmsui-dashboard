@@ -982,7 +982,7 @@ body .app-content .fleet-page .asset-leaflet-popup .leaflet-popup-content {
 }
 
 body .app-content .fleet-page .fleet-leaflet-popup .leaflet-popup-content {
-  width: 254px !important;
+  width: 300px !important;
   max-width: calc(100vw - 42px) !important;
   margin: 0 !important;
   overflow: hidden !important;
@@ -1014,6 +1014,267 @@ body .app-content .fleet-page :is(
   }
 
   body .app-content .fleet-page .fleet-leaflet-popup .leaflet-popup-content {
-    width: min(254px, calc(100vw - 42px)) !important;
+    width: min(300px, calc(100vw - 42px)) !important;
   }
+}
+
+/*
+ * Keep dense desktop screens readable.
+ * A 1920x1080 display usually exposes a viewport around this height, while
+ * 1920x1200 keeps the original, slightly denser typography.
+ */
+@media (min-width: 1280px) and (max-height: 1080px) {
+  body .app-content :is(input, select, textarea) {
+    font-size: 14px !important;
+  }
+
+  body .app-content label {
+    font-size: 13px !important;
+  }
+
+  body .app-content small {
+    font-size: 12px !important;
+  }
+
+  body .app-content :is(p, button) {
+    font-size: 14px !important;
+  }
+
+  body .app-content :is(
+    [class*="subtitle"],
+    [class*="description"],
+    [class*="helper"],
+    [class*="note"]
+  ) {
+    font-size: 13px !important;
+    line-height: 1.45 !important;
+  }
+
+  body .app-content :is(
+    [class*="meta"],
+    [class*="label"]
+  ) :is(span, small, p) {
+    font-size: 12px !important;
+    line-height: 1.35 !important;
+  }
+
+  body .app-content table :is(th, td) {
+    font-size: 14px !important;
+  }
+
+  body :is(
+    .side-item,
+    .side-label,
+    .main-sidebar-toggle,
+    .logout-btn
+  ) {
+    font-size: 13px !important;
+  }
+
+  body :is(
+    .alarm-count-badge,
+    .sidebar-mobile-header p,
+    .user-mini span
+  ) {
+    font-size: 12px !important;
+  }
+
+  body .app-content .vessel-shell :is(
+    .arrow,
+    .status-copy small,
+    .vessel-item-copy small
+  ) {
+    font-size: 12px !important;
+  }
+
+  body .app-content .vessel-shell :is(
+    .status-copy strong,
+    .dropdown-empty
+  ) {
+    font-size: 13px !important;
+  }
+
+  body .app-content .fleet-page {
+    font-size: 13px !important;
+  }
+
+  body .app-content .fleet-page :is(
+    .sidebar-header p,
+    .vessel-name-block p,
+    .mini-metric span,
+    .legend-item,
+    .detail-panel-header p,
+    .detail-section h3,
+    .detail-section-kicker,
+    .detail-item span,
+    .voyage-progress-meta span,
+    .empty-voyage,
+    .simple-row,
+    .ocean-current span,
+    .weather-card small,
+    .detail-status-pill,
+    .detail-dashboard-btn,
+    .detail-updated-badge,
+    .detail-hero-metric > small
+  ) {
+    font-size: 12px !important;
+    line-height: 1.35 !important;
+  }
+
+  body .app-content .fleet-page :is(
+    .stat-chip,
+    .mini-metric strong,
+    .detail-item strong,
+    .ocean-current strong,
+    .voyage-progress-mini-bottom,
+    .asset-toggle-btn,
+    .wind-toggle-btn,
+    .current-toggle-btn,
+    .measure-cancel-btn
+  ) {
+    font-size: 13px !important;
+  }
+
+  body .app-content .fleet-page :is(
+    .fleet-popup-eyebrow,
+    .fleet-popup-status,
+    .fleet-popup-metric > span,
+    .fleet-popup-metric > strong small,
+    .fleet-popup-meta .fleet-popup-row span,
+    .fleet-asset-popup-eyebrow,
+    .fleet-asset-popup-badge,
+    .fleet-asset-popup-coordinates span,
+    .measure-start-info span,
+    .measure-distance-label
+  ) {
+    font-size: 11.5px !important;
+    line-height: 1.3 !important;
+  }
+
+  body .app-content .fleet-page :is(
+    .fleet-popup-meta .fleet-popup-row strong,
+    .fleet-asset-popup-coordinates strong,
+    .measure-start-info strong,
+    .measure-start-btn,
+    .fleet-popup-actions .fleet-popup-detail-btn,
+    .fleet-popup-actions .fleet-popup-dashboard-btn
+  ) {
+    font-size: 13px !important;
+  }
+
+  body .app-content .fleet-page .fleet-asset-popup-heading > strong {
+    font-size: 14px !important;
+  }
+
+  body .app-content .dashboard-content :is(
+    .section-kicker,
+    .header-meta span,
+    .cctv-status-text,
+    .dashboard-map-status,
+    .info-label,
+    .environment-grid small,
+    .fod-usage-summary span
+  ) {
+    font-size: 13px !important;
+  }
+
+  body .app-content .dashboard-content :is(
+    .current-toggle-btn,
+    .wind-toggle-btn,
+    .dashboard-map-popup-row span
+  ) {
+    font-size: 12px !important;
+  }
+
+  body .app-content .dashboard-content .dashboard-map-popup-row strong {
+    font-size: 13px !important;
+  }
+}
+
+/*
+ * Typography weight normalization.
+ * A lot of legacy component styles used 800/900 everywhere, which made labels,
+ * values, buttons, and helper text all compete visually. Keep hierarchy, but
+ * cap most UI text to calmer weights across every screen.
+ */
+:root {
+  --font-weight-body: 500;
+  --font-weight-label: 600;
+  --font-weight-action: 600;
+  --font-weight-title: 700;
+}
+
+body {
+  font-weight: var(--font-weight-body);
+}
+
+body :is(.app-shell, .login-page, .login-card, .login-footer, .loading-screen) {
+  font-weight: var(--font-weight-body);
+}
+
+body :is(.app-shell, .login-page, .login-card, .login-footer, .loading-screen) :is(
+  p,
+  span,
+  small,
+  td,
+  li,
+  input,
+  select,
+  textarea,
+  option
+) {
+  font-weight: var(--font-weight-body) !important;
+}
+
+body :is(.app-shell, .login-page, .login-card, .login-footer, .loading-screen) :is(
+  label,
+  label > span,
+  th,
+  button,
+  button *,
+  [role='button'],
+  [role='button'] *,
+  a[class],
+  a[class] *,
+  [class*='btn'],
+  [class*='btn'] *,
+  [class*='button'],
+  [class*='button'] *,
+  [class*='tab'],
+  [class*='tab'] *,
+  [class*='badge'],
+  [class*='badge'] *,
+  [class*='pill'],
+  [class*='pill'] *,
+  [class*='chip'],
+  [class*='chip'] *,
+  [class*='kicker'],
+  [class*='eyebrow'],
+  [class*='label'],
+  [class*='status']
+) {
+  font-weight: var(--font-weight-label) !important;
+}
+
+body :is(.app-shell, .login-page, .login-card, .login-footer, .loading-screen) :is(
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  strong,
+  b,
+  [class*='title'],
+  [class*='title'] *,
+  [class*='heading'],
+  [class*='heading'] *,
+  [class*='name'],
+  [class*='name'] *,
+  [class*='value'],
+  [class*='value'] *,
+  [class*='amount'],
+  [class*='amount'] *
+) {
+  font-weight: var(--font-weight-title) !important;
 }

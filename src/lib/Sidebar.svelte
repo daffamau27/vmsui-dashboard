@@ -355,7 +355,7 @@
 			<span>{$currentUser?.email || 'Logged in'}</span>
 		</div>
 
-		<button type="button" class="logout-btn" onclick={openLogoutConfirm}> Logout </button>
+		<button type="button" class="logout-btn" onclick={openLogoutConfirm}></button>
 	</div>
 </aside>
 

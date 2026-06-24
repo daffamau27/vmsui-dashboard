@@ -2668,16 +2668,6 @@
 		<div class="status-box error-box">{vesselEnginesError}</div>
 	{/if}
 
-	<section class="data-received-card">
-		<span>Data Received</span>
-		<strong>
-			{dataReceivedStats?.received_minutes ?? dataReceivedStats?.received_slots ?? '-'}
-			of
-			{dataReceivedStats?.total_minutes ?? dataReceivedStats?.total_slots ?? '-'}
-			({dataReceivedStats?.percentage ?? '-'}%)
-		</strong>
-	</section>
-
 	<section class="summary-grid">
 		<article class="summary-card">
 			<span>Total Runtime</span>
@@ -2710,15 +2700,6 @@
 							: speedSummary?.avgSpeed !== undefined && speedSummary?.avgSpeed !== null
 								? `${formatNumber(speedSummary.avgSpeed, 2)} knot`
 								: '-'}
-				</strong>
-			</article>
-		{/if}
-
-		{#if canViewTravelDistanceTable}
-			<article class="summary-card">
-				<span>Total Distance</span>
-				<strong>
-					{totalDistanceNmForFuel > 0 ? `${formatNumber(totalDistanceNmForFuel, 3)} NM` : '-'}
 				</strong>
 			</article>
 		{/if}
@@ -3854,6 +3835,34 @@
 		font-weight: 900;
 	}
 
+	@media (min-width: 1101px) {
+		.summary-grid > .summary-card:nth-last-child(2):nth-child(4n),
+		.summary-grid > .summary-card:last-child:nth-child(4n + 1) {
+			grid-column: span 2;
+		}
+
+		.summary-grid > .summary-card:nth-last-child(2):nth-child(4n + 1),
+		.summary-grid > .summary-card:last-child:nth-child(4n + 2) {
+			grid-column: span 2;
+		}
+
+		.summary-grid > .summary-card:nth-last-child(3):nth-child(4n + 1) {
+			grid-column: span 2;
+		}
+
+		.summary-grid:has(> .summary-card:nth-child(5):last-child) {
+			grid-template-columns: repeat(6, minmax(0, 1fr));
+		}
+
+		.summary-grid:has(> .summary-card:nth-child(5):last-child) > .summary-card {
+			grid-column: span 2;
+		}
+
+		.summary-grid:has(> .summary-card:nth-child(5):last-child) > .summary-card:nth-last-child(-n + 2) {
+			grid-column: span 3;
+		}
+	}
+
 	.speed-detail-grid {
 		margin-top: 14px;
 		display: grid;
@@ -4808,6 +4817,10 @@
 	@media (max-width: 1100px) {
 		.summary-grid {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.summary-grid > .summary-card:last-child:nth-child(odd) {
+			grid-column: 1 / -1;
 		}
 
 		.speed-detail-grid {
