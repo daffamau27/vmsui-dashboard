@@ -10,8 +10,16 @@
 	} from '$lib/stores/selectedVessel.svelte.js';
 	import 'leaflet/dist/leaflet.css';
 	import { VMS_TILE_URL, VMS_TILE_OPTIONS } from '$lib/mapStyle.js';
+	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
+	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
+	import {
+		createCopyableCoordinateHtml,
+		handleCoordinateCopyClick
+	} from '$lib/utils/coordinateClipboard.js';
 
 	const PAGE_SIZE_OPTIONS = [10, 20, 50];
+	const ASSET_LEGEND_TYPES = ['anchor', 'buoy', 'dock', 'shipyard', 'mess', 'office', 'fso', 'rig', 'whp'];
 
 	export let vesselId = null;
 
@@ -19,6 +27,7 @@
 	let activeLoading = false;
 	let historyLoading = false;
 	let detailLoading = false;
+	let voyageActionLoading = '';
 	let errorMessage = '';
 	let successMessage = '';
 
@@ -63,6 +72,17 @@
 	$: averageSpeedKn = calculateAverageSpeed(routePoints);
 	$: routePointCount = routePoints.length;
 	$: activeStatusLabel = activeAssignment ? 'Assigned' : 'No Active Plan';
+	$: selectedProgress = getAssignmentProgress(selectedAssignment || activeAssignment);
+	$: checkpointSummary = getCheckpointSummary(routePoints);
+	$: isSelectedActiveAssignment =
+		Boolean(activeAssignment && selectedAssignment) &&
+		String(activeAssignment.id) === String(selectedAssignment.id) &&
+		!activeAssignment.endDate;
+	$: canEndActiveVoyage =
+		isSelectedActiveAssignment &&
+		routePointCount > 0 &&
+		checkpointSummary.pending === 0 &&
+		checkpointSummary.skipped === 0;
 
 	$: if (
 		canView &&
@@ -102,12 +122,16 @@
 			}
 
 			if (canView && selectedVesselId) {
-				await loadVesselVoyageData(1);
+				await loadVesselVoyageData(selectedVesselId, 1);
 			}
 		} catch (error) {
 			errorMessage = error.message;
 		} finally {
 			loading = false;
+			if (canView && selectedVesselId) {
+				await tick();
+				await initializeOrRefreshMap(true);
+			}
 		}
 	}
 
@@ -138,10 +162,26 @@
 			id: asset?.id,
 			assetId: asset?.assetId || '',
 			assetName: asset?.assetName || `Asset ${asset?.id || ''}`,
+			assetType: getAssetTypeValue(asset),
 			latitude,
 			longitude,
 			raw: asset
 		};
+	}
+
+	function createAssetMarkerIcon(asset) {
+		const iconUrl = getAssetIconUrl(asset);
+		const typeLabel = getAssetTypeLabel(asset);
+
+		return L.divIcon({
+			className: `asset-leaflet-icon asset-type-${String(typeLabel).toLowerCase()}`,
+			html: `
+            <img class="asset-type-marker-icon" src="${iconUrl}" alt="${escapeHtml(typeLabel)} asset" title="${escapeHtml(asset.assetName)}" />
+          `,
+			iconSize: [32, 32],
+			iconAnchor: [16, 16],
+			popupAnchor: [0, -16]
+		});
 	}
 
 	async function loadFleetAssets() {
@@ -193,26 +233,43 @@
 
 		assets.forEach((asset) => {
 			const marker = L.marker([asset.latitude, asset.longitude], {
-				icon: L.divIcon({
-					className: 'asset-leaflet-icon',
-					html: `
-            <div class="asset-marker-shell">
-              <div class="asset-marker-core"></div>
-            </div>
-          `,
-					iconSize: [22, 22],
-					iconAnchor: [11, 11]
-				})
+				icon: createAssetMarkerIcon(asset)
 			});
 
-			marker.bindPopup(`
-        <div class="asset-popup">
-          <strong>${escapeHtml(asset.assetName)}</strong>
-          <span>ID: ${escapeHtml(asset.id ?? '-')}</span>
-          <span>Lat: ${escapeHtml(asset.latitude)}</span>
-          <span>Lng: ${escapeHtml(asset.longitude)}</span>
-        </div>
-      `);
+			marker.bindPopup(
+				`
+					<div class="asset-popup route-asset-popup">
+						<div class="map-popup-hero">
+							<div class="map-popup-icon">
+								<img src="${getAssetIconUrl(asset)}" alt="${escapeHtml(getAssetTypeLabel(asset))} icon" />
+							</div>
+							<div class="map-popup-heading">
+								<span>Fleet Asset</span>
+								<strong>${escapeHtml(asset.assetName)}</strong>
+							</div>
+							<em>${escapeHtml(getAssetTypeLabel(asset))}</em>
+						</div>
+
+						<div class="map-popup-body">
+							<div class="popup-info-row">
+								<span>Asset ID</span>
+								<strong>${escapeHtml(asset.id ?? '-')}</strong>
+							</div>
+							<div class="popup-info-row coordinate-row">
+								<span>Latitude</span>
+								<div class="popup-coordinate-value">${createCopyableCoordinateHtml(asset.latitude, 'asset latitude')}</div>
+							</div>
+							<div class="popup-info-row coordinate-row">
+								<span>Longitude</span>
+								<div class="popup-coordinate-value">${createCopyableCoordinateHtml(asset.longitude, 'asset longitude')}</div>
+							</div>
+						</div>
+					</div>
+				`,
+				{
+					className: 'voyage-vessel-map-popup'
+				}
+			);
 
 			marker.addTo(assetMarkerLayer);
 		});
@@ -404,7 +461,10 @@
 			});
 
 			activeAssignment = result?.data || null;
-			if (!selectedAssignment && activeAssignment) {
+			if (
+				activeAssignment &&
+				(!selectedAssignment || String(selectedAssignment.id) === String(activeAssignment.id))
+			) {
 				selectedAssignment = activeAssignment;
 				selectedHistoryId = activeAssignment.id;
 			}
@@ -475,17 +535,115 @@
 		initializeOrRefreshMap(true);
 	}
 
+	async function refreshSelectedVoyageData() {
+		if (!selectedVesselId) return;
+		await loadVesselVoyageData(selectedVesselId, page);
+	}
+
+	function isCheckpointActionable(point) {
+		const status = String(point?.status || '').toUpperCase();
+		return isSelectedActiveAssignment && !['COMPLETED', 'MANUAL_COMPLETED'].includes(status);
+	}
+
+	async function cancelActiveVoyageAssignment() {
+		if (!selectedVesselId || !activeAssignment) return;
+		if (browser && !window.confirm('Cancel the active voyage assignment for this vessel?')) return;
+
+		voyageActionLoading = 'cancel-active';
+		clearMessages();
+
+		try {
+			const result = await apiFetch(`/voyage-plans/vessels/${selectedVesselId}/active`, {
+				method: 'DELETE'
+			});
+
+			successMessage = result?.message || 'Active voyage assignment canceled successfully.';
+			activeAssignment = null;
+			selectedAssignment = null;
+			selectedHistoryId = null;
+			await refreshSelectedVoyageData();
+		} catch (error) {
+			errorMessage = error.message;
+		} finally {
+			voyageActionLoading = '';
+		}
+	}
+
+	async function completeCheckpointManually(order) {
+		if (!selectedVesselId || !order) return;
+		if (browser && !window.confirm(`Mark checkpoint ${order} as manually completed?`)) return;
+
+		voyageActionLoading = `complete-${order}`;
+		clearMessages();
+
+		try {
+			const result = await apiFetch(
+				`/voyage-plans/vessels/${selectedVesselId}/active/checkpoints/${order}/complete`,
+				{
+					method: 'PATCH',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ reachedAt: new Date().toISOString() })
+				}
+			);
+
+			successMessage = result?.message || `Checkpoint ${order} completed successfully.`;
+			await refreshSelectedVoyageData();
+		} catch (error) {
+			errorMessage = error.message;
+		} finally {
+			voyageActionLoading = '';
+		}
+	}
+
+	async function endActiveVoyageAssignment() {
+		if (!selectedVesselId || !activeAssignment) return;
+		if (browser && !window.confirm('End the active voyage assignment for this vessel?')) return;
+
+		voyageActionLoading = 'end-active';
+		clearMessages();
+
+		try {
+			const result = await apiFetch(`/voyage-plans/vessels/${selectedVesselId}/active/end`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ endDate: new Date().toISOString() })
+			});
+
+			successMessage = result?.message || 'Active voyage assignment ended successfully.';
+			activeAssignment = null;
+			selectedAssignment = null;
+			selectedHistoryId = null;
+			await refreshSelectedVoyageData();
+		} catch (error) {
+			errorMessage = error.message;
+		} finally {
+			voyageActionLoading = '';
+		}
+	}
+
 	function normalizeRoutePoints(points = []) {
 		return points
-			.map((point, index) => ({
-				order: Number(point?.order || index + 1),
-				latitude: Number(point?.latitude),
-				longitude: Number(point?.longitude),
-				speed_kn:
-					point?.speed_kn === null || point?.speed_kn === undefined || point?.speed_kn === ''
+			.map((point, index) => {
+				const averageSpeed =
+					point?.average_speed === null ||
+					point?.average_speed === undefined ||
+					point?.average_speed === ''
 						? null
-						: Number(point.speed_kn)
-			}))
+						: Number(point.average_speed);
+
+				return {
+					order: Number(point?.order || index + 1),
+					latitude: Number(point?.latitude ?? point?.lat),
+					longitude: Number(point?.longitude ?? point?.lon ?? point?.lng),
+					speed_kn:
+						point?.speed_kn === null || point?.speed_kn === undefined || point?.speed_kn === ''
+							? null
+							: Number(point.speed_kn),
+					status: String(point?.status || 'PENDING').toUpperCase(),
+					reachedAt: point?.reached_at ?? point?.reachedAt ?? null,
+					average_speed: Number.isFinite(averageSpeed) ? averageSpeed : null
+				};
+			})
 			.filter(
 				(point) =>
 					Number.isFinite(point.latitude) &&
@@ -496,6 +654,46 @@
 					point.longitude <= 180
 			)
 			.sort((a, b) => a.order - b.order);
+	}
+
+	function getAssignmentProgress(assignment) {
+		const progress = Number(
+			assignment?.progress_percentage ?? assignment?.progressPercentage ?? assignment?.percentage
+		);
+
+		return Number.isFinite(progress) ? Math.max(0, Math.min(100, progress)) : 0;
+	}
+
+	function getCheckpointSummary(points = []) {
+		const total = points.length;
+		const completed = points.filter((point) =>
+			['COMPLETED', 'MANUAL_COMPLETED'].includes(String(point.status || '').toUpperCase())
+		).length;
+		const skipped = points.filter(
+			(point) => String(point.status || '').toUpperCase() === 'SKIPPED'
+		).length;
+		const pending = points.filter(
+			(point) => String(point.status || '').toUpperCase() === 'PENDING'
+		).length;
+
+		return { total, completed, skipped, pending };
+	}
+
+	function formatCheckpointStatus(status) {
+		const normalized = String(status || 'PENDING').toUpperCase();
+		return normalized
+			.toLowerCase()
+			.split('_')
+			.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+			.join(' ');
+	}
+
+	function getCheckpointStatusClass(status) {
+		const normalized = String(status || 'PENDING').toUpperCase();
+		if (normalized === 'COMPLETED') return 'status-completed';
+		if (normalized === 'MANUAL_COMPLETED') return 'status-manual';
+		if (normalized === 'SKIPPED') return 'status-skipped';
+		return 'status-pending';
 	}
 
 	async function ensureLeaflet() {
@@ -535,6 +733,7 @@
 
 			assetMarkerLayer = leaflet.layerGroup().addTo(routeMap);
 			markerLayer = leaflet.layerGroup().addTo(routeMap);
+			mapContainer.addEventListener('click', handleCoordinateCopyClick, true);
 
 			routeLine = leaflet
 				.polyline([], {
@@ -569,16 +768,56 @@
 			const marker = L.marker([point.latitude, point.longitude], {
 				icon: L.divIcon({
 					className: '',
-					html: `<div class="route-marker ${index === 0 ? 'start' : ''} ${index === points.length - 1 ? 'finish' : ''}">${point.order}</div>`,
+					html: `<div class="route-marker ${index === 0 ? 'start' : ''} ${index === points.length - 1 ? 'finish' : ''} ${getCheckpointStatusClass(point.status)}">${point.order}</div>`,
 					iconSize: [30, 30],
 					iconAnchor: [15, 15]
 				})
 			});
 
 			const speedText = Number.isFinite(point.speed_kn) ? `${point.speed_kn} kn` : '-';
-			marker.bindTooltip(
-				`<b>Point ${point.order}</b><br>Lat: ${point.latitude}<br>Lng: ${point.longitude}<br>Speed: ${speedText}`,
-				{ direction: 'top', offset: [0, -10] }
+			const averageSpeedText = Number.isFinite(point.average_speed)
+				? `${point.average_speed.toFixed(2)} kn`
+				: '-';
+			marker.bindTooltip(`Point ${point.order}`, { direction: 'top', offset: [0, -10] });
+			marker.bindPopup(
+				`
+					<div class="route-point-popup">
+						<div class="map-popup-hero">
+							<div class="route-popup-icon">${point.order}</div>
+							<div class="map-popup-heading">
+								<span>Route Checkpoint</span>
+								<strong>Point ${point.order}</strong>
+							</div>
+							<em class="${getCheckpointStatusClass(point.status)}">${formatCheckpointStatus(point.status)}</em>
+						</div>
+
+						<div class="map-popup-body">
+							<div class="popup-info-row coordinate-row">
+								<span>Latitude</span>
+								<div class="popup-coordinate-value">${createCopyableCoordinateHtml(point.latitude, 'point latitude')}</div>
+							</div>
+							<div class="popup-info-row coordinate-row">
+								<span>Longitude</span>
+								<div class="popup-coordinate-value">${createCopyableCoordinateHtml(point.longitude, 'point longitude')}</div>
+							</div>
+							<div class="popup-info-row">
+								<span>Planned Speed</span>
+								<strong>${speedText}</strong>
+							</div>
+							<div class="popup-info-row">
+								<span>Actual Avg Speed</span>
+								<strong>${averageSpeedText}</strong>
+							</div>
+							<div class="popup-info-row">
+								<span>Reached At</span>
+								<strong>${formatDate(point.reachedAt)}</strong>
+							</div>
+						</div>
+					</div>
+				`,
+				{
+					className: 'voyage-vessel-map-popup'
+				}
 			);
 			marker.addTo(markerLayer);
 		});
@@ -596,6 +835,10 @@
 	}
 
 	function destroyRouteMap() {
+		if (mapContainer) {
+			mapContainer.removeEventListener('click', handleCoordinateCopyClick, true);
+		}
+
 		if (routeMap) {
 			routeMap.off();
 			routeMap.remove();
@@ -702,7 +945,7 @@
 	{/if}
 
 	{#if loading}
-		<div class="status-box">Loading vessel voyage plan page...</div>
+		<LoadingSkeleton label="Loading vessel voyage plan page" variant="voyage-plan-vessel" />
 	{:else if !canView}
 		<div class="status-box error-box">
 			This user does not have the required permission: <b>view_voyage_plan_vessel</b>.
@@ -717,6 +960,14 @@
 			<article class="summary-card">
 				<span>Route Points</span>
 				<strong>{routePointCount}</strong>
+			</article>
+
+			<article class="summary-card progress-summary-card">
+				<span>Progress</span>
+				<strong>{formatNumber(selectedProgress, 2, '%')}</strong>
+				<div class="progress-track">
+					<i style={`width: ${selectedProgress}%`}></i>
+				</div>
 			</article>
 
 			<article class="summary-card">
@@ -756,12 +1007,62 @@
 				<div class="map-shell">
 					<div class="route-map" bind:this={mapContainer}></div>
 
+					{#if activeLoading || detailLoading || assetsLoading}
+						<div class="map-loading-overlay">
+							<LoadingSkeleton label="Loading route map data" variant="voyage-route-map" compact />
+						</div>
+					{/if}
+
 					{#if !routePointCount}
 						<div class="map-empty">
 							<strong>No route data</strong>
 							<span>Select a vessel or history item that has route points.</span>
 						</div>
 					{/if}
+				</div>
+
+				<div class="route-map-legend" aria-label="Route map legend">
+					<div class="legend-group">
+						<span class="legend-title">Route</span>
+						<span class="legend-item">
+							<i class="legend-route-dot start"></i>
+							Start
+						</span>
+						<span class="legend-item">
+							<i class="legend-route-dot pending"></i>
+							Pending
+						</span>
+						<span class="legend-item">
+							<i class="legend-route-dot completed"></i>
+							Completed
+						</span>
+						<span class="legend-item">
+							<i class="legend-route-dot manual"></i>
+							Manual
+						</span>
+						<span class="legend-item">
+							<i class="legend-route-dot skipped"></i>
+							Skipped
+						</span>
+						<span class="legend-item">
+							<i class="legend-route-dot finish"></i>
+							Finish
+						</span>
+					</div>
+
+					<div class="legend-group">
+						<span class="legend-title">Assets</span>
+						{#each ASSET_LEGEND_TYPES as assetType}
+							<span class="legend-item asset-legend-item">
+								<img
+									class="legend-asset-icon"
+									src={getAssetIconUrl(assetType)}
+									alt={`${getAssetTypeLabel(assetType)} icon`}
+								/>
+								{getAssetTypeLabel(assetType)}
+							</span>
+						{/each}
+					</div>
 				</div>
 			</section>
 
@@ -774,6 +1075,9 @@
 				</div>
 
 				{#if selectedAssignment}
+					{#if detailLoading}
+						<LoadingSkeleton label="Loading assignment detail" variant="voyage-assignment-detail" compact />
+					{/if}
 					<div class="detail-list">
 						<div><span>Assignment ID</span><strong>#{selectedAssignment.id}</strong></div>
 						<div>
@@ -791,7 +1095,48 @@
 						<div>
 							<span>Assigned By</span><strong>{getAssignmentUser(selectedAssignment)}</strong>
 						</div>
+						<div>
+							<span>Progress</span><strong>{formatNumber(selectedProgress, 2, '%')}</strong>
+						</div>
+						<div>
+							<span>Checkpoints</span>
+							<strong>
+								{checkpointSummary.completed} completed · {checkpointSummary.skipped} skipped ·
+								{checkpointSummary.pending} pending
+							</strong>
+						</div>
 					</div>
+
+					{#if isSelectedActiveAssignment}
+						<div class="assignment-actions">
+							<button
+								type="button"
+								class="danger-button"
+								on:click={cancelActiveVoyageAssignment}
+								disabled={Boolean(voyageActionLoading)}
+							>
+								{voyageActionLoading === 'cancel-active' ? 'Canceling...' : 'Cancel Active Assignment'}
+							</button>
+
+							<button
+								type="button"
+								class="primary-button"
+								on:click={endActiveVoyageAssignment}
+								disabled={Boolean(voyageActionLoading) || !canEndActiveVoyage}
+								title={canEndActiveVoyage
+									? 'End active voyage assignment'
+									: 'All checkpoints must be completed before ending the voyage'}
+							>
+								{voyageActionLoading === 'end-active' ? 'Ending...' : 'End Active Voyage'}
+							</button>
+						</div>
+
+						{#if !canEndActiveVoyage}
+							<p class="action-note">
+								Complete all pending/skipped checkpoints before ending this voyage.
+							</p>
+						{/if}
+					{/if}
 				{:else}
 					<div class="empty-box">No assignment has been selected.</div>
 				{/if}
@@ -814,18 +1159,54 @@
 						<thead>
 							<tr>
 								<th>Order</th>
+								<th>Status</th>
 								<th>Latitude</th>
 								<th>Longitude</th>
-								<th>Speed (kn)</th>
+								<th>Planned Speed</th>
+								<th>Actual Avg Speed</th>
+								<th>Reached At</th>
+								<th class="right">Action</th>
 							</tr>
 						</thead>
 						<tbody>
 							{#each routePoints as point}
 								<tr>
 									<td>{point.order}</td>
-									<td>{point.latitude}</td>
-									<td>{point.longitude}</td>
-									<td>{Number.isFinite(point.speed_kn) ? point.speed_kn : '-'}</td>
+									<td>
+										<span class={`checkpoint-status ${getCheckpointStatusClass(point.status)}`}>
+											{formatCheckpointStatus(point.status)}
+										</span>
+									</td>
+									<td>
+										<CopyableCoordinate value={point.latitude} display={point.latitude} label="latitude" compact />
+									</td>
+									<td>
+										<CopyableCoordinate
+											value={point.longitude}
+											display={point.longitude}
+											label="longitude"
+											compact
+										/>
+									</td>
+									<td>{Number.isFinite(point.speed_kn) ? `${point.speed_kn} kn` : '-'}</td>
+									<td>
+										{Number.isFinite(point.average_speed) ? `${point.average_speed.toFixed(2)} kn` : '-'}
+									</td>
+									<td>{formatDate(point.reachedAt)}</td>
+									<td class="right">
+										{#if isCheckpointActionable(point)}
+											<button
+												type="button"
+												class="table-action-btn"
+												on:click={() => completeCheckpointManually(point.order)}
+												disabled={Boolean(voyageActionLoading)}
+											>
+												{voyageActionLoading === `complete-${point.order}` ? 'Completing...' : 'Complete'}
+											</button>
+										{:else}
+											<span class="muted-action">-</span>
+										{/if}
+									</td>
 								</tr>
 							{/each}
 						</tbody>
@@ -847,6 +1228,9 @@
 			</div>
 
 			{#if historyItems.length}
+				{#if historyLoading}
+					<LoadingSkeleton label="Loading voyage plan history" variant="voyage-history-table" />
+				{/if}
 				<div class="table-wrap">
 					<table>
 						<thead>
@@ -1120,6 +1504,16 @@
 		background: #1d4ed8;
 	}
 
+	.danger-button {
+		background: var(--color-danger-muted);
+		color: #b91c1c;
+	}
+
+	.danger-button:hover:not(:disabled) {
+		background: #fecaca;
+		color: #991b1b;
+	}
+
 	.status-box {
 		margin-top: 14px;
 		padding: 10px 12px;
@@ -1147,7 +1541,7 @@
 
 	.summary-grid {
 		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 		gap: 14px;
 		margin-top: 14px;
 	}
@@ -1166,6 +1560,28 @@
 		line-height: 1.2;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.progress-summary-card {
+		display: grid;
+		align-content: start;
+	}
+
+	.progress-track {
+		width: 100%;
+		height: 8px;
+		overflow: hidden;
+		margin-top: 10px;
+		border-radius: 999px;
+		background: rgba(148, 163, 184, 0.22);
+	}
+
+	.progress-track i {
+		display: block;
+		height: 100%;
+		border-radius: inherit;
+		background: linear-gradient(90deg, #2563eb 0%, #14b8a6 100%);
+		box-shadow: 0 0 14px rgba(37, 99, 235, 0.22);
 	}
 
 	.main-grid {
@@ -1285,6 +1701,15 @@
 		min-height: 460px;
 	}
 
+	.map-loading-overlay {
+		position: absolute;
+		right: 14px;
+		bottom: 14px;
+		z-index: 650;
+		width: min(360px, calc(100% - 28px));
+		pointer-events: none;
+	}
+
 	.map-empty {
 		position: absolute;
 		inset: 0;
@@ -1303,6 +1728,82 @@
 		color: var(--text-primary);
 		font-size: 16px;
 		font-weight: 900;
+	}
+
+	.route-map-legend {
+		display: grid;
+		gap: 8px;
+		margin-top: 10px;
+		padding: 10px 12px;
+		border: 1px solid rgba(148, 163, 184, 0.2);
+		border-radius: 12px;
+		background: var(--color-elevated);
+		color: var(--text-primary);
+	}
+
+	.legend-group {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 7px;
+		min-width: 0;
+	}
+
+	.legend-title {
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 900;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+
+	.legend-item {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		min-height: 24px;
+		padding: 4px 8px;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		border-radius: 999px;
+		background: var(--color-surface);
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 800;
+		line-height: 1;
+		white-space: nowrap;
+	}
+
+	.legend-route-dot {
+		width: 12px;
+		height: 12px;
+		border: 2px solid #ffffff;
+		border-radius: 999px;
+		background: #2563eb;
+		box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.18);
+	}
+
+	.legend-route-dot.start,
+	.legend-route-dot.completed {
+		background: #16a34a;
+	}
+
+	.legend-route-dot.manual {
+		background: #14b8a6;
+	}
+
+	.legend-route-dot.skipped {
+		background: #f59e0b;
+	}
+
+	.legend-route-dot.finish {
+		background: #ef4444;
+	}
+
+	.legend-asset-icon {
+		width: 18px;
+		height: 18px;
+		object-fit: contain;
+		filter: drop-shadow(0 2px 4px rgba(15, 23, 42, 0.25));
 	}
 
 	.detail-list {
@@ -1325,6 +1826,27 @@
 		font-weight: 900;
 		line-height: 1.35;
 		word-break: break-word;
+	}
+
+	.assignment-actions {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-top: 12px;
+	}
+
+	.assignment-actions button {
+		flex: 1 1 180px;
+		justify-content: center;
+	}
+
+	.action-note {
+		margin-top: 8px;
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 700;
+		line-height: 1.45;
 	}
 
 	.table-wrap {
@@ -1385,12 +1907,57 @@
 		text-align: right;
 	}
 
+	.checkpoint-status {
+		display: inline-flex;
+		align-items: center;
+		min-height: 24px;
+		padding: 4px 8px;
+		border: 1px solid rgba(148, 163, 184, 0.24);
+		border-radius: 999px;
+		background: rgba(148, 163, 184, 0.12);
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 900;
+		line-height: 1;
+		text-transform: uppercase;
+	}
+
+	.checkpoint-status.status-completed {
+		border-color: rgba(34, 197, 94, 0.34);
+		background: rgba(34, 197, 94, 0.12);
+		color: #047857;
+	}
+
+	.checkpoint-status.status-manual {
+		border-color: rgba(20, 184, 166, 0.36);
+		background: rgba(20, 184, 166, 0.12);
+		color: #0f766e;
+	}
+
+	.checkpoint-status.status-skipped {
+		border-color: rgba(245, 158, 11, 0.38);
+		background: rgba(245, 158, 11, 0.12);
+		color: #92400e;
+	}
+
+	.checkpoint-status.status-pending {
+		border-color: rgba(96, 165, 250, 0.34);
+		background: rgba(96, 165, 250, 0.12);
+		color: #1d4ed8;
+	}
+
 	.table-action-btn {
 		height: 28px;
 		min-height: 28px;
 		padding: 0 10px;
 		font-size: 10px;
 		line-height: 28px;
+	}
+
+	.muted-action {
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 800;
 	}
 
 	.pagination-bar {
@@ -1442,36 +2009,97 @@
 		background: #ef4444;
 	}
 
+	:global(.route-marker.status-completed) {
+		background: #16a34a;
+	}
+
+	:global(.route-marker.status-manual) {
+		background: #14b8a6;
+	}
+
+	:global(.route-marker.status-skipped) {
+		background: #f59e0b;
+	}
+
+	:global(.route-marker.status-pending) {
+		background: #2563eb;
+	}
+
+	:global(.route-marker.finish.status-pending) {
+		background: #2563eb;
+	}
+
 	:global(.asset-leaflet-icon) {
 		background: transparent;
 		border: none;
 	}
 
-	:global(.asset-marker-shell) {
-		width: 22px;
-		height: 22px;
-		display: grid;
-		place-items: center;
-		border: 2px solid #f59e0b;
-		border-radius: 999px;
-		background: rgba(17, 24, 39, 0.94);
-		box-shadow:
-			0 0 0 4px rgba(245, 158, 11, 0.16),
-			0 5px 10px rgba(15, 23, 42, 0.16);
+	:global(.asset-type-marker-icon) {
+		width: 32px;
+		height: 32px;
+		object-fit: contain;
+		filter: drop-shadow(0 4px 8px rgba(15, 23, 42, 0.35));
 	}
 
-	:global(.asset-marker-core) {
-		width: 9px;
-		height: 9px;
-		border-radius: 999px;
-		background: #f59e0b;
-		color: transparent;
+	:global(.voyage-vessel-page .leaflet-popup-content-wrapper),
+	:global(.voyage-vessel-map-popup .leaflet-popup-content-wrapper) {
+		overflow: hidden;
+		border: 1px solid rgba(96, 165, 250, 0.22);
+		border-radius: 14px;
+		background: #0f172a !important;
+		color: #f8fafc !important;
+		box-shadow: 0 18px 42px rgba(15, 23, 42, 0.38);
 	}
 
-	:global(.asset-popup) {
+	:global(.voyage-vessel-map-popup .leaflet-popup-content-wrapper) {
+		width: 315px;
+		max-width: 78vw;
+	}
+
+	:global(.asset-popup),
+	:global(.route-point-popup) {
+		width: min(315px, 78vw);
+	}
+
+	:global(.voyage-vessel-page .leaflet-popup-content),
+	:global(.voyage-vessel-map-popup .leaflet-popup-content) {
+		margin: 0;
+		color: #f8fafc !important;
+	}
+
+	:global(.voyage-vessel-page .leaflet-popup-tip),
+	:global(.voyage-vessel-map-popup .leaflet-popup-tip) {
+		background: #0f172a !important;
+		border: 1px solid rgba(96, 165, 250, 0.22);
+		box-shadow: 0 10px 22px rgba(15, 23, 42, 0.24);
+	}
+
+	:global(.voyage-vessel-page .leaflet-popup-close-button),
+	:global(.voyage-vessel-map-popup .leaflet-popup-close-button) {
+		top: 10px;
+		right: 12px;
+		width: 24px;
+		height: 24px;
+		border-radius: 999px;
+		background: rgba(30, 41, 59, 0.92);
+		color: #cbd5e1 !important;
+		font-size: 16px;
+		line-height: 22px;
+	}
+
+	:global(.voyage-vessel-page .leaflet-popup-close-button:hover),
+	:global(.voyage-vessel-map-popup .leaflet-popup-close-button:hover) {
+		background: rgba(59, 130, 246, 0.28);
+		color: #ffffff !important;
+	}
+
+	:global(.asset-popup),
+	:global(.route-point-popup) {
 		display: grid;
-		gap: 4px;
-		min-width: 150px;
+		width: min(310px, 78vw);
+		overflow: hidden;
+		border-radius: 14px;
+		background: #0f172a;
 		font-family:
 			Inter,
 			ui-sans-serif,
@@ -1482,16 +2110,160 @@
 			sans-serif;
 	}
 
-	:global(.asset-popup strong) {
-		color: var(--text-primary);
+	:global(.map-popup-hero) {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 10px;
+		padding: 14px 52px 13px 16px;
+		background:
+			radial-gradient(circle at top left, rgba(37, 99, 235, 0.28), transparent 52%),
+			linear-gradient(135deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98));
+		border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+	}
+
+	:global(.map-popup-icon),
+	:global(.route-popup-icon) {
+		width: 38px;
+		height: 38px;
+		display: grid;
+		place-items: center;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 13px;
+		background: rgba(37, 99, 235, 0.14);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+	}
+
+	:global(.map-popup-icon img) {
+		width: 27px;
+		height: 27px;
+		object-fit: contain;
+		filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.28));
+	}
+
+	:global(.route-popup-icon) {
+		color: #dbeafe;
 		font-size: 13px;
 		font-weight: 900;
 	}
 
-	:global(.asset-popup span) {
-		color: var(--text-secondary);
+	:global(.map-popup-heading) {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	:global(.map-popup-heading span) {
+		color: #60a5fa;
+		font-size: 10px;
+		font-weight: 900;
+		letter-spacing: 0.1em;
+		line-height: 1;
+		text-transform: uppercase;
+	}
+
+	:global(.asset-popup strong),
+	:global(.route-point-popup strong) {
+		color: #f8fafc;
+		font-size: 14px;
+		font-weight: 900;
+		line-height: 1.15;
+	}
+
+	:global(.map-popup-heading strong) {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	:global(.map-popup-hero em) {
+		max-width: 96px;
+		overflow: hidden;
+		padding: 5px 8px;
+		border: 1px solid rgba(96, 165, 250, 0.26);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.16);
+		color: #bfdbfe;
+		font-size: 10px;
+		font-style: normal;
+		font-weight: 900;
+		line-height: 1;
+		text-overflow: ellipsis;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+
+	:global(.map-popup-hero em.status-completed) {
+		border-color: rgba(34, 197, 94, 0.34);
+		background: rgba(34, 197, 94, 0.14);
+		color: #86efac;
+	}
+
+	:global(.map-popup-hero em.status-manual) {
+		border-color: rgba(20, 184, 166, 0.36);
+		background: rgba(20, 184, 166, 0.14);
+		color: #99f6e4;
+	}
+
+	:global(.map-popup-hero em.status-skipped) {
+		border-color: rgba(245, 158, 11, 0.36);
+		background: rgba(245, 158, 11, 0.14);
+		color: #fde68a;
+	}
+
+	:global(.map-popup-body) {
+		display: grid;
+		gap: 7px;
+		padding: 11px 14px 14px;
+	}
+
+	:global(.popup-info-row) {
+		display: grid;
+		grid-template-columns: minmax(82px, 0.8fr) minmax(0, 1.2fr);
+		align-items: center;
+		gap: 10px;
+		min-height: 36px;
+		padding: 9px 14px;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 12px;
+		background: rgba(30, 41, 59, 0.74);
+	}
+
+	:global(.popup-info-row > span) {
+		color: #cbd5e1;
+		font-size: 10px;
+		font-weight: 900;
+		letter-spacing: 0.05em;
+		line-height: 1.35;
+		text-transform: uppercase;
+	}
+
+	:global(.popup-info-row > strong),
+	:global(.popup-coordinate-value),
+	:global(.coordinate-copy-inline strong) {
+		min-width: 0;
+		color: #f8fafc;
 		font-size: 12px;
-		font-weight: 700;
+		font-weight: 850;
+		line-height: 1.2;
+		text-align: right;
+	}
+
+	:global(.popup-coordinate-value .coordinate-copy-inline) {
+		width: 100%;
+		display: inline-flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 7px;
+	}
+
+	:global(.asset-popup .copy-coordinate-button),
+	:global(.route-point-popup .copy-coordinate-button),
+	:global(.asset-popup button),
+	:global(.route-point-popup button) {
+		border-color: rgba(96, 165, 250, 0.34);
+		background: rgba(37, 99, 235, 0.18);
+		color: #bfdbfe;
 	}
 
 	:global(.leaflet-container) {
@@ -1530,7 +2302,6 @@
 
 		.header-meta,
 		.filter-actions,
-		.filter-actions button,
 		.header-refresh-button {
 			width: 100%;
 			text-align: left;

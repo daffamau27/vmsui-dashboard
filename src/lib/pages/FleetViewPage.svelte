@@ -5,9 +5,15 @@
 	import { setSelectedVessel } from '$lib/stores/selectedVessel.svelte.js';
 	import { activeMenu, setActiveMenu } from '$lib/stores/appNavigation.svelte.js';
 	import { VMS_TILE_URL, VMS_TILE_OPTIONS } from '$lib/mapStyle.js';
+	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
+	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
+	import {
+		createCopyableCoordinateHtml,
+		handleCoordinateCopyClick
+	} from '$lib/utils/coordinateClipboard.js';
 
 	const vesselMarkerUrl = '/assets/vessel-marker.svg';
-
 
 	let vesselData = $state([]);
 	let fleetLoading = $state(false);
@@ -25,15 +31,17 @@
 	let assetLoading = $state(false);
 	let assetError = $state('');
 	let showAssets = $state(true);
+	let isMapLegendOpen = $state(true);
 	let assetMarkers = new Map();
 	let assetBoundaryCircles = new Map();
 
 	let ignoreNextPopupCloseForVesselId = null;
 	let openingDetailFromPopupForVesselId = null;
 
-	let isMobileSidebarOpen = $state(false);
+	let isSidebarOpen = $state(true);
 
 	let mapContainer;
+	let vesselListContainer;
 	let map = null;
 	let L = null;
 	let markers = new Map();
@@ -142,6 +150,14 @@
 			online: Boolean(vessel.online),
 			hireStatus: vessel.hireStatus ?? '-',
 			companyName: vessel.companyName ?? '-',
+			timezone:
+				vessel.timezone ??
+				vessel.timeZone ??
+				vessel.timezoneMode ??
+				vessel.utc ??
+				vessel.utcOffset ??
+				vessel.utc_offset ??
+				'UTC+07:00',
 			engines: Array.isArray(vessel.engines) ? vessel.engines : [],
 			liveEngines: Array.isArray(vessel.engines) ? vessel.engines : []
 		};
@@ -155,7 +171,8 @@
 			id,
 			name: asset.assetName ?? asset.name ?? '-',
 			assetName: asset.assetName ?? asset.name ?? '-',
-			type: asset.type ?? 'Asset',
+			assetType: getAssetTypeValue(asset),
+			type: getAssetTypeValue(asset) || 'Asset',
 			lat: asset.latitude ?? asset.lat,
 			lng: asset.longitude ?? asset.lng
 		};
@@ -163,6 +180,24 @@
 
 	let onlineCount = $derived(vesselData.filter((v) => v.online).length);
 	let offlineCount = $derived(vesselData.filter((v) => !v.online).length);
+	let assetLegendItems = $derived.by(() => {
+		const items = new Map();
+
+		for (const asset of assetData) {
+			const label = getAssetTypeLabel(asset);
+			const key = String(label || 'Asset').toLowerCase();
+
+			if (!items.has(key)) {
+				items.set(key, {
+					key,
+					label,
+					iconUrl: getAssetIconUrl(asset)
+				});
+			}
+		}
+
+		return Array.from(items.values()).sort((a, b) => a.label.localeCompare(b.label));
+	});
 
 	function mergeVesselWithLiveDetail(vessel, liveDetail) {
 		if (!vessel && !liveDetail) return null;
@@ -409,7 +444,15 @@
 	function getUtcLabel(value) {
 		if (!value || value === '-') return null;
 
-		const match = String(value).match(/\bUTC\s*([+-]\d{1,2})(?::?(\d{2}))?/i);
+		const text = String(value).trim();
+
+		if (/^Asia\/Jakarta$/i.test(text) || /^WIB$/i.test(text)) return 'UTC+07:00';
+		if (/^Asia\/Makassar$/i.test(text) || /^WITA$/i.test(text)) return 'UTC+08:00';
+		if (/^Asia\/Jayapura$/i.test(text) || /^WIT$/i.test(text)) return 'UTC+09:00';
+
+		const match =
+			text.match(/\bUTC\s*([+-]\d{1,2})(?::?(\d{2}))?/i) ||
+			text.match(/^([+-]\d{1,2})(?::?(\d{2}))?$/);
 		if (!match) return null;
 
 		const rawHour = match[1];
@@ -425,7 +468,13 @@
 			getUtcLabel(vessel?.lastUpdated) ||
 			getUtcLabel(vessel?.lastConnectTime) ||
 			getUtcLabel(vessel?.lastDisconnectTime) ||
-			'UTC'
+			getUtcLabel(vessel?.timezone) ||
+			getUtcLabel(vessel?.timeZone) ||
+			getUtcLabel(vessel?.timezoneMode) ||
+			getUtcLabel(vessel?.utc) ||
+			getUtcLabel(vessel?.utcOffset) ||
+			getUtcLabel(vessel?.utc_offset) ||
+			'UTC+07:00'
 		);
 	}
 
@@ -715,8 +764,8 @@
 		}
 	});
 
-	function openMobileSidebar() {
-		isMobileSidebarOpen = true;
+	function openSidebar() {
+		isSidebarOpen = true;
 
 		if (browser) {
 			window.dispatchEvent(
@@ -727,19 +776,38 @@
 		}
 	}
 
+	function closeSidebar() {
+		isSidebarOpen = false;
+	}
+
+	function openMobileSidebar() {
+		openSidebar();
+	}
+
 	function closeMobileSidebar() {
-		isMobileSidebarOpen = false;
+		closeSidebar();
+	}
+
+	function toggleSidebar() {
+		if (isSidebarOpen) {
+			closeSidebar();
+			return;
+		}
+
+		openSidebar();
 	}
 
 	function handleMobilePanelOpen(event) {
 		if (event.detail !== 'vessel-list') {
-			isMobileSidebarOpen = false;
+			isSidebarOpen = false;
 		}
 	}
 
 	function createPopupHtml(vessel) {
 		const latitude = vessel.latitude ?? vessel.lat;
 		const longitude = vessel.longitude ?? vessel.lng;
+		const formattedLatitude = formatNumber(latitude, 6, '-');
+		const formattedLongitude = formatNumber(longitude, 6, '-');
 
 		return `
       <div class="fleet-popup">
@@ -769,11 +837,11 @@
         <div class="fleet-popup-coordinates">
           <div>
             <span>Latitude</span>
-            <strong>${formatNumber(latitude, 6, '-')}</strong>
+            ${createCopyableCoordinateHtml(formattedLatitude, 'latitude')}
           </div>
           <div>
             <span>Longitude</span>
-            <strong>${formatNumber(longitude, 6, '-')}</strong>
+            ${createCopyableCoordinateHtml(formattedLongitude, 'longitude')}
           </div>
         </div>
 
@@ -784,7 +852,7 @@
           </div>
           <div class="fleet-popup-row">
             <span>Last updated</span>
-            <strong>${formatLastUpdated(vessel.lastUpdated)}</strong>
+            <strong>${formatLastUpdatedBadge(vessel.lastUpdated)}</strong>
           </div>
         </div>
 
@@ -812,26 +880,31 @@
 	}
 
 	function createAssetPopupHtml(asset) {
+		const iconUrl = getAssetIconUrl(asset);
+		const typeLabel = getAssetTypeLabel(asset);
+		const formattedLatitude = formatNumber(asset.latitude, 6);
+		const formattedLongitude = formatNumber(asset.longitude, 6);
+
 		return `
     <div class="fleet-asset-popup">
       <div class="fleet-asset-popup-hero">
         <div class="fleet-asset-popup-icon" aria-hidden="true">
-          <span></span>
+          <img src="${iconUrl}" alt="" />
         </div>
         <div class="fleet-asset-popup-heading">
-          <span class="fleet-asset-popup-eyebrow">Fleet asset</span>
+          <span class="fleet-asset-popup-eyebrow">${formatValue(typeLabel)}</span>
           <strong>${formatValue(asset.name)}</strong>
         </div>
-        <span class="fleet-asset-popup-badge">POI</span>
+        <span class="fleet-asset-popup-badge">${formatValue(typeLabel)}</span>
       </div>
       <div class="fleet-asset-popup-coordinates">
         <div>
           <span>Latitude</span>
-          <strong>${formatNumber(asset.latitude, 6)}</strong>
+          ${createCopyableCoordinateHtml(formattedLatitude, 'asset latitude')}
         </div>
         <div>
           <span>Longitude</span>
-          <strong>${formatNumber(asset.longitude, 6)}</strong>
+          ${createCopyableCoordinateHtml(formattedLongitude, 'asset longitude')}
         </div>
       </div>
     </div>
@@ -859,16 +932,17 @@
 	}
 
 	function createAssetIcon(asset) {
+		const iconUrl = getAssetIconUrl(asset);
+		const typeLabel = getAssetTypeLabel(asset);
+
 		return L.divIcon({
-			className: 'asset-leaflet-icon',
+			className: `asset-leaflet-icon asset-type-${String(typeLabel).toLowerCase()}`,
 			html: `
-        <div class="asset-marker-shell">
-            <div class="asset-marker-core">●</div>
-        </div>
+        <img class="asset-type-marker-icon" src="${iconUrl}" alt="${formatValue(typeLabel)} asset" title="${formatValue(asset.name)}" />
         `,
-			iconSize: [24, 24],
-			iconAnchor: [12, 12],
-			popupAnchor: [0, -10]
+			iconSize: [32, 32],
+			iconAnchor: [16, 16],
+			popupAnchor: [0, -16]
 		});
 	}
 
@@ -884,6 +958,33 @@
 			marker.setIcon(createVesselIcon(vessel));
 			marker.options.pane = isSelected ? 'selectedVesselPane' : 'vesselPane';
 			marker.setZIndexOffset(isSelected ? 1000 : 600);
+		});
+	}
+
+	async function scrollSidebarToVessel(id, { behavior = 'smooth' } = {}) {
+		const normalizedId = String(id);
+
+		await tick();
+
+		if (!vesselListContainer) return;
+
+		const target = Array.from(vesselListContainer.querySelectorAll('[data-vessel-id]')).find(
+			(element) => String(element.dataset.vesselId) === normalizedId
+		);
+
+		if (!target) return;
+
+		const listRect = vesselListContainer.getBoundingClientRect();
+		const targetRect = target.getBoundingClientRect();
+		const targetOffset =
+			targetRect.top -
+			listRect.top +
+			vesselListContainer.scrollTop -
+			(vesselListContainer.clientHeight - targetRect.height) / 2;
+
+		vesselListContainer.scrollTo({
+			top: Math.max(0, targetOffset),
+			behavior
 		});
 	}
 
@@ -925,7 +1026,7 @@
 		selectedVesselId = normalizedId;
 		selectedVesselDetail = null;
 		showDetailPanel = true;
-		isMobileSidebarOpen = false;
+		isSidebarOpen = false;
 
 		refreshMarkerSelection();
 
@@ -937,6 +1038,8 @@
 	}
 
 	function handleFleetPopupAction(event) {
+		if (handleCoordinateCopyClick(event)) return;
+
 		const actionButton = event.target?.closest?.('[data-action][data-vessel-id]');
 
 		if (!actionButton || !mapContainer?.contains?.(actionButton)) return;
@@ -969,16 +1072,33 @@
 		})();
 	}
 
-	function openVesselPopupFromInteraction(id, { zoom = 7 } = {}) {
+	function openVesselPopupFromInteraction(id, { zoom = 7, keepSidebarOpen = false } = {}) {
 		const normalizedId = String(id);
+		const previousId = selectedVesselId ? String(selectedVesselId) : null;
+
+		if (previousId && previousId !== normalizedId) {
+			const previousMarker = markers.get(previousId);
+
+			if (previousMarker?.isPopupOpen?.()) {
+				ignoreNextPopupCloseForVesselId = previousId;
+				previousMarker.closePopup();
+			}
+		}
 
 		selectedVesselId = normalizedId;
 		selectedVesselDetail = null;
 		showDetailPanel = false;
-		isMobileSidebarOpen = false;
+		if (!keepSidebarOpen) {
+			isSidebarOpen = false;
+		}
 
 		refreshMarkerSelection();
 		focusVessel(normalizedId, zoom, true);
+		setTimeout(() => {
+			const marker = markers.get(normalizedId);
+			marker?.openPopup?.();
+		}, 0);
+		void scrollSidebarToVessel(normalizedId);
 	}
 
 	function closeVesselDetail() {
@@ -1036,26 +1156,14 @@
 			marker.bindPopup(createPopupHtml(vessel), {
 				closeButton: true,
 				autoPan: true,
+				autoClose: true,
+				closeOnClick: false,
 				maxWidth: 320,
 				className: 'fleet-leaflet-popup'
 			});
 
 			marker.on('click', () => {
-				if (showDetailPanel) {
-					openVesselPopupFromInteraction(vesselId, { zoom: map?.getZoom?.() ?? 7 });
-					return;
-				}
-
-				const isDifferentVessel = String(selectedVesselId) !== vesselId;
-
-				selectedVesselId = vesselId;
-				selectedVesselDetail = null;
-
-				if (isDifferentVessel) {
-					showDetailPanel = false;
-				}
-
-				refreshMarkerSelection();
+				openVesselPopupFromInteraction(vesselId, { zoom: map?.getZoom?.() ?? 7 });
 			});
 
 			marker.on('popupclose', () => {
@@ -1914,7 +2022,7 @@
 	function selectVessel(id) {
 		const normalizedId = String(id);
 
-		openVesselPopupFromInteraction(normalizedId);
+		openVesselPopupFromInteraction(normalizedId, { keepSidebarOpen: true });
 	}
 
 	async function waitForMapContainer(maxRetry = 20) {
@@ -1964,10 +2072,11 @@
 					selectedVesselDetail = selectedVesselDetail
 						? mergeVesselWithLiveDetail(selectedVesselDetail, refreshedSelected)
 						: refreshedSelected;
+				} else {
+					selectedVesselId = null;
+					selectedVesselDetail = null;
+					showDetailPanel = false;
 				}
-			} else if (vesselData.length > 0) {
-				selectedVesselId = String(vesselData[0].id);
-				selectedVesselDetail = vesselData[0];
 			}
 
 			if (map && L) {
@@ -2105,6 +2214,7 @@
 		if (!browser) return;
 
 		isFleetMounted = true;
+		isSidebarOpen = window.innerWidth > 760;
 
 		window.addEventListener('mobile-panel-open', handleMobilePanelOpen);
 
@@ -2125,7 +2235,8 @@
 		map = L.map(container, {
 			zoomControl: false,
 			attributionControl: true,
-			preferCanvas: true
+			preferCanvas: true,
+			closePopupOnClick: false
 		}).setView([-2.8, 114.5], 5);
 
 		L.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(map);
@@ -2205,6 +2316,18 @@
 	});
 
 	$effect(() => {
+		isSidebarOpen;
+
+		if (!map) return;
+
+		setTimeout(() => {
+			map?.invalidateSize?.({
+				pan: false
+			});
+		}, 260);
+	});
+
+	$effect(() => {
 		showAssets;
 		assetData;
 
@@ -2245,21 +2368,30 @@
 </script>
 
 <section class="fleet-page">
-	<button type="button" class="mobile-vessel-toggle" onclick={openMobileSidebar}>
-		☰ Vessels
+	<button
+		type="button"
+		class:sidebar-open-toggle={isSidebarOpen}
+		class="sidebar-toggle-btn"
+		aria-expanded={isSidebarOpen}
+		aria-label={isSidebarOpen ? 'Close vessel sidebar' : 'Open vessel sidebar'}
+		title={isSidebarOpen ? 'Hide vessels' : 'Show vessels'}
+		onclick={toggleSidebar}
+	>
+		<span aria-hidden="true">☰</span>
+		<span>{isSidebarOpen ? 'Hide Vessels' : 'Show Vessels'}</span>
 	</button>
 
-	{#if isMobileSidebarOpen}
+	{#if isSidebarOpen}
 		<button
 			type="button"
 			class="mobile-sidebar-backdrop"
 			aria-label="Close vessel sidebar"
-			onclick={closeMobileSidebar}
+			onclick={closeSidebar}
 		></button>
 	{/if}
 
-	<div class="fleet-layout">
-		<aside class:sidebar-open={isMobileSidebarOpen} class="fleet-sidebar">
+	<div class:sidebar-collapsed={!isSidebarOpen} class="fleet-layout">
+		<aside class:sidebar-open={isSidebarOpen} class:sidebar-collapsed={!isSidebarOpen} class="fleet-sidebar">
 			<div class="sidebar-fixed">
 				<div class="sidebar-header">
 					<div class="sidebar-title-wrap">
@@ -2309,9 +2441,13 @@
 				</div>
 			</div>
 
-			<div class="vessel-list">
-				{#each filteredVessels as vessel}
+			<div class="vessel-list" bind:this={vesselListContainer}>
+				{#if fleetLoading && !vesselData.length}
+					<LoadingSkeleton label="Loading fleet vessels" variant="fleet-list" rows={7} compact />
+				{:else}
+					{#each filteredVessels as vessel}
 					<article
+						data-vessel-id={String(vessel.id)}
 						class:selected-card={String(selectedVesselId) === String(vessel.id)}
 						class:offline-card={!vessel.online}
 						class="vessel-card"
@@ -2338,41 +2474,38 @@
 											Last Updated: 
 										</p>
 										<p>
-											{formatLastUpdated(vessel.lastUpdated)}
+											{formatLastUpdatedBadge(vessel.lastUpdated)}
 										</p>
 									</div>
 								</div>
 
-								<div
-									class="location-button"
-									class:has-coordinate={hasValidVesselCoordinate(vessel)}
-									title={hasValidVesselCoordinate(vessel)
-										? 'Coordinate available'
-										: 'Coordinate unavailable'}
-									aria-label={hasValidVesselCoordinate(vessel)
-										? 'Coordinate available'
-										: 'Coordinate unavailable'}
-								></div>
+								<div class="vessel-card-tools">
+									<span class="vessel-utc-badge">{getTelemetryUtcLabel(vessel)}</span>
+									<div
+										class="location-button"
+										class:has-coordinate={hasValidVesselCoordinate(vessel)}
+										title={hasValidVesselCoordinate(vessel)
+											? 'Coordinate available'
+											: 'Coordinate unavailable'}
+										aria-label={hasValidVesselCoordinate(vessel)
+											? 'Coordinate available'
+											: 'Coordinate unavailable'}
+									></div>
+								</div>
 							</div>
 						</button>
 					</article>
-				{/each}
+					{/each}
+				{/if}
 			</div>
 		</aside>
 
 		<section class="fleet-map-panel">
 			<div class="map-stage">
-				{#if fleetLoading}
-					<div class="fleet-api-status">Loading fleet data...</div>
-				{/if}
-
 				{#if fleetError}
 					<div class="fleet-api-error">
 						{fleetError}
 					</div>
-				{/if}
-				{#if assetLoading}
-					<div class="asset-api-status">Loading assets...</div>
 				{/if}
 
 				{#if assetError}
@@ -2521,12 +2654,26 @@
 
 									<div class="detail-item">
 										<span>Latitude</span>
-										<strong>{formatMissingValue(selectedVessel.latitude)}</strong>
+										<strong>
+											<CopyableCoordinate
+												value={formatMissingValue(selectedVessel.latitude)}
+												display={formatMissingValue(selectedVessel.latitude)}
+												label="latitude"
+												compact
+											/>
+										</strong>
 									</div>
 
 									<div class="detail-item">
 										<span>Longitude</span>
-										<strong>{formatMissingValue(selectedVessel.longitude)}</strong>
+										<strong>
+											<CopyableCoordinate
+												value={formatMissingValue(selectedVessel.longitude)}
+												display={formatMissingValue(selectedVessel.longitude)}
+												label="longitude"
+												compact
+											/>
+										</strong>
 									</div>
 
 								</div>
@@ -2658,48 +2805,94 @@
 					</aside>
 				{/if}
 
-				<div class="map-legend">
-					<span class="legend-title">Legend</span>
-
-					<div class="legend-item">
-						<span class="legend-dot online"></span>
-						Online
+				<div class:legend-collapsed={!isMapLegendOpen} class="map-legend">
+					<div class="legend-header">
+						<div>
+							<span class="legend-title">Map Legend</span>
+							<span class="legend-subtitle">Fleet overlays</span>
+						</div>
+						<button
+							type="button"
+							class="legend-toggle-btn"
+							aria-expanded={isMapLegendOpen}
+							aria-label={isMapLegendOpen ? 'Hide map legend' : 'Show map legend'}
+							title={isMapLegendOpen ? 'Hide legend' : 'Show legend'}
+							onclick={() => (isMapLegendOpen = !isMapLegendOpen)}
+						>
+							{isMapLegendOpen ? '−' : '+'}
+						</button>
 					</div>
 
-					<div class="legend-item">
-						<span class="legend-dot offline"></span>
-						Offline
-					</div>
+					{#if isMapLegendOpen}
+						<div class="legend-body">
+							<div class="legend-section">
+								<div class="legend-item">
+									<span class="legend-vessel-marker online" aria-hidden="true"></span>
+									<span>Vessel online</span>
+								</div>
 
-					<button
-						type="button"
-						class:active-wind-toggle={showWindParticles}
-						class="wind-toggle-btn"
-						onclick={() => (showWindParticles = !showWindParticles)}
-					>
-						<span class="wind-legend-line"></span>
-						Wind: {showWindParticles ? 'On' : 'Off'}
-					</button>
+								<div class="legend-item">
+									<span class="legend-vessel-marker offline" aria-hidden="true"></span>
+									<span>Vessel offline</span>
+								</div>
 
-					<button
-						type="button"
-						class:active-current-toggle={showCurrentParticles}
-						class="current-toggle-btn"
-						onclick={() => (showCurrentParticles = !showCurrentParticles)}
-					>
-						<span class="current-legend-line"></span>
-						Current: {showCurrentParticles ? 'On' : 'Off'}
-					</button>
+								<div class="legend-item">
+									<span class="legend-vessel-marker selected" aria-hidden="true"></span>
+									<span>Selected vessel</span>
+								</div>
+							</div>
 
-					<button
-						type="button"
-						class:active-asset-toggle={showAssets}
-						class="asset-toggle-btn"
-						onclick={() => (showAssets = !showAssets)}
-					>
-						<span class="asset-legend-dot"></span>
-						Assets: {showAssets ? 'On' : 'Off'}
-					</button>
+							<div class="legend-section">
+								<div class="legend-item">
+									<span class="asset-boundary-legend" aria-hidden="true"></span>
+									<span>Asset boundary 500 m</span>
+								</div>
+
+								{#if assetLegendItems.length}
+									<div class="legend-asset-icons" aria-label="Asset types on map">
+										{#each assetLegendItems as item}
+											<span class="legend-asset-item" title={item.label}>
+												<img src={item.iconUrl} alt="" />
+												<span>{item.label}</span>
+											</span>
+										{/each}
+									</div>
+								{/if}
+							</div>
+
+							<div class="legend-actions">
+								<button
+									type="button"
+									class:active-wind-toggle={showWindParticles}
+									class="wind-toggle-btn"
+									onclick={() => (showWindParticles = !showWindParticles)}
+								>
+									<span class="wind-legend-line"></span>
+									Wind: {showWindParticles ? 'On' : 'Off'}
+								</button>
+
+								<button
+									type="button"
+									class:active-current-toggle={showCurrentParticles}
+									class="current-toggle-btn"
+									onclick={() => (showCurrentParticles = !showCurrentParticles)}
+								>
+									<span class="current-legend-line"></span>
+									Current: {showCurrentParticles ? 'On' : 'Off'}
+								</button>
+
+								<button
+									type="button"
+									class:active-asset-toggle={showAssets}
+									class="asset-toggle-btn"
+									onclick={() => (showAssets = !showAssets)}
+								>
+									<span class="asset-toggle-icon"></span>
+									Assets: {showAssets ? 'On' : 'Off'}
+								</button>
+							</div>
+						</div>
+					{/if}
 				</div>
 			</div>
 		</section>
@@ -2751,6 +2944,8 @@
 		background: #334155;
 	}
 	.fleet-page {
+		--fleet-sidebar-width: 280px;
+		--fleet-gap: 5px;
 		position: relative;
 		height: 100%;
 		min-height: 0;
@@ -2768,13 +2963,27 @@
 		min-height: 0;
 		max-height: 100%;
 		display: grid;
-		grid-template-columns: 280px minmax(0, 1fr);
-		gap: 5px;
+		grid-template-columns: var(--fleet-sidebar-width) minmax(0, 1fr);
+		gap: var(--fleet-gap);
+		transition: grid-template-columns 0.22s ease, gap 0.22s ease;
+	}
+
+	.fleet-layout.sidebar-collapsed {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 0;
 	}
 
 	@media (min-width: 1280px) and (max-height: 1080px) {
+		.fleet-page {
+			--fleet-sidebar-width: 340px;
+		}
+
 		.fleet-layout {
-			grid-template-columns: 340px minmax(0, 1fr);
+			grid-template-columns: var(--fleet-sidebar-width) minmax(0, 1fr);
+		}
+
+		.fleet-layout.sidebar-collapsed {
+			grid-template-columns: minmax(0, 1fr);
 		}
 	}
 
@@ -2828,25 +3037,11 @@
 		border: none;
 	}
 
-	:global(.asset-marker-shell) {
-		width: 22px;
-		height: 22px;
-		border-radius: 999px;
-		display: grid;
-		place-items: center;
-		background: rgba(17, 24, 39, 0.94);
-		border: 2px solid #f59e0b;
-		box-shadow:
-			0 0 0 4px rgba(245, 158, 11, 0.16),
-			0 5px 10px rgba(15, 23, 42, 0.16);
-	}
-
-	:global(.asset-marker-core) {
-		width: 9px;
-		height: 9px;
-		border-radius: 999px;
-		background: #f59e0b;
-		color: transparent;
+	:global(.asset-type-marker-icon) {
+		width: 32px;
+		height: 32px;
+		object-fit: contain;
+		filter: drop-shadow(0 4px 8px rgba(15, 23, 42, 0.35));
 	}
 
 	/* =========================
@@ -2957,14 +3152,11 @@
 		background: var(--color-warning-muted);
 	}
 
-	:global(.fleet-asset-popup-icon span) {
-		width: 11px;
-		height: 11px;
-		border: 3px solid #f59e0b;
-		border-radius: 50%;
-		box-shadow:
-			0 0 0 4px rgba(245, 158, 11, 0.13),
-			0 0 12px rgba(245, 158, 11, 0.35);
+	:global(.fleet-asset-popup-icon img) {
+		width: 21px;
+		height: 21px;
+		object-fit: contain;
+		filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.28));
 	}
 
 	:global(.fleet-asset-popup-heading) {
@@ -3072,9 +3264,9 @@
 		white-space: nowrap;
 	}
 
-	.asset-legend-dot {
-		width: 6px;
-		height: 6px;
+	.asset-toggle-icon {
+		width: 9px;
+		height: 9px;
 		border-radius: 999px;
 		background: #f59e0b;
 		box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.16);
@@ -3082,28 +3274,28 @@
 	}
 
 	.asset-toggle-btn {
-		height: 21px;
+		height: 25px;
 		display: inline-flex;
 		align-items: center;
 		gap: 5px;
-		padding: 0 7px;
-		border: 1px solid #fed7aa;
+		padding: 0 9px;
+		border: 1px solid rgba(245, 158, 11, 0.34);
 		border-radius: 999px;
-		background: var(--color-surface);
-		color: #92400e;
-		font-size: 8px;
+		background: rgba(245, 158, 11, 0.1);
+		color: #fed7aa;
+		font-size: 9px;
 		line-height: 1;
-		font-weight: 900;
+		font-weight: 800;
 		cursor: pointer;
 	}
 
 	.asset-toggle-btn.active-asset-toggle {
-		background: var(--color-warning-muted);
+		background: rgba(245, 158, 11, 0.18);
 		border-color: #f59e0b;
 	}
 
 	.asset-toggle-btn:hover {
-		background: var(--color-warning-muted);
+		background: rgba(245, 158, 11, 0.22);
 	}
 
 	:global(.wind-particle-canvas) {
@@ -3127,28 +3319,28 @@
 	}
 
 	.wind-toggle-btn {
-		height: 21px;
+		height: 25px;
 		display: inline-flex;
 		align-items: center;
 		gap: 5px;
-		padding: 0 7px;
-		border: 1px solid #bae6fd;
+		padding: 0 9px;
+		border: 1px solid rgba(147, 197, 253, 0.34);
 		border-radius: 999px;
-		background: var(--color-surface);
-		color: #0369a1;
-		font-size: 8px;
+		background: rgba(15, 23, 42, 0.2);
+		color: #bfdbfe;
+		font-size: 9px;
 		line-height: 1;
-		font-weight: 900;
+		font-weight: 800;
 		cursor: pointer;
 	}
 
 	.wind-toggle-btn.active-wind-toggle {
-		background: var(--color-elevated);
+		background: rgba(37, 99, 235, 0.2);
 		border-color: #0ea5e9;
 	}
 
 	.wind-toggle-btn:hover {
-		background: var(--color-elevated);
+		background: rgba(37, 99, 235, 0.25);
 	}
 
 	.current-legend-line {
@@ -3161,28 +3353,28 @@
 	}
 
 	.current-toggle-btn {
-		height: 21px;
+		height: 25px;
 		display: inline-flex;
 		align-items: center;
 		gap: 5px;
-		padding: 0 7px;
-		border: 1px solid #bae6fd;
+		padding: 0 9px;
+		border: 1px solid rgba(56, 189, 248, 0.34);
 		border-radius: 999px;
-		background: var(--color-surface);
-		color: #075985;
-		font-size: 8px;
+		background: rgba(8, 47, 73, 0.24);
+		color: #bae6fd;
+		font-size: 9px;
 		line-height: 1;
-		font-weight: 900;
+		font-weight: 800;
 		cursor: pointer;
 	}
 
 	.current-toggle-btn.active-current-toggle {
-		background: var(--color-elevated);
+		background: rgba(14, 165, 233, 0.18);
 		border-color: #38bdf8;
 	}
 
 	.current-toggle-btn:hover {
-		background: var(--color-elevated);
+		background: rgba(14, 165, 233, 0.22);
 	}
 
 	.asset-api-status,
@@ -3477,10 +3669,110 @@
      MOBILE TOGGLE DEFAULT
      ========================= */
 
-	.mobile-vessel-toggle,
 	.mobile-sidebar-backdrop,
-	.sidebar-close-btn {
+	.mobile-vessel-toggle {
 		display: none;
+	}
+
+	.sidebar-toggle-btn {
+		position: absolute;
+		top: 50%;
+		left: 14px;
+		z-index: 950;
+		width: 42px;
+		min-height: 92px;
+		display: inline-flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 7px;
+		border: 1px solid rgba(147, 197, 253, 0.42);
+		border-radius: 18px;
+		background:
+			linear-gradient(180deg, rgba(30, 64, 175, 0.28), rgba(15, 23, 42, 0.08)),
+			rgba(15, 23, 42, 0.9);
+		color: #dbeafe;
+		padding: 8px 5px;
+		font-size: 0;
+		font-weight: 800;
+		box-shadow:
+			0 12px 28px rgba(15, 23, 42, 0.22),
+			inset 0 1px 0 rgba(255, 255, 255, 0.08);
+		backdrop-filter: blur(12px) saturate(1.15);
+		cursor: pointer;
+		transform: translateY(-50%);
+		transition:
+			left 0.22s ease,
+			background 0.18s ease,
+			border-color 0.18s ease,
+			box-shadow 0.18s ease,
+			transform 0.18s ease;
+	}
+
+	.sidebar-toggle-btn span {
+		color: inherit;
+		font-size: 10px;
+		line-height: 1;
+	}
+
+	.sidebar-toggle-btn span:first-of-type {
+		width: 24px;
+		height: 24px;
+		display: grid;
+		place-items: center;
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.55);
+		border: 1px solid rgba(191, 219, 254, 0.28);
+		font-size: 0;
+		font-weight: 900;
+		box-shadow: 0 6px 14px rgba(37, 99, 235, 0.22);
+	}
+
+	.sidebar-toggle-btn span:first-of-type::before {
+		content: '☰';
+		font-size: 14px;
+		line-height: 1;
+	}
+
+	.sidebar-toggle-btn:hover {
+		border-color: rgba(147, 197, 253, 0.8);
+		background: rgba(30, 41, 59, 0.96);
+		transform: translateY(-1px);
+	}
+
+	.sidebar-toggle-btn.sidebar-open-toggle {
+		left: calc(5px + var(--fleet-sidebar-width) + (var(--fleet-gap) / 2));
+	}
+
+	.sidebar-toggle-btn span:first-of-type::before {
+		content: '>';
+		font-size: 15px;
+		line-height: 1;
+	}
+
+	.sidebar-toggle-btn.sidebar-open-toggle span:first-of-type::before {
+		content: '<';
+	}
+
+	.sidebar-toggle-btn span:last-of-type {
+		writing-mode: vertical-rl;
+		text-orientation: mixed;
+		letter-spacing: 0.03em;
+		font-size: 9px;
+		font-weight: 800;
+		text-transform: uppercase;
+	}
+
+	.sidebar-toggle-btn:hover {
+		border-color: rgba(147, 197, 253, 0.8);
+		background:
+			linear-gradient(180deg, rgba(37, 99, 235, 0.36), rgba(15, 23, 42, 0.12)),
+			rgba(15, 23, 42, 0.96);
+		box-shadow:
+			0 16px 34px rgba(15, 23, 42, 0.28),
+			0 0 0 4px rgba(37, 99, 235, 0.09),
+			inset 0 1px 0 rgba(255, 255, 255, 0.1);
+		transform: translateY(-50%) translateX(1px);
 	}
 
 	/* =========================
@@ -3490,6 +3782,13 @@
 	.fleet-sidebar {
 		display: flex;
 		flex-direction: column;
+		transition:
+			opacity 0.18s ease,
+			transform 0.22s ease;
+	}
+
+	.fleet-sidebar.sidebar-collapsed {
+		display: none;
 	}
 
 	.sidebar-fixed {
@@ -3499,6 +3798,10 @@
 	}
 
 	.sidebar-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
 		padding: 8px 10px 5px;
 	}
 
@@ -3787,9 +4090,67 @@
 		white-space: nowrap;
 	}
 
+	.sidebar-close-btn {
+		width: 24px;
+		height: 24px;
+		display: none;
+		place-items: center;
+		border: 1px solid rgba(148, 163, 184, 0.24);
+		border-radius: 9px;
+		background: rgba(15, 23, 42, 0.04);
+		color: var(--text-secondary);
+		font-size: 16px;
+		font-weight: 900;
+		line-height: 1;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+
+	.sidebar-close-btn:hover {
+		border-color: rgba(248, 113, 113, 0.36);
+		background: var(--color-danger-muted);
+		color: #dc2626;
+	}
+
 	.vessel-card.offline-card .vessel-name-block p,
 	.vessel-card.offline-card .mini-metric span {
 		color: rgba(148, 163, 184, 0.78);
+	}
+
+	.vessel-card-tools {
+		display: inline-flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 6px;
+		flex: 0 0 auto;
+		max-width: 128px;
+	}
+
+	.vessel-utc-badge {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 0;
+		max-width: 88px;
+		height: 24px;
+		padding: 0 8px;
+		overflow: hidden;
+		border: 1px solid rgba(96, 165, 250, 0.22);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.13);
+		color: #bfdbfe;
+		font-size: 9.4px;
+		font-weight: 800;
+		letter-spacing: 0.04em;
+		line-height: 1;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.vessel-card.offline-card .vessel-utc-badge {
+		border-color: rgba(148, 163, 184, 0.2);
+		background: rgba(100, 116, 139, 0.12);
+		color: rgba(203, 213, 225, 0.78);
 	}
 
 	.location-button {
@@ -4024,38 +4385,251 @@
 
 	.map-legend {
 		position: absolute;
-		left: 8px;
-		bottom: 8px;
-		display: inline-flex;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 5px;
-		max-width: calc(100% - 16px);
-		padding: 5px 7px;
-		border-radius: 8px;
-		background: rgba(17, 24, 39, 0.94);
-		border: 1px solid #dbe4ef;
-		box-shadow: 0 4px 10px rgba(15, 23, 42, 0.07);
+		top: 12px;
+		right: 12px;
+		display: grid;
+		gap: 9px;
+		width: min(310px, calc(100% - 24px));
+		max-height: calc(100% - 24px);
+		overflow: auto;
+		padding: 11px;
+		border-radius: 14px;
+		background:
+			linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.84)),
+			rgba(15, 23, 42, 0.88);
+		border: 1px solid rgba(147, 197, 253, 0.24);
+		box-shadow:
+			0 18px 40px rgba(15, 23, 42, 0.24),
+			inset 0 1px 0 rgba(255, 255, 255, 0.08);
+		backdrop-filter: blur(14px) saturate(1.12);
 		z-index: 700;
+		transition:
+			width 0.2s ease,
+			padding 0.2s ease,
+			background 0.2s ease,
+			border-color 0.2s ease,
+			box-shadow 0.2s ease;
 	}
 
-	.legend-title,
-	.legend-item {
-		font-size: 8px;
-		line-height: 1;
+	.map-legend.legend-collapsed {
+		width: auto;
+		min-width: 0;
+		padding: 8px 9px;
+		background:
+			linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.78)),
+			rgba(15, 23, 42, 0.82);
+	}
+
+	.legend-header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 10px;
+		padding-bottom: 2px;
+	}
+
+	.map-legend.legend-collapsed .legend-header {
+		align-items: center;
+		padding-bottom: 0;
+	}
+
+	.legend-header > div {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
 	}
 
 	.legend-title {
-		font-weight: 900;
-		color: #1d4ed8;
+		color: #dbeafe;
+		font-size: 12px;
+		line-height: 1.1;
+		font-weight: 800;
+		letter-spacing: 0.03em;
+		text-transform: uppercase;
+	}
+
+	.legend-subtitle {
+		color: rgba(203, 213, 225, 0.78);
+		font-size: 10px;
+		line-height: 1.1;
+		font-weight: 600;
+		white-space: nowrap;
+	}
+
+	.map-legend.legend-collapsed .legend-subtitle {
+		display: none;
+	}
+
+	.legend-toggle-btn {
+		width: 28px;
+		height: 28px;
+		min-width: 28px;
+		display: grid;
+		place-items: center;
+		border: 1px solid rgba(147, 197, 253, 0.35);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.18);
+		color: #dbeafe;
+		font-size: 18px;
+		line-height: 1;
+		font-weight: 800;
+		cursor: pointer;
+		transition:
+			transform 0.16s ease,
+			background 0.16s ease,
+			border-color 0.16s ease;
+	}
+
+	.legend-toggle-btn:hover {
+		transform: translateY(-1px);
+		border-color: rgba(147, 197, 253, 0.72);
+		background: rgba(37, 99, 235, 0.3);
+	}
+
+	.legend-body {
+		display: grid;
+		gap: 9px;
+	}
+
+	.legend-section {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 7px;
+		padding: 0;
+		border: 0;
+		background: transparent !important;
+		box-shadow: none;
+	}
+
+	.legend-section + .legend-section {
+		padding-top: 0;
+		border-top: 0;
 	}
 
 	.legend-item {
 		display: inline-flex;
 		align-items: center;
+		gap: 7px;
+		min-width: 0;
+		color: rgba(226, 232, 240, 0.9);
+		font-size: 10px;
+		line-height: 1.15;
+		font-weight: 650;
+	}
+
+	.legend-vessel-marker {
+		position: relative;
+		width: 20px;
+		height: 20px;
+		display: inline-grid;
+		place-items: center;
+		flex: 0 0 auto;
+		border-radius: 999px;
+		background: #f8fafc;
+		border: 2px solid #22c55e;
+		box-shadow:
+			0 0 0 3px rgba(34, 197, 94, 0.22),
+			0 6px 12px rgba(15, 23, 42, 0.2);
+	}
+
+	.legend-vessel-marker::before {
+		content: '';
+		width: 8px;
+		height: 8px;
+		border-radius: 999px;
+		clip-path: polygon(50% 0, 100% 100%, 50% 76%, 0 100%);
+	}
+
+	.legend-vessel-marker::after {
+		content: '';
+		position: absolute;
+		right: -3px;
+		bottom: -3px;
+		width: 7px;
+		height: 7px;
+		border: 2px solid #ffffff;
+		border-radius: 999px;
+		background: #22c55e;
+	}
+
+	.legend-vessel-marker.offline {
+		background: #1e293b;
+		border-color: #ef4444;
+		box-shadow:
+			0 0 0 3px rgba(239, 68, 68, 0.2),
+			0 6px 12px rgba(15, 23, 42, 0.24);
+	}
+
+	.legend-vessel-marker.offline::before {
+		background: #94a3b8;
+	}
+
+	.legend-vessel-marker.offline::after {
+		background: #ef4444;
+		border-color: #1e293b;
+	}
+
+	.legend-vessel-marker.selected {
+		width: 22px;
+		height: 22px;
+		border-color: #3b82f6;
+		background: #eff6ff;
+		box-shadow:
+			0 0 0 4px rgba(59, 130, 246, 0.24),
+			0 6px 12px rgba(15, 23, 42, 0.22);
+	}
+
+	.legend-vessel-marker.selected::after {
+		background: #22c55e;
+	}
+
+	.asset-boundary-legend {
+		width: 22px;
+		height: 22px;
+		border: 2px dashed #f59e0b;
+		border-radius: 999px;
+		background: rgba(245, 158, 11, 0.14);
+		box-shadow: 0 0 10px rgba(245, 158, 11, 0.24);
+		flex: 0 0 auto;
+	}
+
+	.legend-asset-icons {
+		grid-column: 1 / -1;
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.legend-asset-item {
+		display: inline-flex;
+		align-items: center;
 		gap: 5px;
-		font-weight: 700;
-		color: var(--text-secondary);
+		min-height: 26px;
+		padding: 4px 7px;
+		border: 1px solid rgba(245, 158, 11, 0.22);
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.36);
+		color: rgba(226, 232, 240, 0.92);
+		font-size: 9.5px;
+		font-weight: 650;
+	}
+
+	.legend-asset-item img {
+		width: 18px;
+		height: 18px;
+		object-fit: contain;
+		filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.34));
+	}
+
+	.legend-actions {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 6px;
+		padding-top: 8px;
+		border-top: 1px solid rgba(148, 163, 184, 0.14);
 	}
 
 	/* =========================
@@ -4068,15 +4642,37 @@
 	}
 
 	:global(.vessel-marker-shell) {
-		width: 23px;
-		height: 23px;
+		position: relative;
+		width: 25px;
+		height: 25px;
 		border-radius: 999px;
 		display: grid;
 		place-items: center;
 		background: white;
+		border: 2px solid #22c55e;
 		box-shadow:
-			0 0 0 4px rgba(34, 197, 94, 0.12),
-			0 5px 10px rgba(15, 23, 42, 0.14);
+			0 0 0 4px rgba(34, 197, 94, 0.22),
+			0 0 0 9px rgba(34, 197, 94, 0.08),
+			0 6px 12px rgba(15, 23, 42, 0.18);
+		transition:
+			background 0.18s ease,
+			border-color 0.18s ease,
+			box-shadow 0.18s ease,
+			filter 0.18s ease,
+			opacity 0.18s ease;
+	}
+
+	:global(.vessel-marker-shell::after) {
+		content: '';
+		position: absolute;
+		right: -3px;
+		bottom: -3px;
+		width: 9px;
+		height: 9px;
+		border: 2px solid #ffffff;
+		border-radius: 999px;
+		background: #22c55e;
+		box-shadow: 0 2px 6px rgba(15, 23, 42, 0.28);
 	}
 
 	:global(.vessel-marker-shell img) {
@@ -4089,10 +4685,10 @@
 	}
 
 	:global(.vessel-leaflet-icon.selected .vessel-marker-shell) {
-		width: 29px;
-		height: 29px;
-		background: var(--color-accent);
-		border: 2px solid #2563eb;
+		width: 31px;
+		height: 31px;
+		background: #eff6ff;
+		border: 3px solid #2563eb;
 		box-shadow:
 			0 0 0 5px rgba(37, 99, 235, 0.22),
 			0 0 0 10px rgba(37, 99, 235, 0.09),
@@ -4106,21 +4702,42 @@
 	}
 
 	:global(.vessel-leaflet-icon.offline .vessel-marker-shell) {
+		background: #1e293b;
+		border-color: #ef4444;
 		box-shadow:
-			0 0 0 4px rgba(148, 163, 184, 0.14),
-			0 5px 10px rgba(15, 23, 42, 0.14);
-		opacity: 0.85;
-		filter: grayscale(0.85);
+			0 0 0 4px rgba(239, 68, 68, 0.2),
+			0 0 0 9px rgba(15, 23, 42, 0.16),
+			0 6px 12px rgba(15, 23, 42, 0.24);
+		opacity: 0.96;
+		filter: grayscale(0.25) saturate(0.72);
+	}
+
+	:global(.vessel-leaflet-icon.offline .vessel-marker-shell::after) {
+		background: #ef4444;
+		border-color: #1e293b;
+	}
+
+	:global(.vessel-leaflet-icon.offline .vessel-marker-shell img) {
+		opacity: 0.58;
+		filter: grayscale(1) brightness(1.35) drop-shadow(0 1px 1px rgba(2, 6, 23, 0.45));
 	}
 
 	:global(.vessel-leaflet-icon.offline.selected .vessel-marker-shell) {
-		background: var(--color-elevated);
-		border: 2px solid #64748b;
+		background: #111827;
+		border: 3px solid #ef4444;
 		box-shadow:
-			0 0 0 5px rgba(100, 116, 139, 0.2),
-			0 0 0 10px rgba(100, 116, 139, 0.08),
-			0 10px 20px rgba(15, 23, 42, 0.18);
-		filter: grayscale(0.35);
+			0 0 0 5px rgba(239, 68, 68, 0.24),
+			0 0 0 10px rgba(239, 68, 68, 0.1),
+			0 10px 20px rgba(15, 23, 42, 0.22);
+		filter: grayscale(0.1) saturate(0.82);
+	}
+
+	:global(.vessel-leaflet-icon.online.selected .vessel-marker-shell) {
+		border-color: #22c55e;
+		box-shadow:
+			0 0 0 5px rgba(34, 197, 94, 0.26),
+			0 0 0 10px rgba(37, 99, 235, 0.12),
+			0 10px 20px rgba(15, 23, 42, 0.22);
 	}
 
 	/* =========================
@@ -5168,12 +5785,12 @@
 	}
 
 	.detail-utc-badge {
-		padding: 4px 8px;
+		padding: 5px 10px;
 		border: 1px solid rgba(96, 165, 250, 0.28);
 		border-radius: 999px;
 		background: rgba(37, 99, 235, 0.18);
 		color: #bfdbfe;
-		font-size: 8px;
+		font-size: 10px;
 		font-weight: 900;
 		letter-spacing: 0.08em;
 		line-height: 1;
@@ -5349,6 +5966,31 @@
 			grid-template-columns: 1fr;
 		}
 
+		.sidebar-toggle-btn {
+			top: 14px;
+			left: 14px;
+			width: auto;
+			min-height: 34px;
+			flex-direction: row;
+			padding: 0 12px;
+			border-radius: 999px;
+			transform: none;
+		}
+
+		.sidebar-toggle-btn.sidebar-open-toggle {
+			left: 14px;
+		}
+
+		.sidebar-toggle-btn span:last-of-type {
+			writing-mode: horizontal-tb;
+			font-size: 10px;
+			letter-spacing: 0;
+		}
+
+		.sidebar-toggle-btn:hover {
+			transform: none;
+		}
+
 		.fleet-sidebar {
 			height: 460px;
 		}
@@ -5419,25 +6061,52 @@
 			cursor: pointer;
 		}
 
-		.mobile-vessel-toggle {
-			display: inline-flex;
+		.sidebar-toggle-btn {
 			position: fixed;
-			top: 10px;
+			top: 50%;
 			left: 10px;
-			z-index: 900;
-			height: 25px;
-			align-items: center;
-			justify-content: center;
-			gap: 5px;
-			padding: 0 8px;
+			z-index: 1250;
+			width: 38px;
+			height: auto;
+			min-height: 82px;
+			flex-direction: column;
+			gap: 6px;
+			padding: 7px 4px;
+			border-radius: 16px;
 			border: 1px solid #bfdbfe;
-			border-radius: 999px;
 			background: rgba(17, 24, 39, 0.94);
-			color: #1d4ed8;
-			font-size: 9px;
+			color: #dbeafe;
+			font-size: 0;
 			font-weight: 900;
-			box-shadow: 0 5px 12px rgba(15, 23, 42, 0.12);
-			cursor: pointer;
+			box-shadow: 0 8px 18px rgba(15, 23, 42, 0.2);
+			transform: translateY(-50%);
+		}
+
+		.sidebar-toggle-btn.sidebar-open-toggle {
+			left: min(274px, calc(100vw - 50px));
+		}
+
+		.sidebar-toggle-btn span {
+			font-size: 10px;
+		}
+
+		.sidebar-toggle-btn span:first-of-type {
+			width: 18px;
+			height: 18px;
+		}
+
+		.sidebar-toggle-btn span:first-of-type::before {
+			font-size: 12px;
+		}
+
+		.sidebar-toggle-btn span:last-of-type {
+			writing-mode: vertical-rl;
+			font-size: 8px;
+			letter-spacing: 0.03em;
+		}
+
+		.sidebar-toggle-btn:hover {
+			transform: translateY(-50%) translateX(1px);
 		}
 
 		.measure-toolbar {
@@ -5525,7 +6194,7 @@
 		}
 
 		.sidebar-close-btn {
-			display: grid;
+			display: none !important;
 			width: 23px;
 			height: 23px;
 			place-items: center;
@@ -5560,9 +6229,10 @@
 		}
 
 		.map-legend {
-			left: 8px;
-			bottom: 8px;
-			padding: 5px 7px;
+			top: 8px;
+			right: 8px;
+			width: min(292px, calc(100% - 16px));
+			padding: 9px;
 		}
 
 		:global(.fleet-leaflet-popup .leaflet-popup-content) {

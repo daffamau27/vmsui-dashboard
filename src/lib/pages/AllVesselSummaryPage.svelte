@@ -1,6 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
 	import { apiRequest } from '$lib/api/authApi.js';
+	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 
 	const TIME_RANGE_PRESETS = [
 		{ id: 'midnight', label: '00:00 - 06:00', startTime: '00:00', endTime: '06:00' },
@@ -827,7 +828,7 @@
 
 <section class="avs-page">
 	{#if currentUserLoading}
-		<div class="status-box">Loading user permissions...</div>
+		<LoadingSkeleton label="Loading all vessel summary page" variant="all-vessel-summary-page" />
 	{:else if currentUserError}
 		<div class="status-box error-box">{currentUserError}</div>
 	{:else if currentUser && !canAccessAllVesselSummary}
@@ -925,7 +926,7 @@
 
 			<div class="vessel-list">
 				{#if devicesLoading}
-					<div class="empty-box">Loading vessels...</div>
+					<LoadingSkeleton label="Loading vessels" variant="all-vessel-vessel-list" rows={6} compact />
 				{:else if filteredDevices.length}
 					{#each filteredDevices as device}
 						<label
@@ -1280,7 +1281,12 @@
 		{#if !hasLoadedReport && !loading}
 			<div class="empty-box">Click Load Summary to retrieve data.</div>
 		{:else if loading}
-			<div class="empty-box">Summary is loading...</div>
+			<LoadingSkeleton
+				label="Loading summary table"
+				variant="all-vessel-summary-table"
+				rows={7}
+				columns={Math.max(6, visibleDataColumns.length + 3)}
+			/>
 		{:else if vesselReportRows.length}
 			<div class="table-wrapper">
 				<table>

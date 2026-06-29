@@ -1,6 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { apiRequest } from "$lib/api/authApi.js";
+  import LoadingSkeleton from "$lib/components/LoadingSkeleton.svelte";
 
   let { active = false } = $props();
 
@@ -411,7 +412,7 @@
     </div>
 
     {#if loadingMonitor}
-      <div class="empty-box">Loading alarm monitor...</div>
+      <LoadingSkeleton label="Loading alarm monitor" variant="alarm-monitor-grid" rows={4} />
     {:else if monitorRows.length}
       <div class="alarm-monitor-grid">
         {#each monitorRows as row}
@@ -527,7 +528,7 @@
     </div>
 
     {#if loadingEvents}
-      <div class="empty-box">Loading alarm events...</div>
+      <LoadingSkeleton label="Loading alarm events" variant="alarm-events-table" rows={6} columns={7} />
     {:else if eventRows.length}
       <div class="table-wrapper">
         <table>

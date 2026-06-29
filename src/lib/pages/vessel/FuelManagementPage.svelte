@@ -2,6 +2,7 @@
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import { apiRequest } from '$lib/api/authApi.js';
+	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import {
 		getFuelManagementData,
 		getFuelManagementHistory,
@@ -797,13 +798,21 @@
 	{/if}
 
 	<section class="summary-grid">
-		{#each summaryCards as card}
-			<article class="summary-card">
-				<span>{card.label}</span>
-				<strong>{card.value}</strong>
-				<small>{card.note}</small>
-			</article>
-		{/each}
+		{#if loadingData}
+			<LoadingSkeleton
+				label="Loading fuel summary"
+				variant="fuel-summary"
+				rows={summaryCards.length || 4}
+			/>
+		{:else}
+			{#each summaryCards as card}
+				<article class="summary-card">
+					<span>{card.label}</span>
+					<strong>{card.value}</strong>
+					<small>{card.note}</small>
+				</article>
+			{/each}
+		{/if}
 	</section>
 
 	<section class="main-grid">
@@ -818,7 +827,9 @@
 				{/if}
 			</div>
 
-			{#if comparison}
+			{#if loadingData}
+				<LoadingSkeleton label="Loading fuel comparison" variant="fuel-comparison" />
+			{:else if comparison}
 				<div class="comparison-grid">
 					<div>
 						<span>System Total</span>
@@ -853,7 +864,7 @@
 			</div>
 
 			{#if currentUserLoading}
-				<div class="empty-state">Loading permission...</div>
+				<LoadingSkeleton label="Loading fuel operation permissions" variant="fuel-operations" />
 			{:else if currentUserError}
 				<div class="empty-state">{currentUserError}</div>
 			{:else if canViewFuelConsumptionTable}
@@ -983,7 +994,14 @@
 					{/if}
 				</div>
 
-				{#if hasSectionRows(config.key)}
+				{#if loadingData}
+					<LoadingSkeleton
+						label={`Loading ${getTableTitle(config)}`}
+						variant="fuel-table"
+						rows={5}
+						columns={config.columns.length}
+					/>
+				{:else if hasSectionRows(config.key)}
 					<div class="table-wrap">
 						<table>
 							<thead>
@@ -1063,7 +1081,7 @@
 		{/if}
 
 		{#if loadingHistory}
-			<div class="empty-state">Loading history...</div>
+			<LoadingSkeleton label="Loading fuel history" variant="fuel-history" rows={6} columns={7} />
 		{:else if historyRows.length}
 			<div class="table-wrap">
 				<table>

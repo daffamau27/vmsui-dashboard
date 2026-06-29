@@ -7,6 +7,7 @@
 		updateCurrentUserApi,
 		changePasswordApi
 	} from '$lib/api/authApi.js';
+	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 
 	let loading = true;
 	let savingProfile = false;
@@ -188,13 +189,7 @@
 
 <section class="profile-page">
 	{#if loading}
-		<div class="loading-card">
-			<div class="loader"></div>
-			<div>
-				<h2>Loading Profile</h2>
-				<p>Fetching user data, accessible vessels, and accessible assets.</p>
-			</div>
-		</div>
+		<LoadingSkeleton label="Loading profile data" variant="profile-page" />
 	{:else}
 		<section class="profile-shell">
 			<header class="profile-hero">

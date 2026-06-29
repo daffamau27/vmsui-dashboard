@@ -10,6 +10,8 @@
   import { getFleetVesselLiveDetail } from "$lib/api/fleetApi.js";
   import { apiRequest } from "$lib/api/authApi.js";
   import { VMS_TILE_URL, VMS_TILE_OPTIONS } from "$lib/mapStyle.js";
+  import LoadingSkeleton from "$lib/components/LoadingSkeleton.svelte";
+  import CopyableCoordinate from "$lib/components/CopyableCoordinate.svelte";
 
   let loading = $state(false);
   let error = $state("");
@@ -848,7 +850,10 @@
   }
 
   function drawWindParticles() {
-    if (!dashboardMap || !windCanvas || !windContext || !showWindParticles) return;
+    if (!active || !canViewDailyPathMap || !dashboardMap || !windCanvas || !windContext || !showWindParticles) {
+      stopWindAnimation();
+      return;
+    }
 
     const size = dashboardMap.getSize();
     const canvasWidth = windCanvasWidth || size.x;
@@ -935,7 +940,7 @@
   }
 
   function startWindAnimation() {
-    if (!browser || windFrame) return;
+    if (!browser || windFrame || !active || !canViewDailyPathMap || !showWindParticles) return;
 
     const animate = (timestamp) => {
       windFrame = requestAnimationFrame(animate);
@@ -958,7 +963,7 @@
   }
 
   function addWindParticleLayer() {
-    if (!dashboardMap || !L || windParticleLayer) return;
+    if (!active || !canViewDailyPathMap || !showWindParticles || !dashboardMap || !L || windParticleLayer) return;
 
     windParticleLayer = new L.Layer();
 
@@ -1118,7 +1123,10 @@
   }
 
   function drawCurrentParticles() {
-    if (!dashboardMap || !currentCanvas || !currentContext || !showCurrentParticles) return;
+    if (!active || !canViewDailyPathMap || !dashboardMap || !currentCanvas || !currentContext || !showCurrentParticles) {
+      stopCurrentAnimation();
+      return;
+    }
 
     const size = dashboardMap.getSize();
     const canvasWidth = currentCanvasWidth || size.x;
@@ -1210,7 +1218,7 @@
   }
 
   function startCurrentAnimation() {
-    if (!browser || currentFrame) return;
+    if (!browser || currentFrame || !active || !canViewDailyPathMap || !showCurrentParticles) return;
 
     const animate = (timestamp) => {
       currentFrame = requestAnimationFrame(animate);
@@ -1233,7 +1241,7 @@
   }
 
   function addCurrentParticleLayer() {
-    if (!dashboardMap || !L || currentParticleLayer) return;
+    if (!active || !canViewDailyPathMap || !showCurrentParticles || !dashboardMap || !L || currentParticleLayer) return;
 
     currentParticleLayer = new L.Layer();
 
@@ -1511,25 +1519,26 @@
     </div>
   </section>
 
-  {#if loading || currentUserLoading}
-    <div class="status-box loading-box">
-      Loading dashboard data...
-    </div>
-  {:else if error}
-    <div class="status-box error-box">
-      {error}
-    </div>
-  {:else if currentUserError}
-    <div class="status-box error-box">
-      {currentUserError}
-    </div>
-  {:else if !canAccessDashboard}
-    <div class="status-box error-box">
-      The user does not have the access_dashboard or access_daily_report permission.
-    </div>
-  {/if}
+{#if loading || currentUserLoading}
+  <LoadingSkeleton
+    label="Loading vessel dashboard data"
+    variant="vessel-dashboard"
+  />
+{:else if error}
+  <div class="status-box error-box">
+    {error}
+  </div>
+{:else if currentUserError}
+  <div class="status-box error-box">
+    {currentUserError}
+  </div>
+{:else if !canAccessDashboard}
+  <div class="status-box error-box">
+    The user does not have the access_dashboard or access_daily_report permission.
+  </div>
+{:else}
 
-  <section class="hero-grid">
+<section class="hero-grid">
     <div class="monitoring-card cctv-section">
       <div class="section-header">
         <div>
@@ -1632,12 +1641,26 @@
       <div class="vessel-info-grid">
         <article class="compact-info-card">
           <span class="info-label">Latitude</span>
-          <strong>{vesselInfo.latitude === null ? "-" : `${formatNumber(vesselInfo.latitude, 6)}°`}</strong>
+          <strong>
+            <CopyableCoordinate
+              value={vesselInfo.latitude === null ? "-" : formatNumber(vesselInfo.latitude, 6)}
+              display={vesselInfo.latitude === null ? "-" : `${formatNumber(vesselInfo.latitude, 6)}°`}
+              label="latitude"
+              compact
+            />
+          </strong>
         </article>
 
         <article class="compact-info-card">
           <span class="info-label">Longitude</span>
-          <strong>{vesselInfo.longitude === null ? "-" : `${formatNumber(vesselInfo.longitude, 6)}°`}</strong>
+          <strong>
+            <CopyableCoordinate
+              value={vesselInfo.longitude === null ? "-" : formatNumber(vesselInfo.longitude, 6)}
+              display={vesselInfo.longitude === null ? "-" : `${formatNumber(vesselInfo.longitude, 6)}°`}
+              label="longitude"
+              compact
+            />
+          </strong>
         </article>
 
         <article class="compact-info-card">
@@ -1846,11 +1869,6 @@
       {#if canShowFodUsage}
         <div class="fod-usage-summary">
           <article>
-            <span>FOD Date</span>
-            <strong>{fodUsage?.date || "-"}</strong>
-          </article>
-
-          <article>
             <span>Accumulated</span>
             <strong>{formatLiter(fodUsage?.accumulatedLiters || 0)}</strong>
           </article>
@@ -1879,6 +1897,7 @@
       </section>
     {/if}
   </section>
+  {/if}
 </section>
 
 <style>

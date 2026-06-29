@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { activeVesselMenu, setActiveVesselMenu } from '$lib/stores/vesselNavigation.svelte.js';
 	import { apiRequest } from '$lib/api/authApi.js';
+	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 
 	import VesselDashboardPage from '$lib/pages/vessel/VesselDashboardPage.svelte';
 	import DailyReportPage from '$lib/pages/vessel/DailyReportPage.svelte';
@@ -21,8 +22,11 @@
 	} from '$lib/stores/selectedVessel.svelte.js';
 	import { pageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 
+	let { active = true } = $props();
+
 	let menuOpen = $state(false);
 	let vesselDropdownOpen = $state(false);
+	let vesselSearch = $state('');
 
 	let vessels = $state([]);
 	let vesselLoading = $state(false);
@@ -171,6 +175,24 @@
 		return vessel?.vesselId || vessel?.id || vessel?.vessel_id || vessel?.dbId || null;
 	}
 
+	let filteredVessels = $derived(
+		vessels.filter((vessel) => {
+			const keyword = vesselSearch.trim().toLowerCase();
+			if (!keyword) return true;
+
+			return [
+				vessel?.vesselName,
+				vessel?.name,
+				vessel?.companyName,
+				vessel?.deviceName,
+				vessel?.deviceId,
+				getVesselId(vessel)
+			]
+				.filter(Boolean)
+				.some((value) => String(value).toLowerCase().includes(keyword));
+		})
+	);
+
 	function formatNumber(value) {
 		const number = Number(value);
 
@@ -300,7 +322,7 @@
 	}
 
 	function isPageActive(key) {
-		return $activeVesselMenu === key;
+		return active && $activeVesselMenu === key;
 	}
 
 	function shouldMountPage(key) {
@@ -450,6 +472,7 @@
 	function selectVessel(vessel) {
 		setSelectedVessel(vessel);
 		vesselDropdownOpen = false;
+		vesselSearch = '';
 
 		console.log('[VESSEL_PAGE][VESSEL_SELECTED]', vessel);
 
@@ -480,13 +503,13 @@
 						<small>Workspace</small>
 						<strong>{activeLabel}</strong>
 					</span>
-					<span class="arrow">▾</span>
+					<span>▾</span>
 				</button>
 
 				{#if menuOpen}
 					<div class="dropdown-menu">
 						{#if permissionLoading}
-							<div class="dropdown-empty">Loading menu...</div>
+							<div class="dropdown-empty"><LoadingSkeleton label="Loading menu" variant="list" rows={3} compact /></div>
 						{:else if visibleVesselMenus.length}
 							{#each visibleVesselMenus as menu}
 								<button
@@ -552,19 +575,40 @@
 					<small>Active vessel</small>
 					<strong>{selectedVessel}</strong>
 				</span>
-				<span class="arrow">▾</span>
+				<span>▾</span>
 			</button>
 
 			{#if vesselDropdownOpen}
 				<div class="vessel-menu">
 					{#if vesselLoading}
-						<div class="vessel-state">Loading vessels...</div>
+						<div class="vessel-state"><LoadingSkeleton label="Loading vessels" variant="list" rows={4} compact /></div>
 					{:else if vesselError}
 						<div class="vessel-state error">{vesselError}</div>
 					{:else if vessels.length === 0}
 						<div class="vessel-state">No vessels available</div>
 					{:else}
-						{#each vessels as vessel}
+						<div class="vessel-search-box">
+							<input
+								type="search"
+								placeholder="Search vessel..."
+								aria-label="Search vessel"
+								bind:value={vesselSearch}
+							/>
+							{#if vesselSearch}
+								<button
+									type="button"
+									class="vessel-search-clear"
+									aria-label="Clear vessel search"
+									onclick={() => (vesselSearch = '')}
+								>
+								</button>
+							{/if}
+						</div>
+
+						{#if filteredVessels.length === 0}
+							<div class="vessel-state">No vessel found.</div>
+						{:else}
+							{#each filteredVessels as vessel}
 							<button
 								type="button"
 								class="vessel-item"
@@ -580,7 +624,8 @@
 									<span class="active-check">✓</span>
 								{/if}
 							</button>
-						{/each}
+							{/each}
+						{/if}
 					{/if}
 				</div>
 			{/if}
@@ -591,8 +636,7 @@
 		{#if permissionLoading}
 			<section class="vessel-page active-vessel-page">
 				<div class="no-access-card">
-					<h2>Loading access...</h2>
-					<p>Loading user permissions.</p>
+					<LoadingSkeleton label="Loading vessel access" variant="card" rows={3} />
 				</div>
 			</section>
 		{:else if !visibleVesselMenus.length}
@@ -1374,6 +1418,70 @@
 		width: 280px;
 		max-height: min(420px, calc(100vh - 90px));
 		overflow-y: auto;
+	}
+
+	.vessel-search-box {
+		position: sticky;
+		top: 0;
+		z-index: 2;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 7px;
+		margin-bottom: 6px;
+		padding: 6px;
+		border-radius: 10px;
+		background: rgba(10, 15, 28, 0.96);
+		border: 1px solid rgba(148, 163, 184, 0.14);
+		box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+	}
+
+	.vessel-search-box input {
+		width: 100%;
+		min-width: 0;
+		height: 34px;
+		padding: 0 10px;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 8px;
+		background: rgba(15, 23, 42, 0.96);
+		color: var(--text-primary);
+		font-size: 11px;
+		font-weight: 600;
+		outline: none;
+	}
+
+	.vessel-search-box input::placeholder {
+		color: rgba(148, 163, 184, 0.78);
+	}
+
+	.vessel-search-box input:focus {
+		border-color: rgba(59, 130, 246, 0.58);
+		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+	}
+
+	.vessel-search-clear {
+		width: 34px;
+		height: 34px;
+		display: grid;
+		place-items: center;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 8px;
+		background: rgba(30, 41, 59, 0.9);
+		color: var(--text-secondary);
+		font-size: 0;
+		font-weight: 800;
+		line-height: 1;
+		transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+	}
+
+	.vessel-search-clear::before {
+		content: 'X';
+		font-size: 11px;
+	}
+
+	.vessel-search-clear:hover {
+		border-color: rgba(96, 165, 250, 0.36);
+		background: rgba(37, 99, 235, 0.18);
+		color: #dbeafe;
 	}
 
 	.dropdown-item,

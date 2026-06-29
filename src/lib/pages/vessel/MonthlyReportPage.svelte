@@ -4,6 +4,7 @@
 	import { getMonthlyReportData, getMonthlyReportExcelUrl } from '$lib/api/monthlyReportApi.js';
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import { downloadApiFile, apiRequest } from '$lib/api/authApi.js';
+	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 
 	let loading = $state(false);
 	let exporting = $state(false);
@@ -753,6 +754,14 @@
 		visibleMonthlyEngineFuelSources.length > 0 || visibleMonthlyGlobalFuelGroups.length > 0
 	);
 
+	let monthlyTableSkeletonColumns = $derived(
+		2 +
+			(canViewEngineRuntimeTable ? Math.max(monthlyEngines.length, 1) : 0) +
+			(canViewFuelConsumptionTable ? (hasMonthlyFuelColumns ? monthlyFuelColspan : 1) : 0) +
+			(canViewSpeedStatsTable ? 2 : 0) +
+			(canViewHighRpmLowSpeedTable ? 3 : 0)
+	);
+
 	function getSpeed(row, type) {
 		const paths = {
 			avg: [
@@ -1086,14 +1095,22 @@
 	{/if}
 
 	{#if currentUserLoading}
-		<div class="status-box">Loading user permissions...</div>
+		<LoadingSkeleton label="Loading user permissions" variant="card" rows={2} compact />
 	{/if}
 
 	{#if currentUserError}
 		<div class="status-box error-box">{currentUserError}</div>
 	{/if}
 
-	<section class="summary-grid">
+	{#if loading}
+		<LoadingSkeleton
+			label="Loading monthly report data"
+			variant="monthly-report"
+			rows={10}
+			columns={monthlyTableSkeletonColumns}
+		/>
+	{:else}
+		<section class="summary-grid">
 		{#if canViewEngineRuntimeTable}
 			<article class="summary-card">
 				<span>Total Runtime</span>
@@ -1280,11 +1297,12 @@
 		{/if}
 	</section>
 
-	{#if hasRawData}
-		<details class="raw-box">
-			<summary>Raw Monthly Report Response</summary>
-			<pre>{JSON.stringify(reportData, null, 2)}</pre>
-		</details>
+		{#if hasRawData}
+			<details class="raw-box">
+				<summary>Raw Monthly Report Response</summary>
+				<pre>{JSON.stringify(reportData, null, 2)}</pre>
+			</details>
+		{/if}
 	{/if}
 </section>
 

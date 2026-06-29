@@ -2,6 +2,10 @@
   import { onMount, onDestroy, tick } from "svelte";
   import { browser } from "$app/environment";
   import { VMS_TILE_URL, VMS_TILE_OPTIONS } from "$lib/mapStyle.js";
+  import {
+    createCopyableCoordinateHtml,
+    handleCoordinateCopyClick
+  } from "$lib/utils/coordinateClipboard.js";
 
   let {
     latitude = 0,
@@ -130,18 +134,21 @@ function resetTraceFitIfNeeded() {
   }
 
   function createPopupHtml() {
+    const formattedLatitude = toNumber(latitude, 0).toFixed(6);
+    const formattedLongitude = toNumber(longitude, 0).toFixed(6);
+
     return `
       <div class="vessel-map-popup">
         <div class="vessel-map-popup-title">${vesselName || "Vessel"}</div>
 
         <div class="vessel-map-popup-row">
           <span>Latitude</span>
-          <strong>${toNumber(latitude, 0).toFixed(6)}</strong>
+          ${createCopyableCoordinateHtml(formattedLatitude, "latitude")}
         </div>
 
         <div class="vessel-map-popup-row">
           <span>Longitude</span>
-          <strong>${toNumber(longitude, 0).toFixed(6)}</strong>
+          ${createCopyableCoordinateHtml(formattedLongitude, "longitude")}
         </div>
 
         <div class="vessel-map-popup-row">
@@ -342,6 +349,7 @@ function refreshMap() {
     L.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(map);
 
     traceLayerGroup = L.layerGroup().addTo(map);
+    container.addEventListener("click", handleCoordinateCopyClick, true);
 
     refreshMap();
 
@@ -380,6 +388,10 @@ $effect(() => {
     if (marker) {
       marker.remove();
       marker = null;
+    }
+
+    if (mapContainer) {
+      mapContainer.removeEventListener("click", handleCoordinateCopyClick, true);
     }
 
     if (map) {

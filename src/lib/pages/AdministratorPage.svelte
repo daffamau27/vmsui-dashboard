@@ -3,6 +3,7 @@
 	import { fade, fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { getCurrentUserApi } from '$lib/api/authApi.js';
+	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import {
 		getPermissionCatalogApi,
 		getAllUsersApi,
@@ -1101,11 +1102,35 @@
 	function createEmptyAssetForm() {
 		return {
 			assetId: '',
-			assetName: ''
+			assetName: '',
+			assetType: ''
 		};
 	}
 
 	let assetForm = createEmptyAssetForm();
+
+	const assetTypeOptions = ['buoy', 'whp', 'jetty', 'shipyard', 'mess', 'office', 'fso', 'anchor', 'rig'];
+
+	$: hasCustomAssetType =
+		assetForm.assetType.trim() && !assetTypeOptions.includes(assetForm.assetType.trim());
+
+	function getAssetType(asset) {
+		return asset?.assetType ?? asset?.asset_type ?? asset?.type ?? '';
+	}
+
+	function formatAssetType(value) {
+		const text = String(value || '').trim();
+		if (!text) return 'Unspecified';
+
+		return text
+			.replace(/[_-]+/g, ' ')
+			.replace(/\s+/g, ' ')
+			.split(' ')
+			.map((word) =>
+				word.length <= 3 ? word.toUpperCase() : word.charAt(0).toUpperCase() + word.slice(1)
+			)
+			.join(' ');
+	}
 
 	$: filteredAssets = assets.filter((asset) => {
 		const keyword = searchAsset.trim().toLowerCase();
@@ -1116,6 +1141,7 @@
 			asset?.id ? String(asset.id) : '',
 			asset?.assetId,
 			asset?.assetName,
+			getAssetType(asset),
 			asset?.thingsboardName
 		]
 			.filter(Boolean)
@@ -1300,7 +1326,12 @@
 			assetOptions = assetDetails.map((asset) => ({
 				id: Number(asset.id),
 				label: asset.assetName || asset.thingsboardName || asset.assetId || `Asset ${asset.id}`,
-				sublabel: asset.thingsboardName || asset.assetId || ''
+				sublabel: [
+					getAssetType(asset) ? formatAssetType(getAssetType(asset)) : '',
+					asset.thingsboardName || asset.assetId || ''
+				]
+					.filter(Boolean)
+					.join(' • ')
 			}));
 
 			vesselOptions = vesselDetails.map((vessel) => ({
@@ -1580,7 +1611,12 @@
 			assetOptions = assets.map((asset) => ({
 				id: Number(asset.id),
 				label: asset.assetName || asset.thingsboardName || asset.assetId || `Asset ${asset.id}`,
-				sublabel: asset.assetId || asset.thingsboardName || ''
+				sublabel: [
+					getAssetType(asset) ? formatAssetType(getAssetType(asset)) : '',
+					asset.assetId || asset.thingsboardName || ''
+				]
+					.filter(Boolean)
+					.join(' • ')
 			}));
 		} finally {
 			assetsLoading = false;
@@ -1613,7 +1649,8 @@
 
 			assetForm = {
 				assetId: detail?.assetId || '',
-				assetName: detail?.assetName || detail?.thingsboardName || ''
+				assetName: detail?.assetName || detail?.thingsboardName || '',
+				assetType: getAssetType(detail)
 			};
 		} catch (error) {
 			showAlert('error', error.message || 'Failed to load asset details.');
@@ -1633,9 +1670,12 @@
 	}
 
 	function buildAssetPayload() {
+		const assetType = assetForm.assetType.trim();
+
 		return {
 			assetId: assetForm.assetId.trim(),
-			assetName: assetForm.assetName.trim()
+			assetName: assetForm.assetName.trim(),
+			assetType: assetType || null
 		};
 	}
 
@@ -2303,8 +2343,7 @@
 
 	{#if bootLoading}
 		<section class="state-card">
-			<div class="loader"></div>
-			<p>Loading administrator data...</p>
+			<LoadingSkeleton label="Loading administrator data" variant="administrator-page" />
 		</section>
 	{:else if currentUser && !isSuperAdmin}
 		<section class="state-card danger-state">
@@ -2388,7 +2427,7 @@
 						</div>
 
 						{#if usersLoading}
-							<span class="mini-loading">Loading</span>
+							<LoadingSkeleton label="Loading users" variant="inline" compact />
 						{/if}
 					</div>
 
@@ -2400,7 +2439,9 @@
 					/>
 
 					<div class="users-list">
-						{#if filteredUsers.length === 0}
+						{#if usersLoading}
+							<LoadingSkeleton label="Loading users" variant="admin-entity-list" rows={6} compact />
+						{:else if filteredUsers.length === 0}
 							<div class="empty-box">User not found.</div>
 						{:else}
 							{#each filteredUsers as user}
@@ -2459,6 +2500,10 @@
 							</button>
 						{/if}
 					</div>
+
+					{#if selectedUserLoading}
+						<LoadingSkeleton label="Loading user details" variant="admin-detail-form" compact />
+					{/if}	
 
 					<div class="form-grid">
 						<label>
@@ -2618,7 +2663,7 @@
 							</div>
 
 							{#if permissionsLoading}
-								<div class="empty-box">Loading permission catalog...</div>
+								<LoadingSkeleton label="Loading permission catalog" variant="admin-permission-catalog" rows={5} />
 							{:else if visiblePermissionGroups.length === 0}
 								<div class="empty-box">Permission not found.</div>
 							{:else}
@@ -2699,7 +2744,7 @@
 						</div>
 
 						{#if vesselsLoading}
-							<span class="mini-loading">Loading</span>
+							<LoadingSkeleton label="Loading vessels" variant="inline" compact />
 						{/if}
 					</div>
 
@@ -2711,7 +2756,9 @@
 					/>
 
 					<div class="vessel-list">
-						{#if filteredVessels.length === 0}
+						{#if vesselsLoading}
+							<LoadingSkeleton label="Loading vessels" variant="admin-entity-list" rows={6} compact />
+						{:else if filteredVessels.length === 0}
 							<div class="empty-box">Vessel not found.</div>
 						{:else}
 							{#each filteredVessels as vessel}
@@ -2872,7 +2919,7 @@
 						/>
 
 						{#if companiesLoading}
-							<div class="empty-box">Loading companies...</div>
+							<LoadingSkeleton label="Loading companies" variant="admin-compact-list" rows={4} />
 						{:else if filteredCompanies.length === 0}
 							<div class="empty-box">Company not found.</div>
 						{:else}
@@ -2929,7 +2976,7 @@
 						</div>
 
 						{#if assetsLoading}
-							<span class="mini-loading">Loading</span>
+							<LoadingSkeleton label="Loading assets" variant="inline" compact />
 						{/if}
 					</div>
 
@@ -2937,11 +2984,13 @@
 						class="search-input"
 						type="search"
 						bind:value={searchAsset}
-						placeholder="Search asset name, asset ID..."
+						placeholder="Search asset name, asset ID, type..."
 					/>
 
 					<div class="asset-list">
-						{#if filteredAssets.length === 0}
+						{#if assetsLoading}
+							<LoadingSkeleton label="Loading assets" variant="admin-entity-list" rows={6} compact />
+						{:else if filteredAssets.length === 0}
 							<div class="empty-box">Asset not found.</div>
 						{:else}
 							{#each filteredAssets as asset}
@@ -2952,7 +3001,12 @@
 									on:click={() => openEditAssetForm(asset)}
 								>
 									<div>
-										<strong>{asset.assetName || asset.thingsboardName || '-'}</strong>
+										<div class="asset-row-title">
+											<strong>{asset.assetName || asset.thingsboardName || '-'}</strong>
+											<span class:empty-asset-type={!getAssetType(asset)} class="asset-type-badge">
+												{formatAssetType(getAssetType(asset))}
+											</span>
+										</div>
 										<span>ID {asset.id}</span>
 										<small>{asset.assetId || '-'}</small>
 									</div>
@@ -2993,11 +3047,24 @@
 								<span>Asset Name</span>
 								<input type="text" bind:value={assetForm.assetName} placeholder="RIG 1 Test" />
 							</label>
+
+							<label>
+								<span>Asset Type</span>
+								<select bind:value={assetForm.assetType}>
+									<option value="">Select type</option>
+									{#if hasCustomAssetType}
+										<option value={assetForm.assetType}>Current: {formatAssetType(assetForm.assetType)}</option>
+									{/if}
+									{#each assetTypeOptions as type}
+										<option value={type}>{formatAssetType(type)}</option>
+									{/each}
+								</select>
+							</label>
 						</div>
 
 						<div class="asset-note">
 							<strong>Note:</strong>
-							the asset backend accepts <code>assetId</code> and <code>assetName</code>. Make sure <code>assetId</code> matches the Asset ID from ThingsBoard.
+							the asset backend accepts <code>assetId</code>, <code>assetName</code>, and <code>assetType</code>. Make sure <code>assetId</code> matches the Asset ID from ThingsBoard.
 						</div>
 
 						<div class="editor-footer">
@@ -3038,7 +3105,7 @@
 						</div>
 
 						{#if engineCurvesLoading}
-							<span class="mini-loading">Loading</span>
+							<LoadingSkeleton label="Loading engine curves" variant="inline" compact />
 						{/if}
 					</div>
 
@@ -3050,7 +3117,9 @@
 					/>
 
 					<div class="engine-curve-list">
-						{#if filteredEngineCurves.length === 0}
+						{#if engineCurvesLoading}
+							<LoadingSkeleton label="Loading engine curves" variant="admin-entity-list" rows={6} compact />
+						{:else if filteredEngineCurves.length === 0}
 							<div class="empty-box">Engine curve not found.</div>
 						{:else}
 							{#each filteredEngineCurves as curve}
@@ -3160,8 +3229,7 @@
 
 					{#if selectedEngineCurveLoading}
 						<section class="engine-curve-detail-card">
-							<div class="loader"></div>
-							<p>Loading engine curve details...</p>
+							<LoadingSkeleton label="Loading engine curve details" variant="admin-engine-curve-detail" />
 						</section>
 					{:else if selectedEngineCurveDetail}
 						<section class="engine-curve-detail-card">
@@ -3264,7 +3332,7 @@
 						</div>
 
 						{#if reportingVesselsLoading}
-							<span class="mini-loading">Loading</span>
+							<LoadingSkeleton label="Loading reporting vessels" variant="inline" compact />
 						{/if}
 					</div>
 
@@ -3293,7 +3361,9 @@
 					</div>
 
 					<div class="reporting-vessel-list">
-						{#if reportingVessels.length === 0}
+						{#if reportingVesselsLoading}
+							<LoadingSkeleton label="Loading reporting vessels" variant="admin-entity-list" rows={6} compact />
+						{:else if reportingVessels.length === 0}
 							<div class="empty-box">Reporting vessel not found.</div>
 						{:else}
 							{#each reportingVessels as vessel}
@@ -3403,7 +3473,7 @@
 								</div>
 
 								{#if reportingAssignableUsersLoading}
-									<div class="empty-box">Loading assignable users...</div>
+									<LoadingSkeleton label="Loading assignable users" variant="admin-compact-list" rows={5} />
 								{:else if filteredReportingAssignableUsers.length === 0}
 									<div class="empty-box">No users with email are available for this vessel.</div>
 								{:else}
@@ -3594,7 +3664,7 @@
 
 							<div class="audit-log-list">
 								{#if autoReportAuditLoading}
-									<div class="empty-box">Loading audit logs...</div>
+									<LoadingSkeleton label="Loading audit logs" variant="admin-compact-list" rows={4} />
 								{:else if autoReportAuditLogs.length === 0}
 									<div class="empty-box">No audit logs yet.</div>
 								{:else}
@@ -3630,7 +3700,7 @@
 						</div>
 
 						{#if reportingVesselsLoading}
-							<span class="mini-loading">Loading</span>
+							<LoadingSkeleton label="Loading alarm vessels" variant="inline" compact />
 						{/if}
 					</div>
 
@@ -3653,7 +3723,9 @@
 					</div>
 
 					<div class="reporting-vessel-list">
-						{#if reportingVessels.length === 0}
+						{#if reportingVesselsLoading}
+							<LoadingSkeleton label="Loading alarm vessels" variant="admin-entity-list" rows={6} compact />
+						{:else if reportingVessels.length === 0}
 							<div class="empty-box">Alarm vessel not found.</div>
 						{:else}
 							{#each reportingVessels as vessel}
@@ -3776,7 +3848,7 @@
 							<div class="telegram-layout">
 								<div class="telegram-list">
 									{#if telegramGroupsLoading}
-										<div class="empty-box">Loading Telegram groups...</div>
+										<LoadingSkeleton label="Loading Telegram groups" variant="admin-compact-list" rows={4} />
 									{:else if telegramGroups.length === 0}
 										<div class="empty-box">No Telegram groups are available yet.</div>
 									{:else}
@@ -4019,7 +4091,7 @@
 						</div>
 
 						{#if globalAuditLoading}
-							<div class="empty-box">Loading global audit logs...</div>
+							<LoadingSkeleton label="Loading global audit logs" variant="admin-global-audit-table" rows={6} columns={5} />
 						{:else if globalAuditLogs.length === 0}
 							<div class="empty-box">Audit log not found.</div>
 						{:else}
@@ -5001,7 +5073,44 @@
 	}
 
 	.asset-form-grid {
-		grid-template-columns: 1.3fr 1fr;
+		grid-template-columns: 1.35fr 1fr 180px;
+	}
+
+	.asset-row-title {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 7px;
+		min-width: 0;
+	}
+
+	.asset-row-title strong {
+		min-width: 0;
+	}
+
+	.asset-row-title .asset-type-badge {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: fit-content;
+		min-height: 22px;
+		margin-top: 0;
+		padding: 0 8px;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.16);
+		color: #bfdbfe;
+		font-size: 10px;
+		font-weight: 800;
+		line-height: 1;
+		letter-spacing: 0.02em;
+		white-space: nowrap;
+	}
+
+	.asset-row-title .asset-type-badge.empty-asset-type {
+		border-color: rgba(148, 163, 184, 0.18);
+		background: rgba(148, 163, 184, 0.1);
+		color: var(--text-secondary);
 	}
 
 	label span {

@@ -30,7 +30,7 @@
     class="keep-page no-scroll-page"
     class:active-page={$activeMenu === "vessel"}
   >
-    <VesselPage />
+    <VesselPage active={$activeMenu === "vessel"} />
   </section>
 
   <section

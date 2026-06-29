@@ -9,6 +9,7 @@
 	} from '$lib/stores/selectedVessel.svelte.js';
 	import { apiRequest } from '$lib/api/authApi.js';
 	import { pageStatus } from '$lib/stores/pageStatusStore.svelte.js';
+	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 
 	let dropdownOpen = $state(false);
 	let vesselDropdownOpen = $state(false);
@@ -413,7 +414,7 @@
 			{#if dropdownOpen}
 				<div class="dropdown-menu">
 					{#if permissionLoading}
-						<div class="dropdown-empty">Loading menu...</div>
+						<div class="dropdown-empty"><LoadingSkeleton label="Loading menu" variant="list" rows={3} compact /></div>
 					{:else if visibleVesselMenus.length}
 						{#each visibleVesselMenus as menu}
 							<button
@@ -467,7 +468,9 @@
 
 		{#if vesselDropdownOpen}
 			<div class="vessel-menu">
-				{#if vesselError}
+				{#if vesselLoading}
+					<div class="vessel-empty"><LoadingSkeleton label="Loading vessels" variant="list" rows={4} compact /></div>
+				{:else if vesselError}
 					<div class="vessel-empty">{vesselError}</div>
 				{:else if vessels.length}
 					{#each vessels as vessel}

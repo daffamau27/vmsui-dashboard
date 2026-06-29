@@ -157,7 +157,7 @@
 
 	let activeIndex = $derived(visibleMenus.findIndex((menu) => menu.key === $activeMenu));
 
-	let mobileSidebarOpen = $state(false);
+	let isSidebarOpen = $state(true);
 
 	let showLogoutConfirm = $state(false);
 	let logoutConfirmBox;
@@ -232,6 +232,7 @@
 
 	function notifyMobilePanelOpen(panelName) {
 		if (!browser) return;
+		if (window.innerWidth > 760) return;
 
 		window.dispatchEvent(
 			new CustomEvent('mobile-panel-open', {
@@ -241,17 +242,28 @@
 	}
 
 	function openMobileSidebar() {
-		mobileSidebarOpen = true;
+		isSidebarOpen = true;
 		notifyMobilePanelOpen('main-sidebar');
 	}
 
 	function closeMobileSidebar() {
-		mobileSidebarOpen = false;
+		isSidebarOpen = false;
+	}
+
+	function toggleSidebar() {
+		if (isSidebarOpen) {
+			closeMobileSidebar();
+			return;
+		}
+
+		openMobileSidebar();
 	}
 
 	function handleMobilePanelOpen(event) {
+		if (!browser || window.innerWidth > 760) return;
+
 		if (event.detail !== 'main-sidebar') {
-			mobileSidebarOpen = false;
+			isSidebarOpen = false;
 		}
 	}
 
@@ -259,7 +271,9 @@
 		if (!hasPermission(menu)) return;
 
 		setActiveMenu(menu.key);
-		mobileSidebarOpen = false;
+		if (browser && window.innerWidth <= 760) {
+			isSidebarOpen = false;
+		}
 
 		if (page.url.pathname !== '/app') {
 			await goto('/app');
@@ -268,6 +282,8 @@
 
 	onMount(() => {
 		if (!browser) return;
+
+		isSidebarOpen = window.innerWidth > 760;
 
 		const currentPermissionAccess = $currentUser?.permissionAccess;
 		if (currentPermissionAccess) {
@@ -289,9 +305,20 @@
 	});
 </script>
 
-<button type="button" class="main-sidebar-toggle" onclick={openMobileSidebar}> > </button>
+<button
+	type="button"
+	class:sidebar-open-toggle={isSidebarOpen}
+	class="main-sidebar-toggle"
+	aria-expanded={isSidebarOpen}
+	aria-label={isSidebarOpen ? 'Close main sidebar' : 'Open main sidebar'}
+	title={isSidebarOpen ? 'Hide menu' : 'Show menu'}
+	onclick={toggleSidebar}
+>
+	<span aria-hidden="true"></span>
+	<span>{isSidebarOpen ? 'Hide' : 'Menu'}</span>
+</button>
 
-{#if mobileSidebarOpen}
+{#if isSidebarOpen}
 	<button
 		type="button"
 		class="main-sidebar-backdrop"
@@ -300,7 +327,7 @@
 	></button>
 {/if}
 
-<aside class:sidebar-open={mobileSidebarOpen} class="sidebar">
+<aside class:sidebar-open={isSidebarOpen} class:sidebar-collapsed={!isSidebarOpen} class="sidebar">
 	<div class="sidebar-mobile-header">
 		<div>
 			<h2>Menu</h2>
@@ -396,11 +423,103 @@
 {/if}
 
 <style>
-	.main-sidebar-toggle,
 	.main-sidebar-backdrop,
 	.sidebar-mobile-header,
 	.side-label {
 		display: none;
+	}
+
+	.main-sidebar-toggle {
+		position: fixed;
+		top: 10px;
+		left: 8px;
+		z-index: 1300;
+		width: 28px;
+		height: 28px;
+		min-height: 28px;
+		display: inline-flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		gap: 0;
+		padding: 0;
+		border: 1px solid rgba(147, 197, 253, 0.34);
+		border-radius: 999px;
+		background:
+			linear-gradient(180deg, rgba(30, 64, 175, 0.3), rgba(15, 23, 42, 0.08)),
+			rgba(15, 23, 42, 0.78);
+		color: #dbeafe;
+		box-shadow: 0 8px 18px rgba(15, 23, 42, 0.16);
+		backdrop-filter: blur(12px) saturate(1.15);
+		cursor: pointer;
+		transform: none;
+		transition:
+			left 0.22s ease,
+			border-color 0.18s ease,
+			background 0.18s ease,
+			box-shadow 0.18s ease,
+			transform 0.18s ease;
+	}
+
+	.main-sidebar-toggle.sidebar-open-toggle {
+		left: 15px;
+		width: 34px;
+		height: 34px;
+		min-height: 34px;
+		padding: 0;
+		background:
+			linear-gradient(180deg, rgba(30, 64, 175, 0.3), rgba(15, 23, 42, 0.08)),
+			rgba(15, 23, 42, 0.92);
+	}
+
+	.main-sidebar-toggle span:last-child {
+		display: none;
+	}
+
+	.main-sidebar-toggle span:first-child {
+		width: 20px;
+		height: 20px;
+		display: grid;
+		place-items: center;
+		border-radius: 999px;
+		border: 1px solid rgba(191, 219, 254, 0.28);
+		background: rgba(37, 99, 235, 0.55);
+		box-shadow: 0 6px 14px rgba(37, 99, 235, 0.22);
+	}
+
+	.main-sidebar-toggle span:first-child::before {
+		content: '>';
+		font-size: 13px;
+		font-weight: 900;
+		line-height: 1;
+	}
+
+	.main-sidebar-toggle.sidebar-open-toggle span:first-child::before {
+		content: '<';
+		font-size: 15px;
+	}
+
+	.main-sidebar-toggle span:last-child {
+		display: none;
+		writing-mode: horizontal-tb;
+		color: inherit;
+		font-size: 10px;
+		font-weight: 900;
+		line-height: 1;
+		letter-spacing: 0.03em;
+		text-transform: uppercase;
+	}
+
+	.main-sidebar-toggle:hover {
+		border-color: rgba(147, 197, 253, 0.82);
+		background:
+			linear-gradient(180deg, rgba(37, 99, 235, 0.38), rgba(15, 23, 42, 0.12)),
+			rgba(15, 23, 42, 0.96);
+		box-shadow:
+			0 16px 34px rgba(15, 23, 42, 0.3),
+			0 0 0 4px rgba(37, 99, 235, 0.09),
+			inset 0 1px 0 rgba(255, 255, 255, 0.1);
+		transform: translateY(-1px);
 	}
 
 	.sidebar {
@@ -412,13 +531,35 @@
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		padding-top: 8px;
+		padding-top: 52px;
 		padding-bottom: 12px;
 		flex-shrink: 0;
 		position: sticky;
 		top: 0;
 		left: 0;
 		z-index: 1000;
+		overflow: hidden;
+		transition:
+			width 0.22s ease,
+			padding 0.22s ease,
+			border-color 0.18s ease,
+			transform 0.22s ease,
+			opacity 0.18s ease;
+	}
+
+	.sidebar.sidebar-collapsed {
+		width: 0;
+		padding-left: 0;
+		padding-right: 0;
+		border-right-color: transparent;
+		opacity: 0;
+		pointer-events: none;
+	}
+
+	.sidebar.sidebar-collapsed .sidebar-menu,
+	.sidebar.sidebar-collapsed .logout-button {
+		opacity: 0;
+		pointer-events: none;
 	}
 
 	.sidebar-brand {
@@ -771,24 +912,36 @@
 		}
 
 		.main-sidebar-toggle {
-			display: inline-flex;
 			position: fixed;
-			top: 45px;
-			left: 0px;
-			z-index: 900;
+			top: 10px;
+			left: 8px;
+			z-index: 1250;
+			width: 28px;
+			min-height: 28px;
 			height: 28px;
+			flex-direction: row;
 			align-items: center;
 			justify-content: center;
-			gap: 6px;
-			padding: 0 9px;
+			gap: 0;
+			padding: 0;
 			border: 1px solid rgba(59, 130, 246, 0.35);
-			border-radius: 0 999px 999px 0;
-			background: rgba(17, 24, 39, 0.94);
+			border-radius: 999px;
+			background: rgba(17, 24, 39, 0.78);
 			color: var(--text-accent);
-			font-size: 10px;
+			font-size: 0;
 			font-weight: 900;
-			box-shadow: 0 6px 14px rgba(15, 23, 42, 0.12);
+			box-shadow: 0 8px 18px rgba(15, 23, 42, 0.2);
 			cursor: pointer;
+			transform: none;
+		}
+
+		.main-sidebar-toggle.sidebar-open-toggle {
+			left: 16px;
+			width: 32px;
+			height: 32px;
+			min-height: 32px;
+			padding: 0;
+			background: rgba(17, 24, 39, 0.94);
 		}
 
 		.main-sidebar-backdrop {
@@ -830,6 +983,21 @@
 				opacity 0.22s ease;
 		}
 
+		.sidebar.sidebar-collapsed {
+			width: 260px;
+			max-width: calc(100vw - 18px);
+			padding: 0;
+			border: 1px solid var(--color-border);
+			opacity: 0;
+			pointer-events: none;
+			transform: translateX(calc(-100% - 16px));
+		}
+
+		.sidebar.sidebar-collapsed .sidebar-menu,
+		.sidebar.sidebar-collapsed .logout-button {
+			opacity: 1;
+		}
+
 		.sidebar.sidebar-open {
 			transform: translateX(0);
 			opacity: 1;
@@ -841,7 +1009,7 @@
 			align-items: flex-start;
 			justify-content: space-between;
 			gap: 8px;
-			padding: 9px 10px;
+			padding: 9px 10px 9px 50px;
 			border-bottom: 1px solid var(--color-border);
 			background: var(--color-surface);
 		}

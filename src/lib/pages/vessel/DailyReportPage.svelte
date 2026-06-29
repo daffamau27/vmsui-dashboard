@@ -12,6 +12,12 @@
 	import { getFleetVesselDetail } from '$lib/api/fleetApi.js';
 	import { downloadApiFile, apiRequest } from '$lib/api/authApi.js';
 	import { VMS_TILE_URL, VMS_TILE_OPTIONS } from '$lib/mapStyle.js';
+	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
+	import {
+		createCopyableCoordinateHtml,
+		handleCoordinateCopyClick
+	} from '$lib/utils/coordinateClipboard.js';
 	
 	let loading = $state(false);
 	let exporting = $state(false);
@@ -1722,6 +1728,8 @@
 		let endMarker = null;
 		let disposed = false;
 
+		node.addEventListener('click', handleCoordinateCopyClick, true);
+
 		function createTripDivIcon(label, type) {
 			if (!leaflet) return null;
 
@@ -1799,8 +1807,8 @@
 					`
           <strong>Start Point</strong><br/>
           Time: ${startPoint.time}<br/>
-          Lat: ${startPoint.lat}<br/>
-          Lng: ${startPoint.lng}
+          Lat: ${createCopyableCoordinateHtml(startPoint.lat, 'start latitude')}<br/>
+          Lng: ${createCopyableCoordinateHtml(startPoint.lng, 'start longitude')}
         `
 				)
 				.addTo(map);
@@ -1813,8 +1821,8 @@
 					`
           <strong>End Point</strong><br/>
           Time: ${endPoint.time}<br/>
-          Lat: ${endPoint.lat}<br/>
-          Lng: ${endPoint.lng}
+          Lat: ${createCopyableCoordinateHtml(endPoint.lat, 'end latitude')}<br/>
+          Lng: ${createCopyableCoordinateHtml(endPoint.lng, 'end longitude')}
         `
 				)
 				.addTo(map);
@@ -1837,6 +1845,7 @@
 			},
 			destroy() {
 				disposed = true;
+				node.removeEventListener('click', handleCoordinateCopyClick, true);
 
 				if (map) {
 					map.remove();
@@ -2661,14 +2670,19 @@
 	{/if}
 
 	{#if vesselEnginesLoading}
-		<div class="status-box">Loading vessel engines...</div>
+		<LoadingSkeleton label="Loading vessel engines" variant="list" rows={3} compact />
+	{/if}
+
+	{#if loading}
+		<LoadingSkeleton label="Loading daily report data" variant="daily-report" />
 	{/if}
 
 	{#if vesselEnginesError}
 		<div class="status-box error-box">{vesselEnginesError}</div>
 	{/if}
 
-	<section class="summary-grid">
+	{#if !loading}
+		<section class="summary-grid">
 		<article class="summary-card">
 			<span>Total Runtime</span>
 			<strong>{formatHour(totalRuntimeHours)}</strong>
@@ -2826,17 +2840,39 @@
 
 							<div>
 								<span>Start Coordinate</span>
-								<strong>
-									{formatNumber(dailyTripSummary.startLat, 6)},
-									{formatNumber(dailyTripSummary.startLng, 6)}
+								<strong class="coordinate-pair">
+									<CopyableCoordinate
+										value={formatNumber(dailyTripSummary.startLat, 6)}
+										display={formatNumber(dailyTripSummary.startLat, 6)}
+										label="start latitude"
+										compact
+									/>
+									<span>,</span>
+									<CopyableCoordinate
+										value={formatNumber(dailyTripSummary.startLng, 6)}
+										display={formatNumber(dailyTripSummary.startLng, 6)}
+										label="start longitude"
+										compact
+									/>
 								</strong>
 							</div>
 
 							<div>
 								<span>End Coordinate</span>
-								<strong>
-									{formatNumber(dailyTripSummary.endLat, 6)},
-									{formatNumber(dailyTripSummary.endLng, 6)}
+								<strong class="coordinate-pair">
+									<CopyableCoordinate
+										value={formatNumber(dailyTripSummary.endLat, 6)}
+										display={formatNumber(dailyTripSummary.endLat, 6)}
+										label="end latitude"
+										compact
+									/>
+									<span>,</span>
+									<CopyableCoordinate
+										value={formatNumber(dailyTripSummary.endLng, 6)}
+										display={formatNumber(dailyTripSummary.endLng, 6)}
+										label="end longitude"
+										compact
+									/>
 								</strong>
 							</div>
 						</div>
@@ -3442,11 +3478,12 @@
 		</section>
 	{/if}
 
-	{#if hasRawData}
-		<details class="raw-box">
-			<summary>Raw Daily Report Response</summary>
-			<pre>{JSON.stringify(reportData, null, 2)}</pre>
-		</details>
+		{#if hasRawData}
+			<details class="raw-box">
+				<summary>Raw Daily Report Response</summary>
+				<pre>{JSON.stringify(reportData, null, 2)}</pre>
+			</details>
+		{/if}
 	{/if}
 </section>
 
@@ -3789,6 +3826,13 @@
 		font-size: 13px;
 		font-weight: 900;
 		word-break: break-word;
+	}
+
+	.trip-summary-list strong.coordinate-pair {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 5px;
 	}
 
 	@media (max-width: 1000px) {

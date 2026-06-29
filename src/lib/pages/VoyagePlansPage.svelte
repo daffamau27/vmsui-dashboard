@@ -3,9 +3,17 @@
 	import * as XLSX from 'xlsx';
 	import { apiRequest } from '$lib/api/authApi.js';
 	import { browser } from '$app/environment';
+	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
+	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
+	import {
+		createCopyableCoordinateHtml,
+		handleCoordinateCopyClick
+	} from '$lib/utils/coordinateClipboard.js';
 	import 'leaflet/dist/leaflet.css';
 
 	const PAGE_SIZE_OPTIONS = [10, 20, 50];
+	const ASSET_LEGEND_TYPES = ['anchor', 'buoy', 'dock', 'shipyard', 'mess', 'office', 'fso', 'rig', 'whp'];
 
 	let loading = false;
 	let saving = false;
@@ -39,6 +47,23 @@
 		hasNext: false,
 		hasPrevious: false
 	};
+	let activeAssignments = [];
+	let activeAssignmentsLoading = false;
+	let activeAssignmentsError = '';
+	let activeAssignmentPage = 1;
+	let activeAssignmentPageSize = 10;
+	let activeAssignmentPagination = {
+		page: 1,
+		pageSize: 10,
+		totalItems: 0,
+		totalPages: 1,
+		hasNext: false,
+		hasPrevious: false
+	};
+	let activeAssignmentFilters = {
+		voyagePlanId: '',
+		vesselId: ''
+	};
 
 	let search = '';
 	let showForm = false;
@@ -46,6 +71,13 @@
 	let confirmDeleteId = null;
 
 	let form = getEmptyForm();
+	let selectedNotAllowedVesselId = '';
+	let selectedAllowedVesselId = '';
+	let draggedVesselId = '';
+	let draggedVesselSource = '';
+	let vesselDropTarget = '';
+	let useButtonVesselTransfer = false;
+	let useVerticalVesselTransfer = false;
 	let importForm = {
 		voyageName: '',
 		isActive: true,
@@ -67,6 +99,7 @@
 	let assetMarkerLayer;
 	let routeLine;
 	let selectedPointIndex = 0;
+	let routeMarkerDragging = false;
 
 	let assets = [];
 	let assetsLoading = false;
@@ -470,6 +503,7 @@
 
 			assetMarkerLayer = leaflet.layerGroup().addTo(routeMap);
 			markerLayer = leaflet.layerGroup().addTo(routeMap);
+			mapContainer.addEventListener('click', handleCoordinateCopyClick, true);
 
 			routeLine = leaflet
 				.polyline([], {
@@ -517,6 +551,10 @@
 	}
 
 	function destroyRouteMap() {
+		if (mapContainer) {
+			mapContainer.removeEventListener('click', handleCoordinateCopyClick, true);
+		}
+
 		if (routeMap) {
 			routeMap.off();
 			routeMap.remove();
@@ -584,6 +622,28 @@
 		addRoutePointFromLatLng(event.latlng, 'Add route point from map');
 	}
 
+	function handleRouteMarkerClick(point, event) {
+		if (event?.originalEvent && L?.DomEvent) {
+			L.DomEvent.stopPropagation(event.originalEvent);
+		}
+
+		if (routeMarkerDragging) return;
+
+		closePointContextMenu();
+
+		const latlng = {
+			lat: Number(point.latitude),
+			lng: Number(point.longitude)
+		};
+
+		if (movingPointIndex !== null && movingPointIndex !== undefined) {
+			moveSelectedPointToLatLng(movingPointIndex, latlng);
+			return;
+		}
+
+		addRoutePointFromLatLng(latlng, `Reuse route point ${point.order || point.index + 1}`);
+	}
+
 	function updatePointCoordinate(index, latlng) {
 		pushUndoState('Drag point');
 
@@ -644,9 +704,8 @@
 				})
 			});
 
-			marker.on('click', () => {
-				closePointContextMenu();
-				selectPoint(point.index);
+			marker.on('click', (event) => {
+				handleRouteMarkerClick(point, event);
 			});
 
 			marker.on('contextmenu', (event) => {
@@ -654,6 +713,7 @@
 			});
 
 			marker.on('dragstart', () => {
+				routeMarkerDragging = true;
 				closePointContextMenu();
 				selectedPointIndex = point.index;
 				refreshRouteMap();
@@ -661,6 +721,9 @@
 
 			marker.on('dragend', () => {
 				updatePointCoordinate(point.index, marker.getLatLng());
+				setTimeout(() => {
+					routeMarkerDragging = false;
+				}, 120);
 			});
 
 			marker.addTo(markerLayer);
@@ -717,7 +780,18 @@
 				.includes(q)
 		);
 	});
-	$: selectedAllowedVessels = vessels.filter((v) => form.allowedVesselIds.includes(v.id));
+	$: allowedVesselIdSet = new Set(form.allowedVesselIds.map(Number));
+	$: selectedAllowedVessels = vessels.filter((v) => allowedVesselIdSet.has(Number(v.id)));
+	$: notAllowedVessels = vessels.filter((v) => !allowedVesselIdSet.has(Number(v.id)));
+	$: selectedAssignPlan = getAssignmentPlan(assignForm.voyagePlanId);
+	$: assignableVessels = getAssignableVessels(assignForm.voyagePlanId);
+	$: if (
+		assignForm.vesselId &&
+		assignForm.voyagePlanId &&
+		!assignableVessels.some((vessel) => Number(vessel.id) === Number(assignForm.vesselId))
+	) {
+		assignForm.vesselId = '';
+	}
 
 	function getEmptyForm() {
 		return {
@@ -760,10 +834,26 @@
 			id: asset?.id,
 			assetId: asset?.assetId || '',
 			assetName: asset?.assetName || `Asset ${asset?.id || ''}`,
+			assetType: getAssetTypeValue(asset),
 			latitude,
 			longitude,
 			raw: asset
 		};
+	}
+
+	function createAssetMarkerIcon(asset) {
+		const iconUrl = getAssetIconUrl(asset);
+		const typeLabel = getAssetTypeLabel(asset);
+
+		return L.divIcon({
+			className: `asset-leaflet-icon asset-type-${String(typeLabel).toLowerCase()}`,
+			html: `
+				<img class="asset-type-marker-icon" src="${iconUrl}" alt="${escapeHtml(typeLabel)} asset" title="${escapeHtml(asset.assetName)}" />
+			`,
+			iconSize: [32, 32],
+			iconAnchor: [16, 16],
+			popupAnchor: [0, -16]
+		});
 	}
 
 	function escapeHtml(value) {
@@ -815,16 +905,7 @@
 
 		assets.forEach((asset) => {
 			const marker = L.marker([asset.latitude, asset.longitude], {
-				icon: L.divIcon({
-					className: 'asset-leaflet-icon',
-					html: `
-						<div class="asset-marker-shell" title="${escapeHtml(asset.assetName)}">
-							<div class="asset-marker-core"></div>
-						</div>
-					`,
-					iconSize: [22, 22],
-					iconAnchor: [11, 11]
-				})
+				icon: createAssetMarkerIcon(asset)
 			});
 
 			marker.bindTooltip(escapeHtml(asset.assetName), {
@@ -832,6 +913,45 @@
 				offset: [0, -10],
 				opacity: 0.95
 			});
+
+			marker.bindPopup(
+				`
+					<div class="asset-popup route-asset-popup">
+						<div class="map-popup-hero">
+							<div class="map-popup-icon">
+								<img src="${getAssetIconUrl(asset)}" alt="${escapeHtml(getAssetTypeLabel(asset))} icon" />
+							</div>
+							<div class="map-popup-heading">
+								<span>Fleet Asset</span>
+								<strong>${escapeHtml(asset.assetName)}</strong>
+							</div>
+							<em>${escapeHtml(getAssetTypeLabel(asset))}</em>
+						</div>
+
+						<div class="map-popup-body">
+							<div class="popup-info-row">
+								<span>Asset ID</span>
+								<strong>${escapeHtml(asset.id ?? '-')}</strong>
+							</div>
+							<div class="popup-info-row coordinate-row">
+								<span>Latitude</span>
+								<div class="popup-coordinate-value">${createCopyableCoordinateHtml(asset.latitude, 'asset latitude')}</div>
+							</div>
+							<div class="popup-info-row coordinate-row">
+								<span>Longitude</span>
+								<div class="popup-coordinate-value">${createCopyableCoordinateHtml(asset.longitude, 'asset longitude')}</div>
+							</div>
+						</div>
+
+						<div class="map-popup-note">
+							Click marker to add this asset as a route point.
+						</div>
+					</div>
+				`,
+				{
+					className: 'voyage-plan-map-popup'
+				}
+			);
 
 			marker.on('click', (event) => {
 				if (event?.originalEvent) {
@@ -872,19 +992,50 @@
 		);
 	}
 
-	onMount(async () => {
+	onMount(() => {
+		let cleanupVesselTransferMode = () => {};
+
 		if (browser) {
 			window.addEventListener('keydown', handleRouteEditorKeydown);
+			cleanupVesselTransferMode = setupVesselTransferMode();
 		}
 
-		await initializePage();
+		initializePage();
 
 		return () => {
 			if (browser) {
 				window.removeEventListener('keydown', handleRouteEditorKeydown);
 			}
+
+			cleanupVesselTransferMode();
 		};
 	});
+
+	function setupVesselTransferMode() {
+		if (!browser) return () => {};
+
+		const buttonModeQuery = window.matchMedia('(max-width: 1024px), (pointer: coarse)');
+		const verticalModeQuery = window.matchMedia('(max-width: 720px)');
+
+		const updateTransferMode = () => {
+			useButtonVesselTransfer = buttonModeQuery.matches;
+			useVerticalVesselTransfer = verticalModeQuery.matches;
+
+			if (useButtonVesselTransfer) {
+				handleVesselDragEnd();
+			}
+		};
+
+		updateTransferMode();
+
+		buttonModeQuery.addEventListener?.('change', updateTransferMode);
+		verticalModeQuery.addEventListener?.('change', updateTransferMode);
+
+		return () => {
+			buttonModeQuery.removeEventListener?.('change', updateTransferMode);
+			verticalModeQuery.removeEventListener?.('change', updateTransferMode);
+		};
+	}
 
 	async function initializePage() {
 		loading = true;
@@ -892,7 +1043,7 @@
 		try {
 			await loadCurrentUser();
 			if (canAccess) {
-				await Promise.all([loadPlans(), loadVessels(), loadFleetAssets()]);
+				await Promise.all([loadPlans(), loadVessels(), loadFleetAssets(), loadActiveAssignments()]);
 			}
 		} catch (error) {
 			errorMessage = error.message;
@@ -959,6 +1110,106 @@
 		};
 	}
 
+	function normalizeActiveAssignment(row = {}) {
+		const checkpoints = Array.isArray(row.checkpoints) ? row.checkpoints : [];
+		const percentage = Number(row.percentage ?? 0);
+
+		return {
+			id: row.id,
+			vesselId: row.vessel?.id ?? row.vesselId ?? row.vessel_id,
+			vesselName:
+				row.vessel?.vesselName ||
+				row.vessel?.name ||
+				row.vesselName ||
+				(row.vessel?.id ? `Vessel ${row.vessel.id}` : '-'),
+			voyagePlanId: row.voyage?.id ?? row.voyagePlanId ?? row.voyage_plan_id,
+			voyageName:
+				row.voyage?.voyageName ||
+				row.voyage?.name ||
+				row.voyageName ||
+				(row.voyage?.id ? `Plan ${row.voyage.id}` : '-'),
+			startDate: row.startDate ?? row.start_date ?? null,
+			percentage: Number.isFinite(percentage) ? percentage : 0,
+			assignedBy: row.assignedBy ?? row.assigned_by ?? '-',
+			checkpoints
+		};
+	}
+
+	function getCheckpointSummary(checkpoints = []) {
+		const total = checkpoints.length;
+		const completed = checkpoints.filter((checkpoint) =>
+			['COMPLETED', 'MANUAL_COMPLETED'].includes(String(checkpoint.status || '').toUpperCase())
+		).length;
+		const skipped = checkpoints.filter(
+			(checkpoint) => String(checkpoint.status || '').toUpperCase() === 'SKIPPED'
+		).length;
+		const pending = checkpoints.filter(
+			(checkpoint) => String(checkpoint.status || '').toUpperCase() === 'PENDING'
+		).length;
+
+		return { total, completed, skipped, pending };
+	}
+
+	async function loadActiveAssignments(targetPage = activeAssignmentPage) {
+		activeAssignmentsLoading = true;
+		activeAssignmentsError = '';
+
+		try {
+			const params = new URLSearchParams({
+				page: String(targetPage),
+				pageSize: String(Number(activeAssignmentPageSize) || 10)
+			});
+
+			if (activeAssignmentFilters.voyagePlanId) {
+				params.set('voyagePlanId', String(activeAssignmentFilters.voyagePlanId));
+			}
+
+			if (activeAssignmentFilters.vesselId) {
+				params.set('vesselId', String(activeAssignmentFilters.vesselId));
+			}
+
+			const result = await apiFetch(`/voyage-plans/assignments/active?${params.toString()}`);
+			activeAssignments = (result?.data?.items || []).map(normalizeActiveAssignment);
+			activeAssignmentPagination = result?.data?.pagination || activeAssignmentPagination;
+			activeAssignmentPage = activeAssignmentPagination.page || targetPage;
+		} catch (error) {
+			activeAssignmentsError = error.message;
+			activeAssignments = [];
+		} finally {
+			activeAssignmentsLoading = false;
+		}
+	}
+
+	function clearActiveAssignmentFilters() {
+		activeAssignmentFilters = {
+			voyagePlanId: '',
+			vesselId: ''
+		};
+		loadActiveAssignments(1);
+	}
+
+	function getAssignmentPlan(planId) {
+		if (!planId) return null;
+
+		const normalizedPlanId = Number(planId);
+		if (!Number.isFinite(normalizedPlanId)) return null;
+
+		if (Number(selectedPlan?.id) === normalizedPlanId) return selectedPlan;
+
+		return plans.find((plan) => Number(plan.id) === normalizedPlanId) || null;
+	}
+
+	function getAssignableVessels(planId) {
+		const plan = getAssignmentPlan(planId);
+		const allowedIds = (plan?.allowedVesselIds || []).map(Number).filter(Number.isFinite);
+
+		if (!plan || allowedIds.length === 0) return [];
+
+		const allowedIdSet = new Set(allowedIds);
+
+		return vessels.filter((vessel) => allowedIdSet.has(Number(vessel.id)));
+	}
+
 	async function loadVessels() {
 		if (vessels.length) return;
 		try {
@@ -1009,6 +1260,9 @@
 	function startCreate() {
 		clearMessages();
 		form = getEmptyForm();
+		selectedNotAllowedVesselId = '';
+		selectedAllowedVesselId = '';
+		handleVesselDragEnd();
 		editMode = false;
 		showForm = true;
 		selectedPointIndex = 0;
@@ -1035,6 +1289,9 @@
 		};
 
 		if (!form.planData.length) form.planData = [createPoint(1)];
+		selectedNotAllowedVesselId = '';
+		selectedAllowedVesselId = '';
+		handleVesselDragEnd();
 		editMode = true;
 		showForm = true;
 		selectedPointIndex = 0;
@@ -1047,6 +1304,9 @@
 		showForm = false;
 		editMode = false;
 		form = getEmptyForm();
+		selectedNotAllowedVesselId = '';
+		selectedAllowedVesselId = '';
+		handleVesselDragEnd();
 		selectedPointIndex = 0;
 		resetUndoStack();
 		resetMoveState();
@@ -1088,6 +1348,100 @@
 		} else {
 			form.allowedVesselIds = [...form.allowedVesselIds, value].sort((a, b) => a - b);
 		}
+	}
+
+	function moveVesselToAllowed(id) {
+		const value = Number(id);
+		if (!Number.isFinite(value)) return;
+
+		if (!form.allowedVesselIds.map(Number).includes(value)) {
+			form.allowedVesselIds = [...form.allowedVesselIds.map(Number), value].sort((a, b) => a - b);
+		}
+
+		selectedNotAllowedVesselId = '';
+		selectedAllowedVesselId = String(value);
+	}
+
+	function moveVesselToNotAllowed(id) {
+		const value = Number(id);
+		if (!Number.isFinite(value)) return;
+
+		form.allowedVesselIds = form.allowedVesselIds.map(Number).filter((item) => item !== value);
+
+		selectedAllowedVesselId = '';
+		selectedNotAllowedVesselId = String(value);
+	}
+
+	function allowSelectedVessel() {
+		if (!selectedNotAllowedVesselId) return;
+		moveVesselToAllowed(selectedNotAllowedVesselId);
+	}
+
+	function disallowSelectedVessel() {
+		if (!selectedAllowedVesselId) return;
+		moveVesselToNotAllowed(selectedAllowedVesselId);
+	}
+
+	function selectTransferVessel(vesselId, source) {
+		if (source === 'allowed') {
+			selectedAllowedVesselId = String(vesselId);
+			selectedNotAllowedVesselId = '';
+			return;
+		}
+
+		selectedNotAllowedVesselId = String(vesselId);
+		selectedAllowedVesselId = '';
+	}
+
+	function handleVesselDragStart(event, vesselId, source) {
+		if (useButtonVesselTransfer) {
+			event.preventDefault();
+			return;
+		}
+
+		draggedVesselId = String(vesselId);
+		draggedVesselSource = source;
+		vesselDropTarget = source === 'allowed' ? 'not-allowed' : 'allowed';
+
+		event.dataTransfer?.setData('text/plain', String(vesselId));
+		if (event.dataTransfer) {
+			event.dataTransfer.effectAllowed = 'move';
+		}
+	}
+
+	function handleVesselDragOver(event, target) {
+		if (useButtonVesselTransfer) return;
+
+		event.preventDefault();
+		vesselDropTarget = target;
+		if (event.dataTransfer) {
+			event.dataTransfer.dropEffect = 'move';
+		}
+	}
+
+	function handleVesselDrop(event, target) {
+		if (useButtonVesselTransfer) return;
+
+		event.preventDefault();
+
+		const droppedId = draggedVesselId || event.dataTransfer?.getData('text/plain');
+		if (!droppedId) return;
+
+		if (target === 'allowed') {
+			moveVesselToAllowed(droppedId);
+		} else {
+			moveVesselToNotAllowed(droppedId);
+		}
+
+		draggedVesselId = '';
+		draggedVesselSource = '';
+		vesselDropTarget = '';
+	}
+
+	function handleVesselDragEnd() {
+		draggedVesselId = '';
+		draggedVesselSource = '';
+		vesselDropTarget = '';
 	}
 
 	function validatePlanPayload() {
@@ -1340,6 +1694,7 @@
 				})
 			});
 			successMessage = result?.message || 'Voyage plan assigned to vessel successfully.';
+			await loadActiveAssignments(1);
 		} catch (error) {
 			errorMessage = error.message;
 		} finally {
@@ -1397,7 +1752,7 @@
 	{/if}
 
 	{#if loading && !plans.length}
-		<div class="empty-card">Loading voyage plans...</div>
+		<LoadingSkeleton label="Loading voyage plans" variant="voyage-plans-page" rows={6} />
 	{:else if !canAccess}
 		<div class="empty-card">
 			<h3>Access Restricted</h3>
@@ -1605,8 +1960,17 @@
 								{#each selectedPlan.planData || [] as point}
 									<tr>
 										<td>{point.order}</td>
-										<td>{point.latitude}</td>
-										<td>{point.longitude}</td>
+										<td>
+											<CopyableCoordinate value={point.latitude} display={point.latitude} label="latitude" compact />
+										</td>
+										<td>
+											<CopyableCoordinate
+												value={point.longitude}
+												display={point.longitude}
+												label="longitude"
+												compact
+											/>
+										</td>
 										<td>{point.speed_kn ?? '-'}</td>
 									</tr>
 								{:else}
@@ -1667,8 +2031,22 @@
 									<tbody>
 										{#each importForm.previewRows as row}
 											<tr
-												><td>{row.order}</td><td>{row.latitude}</td><td>{row.longitude}</td><td
-													>{row.speed_kn}</td
+												><td>{row.order}</td
+												><td
+													><CopyableCoordinate
+														value={row.latitude}
+														display={row.latitude}
+														label="latitude"
+														compact
+													/></td
+												><td
+													><CopyableCoordinate
+														value={row.longitude}
+														display={row.longitude}
+														label="longitude"
+														compact
+													/></td
+												><td>{row.speed_kn}</td
 												></tr
 											>
 										{/each}
@@ -1681,49 +2059,230 @@
 
 				{#if canAssign}
 					<section class="panel assign-panel">
-						<div class="panel-toolbar">
+						<div class="panel-toolbar assign-toolbar">
 							<div>
+								<div class="panel-kicker">Assignment</div>
 								<h2>Assign to Vessel</h2>
-								<span>Assign a plan to a vessel according to the active period.</span>
+								<span>Assign a voyage plan only to vessels allowed by that plan.</span>
 							</div>
 						</div>
 
-						<div class="form-grid compact">
-							<label>
-								<span>Voyage Plan</span>
-								<select bind:value={assignForm.voyagePlanId}>
-									<option value="">Select plan</option>
-									{#each plans as plan}
-										<option value={plan.id}>{plan.voyageName}</option>
-									{/each}
-								</select>
-							</label>
-							<label>
-								<span>Vessel</span>
-								<select bind:value={assignForm.vesselId}>
-									<option value="">Select vessel</option>
-									{#each vessels as vessel}
-										<option value={vessel.id}>{vessel.vesselName}</option>
-									{/each}
-								</select>
-							</label>
-							<label>
-								<span>Start Date</span>
-								<input type="datetime-local" bind:value={assignForm.startDate} />
-							</label>
-							<button
-								class="primary-button"
-								type="button"
-								on:click={assignPlan}
-								disabled={assigning}
-							>
-								{assigning ? 'Assigning...' : 'Assign Plan'}
-							</button>
+						<div class="assign-card">
+							<div class="assign-plan-preview">
+								<div>
+									<span>Selected Plan</span>
+									<strong>{selectedAssignPlan?.voyageName || 'Choose a voyage plan'}</strong>
+								</div>
+								<em>
+									{assignForm.voyagePlanId
+										? `${assignableVessels.length} allowed vessel`
+										: 'No plan selected'}
+								</em>
+							</div>
+
+							<div class="assign-form-grid">
+								<label class="assign-field">
+									<span>Voyage Plan</span>
+									<select bind:value={assignForm.voyagePlanId}>
+										<option value="">Select plan</option>
+										{#each plans as plan}
+											<option value={plan.id}>{plan.voyageName}</option>
+										{/each}
+									</select>
+								</label>
+
+								<label class="assign-field">
+									<span>Allowed Vessel</span>
+									<select bind:value={assignForm.vesselId} disabled={!assignForm.voyagePlanId}>
+										<option value="">
+											{assignForm.voyagePlanId ? 'Select allowed vessel' : 'Select voyage plan first'}
+										</option>
+										{#each assignableVessels as vessel}
+											<option value={vessel.id}>{vessel.vesselName}</option>
+										{/each}
+									</select>
+									{#if assignForm.voyagePlanId && assignableVessels.length === 0}
+										<small class="field-note warning-note">
+											This voyage plan has no allowed vessel.
+										</small>
+									{:else if assignForm.voyagePlanId}
+										<small class="field-note">
+											Only vessels listed in this plan can be assigned.
+										</small>
+									{/if}
+								</label>
+
+								<label class="assign-field">
+									<span>Start Date</span>
+									<input type="datetime-local" bind:value={assignForm.startDate} />
+								</label>
+
+								<div class="assign-action">
+									<button
+										class="primary-button assign-button"
+										type="button"
+										on:click={assignPlan}
+										disabled={assigning || !assignForm.voyagePlanId || !assignForm.vesselId || !assignForm.startDate}
+									>
+										{assigning ? 'Assigning...' : 'Assign Plan'}
+									</button>
+								</div>
+							</div>
 						</div>
 					</section>
 				{/if}
 			</section>
 		{/if}
+
+		<section class="panel active-assignments-panel">
+			<div class="panel-toolbar assignments-toolbar">
+				<div>
+					<h2>Active Assignments</h2>
+					<span>
+						{activeAssignmentPagination.totalItems || 0} active voyage plan assignment
+					</span>
+				</div>
+
+				<button
+					type="button"
+					class="ghost-button"
+					on:click={() => loadActiveAssignments(activeAssignmentPage)}
+					disabled={activeAssignmentsLoading}
+				>
+					{activeAssignmentsLoading ? 'Refreshing...' : 'Refresh'}
+				</button>
+			</div>
+
+			<div class="assignment-filter-grid">
+				<label>
+					<span>Voyage Plan</span>
+					<select
+						bind:value={activeAssignmentFilters.voyagePlanId}
+						on:change={() => loadActiveAssignments(1)}
+					>
+						<option value="">All plans</option>
+						{#each plans as plan}
+							<option value={plan.id}>{plan.voyageName}</option>
+						{/each}
+					</select>
+				</label>
+
+				<label>
+					<span>Vessel</span>
+					<select
+						bind:value={activeAssignmentFilters.vesselId}
+						on:change={() => loadActiveAssignments(1)}
+					>
+						<option value="">All vessels</option>
+						{#each vessels as vessel}
+							<option value={vessel.id}>{vessel.vesselName}</option>
+						{/each}
+					</select>
+				</label>
+
+				<label>
+					<span>Page Size</span>
+					<select
+						bind:value={activeAssignmentPageSize}
+						on:change={() => loadActiveAssignments(1)}
+					>
+						{#each PAGE_SIZE_OPTIONS as option}
+							<option value={option}>{option}/page</option>
+						{/each}
+					</select>
+				</label>
+
+				<button
+					type="button"
+					class="ghost-button"
+					on:click={clearActiveAssignmentFilters}
+					disabled={!activeAssignmentFilters.voyagePlanId && !activeAssignmentFilters.vesselId}
+				>
+					Clear Filter
+				</button>
+			</div>
+
+			{#if activeAssignmentsError}
+				<div class="alert error compact-alert">{activeAssignmentsError}</div>
+			{/if}
+
+			<div class="table-wrap active-assignment-table-wrap">
+				<table>
+					<thead>
+						<tr>
+							<th>ID</th>
+							<th>Vessel</th>
+							<th>Voyage Plan</th>
+							<th>Start Date</th>
+							<th>Progress</th>
+							<th>Checkpoints</th>
+							<th>Assigned By</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#if activeAssignmentsLoading && !activeAssignments.length}
+							<tr>
+								<td colspan="7" class="empty-cell">Loading active assignments...</td>
+							</tr>
+						{:else}
+							{#each activeAssignments as assignment}
+								{@const checkpointSummary = getCheckpointSummary(assignment.checkpoints)}
+								<tr>
+									<td>#{assignment.id}</td>
+									<td>
+										<strong>{assignment.vesselName}</strong>
+										<small>#{assignment.vesselId}</small>
+									</td>
+									<td>
+										<strong>{assignment.voyageName}</strong>
+										<small>#{assignment.voyagePlanId}</small>
+									</td>
+									<td>{formatDate(assignment.startDate)}</td>
+									<td>
+										<div class="assignment-progress">
+											<div class="assignment-progress-track">
+												<span style={`width: ${Math.max(0, Math.min(100, assignment.percentage))}%`}></span>
+											</div>
+											<strong>{assignment.percentage.toFixed(2)}%</strong>
+										</div>
+									</td>
+									<td>
+										<div class="checkpoint-summary">
+											<span>{checkpointSummary.completed} completed</span>
+											<span>{checkpointSummary.skipped} skipped</span>
+											<span>{checkpointSummary.pending} pending</span>
+											<small>{checkpointSummary.total} total</small>
+										</div>
+									</td>
+									<td>{assignment.assignedBy}</td>
+								</tr>
+							{:else}
+								<tr>
+									<td colspan="7" class="empty-cell">No active assignment is available.</td>
+								</tr>
+							{/each}
+						{/if}
+					</tbody>
+				</table>
+			</div>
+
+			<div class="pagination-bar">
+				<button
+					type="button"
+					disabled={!activeAssignmentPagination.hasPrevious || activeAssignmentsLoading}
+					on:click={() => loadActiveAssignments(activeAssignmentPage - 1)}>Previous</button
+				>
+				<span>
+					Page {activeAssignmentPagination.page || activeAssignmentPage} of
+					{activeAssignmentPagination.totalPages || 1}
+				</span>
+				<button
+					type="button"
+					disabled={!activeAssignmentPagination.hasNext || activeAssignmentsLoading}
+					on:click={() => loadActiveAssignments(activeAssignmentPage + 1)}>Next</button
+				>
+			</div>
+		</section>
 	{/if}
 </section>
 
@@ -1739,7 +2298,8 @@
 			</div>
 
 			<div class="modal-body">
-				<div class="section-title route-section-title" style="margin:-16px -16px 0; border-radius: 0px;">
+				{#if false}
+					<div class="section-title route-section-title" style="margin:-16px -16px 0; border-radius: 0px;">
 					<div>
 						<h3>Route Points</h3>
 						<span>
@@ -1776,7 +2336,8 @@
 							Clear
 						</button>
 					</div>
-				</div>
+					</div>
+				{/if}
 
 				<div class="route-map-editor">
 					<aside class="route-point-panel">
@@ -1811,25 +2372,41 @@
 											</td>
 
 											<td>
-												<input
-													type="number"
-													step="0.000001"
-													bind:value={point.latitude}
-													placeholder="-6.1751"
-													on:focus={() => pushUndoState('Edit coordinate')}
-													on:input={() => refreshRouteMap()}
-												/>
+												<div class="coordinate-input-wrap">
+													<input
+														type="number"
+														step="0.000001"
+														bind:value={point.latitude}
+														placeholder="-6.1751"
+														on:focus={() => pushUndoState('Edit coordinate')}
+														on:input={() => refreshRouteMap()}
+													/>
+													<CopyableCoordinate
+														value={point.latitude}
+														display=""
+														label="latitude"
+														compact
+													/>
+												</div>
 											</td>
 
 											<td>
-												<input
-													type="number"
-													step="0.000001"
-													bind:value={point.longitude}
-													placeholder="106.865"
-													on:focus={() => pushUndoState('Edit coordinate')}
-													on:input={() => refreshRouteMap()}
-												/>
+												<div class="coordinate-input-wrap">
+													<input
+														type="number"
+														step="0.000001"
+														bind:value={point.longitude}
+														placeholder="106.865"
+														on:focus={() => pushUndoState('Edit coordinate')}
+														on:input={() => refreshRouteMap()}
+													/>
+													<CopyableCoordinate
+														value={point.longitude}
+														display=""
+														label="longitude"
+														compact
+													/>
+												</div>
 											</td>
 
 											<td>
@@ -1858,11 +2435,49 @@
 								</tbody>
 							</table>
 						</div>
+
 					</aside>
 
 					<section class="route-map-card">
 						<div class="route-map-shell">
 							<div class="route-map" bind:this={mapContainer}></div>
+
+							<div class="route-map-overlay-toolbar">
+								<div class="route-map-title">
+									<h3>Route Points</h3>
+									<span>Click map to add point, right-click marker to move, reorder, or delete.</span>
+								</div>
+
+								<div class="route-title-actions">
+									<button
+										type="button"
+										class="toolbar-button"
+										on:click={undoRouteChange}
+										disabled={!canUndoRoute}
+										title={canUndoRoute
+											? `Undo: ${undoStack[undoStack.length - 1]?.label}`
+											: 'No undo available'}
+									>
+										Undo
+									</button>
+
+									<button class="toolbar-button" type="button" on:click={addPoint}>
+										+ Add Point
+									</button>
+
+									<button class="toolbar-button" type="button" on:click={fitRouteMap}>
+										Fit Map
+									</button>
+
+									<button
+										class="toolbar-button danger ghost-danger"
+										type="button"
+										on:click={clearRoutePoints}
+									>
+										Clear
+									</button>
+								</div>
+							</div>
 
 							{#if movingPointIndex !== null && movingPointIndex !== undefined && moveConfirmPosition.visible}
 								<div
@@ -1940,6 +2555,42 @@
 								</div>
 							{/if}
 						</div>
+
+						<div class="route-map-legend" aria-label="Route editor map legend">
+							<div class="legend-group">
+								<span class="legend-title">Route</span>
+								<span class="legend-item">
+									<i class="legend-route-line"></i>
+									Route line
+								</span>
+								<span class="legend-item">
+									<i class="legend-route-dot"></i>
+									Point
+								</span>
+								<span class="legend-item">
+									<i class="legend-route-dot selected"></i>
+									Selected
+								</span>
+								<!-- <span class="legend-item">
+									<i class="legend-route-dot moving"></i>
+									Moving
+								</span> -->
+							</div>
+
+							<div class="legend-group">
+								<span class="legend-title">Assets</span>
+								{#each ASSET_LEGEND_TYPES as assetType}
+									<span class="legend-item asset-legend-item">
+										<img
+											class="legend-asset-icon"
+											src={getAssetIconUrl(assetType)}
+											alt={`${getAssetTypeLabel(assetType)} icon`}
+										/>
+										{getAssetTypeLabel(assetType)}
+									</span>
+								{/each}
+							</div>
+						</div>
 					</section>
 				</div>
 
@@ -1959,22 +2610,105 @@
 					<div class="section-title compact-title">
 						<div>
 							<h3>Allowed Vessels</h3>
-							<span>{selectedAllowedVessels.length} selected vessel</span>
+							<span>
+								{selectedAllowedVessels.length} selected vessel •
+								{useButtonVesselTransfer
+									? 'select a vessel, then use the transfer buttons'
+									: 'drag vessel between boxes'}
+							</span>
 						</div>
 					</div>
 
-					<div class="vessel-chips">
-						{#each vessels as vessel}
+					<div
+						class="vessel-transfer"
+						class:drag-mode={!useButtonVesselTransfer}
+						class:button-mode={useButtonVesselTransfer}
+						class:vertical-mode={useVerticalVesselTransfer}
+					>
+						<section
+							class="vessel-transfer-box"
+							class:drop-ready={vesselDropTarget === 'not-allowed'}
+							on:dragover={(event) => handleVesselDragOver(event, 'not-allowed')}
+							on:drop={(event) => handleVesselDrop(event, 'not-allowed')}
+						>
+							<div class="transfer-box-head">
+								<strong>Not Allowed</strong>
+								<span>{notAllowedVessels.length} vessel</span>
+							</div>
+
+							<div class="transfer-list" role="listbox" aria-label="Not allowed vessels">
+								{#each notAllowedVessels as vessel}
+									<button
+										type="button"
+										draggable={!useButtonVesselTransfer}
+										class:selected={String(vessel.id) === selectedNotAllowedVesselId}
+										class:dragging={draggedVesselId === String(vessel.id)}
+										on:click={() => selectTransferVessel(vessel.id, 'not-allowed')}
+										on:dblclick={() => moveVesselToAllowed(vessel.id)}
+										on:dragstart={(event) =>
+											handleVesselDragStart(event, vessel.id, 'not-allowed')}
+										on:dragend={handleVesselDragEnd}
+									>
+										<span>{vessel.vesselName}</span>
+										<small>ID {vessel.id}</small>
+									</button>
+								{:else}
+									<em>All vessels are allowed.</em>
+								{/each}
+							</div>
+						</section>
+
+						<div class="transfer-actions" aria-label="Move vessel access">
 							<button
 								type="button"
-								class:selected={form.allowedVesselIds.includes(vessel.id)}
-								on:click={() => toggleVessel(vessel.id)}
+								on:click={allowSelectedVessel}
+								disabled={!selectedNotAllowedVesselId}
+								aria-label="Allow selected vessel"
 							>
-								{vessel.vesselName}
+								<span class="wide-icon">&gt;</span>
 							</button>
-						{:else}
-							<em>Vessel data is not available.</em>
-						{/each}
+
+							<button
+								type="button"
+								on:click={disallowSelectedVessel}
+								disabled={!selectedAllowedVesselId}
+								aria-label="Remove selected vessel from allowed"
+							>
+								<span class="wide-icon">&lt;</span>
+							</button>
+						</div>
+
+						<section
+							class="vessel-transfer-box allowed"
+							class:drop-ready={vesselDropTarget === 'allowed'}
+							on:dragover={(event) => handleVesselDragOver(event, 'allowed')}
+							on:drop={(event) => handleVesselDrop(event, 'allowed')}
+						>
+							<div class="transfer-box-head">
+								<strong>Allowed</strong>
+								<span>{selectedAllowedVessels.length} vessel</span>
+							</div>
+
+							<div class="transfer-list" role="listbox" aria-label="Allowed vessels">
+								{#each selectedAllowedVessels as vessel}
+									<button
+										type="button"
+										draggable={!useButtonVesselTransfer}
+										class:selected={String(vessel.id) === selectedAllowedVesselId}
+										class:dragging={draggedVesselId === String(vessel.id)}
+										on:click={() => selectTransferVessel(vessel.id, 'allowed')}
+										on:dblclick={() => moveVesselToNotAllowed(vessel.id)}
+										on:dragstart={(event) => handleVesselDragStart(event, vessel.id, 'allowed')}
+										on:dragend={handleVesselDragEnd}
+									>
+										<span>{vessel.vesselName}</span>
+										<small>ID {vessel.id}</small>
+									</button>
+								{:else}
+									<em>No vessel allowed yet.</em>
+								{/each}
+							</div>
+						</section>
 					</div>
 				</div>
 			</div>
@@ -2027,25 +2761,11 @@
 		border: none;
 	}
 
-	:global(.asset-marker-shell) {
-		width: 22px;
-		height: 22px;
-		border-radius: 999px;
-		display: grid;
-		place-items: center;
-		background: rgba(17, 24, 39, 0.94);
-		border: 2px solid #f59e0b;
-		box-shadow:
-			0 0 0 4px rgba(245, 158, 11, 0.16),
-			0 5px 10px rgba(15, 23, 42, 0.16);
-	}
-
-	:global(.asset-marker-core) {
-		width: 9px;
-		height: 9px;
-		border-radius: 999px;
-		background: #f59e0b;
-		color: transparent;
+	:global(.asset-type-marker-icon) {
+		width: 32px;
+		height: 32px;
+		object-fit: contain;
+		filter: drop-shadow(0 4px 8px rgba(15, 23, 42, 0.35));
 	}
 
 	:global(.leaflet-tooltip) {
@@ -2055,6 +2775,227 @@
 		color: var(--text-primary);
 		font-size: 11px;
 		font-weight: 900;
+	}
+
+	:global(.voyage-page .leaflet-popup-content-wrapper),
+	:global(.voyage-plan-map-popup .leaflet-popup-content-wrapper) {
+		overflow: hidden;
+		border: 1px solid rgba(96, 165, 250, 0.22);
+		border-radius: 14px;
+		background: #0f172a !important;
+		color: #f8fafc !important;
+		box-shadow: 0 18px 42px rgba(15, 23, 42, 0.38);
+	}
+
+	:global(.voyage-plan-map-popup .leaflet-popup-content-wrapper) {
+		width: 315px;
+		max-width: 78vw;
+	}
+
+	:global(.asset-popup) {
+		width: min(315px, 78vw);
+	}
+
+	:global(.voyage-page .leaflet-popup-content),
+	:global(.voyage-plan-map-popup .leaflet-popup-content) {
+		margin: 0;
+		color: #f8fafc !important;
+	}
+
+	:global(.voyage-page .leaflet-popup-tip),
+	:global(.voyage-plan-map-popup .leaflet-popup-tip) {
+		background: #0f172a !important;
+		border: 1px solid rgba(96, 165, 250, 0.22);
+		box-shadow: 0 10px 22px rgba(15, 23, 42, 0.24);
+	}
+
+	:global(.voyage-page .leaflet-popup-close-button),
+	:global(.voyage-plan-map-popup .leaflet-popup-close-button) {
+		top: 10px;
+		right: 12px;
+		width: 24px;
+		height: 24px;
+		border-radius: 999px;
+		background: rgba(30, 41, 59, 0.92);
+		color: #cbd5e1 !important;
+		font-size: 16px;
+		line-height: 22px;
+	}
+
+	:global(.voyage-page .leaflet-popup-close-button:hover),
+	:global(.voyage-plan-map-popup .leaflet-popup-close-button:hover) {
+		background: rgba(59, 130, 246, 0.28);
+		color: #ffffff !important;
+	}
+
+	:global(.asset-popup) {
+		display: grid;
+		width: min(310px, 78vw);
+		overflow: hidden;
+		border-radius: 14px;
+		background: #0f172a;
+		font-family:
+			Inter,
+			ui-sans-serif,
+			system-ui,
+			-apple-system,
+			BlinkMacSystemFont,
+			'Segoe UI',
+			sans-serif;
+	}
+
+	:global(.map-popup-hero) {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 10px;
+		padding: 14px 52px 13px 16px;
+		background:
+			radial-gradient(circle at top left, rgba(37, 99, 235, 0.28), transparent 52%),
+			linear-gradient(135deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98));
+		border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+	}
+
+	:global(.map-popup-icon),
+	:global(.route-popup-icon) {
+		width: 38px;
+		height: 38px;
+		display: grid;
+		place-items: center;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 13px;
+		background: rgba(37, 99, 235, 0.14);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+	}
+
+	:global(.map-popup-icon img) {
+		width: 27px;
+		height: 27px;
+		object-fit: contain;
+		filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.28));
+	}
+
+	:global(.route-popup-icon) {
+		color: #dbeafe;
+		font-size: 13px;
+		font-weight: 900;
+	}
+
+	:global(.map-popup-heading) {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	:global(.map-popup-heading span) {
+		color: #60a5fa;
+		font-size: 10px;
+		font-weight: 900;
+		letter-spacing: 0.1em;
+		line-height: 1;
+		text-transform: uppercase;
+	}
+
+	:global(.asset-popup strong) {
+		color: #f8fafc;
+		font-size: 14px;
+		font-weight: 900;
+		line-height: 1.15;
+	}
+
+	:global(.map-popup-heading strong) {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	:global(.map-popup-hero em) {
+		max-width: 78px;
+		overflow: hidden;
+		padding: 5px 8px;
+		border: 1px solid rgba(96, 165, 250, 0.26);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.16);
+		color: #bfdbfe;
+		font-size: 10px;
+		font-style: normal;
+		font-weight: 900;
+		line-height: 1;
+		text-overflow: ellipsis;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+
+	:global(.map-popup-body) {
+		display: grid;
+		gap: 7px;
+		padding: 11px 14px 14px;
+	}
+
+	:global(.popup-info-row) {
+		display: grid;
+		grid-template-columns: minmax(82px, 0.8fr) minmax(0, 1.2fr);
+		align-items: center;
+		gap: 10px;
+		min-height: 36px;
+		padding: 9px 14px;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 12px;
+		background: rgba(30, 41, 59, 0.74);
+	}
+
+	:global(.popup-info-row > span),
+	:global(.asset-popup small) {
+		color: #cbd5e1;
+		font-size: 10px;
+		font-weight: 900;
+		letter-spacing: 0.05em;
+		line-height: 1.35;
+		text-transform: uppercase;
+	}
+
+	:global(.popup-info-row > strong),
+	:global(.popup-coordinate-value),
+	:global(.coordinate-copy-inline strong) {
+		min-width: 0;
+		color: #f8fafc;
+		font-size: 12px;
+		font-weight: 850;
+		line-height: 1.2;
+		text-align: right;
+	}
+
+	:global(.popup-coordinate-value .coordinate-copy-inline) {
+		width: 100%;
+		display: inline-flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 7px;
+	}
+
+	:global(.map-popup-note) {
+		margin: 0 10px 10px;
+		padding: 8px 10px;
+		border: 1px dashed rgba(96, 165, 250, 0.28);
+		border-radius: 12px;
+		background: rgba(37, 99, 235, 0.1);
+		color: #bfdbfe;
+		font-size: 11px;
+		font-weight: 750;
+		line-height: 1.35;
+	}
+
+	:global(.asset-popup .copy-coordinate-button),
+	:global(.asset-popup button) {
+		border-color: rgba(96, 165, 250, 0.34);
+		background: rgba(37, 99, 235, 0.18);
+		color: #bfdbfe;
+	}
+
+	:global(.asset-popup .copy-coordinate-button:hover),
+	:global(.asset-popup button:hover) {
+		background: rgba(37, 99, 235, 0.32);
+		color: #ffffff;
 	}
 
 	:global(.route-marker) {
@@ -2223,6 +3164,247 @@
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 14px;
 		margin-top: 14px;
+	}
+
+	.active-assignments-panel {
+		margin-top: 14px;
+	}
+
+	.assignments-toolbar {
+		align-items: flex-start;
+	}
+
+	.assign-panel {
+		background:
+			linear-gradient(180deg, rgba(30, 41, 59, 0.36), rgba(15, 23, 42, 0.14)),
+			var(--color-surface);
+	}
+
+	.assign-toolbar {
+		align-items: flex-start;
+		padding-bottom: 14px;
+	}
+
+	.panel-kicker {
+		display: inline-flex;
+		width: fit-content;
+		margin-bottom: 6px;
+		padding: 4px 9px;
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.18);
+		color: #60a5fa;
+		font-size: 10px;
+		font-weight: 900;
+		letter-spacing: 0.08em;
+		line-height: 1;
+		text-transform: uppercase;
+	}
+
+	.assign-card {
+		display: grid;
+		gap: 12px;
+		padding: 14px;
+	}
+
+	.assign-plan-preview {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 12px 14px;
+		border: 1px solid rgba(96, 165, 250, 0.18);
+		border-radius: 14px;
+		background:
+			radial-gradient(circle at top left, rgba(37, 99, 235, 0.2), transparent 48%),
+			rgba(15, 23, 42, 0.32);
+	}
+
+	.assign-plan-preview div {
+		min-width: 0;
+	}
+
+	.assign-plan-preview span {
+		display: block;
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 900;
+		letter-spacing: 0.07em;
+		line-height: 1;
+		text-transform: uppercase;
+	}
+
+	.assign-plan-preview strong {
+		display: block;
+		overflow: hidden;
+		margin-top: 6px;
+		color: var(--text-primary);
+		font-size: 15px;
+		font-weight: 850;
+		line-height: 1.25;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.assign-plan-preview em {
+		flex: 0 0 auto;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 26px;
+		padding: 5px 10px;
+		border: 1px solid rgba(96, 165, 250, 0.26);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.16);
+		color: #bfdbfe;
+		font-size: 10px;
+		font-style: normal;
+		font-weight: 900;
+		line-height: 1;
+		white-space: nowrap;
+	}
+
+	.assign-form-grid {
+		display: grid;
+		grid-template-columns: minmax(190px, 1.1fr) minmax(190px, 1.1fr);
+		gap: 12px;
+		align-items: start;
+	}
+
+	.assign-field {
+		min-width: 0;
+		padding: 10px;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		border-radius: 13px;
+		background: rgba(15, 23, 42, 0.24);
+	}
+
+	.assign-field > span {
+		display: block;
+		margin-bottom: 7px;
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 900;
+		letter-spacing: 0.07em;
+		line-height: 1;
+		text-transform: uppercase;
+	}
+
+	.assign-field input,
+	.assign-field select {
+		height: 38px;
+		min-height: 38px;
+		border-color: rgba(148, 163, 184, 0.24);
+		border-radius: 10px;
+		background: rgba(30, 41, 59, 0.72);
+		font-size: 12px;
+		font-weight: 750;
+	}
+
+	.assign-field .field-note {
+		display: block;
+		margin-top: 7px;
+	}
+
+	.assign-action {
+		display: flex;
+		align-items: flex-end;
+		justify-content: flex-end;
+		min-width: 0;
+		padding: 10px;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		border-radius: 13px;
+		background: rgba(15, 23, 42, 0.18);
+	}
+
+	.assign-button {
+		width: 100%;
+		height: 38px;
+		min-height: 38px;
+		border-radius: 10px;
+		box-shadow: 0 10px 22px rgba(37, 99, 235, 0.2);
+	}
+
+	.assignment-filter-grid {
+		display: grid;
+		grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(120px, 150px) auto;
+		gap: 10px;
+		align-items: end;
+		padding: 12px 14px;
+		border-bottom: 1px solid #e5edf5;
+		background: rgba(15, 23, 42, 0.18);
+	}
+
+	.compact-alert {
+		margin: 12px 14px 0;
+	}
+
+	.active-assignment-table-wrap {
+		max-height: 360px;
+	}
+
+	.active-assignment-table-wrap td small {
+		display: block;
+		margin-top: 3px;
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 700;
+	}
+
+	.assignment-progress {
+		display: grid;
+		gap: 5px;
+		min-width: 130px;
+	}
+
+	.assignment-progress-track {
+		width: 100%;
+		height: 8px;
+		overflow: hidden;
+		border-radius: 999px;
+		background: rgba(148, 163, 184, 0.24);
+	}
+
+	.assignment-progress-track span {
+		display: block;
+		height: 100%;
+		border-radius: inherit;
+		background: linear-gradient(90deg, #2563eb 0%, #14b8a6 100%);
+		box-shadow: 0 0 14px rgba(37, 99, 235, 0.22);
+	}
+
+	.assignment-progress strong {
+		color: var(--text-primary);
+		font-size: 11px;
+		font-weight: 850;
+	}
+
+	.checkpoint-summary {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 5px;
+		max-width: 280px;
+	}
+
+	.checkpoint-summary span,
+	.checkpoint-summary small {
+		display: inline-flex;
+		align-items: center;
+		min-height: 22px;
+		padding: 4px 7px;
+		border: 1px solid rgba(148, 163, 184, 0.24);
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.24);
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 750;
+		line-height: 1;
+	}
+
+	.checkpoint-summary span:first-child {
+		border-color: rgba(34, 197, 94, 0.28);
+		background: rgba(34, 197, 94, 0.12);
+		color: #86efac;
 	}
 
 	.panel {
@@ -2601,8 +3783,7 @@
 		white-space: nowrap;
 	}
 
-	.allowed-list,
-	.vessel-chips {
+	.allowed-list {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 8px;
@@ -2610,8 +3791,7 @@
 	}
 
 
-	.allowed-list span,
-	.vessel-chips button {
+	.allowed-list span {
 		height: auto;
 		min-height: 28px;
 		border: 1px solid #d9e2ec;
@@ -2623,14 +3803,179 @@
 		font-weight: 900;
 	}
 
-	.vessel-chips button:hover:not(:disabled) {
+	.vessel-transfer {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 12px;
+		padding: 12px 14px 14px;
+		align-items: stretch;
+	}
+
+	.transfer-actions {
+		display: none;
+	}
+
+	.vessel-transfer.button-mode {
+		grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+		align-items: center;
+	}
+
+	.vessel-transfer.button-mode .transfer-actions {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-direction: column;
+		gap: 10px;
+	}
+
+	.vessel-transfer-box {
+		min-width: 0;
+		overflow: hidden;
+		border: 1px solid #d9e2ec;
+		border-radius: 12px;
+		background: var(--color-elevated);
+	}
+
+	.vessel-transfer-box.allowed {
+		border-color: rgba(37, 99, 235, 0.24);
+		background: rgba(37, 99, 235, 0.06);
+	}
+
+	.vessel-transfer-box.drop-ready {
+		border-color: rgba(37, 99, 235, 0.72);
+		background: rgba(37, 99, 235, 0.1);
+		box-shadow:
+			0 0 0 3px rgba(37, 99, 235, 0.12),
+			inset 0 0 0 1px rgba(37, 99, 235, 0.1);
+	}
+
+	.transfer-box-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		padding: 10px 12px;
+		border-bottom: 1px solid #d9e2ec;
+		background: var(--color-surface);
+	}
+
+	.transfer-box-head strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 800;
+	}
+
+	.transfer-box-head span {
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 700;
+	}
+
+	.transfer-list {
+		display: grid;
+		align-content: start;
+		gap: 7px;
+		height: 190px;
+		overflow-y: auto;
+		padding: 10px;
+	}
+
+	.transfer-list button {
+		width: 100%;
+		height: auto;
+		min-height: 40px;
+		display: grid;
+		justify-items: start;
+		gap: 2px;
+		padding: 7px 9px;
+		border: 1px solid rgba(203, 213, 225, 0.85);
+		border-radius: 10px;
+		background: var(--color-surface);
+		color: var(--text-primary);
+		cursor: grab;
+		text-align: left;
+	}
+
+	.vessel-transfer.button-mode .transfer-list button {
+		cursor: pointer;
+	}
+
+	.transfer-list button:active {
+		cursor: grabbing;
+	}
+
+	.transfer-list button:hover:not(:disabled) {
+		border-color: rgba(37, 99, 235, 0.34);
 		background: var(--color-accent-muted);
 	}
 
-	.vessel-chips button.selected {
-		border-color: #bfdbfe;
-		background: var(--color-accent-muted);
+	.transfer-list button.selected {
+		border-color: #2563eb;
+		background: #dbeafe;
 		color: #1d4ed8;
+		box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+	}
+
+	.transfer-list button.dragging {
+		opacity: 0.48;
+		transform: scale(0.985);
+	}
+
+	.transfer-list button span {
+		font-size: 12px;
+		font-weight: 800;
+		line-height: 1.2;
+	}
+
+	.transfer-list button small,
+	.transfer-list em {
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 700;
+		line-height: 1.25;
+	}
+
+	.transfer-list em {
+		padding: 14px 10px;
+		text-align: center;
+	}
+
+	.transfer-actions button {
+		width: 38px;
+		height: 38px;
+		min-width: 38px;
+		min-height: 38px;
+		display: grid;
+		place-items: center;
+		padding: 0;
+		border: 1px solid rgba(96, 165, 250, 0.42);
+		border-radius: 999px;
+		background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
+		color: #ffffff;
+		font-size: 16px;
+		font-weight: 800;
+		box-shadow: 0 10px 22px rgba(37, 99, 235, 0.22);
+	}
+
+	.transfer-actions button span {
+		display: block;
+		width: auto;
+		line-height: 1;
+		transform: translateY(-0.5px);
+	}
+
+	.transfer-actions button:hover:not(:disabled) {
+		border-color: rgba(147, 197, 253, 0.72);
+		background: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
+		transform: translateY(-1px);
+	}
+
+	.transfer-actions button:disabled {
+		border-color: rgba(71, 85, 105, 0.72);
+		background: rgba(30, 41, 59, 0.92);
+		color: #94a3b8;
+		box-shadow: none;
+		opacity: 0.78;
 	}
 
 	.form-grid {
@@ -2646,7 +3991,7 @@
 
 	.modal-body > .form-grid {
 		padding: 0;
-		margin: 14px 0;
+		margin: 0;
 	}
 
 	.form-grid.compact {
@@ -2658,20 +4003,113 @@
 		gap: 5px;
 	}
 
-	.switch-line {
-		display: flex;
-		align-items: center;
-		gap: 9px;
-		align-self: end;
-		min-height: 32px;
-		padding-bottom: 1px;
+	.field-note {
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 700;
+		line-height: 1.35;
+		letter-spacing: 0;
 		text-transform: none;
 	}
 
+	.field-note.warning-note {
+		color: #fca5a5;
+	}
+
+	.switch-line {
+		display: inline-flex;
+		align-items: center;
+		justify-content: flex-start;
+		gap: 10px;
+		align-self: end;
+		width: fit-content;
+		min-height: 40px;
+		border: 1px solid rgba(148, 163, 184, 0.26);
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.42);
+		padding: 7px 12px 7px 8px;
+		color: var(--text-secondary);
+		cursor: pointer;
+		text-transform: none;
+		transition:
+			border-color 0.18s ease,
+			background 0.18s ease,
+			color 0.18s ease;
+		user-select: none;
+	}
+
 	.switch-line input {
-		width: auto;
-		height: auto;
-		min-height: auto;
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		min-height: 0;
+		margin: 0;
+		opacity: 0;
+		pointer-events: none;
+	}
+
+	.switch-line span {
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		gap: 9px;
+		color: inherit;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 1;
+		letter-spacing: 0.01em;
+	}
+
+	.switch-line span::before {
+		content: '';
+		width: 34px;
+		height: 20px;
+		border: 1px solid rgba(148, 163, 184, 0.34);
+		border-radius: 999px;
+		background: rgba(30, 41, 59, 0.94);
+		box-shadow: inset 0 1px 3px rgba(2, 6, 23, 0.34);
+		transition:
+			border-color 0.18s ease,
+			background 0.18s ease;
+	}
+
+	.switch-line span::after {
+		content: '';
+		position: absolute;
+		left: 3px;
+		width: 14px;
+		height: 14px;
+		border-radius: 999px;
+		background: #94a3b8;
+		box-shadow: 0 3px 8px rgba(2, 6, 23, 0.28);
+		transition:
+			transform 0.18s ease,
+			background 0.18s ease;
+	}
+
+	.switch-line:hover {
+		border-color: rgba(96, 165, 250, 0.48);
+		background: rgba(30, 41, 59, 0.66);
+		color: var(--text-primary);
+	}
+
+	.switch-line input:checked + span {
+		color: #bfdbfe;
+	}
+
+	.switch-line input:checked + span::before {
+		border-color: rgba(96, 165, 250, 0.72);
+		background: linear-gradient(135deg, #2563eb 0%, #14b8a6 100%);
+	}
+
+	.switch-line input:checked + span::after {
+		background: #f8fafc;
+		transform: translateX(14px);
+	}
+
+	.switch-line input:focus-visible + span::before {
+		outline: 2px solid rgba(96, 165, 250, 0.82);
+		outline-offset: 3px;
 	}
 
 	.file-box {
@@ -2713,26 +4151,38 @@
 	.modal-backdrop {
 		position: fixed;
 		inset: 0;
-		z-index: 50;
+		z-index: 2500;
 		display: flex;
-		align-items: flex-start;
+		align-items: stretch;
 		justify-content: center;
-		padding: 24px 24px 24px 104px;
+		padding: 0;
 		background: rgba(15, 23, 42, 0.48);
 		backdrop-filter: blur(3px);
-		overflow: auto;
+		overflow: hidden;
+		transition:
+			left 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+			background 0.18s ease,
+			backdrop-filter 0.18s ease;
+	}
+
+	:global(.app-shell:has(.sidebar.sidebar-open)) .modal-backdrop {
+		left: 64px;
 	}
 
 	.modal-card {
-		width: min(1480px, calc(100vw - 104px));
-		max-height: calc(100vh - 48px);
+		width: 100%;
+		height: 100vh;
+		max-height: 100vh;
 		display: grid;
 		grid-template-rows: auto 1fr auto;
 		overflow: hidden;
 		border: 1px solid #d9e2ec;
-		border-radius: 14px;
+		border-radius: 0;
 		background: var(--color-surface);
-		box-shadow: 0 22px 60px rgba(15, 23, 42, 0.22);
+		box-shadow: none;
+		transition:
+			width 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+			transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
 	}
 
 	.modal-header,
@@ -2749,8 +4199,9 @@
 	}
 
 	.modal-body {
+		min-height: 0;
 		overflow: auto;
-		padding: 16px;
+		padding: 14px;
 		background: var(--color-surface);
 	}
 
@@ -2766,8 +4217,9 @@
 		border: 1px solid #d9e2ec;
 		border-radius: 12px;
 		background: var(--color-surface);
-		margin-bottom: 14px;
+		margin-bottom: 0;
 		overflow: hidden;
+		margin-top: 14px;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
 	}
 
@@ -2794,15 +4246,44 @@
 		font-size: 10px;
 	}
 
+	.route-map-overlay-toolbar .route-title-actions {
+		flex: 0 0 auto;
+		flex-wrap: nowrap;
+	}
+
+	.route-map-overlay-toolbar .toolbar-button {
+		border: 1px solid rgba(148, 163, 184, 0.2);
+		border-radius: 10px;
+		background: rgba(30, 41, 59, 0.86);
+		color: #e2e8f0;
+	}
+
+	.route-map-overlay-toolbar .toolbar-button:hover:not(:disabled) {
+		border-color: rgba(96, 165, 250, 0.42);
+		background: rgba(37, 99, 235, 0.84);
+		color: #ffffff;
+	}
+
+	.route-map-overlay-toolbar .toolbar-button.ghost-danger {
+		border-color: rgba(248, 113, 113, 0.32);
+		background: rgba(127, 29, 29, 0.74);
+		color: #fecaca;
+	}
+
+	.route-map-overlay-toolbar .toolbar-button.ghost-danger:hover:not(:disabled) {
+		background: rgba(220, 38, 38, 0.88);
+		color: #ffffff;
+	}
+
 	.route-map-editor {
 		display: grid;
 		grid-template-columns: minmax(360px, 0.78fr) minmax(480px, 1.42fr);
 		gap: 0;
-		margin:0 -16px;
-		min-height: 400px;
-		max-height: 450px;
+		height: min(700px, calc(100vh - 190px));
+		margin: -14px -14px 14px;
+		min-height: 560px;
+		max-height: none;
 		border: 1px solid #d9e2ec;
-		border-radius: 0 0 12px 12px;
 		background: var(--color-surface);
 		overflow: hidden;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
@@ -2816,7 +4297,7 @@
 
 	.route-point-panel {
 		display: grid;
-		grid-template-rows: auto 1fr;
+		grid-template-rows: auto minmax(0, 1fr);
 		overflow: hidden;
 		border-right: 1px solid #e5edf5;
 	}
@@ -2833,7 +4314,7 @@
 
 	.route-map-card {
 		display: grid;
-		grid-template-rows: auto 1fr;
+		grid-template-rows: minmax(0, 1fr) auto;
 		overflow: hidden;
 	}
 
@@ -2842,16 +4323,11 @@
 		padding: 10px 12px;
 	}
 
-	.map-mini-toolbar strong {
-		color: var(--text-primary);
-		font-size: 12px;
-		font-weight: 900;
-	}
-
 	.route-map-shell {
 		position: relative;
 		width: 100%;
-		min-height: 500px;
+		height: 100%;
+		min-height: 100%;
 		overflow: hidden;
 	}
 
@@ -2859,14 +4335,132 @@
 	.route-map {
 		width: 100%;
 		height: 100%;
-		min-height: 500px;
+		min-height: 100%;
 		background: var(--color-accent-muted);
+	}
+
+	.route-map-legend {
+		display: grid;
+		gap: 8px;
+		padding: 10px 12px;
+		border-top: 1px solid #e5edf5;
+		background: var(--color-elevated);
+		color: var(--text-primary);
+	}
+
+	.legend-group {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 7px;
+		min-width: 0;
+	}
+
+	.legend-title {
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 900;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+
+	.legend-item {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		min-height: 24px;
+		padding: 4px 8px;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		border-radius: 999px;
+		background: var(--color-surface);
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 800;
+		line-height: 1;
+		white-space: nowrap;
+	}
+
+	.legend-route-dot {
+		width: 12px;
+		height: 12px;
+		border: 2px solid #ffffff;
+		border-radius: 999px;
+		background: #2563eb;
+		box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.18);
+	}
+
+	.legend-route-dot.selected {
+		background: #ef4444;
+	}
+
+	.legend-route-dot.moving {
+		background: #f59e0b;
+	}
+
+	.legend-route-line {
+		width: 24px;
+		height: 4px;
+		border-radius: 999px;
+		background: #2f65e8;
+		box-shadow: 0 0 0 1px rgba(47, 101, 232, 0.2);
+	}
+
+	.legend-asset-icon {
+		width: 18px;
+		height: 18px;
+		object-fit: contain;
+		filter: drop-shadow(0 2px 4px rgba(15, 23, 42, 0.25));
+	}
+
+	.route-map-overlay-toolbar {
+		position: absolute;
+		top: 14px;
+		left: 14px;
+		right: 14px;
+		z-index: 520;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 10px 12px;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		border-radius: 14px;
+		background: rgba(15, 23, 42, 0.88);
+		color: #f8fafc;
+		box-shadow: 0 16px 38px rgba(15, 23, 42, 0.22);
+		backdrop-filter: blur(14px);
+		pointer-events: auto;
+	}
+
+	.route-map-title {
+		min-width: 0;
+		display: grid;
+		gap: 3px;
+	}
+
+	.route-map-title h3 {
+		margin: 0;
+		color: #f8fafc;
+		font-size: 15px;
+		line-height: 1.15;
+		font-weight: 800;
+		letter-spacing: -0.01em;
+	}
+
+	.route-map-title span {
+		overflow: hidden;
+		color: rgba(203, 213, 225, 0.92);
+		font-size: 11px;
+		font-weight: 600;
+		line-height: 1.3;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.route-editor {
 		width: 100%;
 		height: 100%;
-		max-height: 450px;
+		max-height: none;
 		overflow-x: hidden;
 		overflow-y: auto;
 		border: 0;
@@ -2914,6 +4508,13 @@
 		min-height: 30px;
 		padding: 0 6px;
 		font-size: 11px;
+	}
+
+	.coordinate-input-wrap {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 6px;
 	}
 
 	.route-editor .icon-action {
@@ -3026,46 +4627,30 @@
 		color: #7f1d1d;
 	}
 
-	.move-mode-badge {
-		display: inline-flex;
-		align-items: center;
-		min-height: 28px;
-		border-radius: 999px;
-		border: 1px solid #fde68a;
-		background: var(--color-warning-muted);
-		color: #854d0e;
-		padding: 6px 10px;
-		font-size: 11px;
-		font-weight: 900;
-	}
-
-	.mini-icon-btn,
-	.mini-map-btn,
-	.move-confirm-btn,
-	.move-cancel-btn {
-		width: 30px;
-		height: 30px;
-		min-height: 30px;
-		font-size: 14px;
-	}
-
-	.confirm-move-btn,
-	.move-confirm-btn {
-		background: #dcfce7;
-		color: #166534;
-	}
-
-	.cancel-move-btn,
-	.move-cancel-btn {
-		background: var(--color-danger-muted);
-		color: #b91c1c;
-	}
-
 	@media (max-width: 1180px) {
 		.voyage-grid,
 		.bottom-grid,
+		.assign-form-grid,
+		.assignment-filter-grid,
 		.route-map-editor {
 			grid-template-columns: 1fr;
+		}
+
+		.route-map-editor {
+			height: auto;
+			min-height: 0;
+			overflow: visible;
+		}
+
+		.modal-body {
+			grid-template-rows: minmax(0, 1fr);
+		}
+
+		.route-map-card,
+		.route-map-shell,
+		.route-map-shell .route-map,
+		.route-map {
+			min-height: 560px;
 		}
 
 		.detail-summary {
@@ -3073,12 +4658,26 @@
 		}
 
 		.route-point-panel {
+			order: 2;
+			min-height: 260px;
 			border-right: 0;
-			border-bottom: 1px solid #e5edf5;
+			border-top: 1px solid #e5edf5;
+			border-bottom: 0;
+		}
+
+		.route-point-panel .route-editor {
+			height: auto;
+			max-height: 320px;
+		}
+
+		.route-map-card {
+			order: 1;
 		}
 
 		.modal-card {
-			width: min(980px, calc(100vw - 126px));
+			width: 100%;
+			height: 100vh;
+			max-height: 100vh;
 		}
 	}
 
@@ -3098,9 +4697,24 @@
 		.header-actions,
 		.route-title-actions,
 		.form-grid,
+		.assign-form-grid,
 		.form-grid.compact,
 		.detail-summary {
 			grid-template-columns: 1fr;
+			width: 100%;
+		}
+
+		.assign-card {
+			padding: 12px;
+		}
+
+		.assign-plan-preview {
+			align-items: flex-start;
+			flex-direction: column;
+		}
+
+		.assign-plan-preview em,
+		.assign-button {
 			width: 100%;
 		}
 
@@ -3118,17 +4732,70 @@
 		}
 
 		.modal-backdrop {
-			padding: 10px;
+			inset: 0;
+			padding: 0;
+		}
+
+		:global(.app-shell:has(.sidebar.sidebar-open)) .modal-backdrop {
+			left: 0;
 		}
 
 		.modal-card {
 			width: 100%;
-			max-height: calc(100vh - 20px);
-			border-radius: 12px;
+			height: 100vh;
+			max-height: 100vh;
+			border-radius: 0;
 		}
 
 		.modal-body {
 			padding: 12px;
+			grid-template-rows: minmax(0, 1fr);
+		}
+
+		.route-map-overlay-toolbar {
+			align-items: stretch;
+			flex-direction: column;
+		}
+
+		.vessel-transfer {
+			grid-template-columns: 1fr;
+		}
+
+		.transfer-actions {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 10px;
+			order: 2;
+			flex-direction: row;
+			width: 100%;
+		}
+
+		.transfer-actions button {
+			width: 42px;
+			height: 42px;
+			min-width: 42px;
+			min-height: 42px;
+			font-size: 14px;
+		}
+
+		.vessel-transfer-box {
+			order: 1;
+		}
+
+		.vessel-transfer-box.allowed {
+			order: 3;
+		}
+
+		.route-map-card,
+		.route-map-shell,
+		.route-map-shell .route-map,
+		.route-map {
+			min-height: 480px;
+		}
+
+		.route-point-panel .route-editor {
+			max-height: 280px;
 		}
 	}
 </style>

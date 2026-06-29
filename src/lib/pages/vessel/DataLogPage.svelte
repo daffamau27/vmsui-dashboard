@@ -5,6 +5,7 @@
 
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import { downloadApiFile, apiRequest } from '$lib/api/authApi.js';
+	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 
 	let loading = $state(false);
 	let exporting = $state(false);
@@ -207,20 +208,6 @@
 		return Array.isArray(columns) ? columns.filter(isDisplayColumn) : [];
 	}
 
-	let apiAvailableColumns = $derived(
-		filterDisplayColumns(
-			Array.isArray(normalizedData?.available_columns) ? normalizedData.available_columns : []
-		)
-	);
-
-	let visibleColumns = $derived(
-		apiAvailableColumns.length ? apiAvailableColumns : filterDisplayColumns(selectedColumns)
-	);
-
-	let displaySelectedColumns = $derived(filterDisplayColumns(selectedColumns));
-
-	let lastLoadedVesselId = $state(null);
-
 	let selectedColumns = $state([
 		'timestamp',
 		'latitude',
@@ -246,7 +233,17 @@
 		'ae_stbd_f_used'
 	]);
 
-	let stats = $derived(normalizedData?.stats || {});
+	let apiAvailableColumns = $derived(
+		filterDisplayColumns(
+			Array.isArray(normalizedData?.available_columns) ? normalizedData.available_columns : []
+		)
+	);
+
+	let visibleColumns = $derived(
+		apiAvailableColumns.length ? apiAvailableColumns : filterDisplayColumns(selectedColumns)
+	);
+
+	let displaySelectedColumns = $derived(filterDisplayColumns(selectedColumns));
 
 	function parseRowTimestamp(row) {
 		const value = row?.timestamp_utc || row?.timestamp || row?.ts || row?.time || row?.datetime;
@@ -267,34 +264,6 @@
 
 		return Number.isFinite(time) ? time : 0;
 	}
-	const availableColumns = [
-		{ key: 'timestamp', label: 'Timestamp' },
-		{ key: 'latitude', label: 'Latitude' },
-		{ key: 'longitude', label: 'Longitude' },
-		{ key: 'course', label: 'Course' },
-		{ key: 'speed', label: 'Speed' },
-		{ key: 'rig', label: 'Rig' },
-
-		{ key: 'me_port_run', label: 'ME Port Run' },
-		{ key: 'me_port_rpm', label: 'ME Port RPM' },
-		{ key: 'me_port_load', label: 'ME Port Load' },
-		{ key: 'me_port_f_used', label: 'ME Port Fuel Used' },
-
-		{ key: 'me_stbd_run', label: 'ME STBD Run' },
-		{ key: 'me_stbd_rpm', label: 'ME STBD RPM' },
-		{ key: 'me_stbd_load', label: 'ME STBD Load' },
-		{ key: 'me_stbd_f_used', label: 'ME STBD Fuel Used' },
-
-		{ key: 'ae_port_run', label: 'AE Port Run' },
-		{ key: 'ae_port_rpm', label: 'AE Port RPM' },
-		{ key: 'ae_port_load', label: 'AE Port Load' },
-		{ key: 'ae_port_f_used', label: 'AE Port Fuel Used' },
-
-		{ key: 'ae_stbd_run', label: 'AE STBD Run' },
-		{ key: 'ae_stbd_rpm', label: 'AE STBD RPM' },
-		{ key: 'ae_stbd_load', label: 'AE STBD Load' },
-		{ key: 'ae_stbd_f_used', label: 'AE STBD Fuel Used' }
-	];
 
 	function pad(value) {
 		return String(value).padStart(2, '0');
@@ -441,10 +410,6 @@
 		)
 			.slice()
 			.sort((a, b) => parseRowTimestamp(b) - parseRowTimestamp(a))
-	);
-
-	let meta = $derived(
-		normalizedData?.meta || normalizedData?.summary || normalizedData?.info || {}
 	);
 
 	let hasRawData = $derived(Boolean(logData));
@@ -757,8 +722,7 @@
 			return;
 		}
 
-		const key = `${$selectedVesselId}|${startDateTime}|${endDateTime}|${timezoneMode}|${timezoneOffset}|${displaySelectedColumns.join(',')}`;
-
+		const key = `${$selectedVesselId}|${startDateTime}|${endDateTime}|${timezoneMode}|${timezoneOffset}`;
 		if (loadedKeys[key]) return;
 
 		loadedKeys = {
@@ -933,48 +897,65 @@
 		<div class="status-box error-box">{error}</div>
 	{/if}
 
-	<section class="table-section">
-		<div class="section-header">
-			<div>
-				<span class="section-kicker">Telemetry</span>
-				<h2>1-Minute Data Log</h2>
+	{#if currentUserLoading}
+		<LoadingSkeleton label="Loading data log permissions" variant="card" rows={2} compact />
+	{/if}
+
+	{#if currentUserError}
+		<div class="status-box error-box">{currentUserError}</div>
+	{/if}
+
+	{#if loading}
+		<LoadingSkeleton
+			label="Loading telemetry log"
+			variant="data-log"
+			rows={10}
+			columns={displaySelectedColumns.length || 10}
+		/>
+	{:else}
+		<section class="table-section">
+			<div class="section-header">
+				<div>
+					<span class="section-kicker">Telemetry</span>
+					<h2>1-Minute Data Log</h2>
+				</div>
+
+				<strong>{dataRows.length} rows</strong>
 			</div>
 
-			<strong>{dataRows.length} rows</strong>
-		</div>
-
-		{#if dataRows.length}
-			<div class="data-log-table-wrapper">
-				<table class="data-log-table">
-					<thead>
-						<tr>
-							{#each displaySelectedColumns as column}
-								<th class:sticky-col={column === 'timestamp'}>
-									{getColumnLabel(column, displaySelectedColumns)}
-								</th>
-							{/each}
-						</tr>
-					</thead>
-
-					<tbody>
-						{#each dataRows as row}
+			{#if dataRows.length}
+				<div class="data-log-table-wrapper">
+					<table class="data-log-table">
+						<thead>
 							<tr>
 								{#each displaySelectedColumns as column}
-									<td class:sticky-col={column === 'timestamp'}>
-										{formatCellValue(row?.[column], column)}
-									</td>
+									<th class:sticky-col={column === 'timestamp'}>
+										{getColumnLabel(column, displaySelectedColumns)}
+									</th>
 								{/each}
 							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		{:else}
-			<div class="empty-box">Data log is not available for the selected time range.</div>
-		{/if}
-	</section>
+						</thead>
 
-	{#if hasRawData}
+						<tbody>
+							{#each dataRows as row}
+								<tr>
+									{#each displaySelectedColumns as column}
+										<td class:sticky-col={column === 'timestamp'}>
+											{formatCellValue(row?.[column], column)}
+										</td>
+									{/each}
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{:else}
+				<div class="empty-box">Data log is not available for the selected time range.</div>
+			{/if}
+		</section>
+	{/if}
+
+	{#if hasRawData && !loading}
 		<details class="raw-box">
 			<summary>Raw Data Log Response</summary>
 			<pre>{JSON.stringify(logData, null, 2)}</pre>

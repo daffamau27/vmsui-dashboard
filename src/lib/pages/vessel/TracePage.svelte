@@ -4,6 +4,8 @@
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
 	import { getVesselTrace } from '$lib/api/traceApi.js';
 	import { fade, fly, scale } from 'svelte/transition';
+	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
 
 	let { active = false } = $props();
 
@@ -473,6 +475,15 @@
 			<div class="status-box error-box">{error}</div>
 		{/if}
 
+	{#if loading}
+		<section class="trace-loading-shell">
+			<LoadingSkeleton
+				label="Loading trace playback"
+				variant="trace-playback"
+				class="trace-page-skeleton"
+			/>
+		</section>
+	{:else}
 		<section class="main-monitor-grid">
 			<section class="monitor-card cctv-card">
 				<div class="card-header">
@@ -530,8 +541,19 @@
 					</div>
 
 					<div class="coordinate-badge">
-						{formatNumber(vesselInfo.latitude, 6, '0.000000')},
-						{formatNumber(vesselInfo.longitude, 6, '0.000000')}
+						<CopyableCoordinate
+							value={formatNumber(vesselInfo.latitude, 6, '0.000000')}
+							display={formatNumber(vesselInfo.latitude, 6, '0.000000')}
+							label="latitude"
+							compact
+						/>
+						<span class="coordinate-separator">,</span>
+						<CopyableCoordinate
+							value={formatNumber(vesselInfo.longitude, 6, '0.000000')}
+							display={formatNumber(vesselInfo.longitude, 6, '0.000000')}
+							label="longitude"
+							compact
+						/>
 					</div>
 				</div>
 
@@ -658,9 +680,10 @@
 				</section>
 			</section>
 		</section>
+		{/if}
 	</section>
 
-	{#if traceData}
+	{#if traceData && !loading}
 		<details class="raw-box">
 			<summary>Raw Trace Response</summary>
 			<pre>{JSON.stringify(traceData, null, 2)}</pre>
@@ -796,6 +819,20 @@
 		border: 1px solid #fecaca;
 	}
 
+	.trace-loading-shell {
+		grid-row: 2 / -1;
+		min-height: 0;
+		display: grid;
+		overflow: hidden;
+	}
+
+	.trace-loading-shell :global(.loading-skeleton.trace-playback),
+	.trace-loading-shell :global(.trace-skeleton-playback) {
+		width: 100%;
+		height: 100%;
+		min-height: 0;
+	}
+
 	.main-monitor-grid {
 		min-height: 0;
 		display: grid;
@@ -849,6 +886,9 @@
 	}
 
 	.coordinate-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
 		padding: 4px 7px;
 		background: var(--color-elevated);
 		border: 1px solid #e2e8f0;
@@ -856,6 +896,10 @@
 		font-size: 10px;
 		font-weight: 850;
 		white-space: nowrap;
+	}
+
+	.coordinate-separator {
+		color: var(--text-muted);
 	}
 
   .cctv-layout {
@@ -1324,6 +1368,12 @@
 
 		.bottom-panel {
 			grid-template-columns: 1fr;
+		}
+
+		.trace-loading-shell {
+			grid-row: auto;
+			display: block;
+			overflow: visible;
 		}
 	}
 

@@ -7,6 +7,7 @@
 	} from '$lib/api/periodicalReportApi.js';
 	import { downloadApiFile } from '$lib/api/authApi.js';
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
+	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 
 	let loading = $state(false);
 	let exporting = $state(false);
@@ -333,6 +334,14 @@
 	let hasAverageSpeed = $derived(Number.isFinite(averageSpeed));
 	let hasMaxSpeed = $derived(Number.isFinite(maxSpeed));
 
+	let periodicalFuelSkeletonColumns = $derived(
+		Math.max(visibleFuelSources.length + 2, 4)
+	);
+
+	let periodicalTableSkeletonRows = $derived(
+		Math.max(engineRuntimeRows.length + 1, 4)
+	);
+
 	async function loadPeriodicalReport() {
 		if (!$selectedVesselId) {
 			error = 'No vessel has been selected from Fleet View.';
@@ -525,15 +534,23 @@
 		</div>
 	{/if}
 
-	<section class="data-received-card">
-		<span>Data Received</span>
-		<strong>
-			{dataReceivedStats?.received_minutes !== undefined &&
-			dataReceivedStats?.total_minutes !== undefined
-				? `${dataReceivedStats.received_minutes} of ${dataReceivedStats.total_minutes} (${dataReceivedStats.percentage ?? '-'}%)`
-				: '-'}
-		</strong>
-	</section>
+	{#if loading}
+		<LoadingSkeleton
+			label="Loading periodical report data"
+			variant="periodical-report"
+			rows={periodicalTableSkeletonRows}
+			columns={periodicalFuelSkeletonColumns}
+		/>
+	{:else}
+		<section class="data-received-card">
+			<span>Data Received</span>
+			<strong>
+				{dataReceivedStats?.received_minutes !== undefined &&
+				dataReceivedStats?.total_minutes !== undefined
+					? `${dataReceivedStats.received_minutes} of ${dataReceivedStats.total_minutes} (${dataReceivedStats.percentage ?? '-'}%)`
+					: '-'}
+			</strong>
+		</section>
 
 	<section class="summary-grid">
 		<article class="summary-card">
@@ -720,6 +737,7 @@
 			<pre>{JSON.stringify(reportData, null, 2)}</pre>
 		</details>
 	{/if}
+{/if}
 </section>
 
 <style>
