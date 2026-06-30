@@ -50,6 +50,8 @@
 	let activeAssignments = [];
 	let activeAssignmentsLoading = false;
 	let activeAssignmentsError = '';
+	let activePlanUsage = new Map();
+	let activePlanLocksLoading = false;
 	let activeAssignmentPage = 1;
 	let activeAssignmentPageSize = 10;
 	let activeAssignmentPagination = {
@@ -1043,7 +1045,13 @@
 		try {
 			await loadCurrentUser();
 			if (canAccess) {
-				await Promise.all([loadPlans(), loadVessels(), loadFleetAssets(), loadActiveAssignments()]);
+				await Promise.all([
+					loadPlans(),
+					loadVessels(),
+					loadFleetAssets(),
+					loadActiveAssignments(),
+					loadActivePlanLocks()
+				]);
 			}
 		} catch (error) {
 			errorMessage = error.message;
@@ -1180,6 +1188,68 @@
 		}
 	}
 
+	async function loadActivePlanLocks() {
+		activePlanLocksLoading = true;
+
+		try {
+			const usage = new Map();
+			let lockPage = 1;
+			let hasNext = true;
+			const pageSizeForLocks = 500;
+			let guard = 0;
+
+			while (hasNext && guard < 20) {
+				const params = new URLSearchParams({
+					page: String(lockPage),
+					pageSize: String(pageSizeForLocks)
+				});
+
+				const result = await apiFetch(`/voyage-plans/assignments/active?${params.toString()}`);
+				const rows = (result?.data?.items || []).map(normalizeActiveAssignment);
+
+				rows.forEach((assignment) => {
+					const planId = Number(assignment.voyagePlanId);
+					if (!Number.isFinite(planId)) return;
+
+					const current = usage.get(planId) || [];
+					current.push(assignment);
+					usage.set(planId, current);
+				});
+
+				const paginationInfo = result?.data?.pagination || {};
+				hasNext = Boolean(paginationInfo.hasNext);
+				lockPage = Number(paginationInfo.page || lockPage) + 1;
+				guard += 1;
+			}
+
+			activePlanUsage = usage;
+		} catch (error) {
+			console.warn('[VOYAGE_PLANS][ACTIVE_LOCKS_ERROR]', error);
+			activePlanUsage = new Map();
+		} finally {
+			activePlanLocksLoading = false;
+		}
+	}
+
+	function isPlanInUse(planId) {
+		return activePlanUsage.has(Number(planId));
+	}
+
+	function getPlanUsageLabel(planId) {
+		const assignments = activePlanUsage.get(Number(planId)) || [];
+		if (!assignments.length) return '';
+
+		const vesselNames = assignments
+			.map((assignment) => assignment.vesselName)
+			.filter(Boolean)
+			.slice(0, 2);
+		const suffix = assignments.length > 2 ? ` +${assignments.length - 2}` : '';
+
+		return vesselNames.length
+			? `In use by ${vesselNames.join(', ')}${suffix}`
+			: `In use by ${assignments.length} vessel`;
+	}
+
 	function clearActiveAssignmentFilters() {
 		activeAssignmentFilters = {
 			voyagePlanId: '',
@@ -1272,6 +1342,11 @@
 
 	async function startEdit(planId) {
 		clearMessages();
+		if (isPlanInUse(planId)) {
+			errorMessage = 'This voyage plan is currently assigned to an active vessel and cannot be edited.';
+			return;
+		}
+
 		await openPlan(planId);
 		if (!selectedPlan) return;
 
@@ -1515,6 +1590,11 @@
 
 	async function toggleActive(plan) {
 		clearMessages();
+		if (isPlanInUse(plan.id)) {
+			errorMessage = 'This voyage plan is currently assigned to an active vessel and cannot be changed.';
+			return;
+		}
+
 		saving = true;
 		try {
 			const result = await apiFetch(`/voyage-plans/${plan.id}/toggle-active`, {
@@ -1534,6 +1614,11 @@
 
 	async function deletePlan(id) {
 		clearMessages();
+		if (isPlanInUse(id)) {
+			errorMessage = 'This voyage plan is currently assigned to an active vessel and cannot be deleted.';
+			return;
+		}
+
 		saving = true;
 		try {
 			const result = await apiFetch(`/voyage-plans/${id}`, { method: 'DELETE' });
@@ -1694,7 +1779,7 @@
 				})
 			});
 			successMessage = result?.message || 'Voyage plan assigned to vessel successfully.';
-			await loadActiveAssignments(1);
+			await Promise.all([loadActiveAssignments(1), loadActivePlanLocks()]);
 		} catch (error) {
 			errorMessage = error.message;
 		} finally {
@@ -1782,12 +1867,22 @@
 						</thead>
 						<tbody>
 							{#each filteredPlans as plan}
+								{@const planIsInUse = isPlanInUse(plan.id)}
+								{@const planUsageLabel = getPlanUsageLabel(plan.id)}
 								<tr
 									class:active-row={selectedPlanId === plan.id}
+									class:plan-in-use-row={planIsInUse}
 									on:click={() => openPlan(plan.id)}
 								>
 									<td>#{plan.id}</td>
-									<td class="strong">{plan.voyageName}</td>
+									<td class="strong">
+										<div class="plan-name-cell">
+											<span>{plan.voyageName}</span>
+											{#if planIsInUse}
+												<small>{planUsageLabel}</small>
+											{/if}
+										</div>
+									</td>
 									<td>
 										<span
 											class:badge-active={plan.isActive}
@@ -1801,6 +1896,9 @@
 									<td class="actions right" on:click|stopPropagation>
 										<div class="action-row">
 											{#if canManage}
+												{#if planIsInUse}
+													<span class="plan-lock-pill" title={planUsageLabel}>In use</span>
+												{/if}
 												{#if confirmDeleteId === plan.id}
 													<button
 														class="icon-action danger"
@@ -1808,7 +1906,7 @@
 														title="Confirm delete"
 														aria-label="Confirm delete"
 														on:click={() => deletePlan(plan.id)}
-														disabled={saving}
+														disabled={saving || planIsInUse || activePlanLocksLoading}
 													>
 														✓
 													</button>
@@ -1827,10 +1925,10 @@
 													<button
 														class="icon-action"
 														type="button"
-														title="Edit"
+														title={planIsInUse ? planUsageLabel : 'Edit'}
 														aria-label="Edit"
 														on:click={() => startEdit(plan.id)}
-														disabled={saving}
+														disabled={saving || planIsInUse || activePlanLocksLoading}
 													>
 														✎
 													</button>
@@ -1839,10 +1937,10 @@
 														class="icon-action"
 														class:active-toggle={plan.isActive}
 														type="button"
-														title={plan.isActive ? 'Deactivate' : 'Activate'}
+														title={planIsInUse ? planUsageLabel : plan.isActive ? 'Deactivate' : 'Activate'}
 														aria-label={plan.isActive ? 'Deactivate' : 'Activate'}
 														on:click={() => toggleActive(plan)}
-														disabled={saving}
+														disabled={saving || planIsInUse || activePlanLocksLoading}
 													>
 														{plan.isActive ? '⏸' : '▶'}
 													</button>
@@ -1850,10 +1948,10 @@
 													<button
 														class="icon-action danger ghost-danger"
 														type="button"
-														title="Delete"
+														title={planIsInUse ? planUsageLabel : 'Delete'}
 														aria-label="Delete"
 														on:click={() => (confirmDeleteId = plan.id)}
-														disabled={saving}
+														disabled={saving || planIsInUse || activePlanLocksLoading}
 													>
 														🗑
 													</button>
@@ -2146,7 +2244,7 @@
 				<button
 					type="button"
 					class="ghost-button"
-					on:click={() => loadActiveAssignments(activeAssignmentPage)}
+					on:click={() => Promise.all([loadActiveAssignments(activeAssignmentPage), loadActivePlanLocks()])}
 					disabled={activeAssignmentsLoading}
 				>
 					{activeAssignmentsLoading ? 'Refreshing...' : 'Refresh'}
@@ -3648,9 +3746,33 @@
 		background: var(--color-accent-muted) !important;
 	}
 
+	tr.plan-in-use-row td {
+		background: rgba(15, 23, 42, 0.32);
+	}
+
 	.strong {
 		color: var(--text-primary);
 		font-weight: 900;
+	}
+
+	.plan-name-cell {
+		display: grid;
+		gap: 4px;
+		min-width: 0;
+	}
+
+	.plan-name-cell > span {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.plan-name-cell > small {
+		color: #fbbf24;
+		font-size: 10px;
+		font-weight: 750;
+		line-height: 1.25;
+		white-space: normal;
 	}
 
 	.right,
@@ -3660,8 +3782,8 @@
 	}
 
 	td.actions {
-		width: 142px;
-		min-width: 142px;
+		width: 218px;
+		min-width: 218px;
 		vertical-align: middle;
 	}
 
@@ -3691,6 +3813,26 @@
 	.icon-action:hover:not(:disabled) {
 		background: var(--color-accent-muted);
 		transform: translateY(-1px);
+	}
+
+	.icon-action:disabled {
+		filter: grayscale(0.35);
+	}
+
+	.plan-lock-pill {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 26px;
+		padding: 5px 9px;
+		border: 1px solid rgba(245, 158, 11, 0.34);
+		border-radius: 999px;
+		background: rgba(245, 158, 11, 0.12);
+		color: #fbbf24;
+		font-size: 10px;
+		font-weight: 900;
+		line-height: 1;
+		white-space: nowrap;
 	}
 
 	.icon-action.active-toggle {
