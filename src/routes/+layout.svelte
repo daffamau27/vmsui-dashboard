@@ -5,6 +5,7 @@
 	import { goto } from '$app/navigation';
 	import Sidebar from '$lib/Sidebar.svelte';
 	import { initAuth, isLoggedIn, authReady } from '$lib/stores/authStore.js';
+	import { activeMenu } from '$lib/stores/appNavigation.svelte.js';
 
 	let { children } = $props();
 
@@ -37,7 +38,7 @@
 {:else if isLoginPage}
 	{@render children()}
 {:else}
-	<div class="app-shell">
+	<div class:fleet-floating-shell={$activeMenu === 'fleet-view'} class="app-shell">
 		<Sidebar />
 
 		<main class="app-main">
@@ -88,6 +89,12 @@
 		min-height: 0;
 		overflow: hidden;
 		background: var(--color-base);
+	}
+
+	.app-shell.fleet-floating-shell .app-main {
+		flex: 0 0 100vw;
+		width: 100vw;
+		max-width: 100vw;
 	}
 
 	.loading-screen {

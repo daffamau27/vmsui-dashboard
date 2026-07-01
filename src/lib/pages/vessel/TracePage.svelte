@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import VesselMap from '$lib/VesselMap.svelte';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
-	import { getVesselTrace } from '$lib/api/traceApi.js';
+	import { getVesselCctvSnapshots, getVesselTrace } from '$lib/api/traceApi.js';
 	import { fade, fly, scale } from 'svelte/transition';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
@@ -22,17 +22,14 @@
 	let timezoneMode = $state('auto');
 	let timezoneOffset = $state('+07:00');
 
-	const cctvItems = [
-		{ name: 'CCTV 1', status: 'Live' },
-		{ name: 'CCTV 2', status: 'Live' },
-		{ name: 'CCTV 3', status: 'Live' },
-		{ name: 'CCTV 4', status: 'Offline' }
-	];
-
+	let cctvItems = $state([]);
+	let cctvSnapshotsError = $state('');
+	let cctvSnapshotsTotal = $state(0);
 	let selectedCctvIndex = $state(0);
 	let cctvAnimationKey = $state(0);
+	const CCTV_SNAPSHOT_PAGE_SIZE = 12;
 
-	let selectedCctv = $derived(cctvItems[selectedCctvIndex] || cctvItems[0]);
+	let selectedCctv = $derived(cctvItems[selectedCctvIndex] || cctvItems[0] || null);
 
 	let miniCctvItems = $derived(
 		cctvItems
@@ -67,6 +64,16 @@
 		return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
 			date.getDate()
 		)} ${pad(date.getHours())}:${pad(date.getMinutes())}:00`;
+	}
+
+	function toSnapshotApiDateTime(value) {
+		if (!value) return '';
+
+		const date = new Date(value);
+
+		if (Number.isNaN(date.getTime())) return value;
+
+		return date.toISOString();
 	}
 
 	function toNumber(value, fallback = 0) {
@@ -112,6 +119,63 @@
 		}
 
 		return value;
+	}
+
+	function formatFileSize(value) {
+		const bytes = Number(value);
+		if (!Number.isFinite(bytes) || bytes <= 0) return '';
+
+		const units = ['B', 'KB', 'MB', 'GB'];
+		let size = bytes;
+		let unitIndex = 0;
+
+		while (size >= 1024 && unitIndex < units.length - 1) {
+			size /= 1024;
+			unitIndex += 1;
+		}
+
+		return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+	}
+
+	function getCameraNameFromPath(filePath = '') {
+		const match = String(filePath).match(/camera_([^/]+)/i);
+		if (!match?.[1]) return '';
+
+		return decodeURIComponent(match[1]).replace(/[-_]+/g, ' ').trim();
+	}
+
+	function normalizeCctvSnapshots(value) {
+		const payload = value?.items ? value : value?.data?.items ? value.data : value?.data || value;
+		const items = Array.isArray(payload?.items)
+			? payload.items
+			: Array.isArray(value)
+				? value
+				: [];
+
+		cctvSnapshotsTotal = Number(payload?.total ?? items.length) || 0;
+
+		return items.map((item, index) => {
+			const filePath = item?.file_path || item?.filePath || '';
+			const capturedAt = item?.captured_at || item?.capturedAt || '';
+			const url = item?.presigned_url || item?.presignedUrl || item?.url || '';
+			const cameraName =
+				item?.camera_name ||
+				item?.cameraName ||
+				item?.name ||
+				getCameraNameFromPath(filePath) ||
+				`Snapshot ${index + 1}`;
+
+			return {
+				name: cameraName,
+				status: url ? 'Captured' : 'No image',
+				url,
+				filePath,
+				fileSizeText: formatFileSize(item?.file_size ?? item?.fileSize),
+				capturedAt,
+				capturedAtText: formatDateTime(capturedAt),
+				online: Boolean(url)
+			};
+		});
 	}
 
 	function normalizeRpm(value) {
@@ -306,30 +370,53 @@
 		if (!$selectedVesselId) {
 			error = 'No vessel has been selected from Fleet View.';
 			traceData = null;
+			cctvItems = [];
+			cctvSnapshotsTotal = 0;
 			return;
 		}
 
 		loading = true;
 		error = '';
+		cctvSnapshotsError = '';
 
 		try {
-			const result = await getVesselTrace({
-				vesselId: $selectedVesselId,
-				start: toApiDateTime(startDateTime),
-				end: toApiDateTime(endDateTime),
-				timezoneMode,
-				timezoneOffset: timezoneMode === 'manual' ? timezoneOffset : ''
-			});
+			const [result, snapshotResult] = await Promise.all([
+				getVesselTrace({
+					vesselId: $selectedVesselId,
+					start: toApiDateTime(startDateTime),
+					end: toApiDateTime(endDateTime),
+					timezoneMode,
+					timezoneOffset: timezoneMode === 'manual' ? timezoneOffset : ''
+				}),
+				getVesselCctvSnapshots({
+					vesselId: $selectedVesselId,
+					startTime: toSnapshotApiDateTime(startDateTime),
+					endTime: toSnapshotApiDateTime(endDateTime),
+					page: 1,
+					pageSize: CCTV_SNAPSHOT_PAGE_SIZE
+				}).catch((snapshotErr) => {
+					console.error('[VESSEL_TRACE_CCTV_SNAPSHOTS_ERROR]', snapshotErr);
+					cctvSnapshotsError =
+						snapshotErr?.message || 'Failed to load CCTV snapshots for this trace range.';
+					return null;
+				})
+			]);
 
 			traceData = result;
+			cctvItems = snapshotResult ? normalizeCctvSnapshots(snapshotResult) : [];
+			selectedCctvIndex = 0;
 			activeIndex = 0;
+			cctvAnimationKey += 1;
 
 			console.log('[VESSEL_TRACE_RAW]', result);
 			console.log('[VESSEL_TRACE_POINTS_COUNT]', getTracePoints(result).length);
+			console.log('[VESSEL_TRACE_CCTV_SNAPSHOTS_COUNT]', cctvItems.length);
 		} catch (err) {
 			console.error('[VESSEL_TRACE_ERROR]', err);
 			error = err?.message || 'Failed to load vessel trace.';
 			traceData = null;
+			cctvItems = [];
+			cctvSnapshotsTotal = 0;
 		} finally {
 			loading = false;
 		}
@@ -398,6 +485,12 @@
 	});
 
 	$effect(() => {
+		if (!active) {
+			isPlaying = false;
+		}
+	});
+
+	$effect(() => {
 		if (!isPlaying) return;
 		if (!tracePoints.length) return;
 
@@ -431,7 +524,7 @@
 	});
 </script>
 
-<section class="trace-root">
+<section class="trace-root page-content">
 	<section class="trace-viewport">
 		<section class="compact-filter-card">
 			<div class="filter-title">
@@ -489,26 +582,45 @@
 				<div class="card-header">
 					<div>
 						<div class="card-title">CCTV Monitoring</div>
-						<div class="card-subtitle">Camera overview</div>
+						<div class="card-subtitle" class:cctv-error-text={Boolean(cctvSnapshotsError)}>
+							{cctvSnapshotsError || `${cctvSnapshotsTotal || cctvItems.length} snapshots in selected range`}
+						</div>
 					</div>
 				</div>
 
 				<div class="cctv-layout">
 					<div class="cctv-main-shell">
 						{#key cctvAnimationKey}
-							<div
-								class="cctv-main"
-								class:offline={selectedCctv.status === 'Offline'}
-								in:fly={{ y: 10, duration: 180 }}
-								out:fade={{ duration: 90 }}
-							>
-								<div class="cctv-scanline"></div>
+							{#if selectedCctv}
+								<div
+									class="cctv-main"
+									class:offline={!selectedCctv.online}
+									class:has-snapshot={Boolean(selectedCctv.url)}
+									in:fly={{ y: 10, duration: 180 }}
+									out:fade={{ duration: 90 }}
+								>
+									{#if selectedCctv.url}
+										<img class="cctv-snapshot-image" src={selectedCctv.url} alt={`${selectedCctv.name} snapshot`} loading="lazy" />
+									{/if}
 
-								<div class="cctv-overlay">
-									<span class="camera-name">{selectedCctv.name}</span>
-									<span class="camera-status">{selectedCctv.status}</span>
+									<div class="cctv-scanline"></div>
+
+									<div class="cctv-overlay">
+										<span class="camera-name">{selectedCctv.name}</span>
+										<span class="camera-status">{selectedCctv.capturedAtText || selectedCctv.status}</span>
+										{#if selectedCctv.fileSizeText}
+											<span class="camera-file-size">{selectedCctv.fileSizeText}</span>
+										{/if}
+									</div>
 								</div>
-							</div>
+							{:else}
+								<div class="cctv-main offline cctv-empty-main" in:fade={{ duration: 150 }}>
+									<div class="cctv-overlay">
+										<span class="camera-name">No CCTV snapshot</span>
+										<span class="camera-status">Choose a range and load trace</span>
+									</div>
+								</div>
+							{/if}
 						{/key}
 					</div>
 
@@ -517,14 +629,18 @@
 							<button
 								type="button"
 								class="cctv-mini"
-								class:offline={cctv.status === 'Offline'}
+								class:offline={!cctv.online}
+								class:has-snapshot={Boolean(cctv.url)}
 								onclick={() => selectCctv(cctv.index)}
 								title={`Show ${cctv.name}`}
 								in:scale={{ start: 0.96, duration: 150 }}
 								out:fade={{ duration: 80 }}
 							>
+								{#if cctv.url}
+									<img src={cctv.url} alt={`${cctv.name} thumbnail`} loading="lazy" />
+								{/if}
 								<span>{cctv.name}</span>
-								<small>{cctv.status}</small>
+								<small>{cctv.capturedAtText || cctv.status}</small>
 							</button>
 						{/each}
 					</div>
@@ -536,7 +652,7 @@
 					<div>
 						<div class="card-title">Vessel Position</div>
 						<div class="card-subtitle">
-							Heading {formatNumber(vesselInfo.heading, 1, '0.0')}° · {vesselInfo.lastUpdate}
+							{vesselInfo.lastUpdate}
 						</div>
 					</div>
 
@@ -558,19 +674,21 @@
 				</div>
 
 				<div class="map-panel">
-					<VesselMap
-						latitude={vesselInfo.latitude}
-						longitude={vesselInfo.longitude}
-						heading={vesselInfo.heading}
-						vesselName={vesselInfo.vesselName}
-						speed={vesselInfo.currentSpeed}
-						lastUpdate={vesselInfo.lastUpdate}
-						iconUrl="/assets/vessel-marker.svg"
-						zoom={12}
-						{tracePoints}
-						{activeIndex}
-						showTraceLine={true}
-					/>
+					{#if active}
+						<VesselMap
+							latitude={vesselInfo.latitude}
+							longitude={vesselInfo.longitude}
+							heading={vesselInfo.heading}
+							vesselName={vesselInfo.vesselName}
+							speed={vesselInfo.currentSpeed}
+							lastUpdate={vesselInfo.lastUpdate}
+							iconUrl="/assets/vessel.png"
+							zoom={12}
+							{tracePoints}
+							{activeIndex}
+							showTraceLine={true}
+						/>
+					{/if}
 				</div>
 			</section>
 		</section>
@@ -694,22 +812,22 @@
 <style>
 	.trace-root {
 		width: 100%;
-		height: 100vh;
-		max-height: 100vh;
+		height: 100%;
+		min-height: 0;
 		background: var(--color-base);
 		color: var(--text-primary);
-		overflow: hidden;
+		overflow-x: hidden;
+		overflow-y: auto;
+		-webkit-overflow-scrolling: touch;
 	}
 
 	.trace-viewport {
-		height: 100vh;
-		max-height: 100vh;
 		padding: 10px;
 		box-sizing: border-box;
 		display: grid;
-		grid-template-rows: 68px auto minmax(0, 1fr) 190px;
+		grid-template-rows: auto auto auto auto;
 		gap: 10px;
-		overflow: hidden;
+		overflow: visible;
 	}
 
 	.compact-filter-card {
@@ -821,9 +939,9 @@
 
 	.trace-loading-shell {
 		grid-row: 2 / -1;
-		min-height: 0;
+		min-height: 620px;
 		display: grid;
-		overflow: hidden;
+		overflow: visible;
 	}
 
 	.trace-loading-shell :global(.loading-skeleton.trace-playback),
@@ -836,7 +954,8 @@
 	.main-monitor-grid {
 		min-height: 0;
 		display: grid;
-		grid-template-columns: 0.9fr 1.45fr;
+		grid-template-columns: minmax(420px, 1fr) minmax(0, 1.75fr);
+		align-items: stretch;
 		gap: 10px;
 	}
 
@@ -854,6 +973,11 @@
 		min-height: 0;
 		display: flex;
 		flex-direction: column;
+	}
+
+	.map-card {
+		height: auto;
+		min-height: 0;
 	}
 
 	.card-header {
@@ -902,21 +1026,25 @@
 		color: var(--text-muted);
 	}
 
-  .cctv-layout {
-    flex: 1;
-    min-height: 0;
-    padding: 8px;
-    display: grid;
-    grid-template-rows: minmax(0, 1fr) 46px;
-    gap: 8px;
-  }
+	.cctv-layout {
+		flex: 0 0 auto;
+		min-height: 0;
+		padding: 8px;
+		display: grid;
+		grid-template-rows: auto auto;
+		align-content: start;
+		gap: 8px;
+	}
 
-  .cctv-main-shell {
-    position: relative;
-    min-height: 0;
-    overflow: hidden;
-    background: #4f5658;
-  }
+	.cctv-main-shell {
+		position: relative;
+		width: 100%;
+		aspect-ratio: 4 / 3;
+		min-height: 0;
+		max-height: 100%;
+		overflow: hidden;
+		background: #4f5658;
+	}
 
   .cctv-main {
     position: absolute;
@@ -938,6 +1066,10 @@
       #6b7280;
   }
 
+  .cctv-main.has-snapshot {
+    background: #111827;
+  }
+
   .cctv-main::before {
     content: '';
     position: absolute;
@@ -947,6 +1079,26 @@
       linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
     background-size: 22px 22px;
     opacity: 0.25;
+    z-index: 1;
+  }
+
+  .cctv-main.has-snapshot::before {
+    background:
+      linear-gradient(180deg, rgba(15, 23, 42, 0.58), rgba(15, 23, 42, 0.1) 42%, rgba(15, 23, 42, 0.82));
+    opacity: 1;
+  }
+
+  .cctv-snapshot-image {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .cctv-empty-main {
+    text-align: center;
   }
 
   .cctv-scanline {
@@ -963,6 +1115,7 @@
     );
     animation: cctvScan 1.4s ease-out;
     pointer-events: none;
+    z-index: 2;
   }
 
   @keyframes cctvScan {
@@ -979,7 +1132,7 @@
 
   .cctv-overlay {
     position: relative;
-    z-index: 1;
+    z-index: 3;
     display: grid;
     place-items: center;
     gap: 5px;
@@ -1012,6 +1165,18 @@
     font-weight: 850;
   }
 
+  .camera-file-size {
+    color: #bfdbfe;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .cctv-error-text {
+    color: #fca5a5;
+  }
+
   .cctv-mini-row {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1020,6 +1185,8 @@
 
   .cctv-mini {
     min-width: 0;
+    width: 100%;
+    aspect-ratio: 4 / 3;
     border: none;
     background: #53595b;
     color: #ffffff;
@@ -1033,8 +1200,33 @@
       transform 0.18s ease,
       box-shadow 0.18s ease,
       background 0.18s ease,
-      opacity 0.18s ease;
+    opacity 0.18s ease;
     will-change: transform, opacity;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .cctv-mini::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.24), rgba(15, 23, 42, 0.78));
+    opacity: 0;
+    transition: opacity 0.18s ease;
+  }
+
+  .cctv-mini.has-snapshot::before {
+    opacity: 1;
+  }
+
+  .cctv-mini img {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
 
   .cctv-mini:hover {
@@ -1048,11 +1240,15 @@
   }
 
   .cctv-mini span {
+    position: relative;
+    z-index: 2;
     font-size: 11px;
     font-weight: 950;
   }
 
   .cctv-mini small {
+    position: relative;
+    z-index: 2;
     color: #d8dee4;
     font-size: 8px;
     font-weight: 750;
@@ -1064,20 +1260,24 @@
 
 	.map-panel {
 		flex: 1;
+		height: auto;
 		min-height: 0;
 		position: relative;
 		overflow: hidden;
 		background: #d9d9d9;
 	}
 
+	.map-panel :global(.vessel-map-root) {
+		height: 100%;
+		min-height: 0;
+	}
+
 	.bottom-panel {
-		height: 190px;
-		min-height: 190px;
-		max-height: 190px;
+		min-height: 0;
 		display: grid;
-		grid-template-rows: 56px minmax(0, 1fr);
+		grid-template-rows: auto auto;
 		gap: 10px;
-		overflow: hidden;
+		overflow: visible;
 	}
 
 	.bottom-data-grid {
@@ -1090,9 +1290,7 @@
 
 	.playback-card {
 		min-width: 0;
-		height: 56px;
-		min-height: 56px;
-		max-height: 56px;
+		min-height: 52px;
 		padding: 8px 10px;
 		display: grid;
 		grid-template-columns: auto minmax(0, 1fr) 190px;
@@ -1361,13 +1559,36 @@
 			grid-template-columns: 1fr;
 		}
 
-		.map-panel,
+		.map-card {
+			height: auto;
+			min-height: 0;
+		}
+
 		.cctv-layout {
-			min-height: 300px;
+			min-height: 0;
+		}
+
+		.cctv-main-shell {
+			max-width: min(100%, 680px);
+			margin: 0 auto;
+		}
+
+		.map-panel {
+			height: auto;
+			min-height: 440px;
+		}
+
+		.map-panel :global(.vessel-map-root) {
+			min-height: 440px;
 		}
 
 		.bottom-panel {
+			height: auto;
+			min-height: 0;
+			max-height: none;
+			grid-template-rows: auto auto;
 			grid-template-columns: 1fr;
+			overflow: visible;
 		}
 
 		.trace-loading-shell {
@@ -1380,6 +1601,14 @@
 	@media (max-width: 760px) {
 		.trace-viewport {
 			padding: 8px;
+		}
+
+		.map-panel {
+			min-height: 360px;
+		}
+
+		.map-panel :global(.vessel-map-root) {
+			min-height: 360px;
 		}
 
 		.compact-filter-card {

@@ -1805,11 +1805,17 @@
 				})
 				.bindPopup(
 					`
-          <strong>Start Point</strong><br/>
-          Time: ${startPoint.time}<br/>
-          Lat: ${createCopyableCoordinateHtml(startPoint.lat, 'start latitude')}<br/>
-          Lng: ${createCopyableCoordinateHtml(startPoint.lng, 'start longitude')}
-        `
+					<div class="trip-map-popup">
+						<strong class="trip-map-popup-title">Start Point</strong>
+						<div class="trip-map-popup-row"><span>Time</span><b>${startPoint.time}</b></div>
+						<div class="trip-map-popup-row"><span>Lat</span>${createCopyableCoordinateHtml(startPoint.lat, 'start latitude')}</div>
+						<div class="trip-map-popup-row"><span>Lng</span>${createCopyableCoordinateHtml(startPoint.lng, 'start longitude')}</div>
+					</div>
+				`,
+					{
+						className: 'trip-leaflet-popup',
+						maxWidth: 260
+					}
 				)
 				.addTo(map);
 
@@ -1819,11 +1825,17 @@
 				})
 				.bindPopup(
 					`
-          <strong>End Point</strong><br/>
-          Time: ${endPoint.time}<br/>
-          Lat: ${createCopyableCoordinateHtml(endPoint.lat, 'end latitude')}<br/>
-          Lng: ${createCopyableCoordinateHtml(endPoint.lng, 'end longitude')}
-        `
+					<div class="trip-map-popup">
+						<strong class="trip-map-popup-title">End Point</strong>
+						<div class="trip-map-popup-row"><span>Time</span><b>${endPoint.time}</b></div>
+						<div class="trip-map-popup-row"><span>Lat</span>${createCopyableCoordinateHtml(endPoint.lat, 'end latitude')}</div>
+						<div class="trip-map-popup-row"><span>Lng</span>${createCopyableCoordinateHtml(endPoint.lng, 'end longitude')}</div>
+					</div>
+				`,
+					{
+						className: 'trip-leaflet-popup',
+						maxWidth: 260
+					}
 				)
 				.addTo(map);
 
@@ -2806,7 +2818,9 @@
 						</div>
 
 						<div class="trip-route-map">
-							<div class="trip-leaflet-map" use:tripLeafletMap={tripMapPoints}></div>
+							{#if active}
+								<div class="trip-leaflet-map" use:tripLeafletMap={tripMapPoints}></div>
+							{/if}
 						</div>
 					</article>
 
@@ -3788,6 +3802,84 @@
 
 	.trip-leaflet-map :global(.trip-map-marker.end) {
 		background: #ef4444;
+	}
+
+	.trip-leaflet-map :global(.trip-leaflet-popup .leaflet-popup-content-wrapper) {
+		background: #0f172a;
+		color: #f8fafc;
+		border: 1px solid rgba(148, 163, 184, 0.34);
+		border-radius: 12px;
+		box-shadow:
+			0 16px 30px rgba(2, 6, 23, 0.28),
+			0 2px 8px rgba(15, 23, 42, 0.2);
+		overflow: hidden;
+	}
+
+	.trip-leaflet-map :global(.trip-leaflet-popup .leaflet-popup-content) {
+		width: 230px !important;
+		margin: 0;
+		color: #f8fafc;
+	}
+
+	.trip-leaflet-map :global(.trip-leaflet-popup .leaflet-popup-tip) {
+		background: #0f172a;
+		border: 1px solid rgba(148, 163, 184, 0.34);
+	}
+
+	.trip-leaflet-map :global(.trip-leaflet-popup .leaflet-popup-close-button) {
+		color: rgba(226, 232, 240, 0.82) !important;
+		font-size: 18px !important;
+		font-weight: 700 !important;
+		padding: 7px 8px 0 0 !important;
+	}
+
+	.trip-leaflet-map :global(.trip-leaflet-popup .leaflet-popup-close-button:hover) {
+		color: #ffffff !important;
+	}
+
+	.trip-leaflet-map :global(.trip-map-popup-title) {
+		display: block;
+		padding: 10px 36px 9px 12px;
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.2), rgba(96, 165, 250, 0.04)),
+			#111827;
+		color: #f8fafc;
+		font-size: 13px;
+		font-weight: 800;
+		line-height: 1.2;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+	}
+
+	.trip-leaflet-map :global(.trip-map-popup-row) {
+		display: grid;
+		grid-template-columns: 52px minmax(0, 1fr);
+		align-items: center;
+		gap: 8px;
+		padding: 8px 12px;
+		background: #0f172a;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+	}
+
+	.trip-leaflet-map :global(.trip-map-popup-row:last-child) {
+		border-bottom: 0;
+	}
+
+	.trip-leaflet-map :global(.trip-map-popup-row span) {
+		color: #94a3b8;
+		font-size: 10px;
+		font-weight: 700;
+	}
+
+	.trip-leaflet-map :global(.trip-map-popup-row b),
+	.trip-leaflet-map :global(.trip-map-popup-row strong) {
+		color: #f8fafc;
+		font-size: 11px;
+		font-weight: 700;
+		text-align: right;
+	}
+
+	.trip-leaflet-map :global(.trip-map-popup-row .coordinate-copy-inline) {
+		justify-content: flex-end;
 	}
 
 	.trip-leaflet-map :global(.leaflet-container) {

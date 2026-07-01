@@ -120,6 +120,31 @@ export async function deleteVesselAdminApi(id) {
   return unwrap(response);
 }
 
+export async function getCctvConfigAdminApi(vesselId) {
+  if (!vesselId) {
+    throw new Error("Vessel ID wajib dipilih.");
+  }
+
+  const response = await apiRequest(`/cctv/vessels/${vesselId}/config`, {
+    method: "GET"
+  });
+
+  return unwrap(response);
+}
+
+export async function updateCctvConfigAdminApi(vesselId, payload) {
+  if (!vesselId) {
+    throw new Error("Vessel ID wajib dipilih.");
+  }
+
+  const response = await apiRequest(`/cctv/vessels/${vesselId}/config`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+
+  return unwrap(response);
+}
+
 export async function getAllAssetsAdminApi() {
   const response = await apiRequest("/assets", {
     method: "GET"

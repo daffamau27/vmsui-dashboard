@@ -13,7 +13,9 @@
 		handleCoordinateCopyClick
 	} from '$lib/utils/coordinateClipboard.js';
 
-	const vesselMarkerUrl = '/assets/vessel-marker.svg';
+	let { active = false } = $props();
+
+	const vesselMarkerUrl = '/assets/vessel.png';
 
 	let vesselData = $state([]);
 	let fleetLoading = $state(false);
@@ -46,6 +48,7 @@
 	let L = null;
 	let markers = new Map();
 	let isFleetMounted = false;
+	let mapInitializing = false;
 
 	let showWindParticles = $state(false);
 	let windParticleLayer = null;
@@ -63,7 +66,7 @@
 	let currentFrame = null;
 	let currentLastFrameAt = 0;
 
-	let isFleetPageActive = $derived($activeMenu === 'fleet-view');
+	let isFleetPageActive = $derived(active && $activeMenu === 'fleet-view');
 
 	const CURRENT_INFLUENCE_RADIUS_METERS = 120000;
 
@@ -913,21 +916,22 @@
 
 	function createVesselIcon(vessel) {
 		const isSelected = String(selectedVesselId) === String(vessel.id);
+		const iconWidth = isSelected ? 28 : 24;
+		const iconHeight = isSelected ? 60 : 52;
 
 		return L.divIcon({
 			className: `vessel-leaflet-icon ${vessel.online ? 'online' : 'offline'} ${isSelected ? 'selected' : ''}`,
 			html: `
-        <div class="vessel-marker-shell">
-          <img
-            src="${vesselMarkerUrl}"
-            alt="${formatValue(vessel.name)}"
-            style="transform: rotate(${Number(vessel.heading || 0)}deg);"
-          />
-        </div>
+        <img
+          class="fleet-vessel-marker-icon"
+          src="${vesselMarkerUrl}"
+          alt="${formatValue(vessel.name)}"
+          style="transform: rotate(${Number(vessel.heading || 0)}deg) scaleX(1.16);"
+        />
       `,
-			iconSize: isSelected ? [31, 31] : [25, 25],
-			iconAnchor: isSelected ? [15.5, 15.5] : [12.5, 12.5],
-			popupAnchor: [0, -14]
+			iconSize: [iconWidth, iconHeight],
+			iconAnchor: [iconWidth / 2, iconHeight / 2],
+			popupAnchor: [0, -(iconHeight / 2 + 2)]
 		});
 	}
 
@@ -2210,6 +2214,97 @@
 		}, FLEET_REFRESH_INTERVAL_MS);
 	}
 
+	async function initializeFleetMap() {
+		if (!browser || !isFleetMounted || !isFleetPageActive || map || mapInitializing) return;
+
+		mapInitializing = true;
+
+		try {
+			const container = await waitForMapContainer();
+
+			if (!isFleetMounted || !isFleetPageActive) return;
+
+			if (!container) {
+				console.warn('[FLEET_MAP] mapContainer still not ready after retry');
+				return;
+			}
+
+			L = await import('leaflet');
+			await import('leaflet/dist/leaflet.css');
+
+			if (!isFleetMounted || !isFleetPageActive || !container) return;
+
+			map = L.map(container, {
+				zoomControl: false,
+				attributionControl: true,
+				preferCanvas: true,
+				closePopupOnClick: false
+			}).setView([-2.8, 114.5], 5);
+
+			L.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(map);
+
+			setupMapPanes();
+			buildMarkers();
+			buildAssetMarkers();
+
+			if (isFleetPageActive && showCurrentParticles) {
+				addCurrentParticleLayer();
+			}
+
+			if (isFleetPageActive && showWindParticles) {
+				addWindParticleLayer();
+			}
+
+			map.on('contextmenu', handleMapRightClick);
+			map.on('click', handleMapMeasureClick);
+			container.addEventListener('click', handleFleetPopupAction, true);
+
+			setTimeout(() => {
+				if (!map) return;
+
+				map.invalidateSize();
+
+				if (selectedVesselId) {
+					focusVessel(selectedVesselId, 6, true);
+				}
+			}, 250);
+		} finally {
+			mapInitializing = false;
+		}
+	}
+
+	function destroyFleetMap() {
+		mapContainer?.removeEventListener?.('click', handleFleetPopupAction, true);
+
+		cancelMeasure();
+		removeCurrentParticleLayer();
+		removeWindParticleLayer();
+
+		markers.forEach((marker) => {
+			marker.off?.();
+			marker.closePopup?.();
+			marker.unbindPopup?.();
+			marker.remove?.();
+		});
+		markers.clear();
+		markers = new Map();
+
+		assetMarkers.forEach((marker) => marker.remove());
+		assetMarkers.clear();
+		assetMarkers = new Map();
+
+		assetBoundaryCircles.forEach((circle) => circle.remove());
+		assetBoundaryCircles.clear();
+		assetBoundaryCircles = new Map();
+
+		if (map) {
+			map.off('contextmenu', handleMapRightClick);
+			map.off('click', handleMapMeasureClick);
+			map.remove();
+			map = null;
+		}
+	}
+
 	onMount(async () => {
 		if (!browser) return;
 
@@ -2218,38 +2313,7 @@
 
 		window.addEventListener('mobile-panel-open', handleMobilePanelOpen);
 
-		const container = await waitForMapContainer();
-
-		if (!isFleetMounted) return;
-
-		if (!container) {
-			console.warn('[FLEET_MAP] mapContainer still not ready after retry');
-			return;
-		}
-
-		L = await import('leaflet');
-		await import('leaflet/dist/leaflet.css');
-
-		if (!isFleetMounted || !container) return;
-
-		map = L.map(container, {
-			zoomControl: false,
-			attributionControl: true,
-			preferCanvas: true,
-			closePopupOnClick: false
-		}).setView([-2.8, 114.5], 5);
-
-		L.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(map);
-
-		setupMapPanes();
-
-		if (isFleetPageActive && showCurrentParticles) {
-			addCurrentParticleLayer();
-		}
-
-		if (isFleetPageActive && showWindParticles) {
-			addWindParticleLayer();
-		}
+		await initializeFleetMap();
 
 		await loadFleetVessels({
 			includeLiveDetails: true
@@ -2258,20 +2322,6 @@
 		await loadFleetAssets();
 
 		startFleetAutoRefresh();
-
-		map.on('contextmenu', handleMapRightClick);
-		map.on('click', handleMapMeasureClick);
-		container.addEventListener('click', handleFleetPopupAction, true);
-
-		setTimeout(() => {
-			if (!map) return;
-
-			map.invalidateSize();
-
-			if (selectedVesselId) {
-				focusVessel(selectedVesselId, 6, true);
-			}
-		}, 250);
 	});
 
 	onDestroy(() => {
@@ -2286,24 +2336,19 @@
 			window.removeEventListener('mobile-panel-open', handleMobilePanelOpen);
 		}
 
-		mapContainer?.removeEventListener?.('click', handleFleetPopupAction, true);
+		destroyFleetMap();
+	});
 
-		cancelMeasure();
-		removeCurrentParticleLayer();
-		removeWindParticleLayer();
+	$effect(() => {
+		isFleetPageActive;
 
-		if (map) {
-			map.off('contextmenu', handleMapRightClick);
-			map.off('click', handleMapMeasureClick);
-			map.remove();
-			map = null;
+		if (!browser || !isFleetMounted) return;
+
+		if (isFleetPageActive) {
+			initializeFleetMap();
+		} else {
+			destroyFleetMap();
 		}
-
-		markers.clear();
-		assetMarkers.forEach((marker) => marker.remove());
-		assetMarkers.clear();
-		assetBoundaryCircles.forEach((circle) => circle.remove());
-		assetBoundaryCircles.clear();
 	});
 
 	$effect(() => {
@@ -2513,7 +2558,9 @@
 						{assetError}
 					</div>
 				{/if}
-				<div class="leaflet-map" bind:this={mapContainer}></div>
+				{#if isFleetPageActive}
+					<div class="leaflet-map" bind:this={mapContainer}></div>
+				{/if}
 
 				{#if !fleetLoading && !fleetError && vesselData.length && !vesselsWithCoordinate.length}
 					<div class="fleet-api-status">
@@ -2845,7 +2892,7 @@
 							<div class="legend-section">
 								<div class="legend-item">
 									<span class="asset-boundary-legend" aria-hidden="true"></span>
-									<span>Asset boundary 500 m</span>
+									<span>Boundary 500 m</span>
 								</div>
 
 								{#if assetLegendItems.length}
@@ -2946,6 +2993,7 @@
 	.fleet-page {
 		--fleet-sidebar-width: 280px;
 		--fleet-gap: 5px;
+		--fleet-main-sidebar-offset: 0px;
 		position: relative;
 		height: 100%;
 		min-height: 0;
@@ -2958,37 +3006,38 @@
 		box-sizing: border-box;
 	}
 
+	:global(.app-shell.fleet-floating-shell:has(.sidebar.fleet-floating-sidebar.sidebar-open)) .fleet-page {
+		--fleet-main-sidebar-offset: 74px;
+	}
+
+	@media (max-width: 760px) {
+		:global(.app-shell.fleet-floating-shell:has(.sidebar.fleet-floating-sidebar.sidebar-open)) .fleet-page {
+			--fleet-main-sidebar-offset: 0px;
+		}
+	}
+
 	.fleet-layout {
+		position: relative;
 		height: 100%;
 		min-height: 0;
 		max-height: 100%;
-		display: grid;
-		grid-template-columns: var(--fleet-sidebar-width) minmax(0, 1fr);
-		gap: var(--fleet-gap);
-		transition: grid-template-columns 0.22s ease, gap 0.22s ease;
+		display: block;
+		overflow: hidden;
 	}
 
 	.fleet-layout.sidebar-collapsed {
-		grid-template-columns: minmax(0, 1fr);
-		gap: 0;
+		display: block;
 	}
 
 	@media (min-width: 1280px) and (max-height: 1080px) {
 		.fleet-page {
 			--fleet-sidebar-width: 340px;
 		}
-
-		.fleet-layout {
-			grid-template-columns: var(--fleet-sidebar-width) minmax(0, 1fr);
-		}
-
-		.fleet-layout.sidebar-collapsed {
-			grid-template-columns: minmax(0, 1fr);
-		}
 	}
 
 	.fleet-sidebar,
 	.fleet-map-panel {
+		position: relative;
 		height: 100%;
 		min-height: 0;
 		max-height: 100%;
@@ -3677,7 +3726,7 @@
 	.sidebar-toggle-btn {
 		position: absolute;
 		top: 50%;
-		left: 14px;
+		left: calc(var(--fleet-main-sidebar-offset) + 14px);
 		z-index: 950;
 		width: 42px;
 		min-height: 92px;
@@ -3741,7 +3790,7 @@
 	}
 
 	.sidebar-toggle-btn.sidebar-open-toggle {
-		left: calc(5px + var(--fleet-sidebar-width) + (var(--fleet-gap) / 2));
+		left: calc(var(--fleet-main-sidebar-offset) + 10px + var(--fleet-sidebar-width));
 	}
 
 	.sidebar-toggle-btn span:first-of-type::before {
@@ -3780,15 +3829,24 @@
      ========================= */
 
 	.fleet-sidebar {
+		position: absolute;
+		top: 0;
+		left: var(--fleet-main-sidebar-offset);
+		z-index: 900;
+		width: var(--fleet-sidebar-width);
 		display: flex;
 		flex-direction: column;
+		background: rgba(15, 23, 42, 0.94);
+		backdrop-filter: blur(16px) saturate(1.18);
 		transition:
 			opacity 0.18s ease,
 			transform 0.22s ease;
 	}
 
 	.fleet-sidebar.sidebar-collapsed {
-		display: none;
+		opacity: 0;
+		pointer-events: none;
+		transform: translateX(calc(-100% - 12px));
 	}
 
 	.sidebar-fixed {
@@ -4271,11 +4329,18 @@
      ========================= */
 
 	.fleet-map-panel {
+		position: absolute;
+		inset: 0;
+		z-index: 1;
 		display: flex;
 		flex-direction: column;
 		min-width: 0;
 		min-height: 0;
-		padding: 5px;
+		padding: 0;
+		background: transparent;
+		border: 0;
+		border-radius: 0;
+		box-shadow: none;
 	}
 
 	:global(.leaflet-control-attribution) {
@@ -4520,31 +4585,39 @@
 	.legend-vessel-marker {
 		position: relative;
 		width: 20px;
-		height: 20px;
+		height: 36px;
 		display: inline-grid;
 		place-items: center;
 		flex: 0 0 auto;
-		border-radius: 999px;
-		background: #f8fafc;
-		border: 2px solid #22c55e;
+		border-radius: 0;
+		background: transparent;
+		border: 0;
 		box-shadow:
-			0 0 0 3px rgba(34, 197, 94, 0.22),
+			0 0 0 5px rgba(34, 197, 94, 0.16),
+			0 0 14px rgba(34, 197, 94, 0.38),
 			0 6px 12px rgba(15, 23, 42, 0.2);
 	}
 
 	.legend-vessel-marker::before {
 		content: '';
-		width: 8px;
-		height: 8px;
-		border-radius: 999px;
-		clip-path: polygon(50% 0, 100% 100%, 50% 76%, 0 100%);
+		width: 20px;
+		height: 36px;
+		background-image: url('/assets/vessel.png');
+		background-size: contain;
+		background-repeat: no-repeat;
+		background-position: center;
+		transform: scaleX(1.16);
+		filter:
+			drop-shadow(0 0 4px rgba(255, 255, 255, 0.92))
+			drop-shadow(0 5px 8px rgba(15, 23, 42, 0.28));
 	}
 
 	.legend-vessel-marker::after {
 		content: '';
 		position: absolute;
-		right: -3px;
-		bottom: -3px;
+		right: -7px;
+		top: 50%;
+		transform: translateY(-50%);
 		width: 7px;
 		height: 7px;
 		border: 2px solid #ffffff;
@@ -4553,15 +4626,19 @@
 	}
 
 	.legend-vessel-marker.offline {
-		background: #1e293b;
-		border-color: #ef4444;
 		box-shadow:
-			0 0 0 3px rgba(239, 68, 68, 0.2),
+			0 0 0 5px rgba(239, 68, 68, 0.14),
+			0 0 14px rgba(239, 68, 68, 0.34),
 			0 6px 12px rgba(15, 23, 42, 0.24);
 	}
 
 	.legend-vessel-marker.offline::before {
-		background: #94a3b8;
+		opacity: 0.66;
+		filter:
+			grayscale(1)
+			brightness(0.78)
+			drop-shadow(0 0 4px rgba(15, 23, 42, 0.7))
+			drop-shadow(0 5px 8px rgba(15, 23, 42, 0.34));
 	}
 
 	.legend-vessel-marker.offline::after {
@@ -4570,13 +4647,21 @@
 	}
 
 	.legend-vessel-marker.selected {
-		width: 22px;
-		height: 22px;
-		border-color: #3b82f6;
-		background: #eff6ff;
+		width: 23px;
+		height: 40px;
 		box-shadow:
-			0 0 0 4px rgba(59, 130, 246, 0.24),
+			0 0 0 6px rgba(59, 130, 246, 0.18),
+			0 0 16px rgba(37, 99, 235, 0.48),
 			0 6px 12px rgba(15, 23, 42, 0.22);
+	}
+
+	.legend-vessel-marker.selected::before {
+		width: 23px;
+		height: 40px;
+		filter:
+			drop-shadow(0 0 5px rgba(59, 130, 246, 0.98))
+			drop-shadow(0 0 10px rgba(37, 99, 235, 0.5))
+			drop-shadow(0 6px 12px rgba(15, 23, 42, 0.28));
 	}
 
 	.legend-vessel-marker.selected::after {
@@ -4637,107 +4722,108 @@
      ========================= */
 
 	:global(.vessel-leaflet-icon) {
+		position: relative;
+		display: block;
 		background: transparent;
 		border: none;
+		overflow: visible !important;
 	}
 
-	:global(.vessel-marker-shell) {
-		position: relative;
-		width: 25px;
-		height: 25px;
+	:global(.vessel-leaflet-icon::before) {
+		content: '';
+		position: absolute;
+		left: 50%;
+		top: 50%;
+		z-index: 0;
+		width: 34px;
+		height: 34px;
 		border-radius: 999px;
-		display: grid;
-		place-items: center;
-		background: white;
-		border: 2px solid #22c55e;
+		transform: translate(-50%, -50%);
+		background: rgba(34, 197, 94, 0.18);
 		box-shadow:
-			0 0 0 4px rgba(34, 197, 94, 0.22),
-			0 0 0 9px rgba(34, 197, 94, 0.08),
-			0 6px 12px rgba(15, 23, 42, 0.18);
+			0 0 0 8px rgba(34, 197, 94, 0.12),
+			0 0 18px rgba(34, 197, 94, 0.44);
+	}
+
+	:global(.vessel-leaflet-icon::after) {
+		content: '';
+		position: absolute;
+		right: -5px;
+		top: 50%;
+		z-index: 2;
+		width: 9px;
+		height: 9px;
+		transform: translateY(-50%);
+		border: 2px solid rgba(15, 23, 42, 0.82);
+		border-radius: 999px;
+		background: #22c55e;
+		box-shadow: 0 0 9px rgba(34, 197, 94, 0.72);
+	}
+
+	:global(.fleet-vessel-marker-icon) {
+		position: relative;
+		z-index: 1;
+		width: 100%;
+		height: 100%;
+		object-fit: contain;
+		display: block;
+		margin: 0;
+		transform-origin: center center;
+		filter:
+			drop-shadow(0 0 4px rgba(255, 255, 255, 0.95))
+			drop-shadow(0 7px 13px rgba(15, 23, 42, 0.32));
 		transition:
-			background 0.18s ease,
-			border-color 0.18s ease,
-			box-shadow 0.18s ease,
 			filter 0.18s ease,
 			opacity 0.18s ease;
 	}
 
-	:global(.vessel-marker-shell::after) {
-		content: '';
-		position: absolute;
-		right: -3px;
-		bottom: -3px;
-		width: 9px;
-		height: 9px;
-		border: 2px solid #ffffff;
-		border-radius: 999px;
-		background: #22c55e;
-		box-shadow: 0 2px 6px rgba(15, 23, 42, 0.28);
+	:global(.vessel-leaflet-icon.selected .fleet-vessel-marker-icon) {
+		width: 100%;
+		margin: 0;
+		filter:
+			drop-shadow(0 0 5px rgba(59, 130, 246, 0.98))
+			drop-shadow(0 0 12px rgba(37, 99, 235, 0.62))
+			drop-shadow(0 10px 18px rgba(15, 23, 42, 0.3));
 	}
 
-	:global(.vessel-marker-shell img) {
-		width: 16px;
-		height: 16px;
-		object-fit: contain;
-		display: block;
-		transform-origin: center center;
-		filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.24));
-	}
-
-	:global(.vessel-leaflet-icon.selected .vessel-marker-shell) {
-		width: 31px;
-		height: 31px;
-		background: #eff6ff;
-		border: 3px solid #2563eb;
+	:global(.vessel-leaflet-icon.selected::before) {
+		width: 40px;
+		height: 40px;
+		background: rgba(59, 130, 246, 0.2);
 		box-shadow:
-			0 0 0 5px rgba(37, 99, 235, 0.22),
-			0 0 0 10px rgba(37, 99, 235, 0.09),
-			0 10px 20px rgba(15, 23, 42, 0.22);
-		transform: scale(1.04);
+			0 0 0 9px rgba(59, 130, 246, 0.14),
+			0 0 22px rgba(37, 99, 235, 0.54);
 	}
 
-	:global(.vessel-leaflet-icon.selected .vessel-marker-shell img) {
-		width: 19px;
-		height: 19px;
+	:global(.vessel-leaflet-icon.offline .fleet-vessel-marker-icon) {
+		opacity: 0.66;
+		filter:
+			grayscale(1)
+			brightness(0.78)
+			drop-shadow(0 0 4px rgba(15, 23, 42, 0.7))
+			drop-shadow(0 7px 13px rgba(15, 23, 42, 0.34));
 	}
 
-	:global(.vessel-leaflet-icon.offline .vessel-marker-shell) {
-		background: #1e293b;
-		border-color: #ef4444;
+	:global(.vessel-leaflet-icon.offline::before) {
+		background: rgba(239, 68, 68, 0.17);
 		box-shadow:
-			0 0 0 4px rgba(239, 68, 68, 0.2),
-			0 0 0 9px rgba(15, 23, 42, 0.16),
-			0 6px 12px rgba(15, 23, 42, 0.24);
-		opacity: 0.96;
-		filter: grayscale(0.25) saturate(0.72);
+			0 0 0 8px rgba(239, 68, 68, 0.11),
+			0 0 18px rgba(239, 68, 68, 0.4);
 	}
 
-	:global(.vessel-leaflet-icon.offline .vessel-marker-shell::after) {
+	:global(.vessel-leaflet-icon.offline::after) {
 		background: #ef4444;
-		border-color: #1e293b;
+		box-shadow: 0 0 9px rgba(239, 68, 68, 0.72);
 	}
 
-	:global(.vessel-leaflet-icon.offline .vessel-marker-shell img) {
-		opacity: 0.58;
-		filter: grayscale(1) brightness(1.35) drop-shadow(0 1px 1px rgba(2, 6, 23, 0.45));
-	}
-
-	:global(.vessel-leaflet-icon.offline.selected .vessel-marker-shell) {
-		background: #111827;
-		border: 3px solid #ef4444;
-		box-shadow:
-			0 0 0 5px rgba(239, 68, 68, 0.24),
-			0 0 0 10px rgba(239, 68, 68, 0.1),
-			0 10px 20px rgba(15, 23, 42, 0.22);
-		filter: grayscale(0.1) saturate(0.82);
-	}
-
-	:global(.vessel-leaflet-icon.online.selected .vessel-marker-shell) {
-		border-color: #22c55e;
-		box-shadow:
-			0 0 0 5px rgba(34, 197, 94, 0.26),
-			0 0 0 10px rgba(37, 99, 235, 0.12),
-			0 10px 20px rgba(15, 23, 42, 0.22);
+	:global(.vessel-leaflet-icon.offline.selected .fleet-vessel-marker-icon) {
+		opacity: 0.82;
+		filter:
+			grayscale(0.7)
+			brightness(0.82)
+			drop-shadow(0 0 5px rgba(248, 113, 113, 0.88))
+			drop-shadow(0 0 12px rgba(239, 68, 68, 0.5))
+			drop-shadow(0 10px 18px rgba(15, 23, 42, 0.3));
 	}
 
 	/* =========================
@@ -5962,37 +6048,12 @@
 		}
 
 		.fleet-layout {
+			display: block;
 			height: 100%;
-			grid-template-columns: 1fr;
-		}
-
-		.sidebar-toggle-btn {
-			top: 14px;
-			left: 14px;
-			width: auto;
-			min-height: 34px;
-			flex-direction: row;
-			padding: 0 12px;
-			border-radius: 999px;
-			transform: none;
-		}
-
-		.sidebar-toggle-btn.sidebar-open-toggle {
-			left: 14px;
-		}
-
-		.sidebar-toggle-btn span:last-of-type {
-			writing-mode: horizontal-tb;
-			font-size: 10px;
-			letter-spacing: 0;
-		}
-
-		.sidebar-toggle-btn:hover {
-			transform: none;
 		}
 
 		.fleet-sidebar {
-			height: 460px;
+			width: min(var(--fleet-sidebar-width), calc(100% - 58px));
 		}
 
 		.fleet-map-panel {
@@ -6020,22 +6081,21 @@
 			height: 100%;
 			min-height: 0;
 			max-height: 100%;
-			display: grid;
-			grid-template-columns: 1fr;
+			display: block;
 			gap: 0;
 		}
 
 		.fleet-sidebar {
-			position: fixed;
-			top: 6px;
-			left: 6px;
-			bottom: 6px;
+			position: absolute;
+			top: 0;
+			left: var(--fleet-main-sidebar-offset);
+			bottom: 0;
 			width: 260px;
-			max-width: calc(100vw - 18px);
+			max-width: calc(100% - 54px);
 			height: auto;
 			max-height: none;
 			border-radius: 12px;
-			z-index: 1200;
+			z-index: 900;
 			transform: translateX(calc(-100% - 16px));
 			opacity: 0;
 			pointer-events: none;
@@ -6052,9 +6112,9 @@
 
 		.mobile-sidebar-backdrop {
 			display: block;
-			position: fixed;
+			position: absolute;
 			inset: 0;
-			z-index: 1100;
+			z-index: 850;
 			border: none;
 			background: rgba(15, 23, 42, 0.36);
 			backdrop-filter: blur(2px);
@@ -6062,10 +6122,10 @@
 		}
 
 		.sidebar-toggle-btn {
-			position: fixed;
+			position: absolute;
 			top: 50%;
-			left: 10px;
-			z-index: 1250;
+			left: calc(var(--fleet-main-sidebar-offset) + 10px);
+			z-index: 950;
 			width: 38px;
 			height: auto;
 			min-height: 82px;
@@ -6083,7 +6143,10 @@
 		}
 
 		.sidebar-toggle-btn.sidebar-open-toggle {
-			left: min(274px, calc(100vw - 50px));
+			left: min(
+				calc(var(--fleet-main-sidebar-offset) + 274px),
+				calc(100vw - 50px)
+			);
 		}
 
 		.sidebar-toggle-btn span {
@@ -6231,47 +6294,292 @@
 		.map-legend {
 			top: 8px;
 			right: 8px;
-			width: min(292px, calc(100% - 16px));
-			padding: 9px;
+			width: min(238px, calc(100% - 72px));
+			max-height: min(52vh, 360px);
+			padding: 7px;
+			border-radius: 14px;
+			overflow: hidden;
+		}
+
+		.map-legend.legend-collapsed {
+			width: auto;
+			min-width: 42px;
+			padding: 5px;
+		}
+
+		.legend-header {
+			gap: 7px;
+		}
+
+		.legend-title {
+			font-size: 10px;
+			line-height: 1.1;
+		}
+
+		.legend-subtitle {
+			font-size: 8.5px;
+			line-height: 1.1;
+		}
+
+		.legend-toggle-btn {
+			width: 28px;
+			height: 28px;
+			min-width: 28px;
+		}
+
+		.legend-body {
+			max-height: calc(min(52vh, 360px) - 42px);
+			gap: 7px;
+			overflow-y: auto;
+			padding-right: 2px;
+		}
+
+		.legend-section {
+			gap: 7px;
+			padding: 0;
+		}
+
+		.legend-section + .legend-section {
+			padding-top: 7px;
+		}
+
+		.legend-item {
+			gap: 7px;
+			font-size: 9px;
+			line-height: 1.15;
+		}
+
+		.legend-vessel-marker {
+			width: 16px;
+			height: 28px;
+		}
+
+		.legend-vessel-marker::before {
+			width: 16px;
+			height: 28px;
+		}
+
+		.legend-vessel-marker.selected {
+			width: 18px;
+			height: 31px;
+		}
+
+		.legend-vessel-marker.selected::before {
+			width: 18px;
+			height: 31px;
+		}
+
+		.asset-boundary-legend {
+			width: 20px;
+			height: 20px;
+		}
+
+		.legend-asset-icons {
+			gap: 5px;
+		}
+
+		.legend-asset-item {
+			min-height: 25px;
+			padding: 4px 7px;
+			gap: 5px;
+			font-size: 8px;
+		}
+
+		.legend-asset-item img {
+			width: 15px;
+			height: 15px;
+		}
+
+		.legend-actions {
+			gap: 5px;
+			flex-wrap: wrap;
+		}
+
+		.legend-actions .wind-toggle-btn,
+		.legend-actions .current-toggle-btn,
+		.legend-actions .asset-toggle-btn {
+			min-height: 26px;
+			padding: 0 8px;
+			font-size: 9px;
 		}
 
 		:global(.fleet-leaflet-popup .leaflet-popup-content) {
-			width: min(280px, calc(100vw - 42px)) !important;
+			width: min(238px, calc(100vw - 54px)) !important;
 		}
 
 		:global(.asset-leaflet-popup .leaflet-popup-content) {
-			width: min(268px, calc(100vw - 42px)) !important;
+			width: min(230px, calc(100vw - 54px)) !important;
+		}
+
+		:global(.fleet-leaflet-popup .leaflet-popup-close-button),
+		:global(.asset-leaflet-popup .leaflet-popup-close-button) {
+			top: 7px !important;
+			right: 7px !important;
+			width: 23px !important;
+			height: 23px !important;
+			font-size: 15px !important;
+			line-height: 20px !important;
 		}
 
 		:global(.fleet-popup-hero) {
-			padding: 13px 40px 12px 13px;
+			gap: 8px;
+			padding: 9px 34px 8px 9px;
+		}
+
+		:global(.fleet-popup-heading > strong) {
+			font-size: 12px;
+			line-height: 1.12;
+			-webkit-line-clamp: 2;
+		}
+
+		:global(.fleet-popup-heading > small),
+		:global(.fleet-popup-eyebrow) {
+			font-size: 7.5px;
+		}
+
+		:global(.fleet-popup-status) {
+			padding: 3px 6px;
+			font-size: 7.2px;
 		}
 
 		:global(.fleet-popup-metrics) {
-			padding: 10px 13px 7px;
+			gap: 5px;
+			padding: 7px 9px 5px;
+		}
+
+		:global(.fleet-popup-metric) {
+			padding: 7px;
+			border-radius: 10px;
+		}
+
+		:global(.fleet-popup-metric > span) {
+			font-size: 7px;
+		}
+
+		:global(.fleet-popup-metric > strong) {
+			font-size: 14px;
 		}
 
 		:global(.fleet-popup-coordinates) {
-			padding-inline: 13px;
+			gap: 5px;
+			padding-inline: 9px;
+		}
+
+		:global(.fleet-popup-coordinates > div) {
+			padding: 7px;
+			border-radius: 9px;
+		}
+
+		:global(.fleet-popup-coordinates span),
+		:global(.fleet-popup-meta .fleet-popup-row span) {
+			font-size: 7px;
+		}
+
+		:global(.fleet-popup-coordinates strong),
+		:global(.fleet-popup-meta .fleet-popup-row strong) {
+			font-size: 8px;
 		}
 
 		:global(.fleet-popup-meta) {
-			padding-inline: 13px;
+			padding-inline: 9px;
+		}
+
+		:global(.fleet-popup-meta .fleet-popup-row) {
+			padding: 6px 0;
+		}
+
+		:global(.fleet-popup-actions) {
+			gap: 7px;
+			padding: 9px;
+		}
+
+		:global(.fleet-popup-actions .fleet-popup-detail-btn),
+		:global(.fleet-popup-actions .fleet-popup-dashboard-btn) {
+			min-height: 32px;
+			padding: 0 9px;
+			border-radius: 10px;
+			font-size: 9px;
+		}
+
+		:global(.fleet-asset-popup-hero) {
+			gap: 7px;
+			padding: 8px 32px 8px 8px;
+		}
+
+		:global(.fleet-asset-popup-icon) {
+			width: 32px;
+			height: 32px;
+			border-radius: 10px;
+		}
+
+		:global(.fleet-asset-popup-icon img) {
+			width: 20px;
+			height: 20px;
+		}
+
+		:global(.fleet-asset-popup-heading > strong) {
+			font-size: 11px;
+		}
+
+		:global(.fleet-asset-popup-eyebrow),
+		:global(.fleet-asset-popup-badge) {
+			font-size: 7px;
+		}
+
+		:global(.fleet-asset-popup-coordinates) {
+			gap: 5px;
+			padding: 8px;
+		}
+
+		:global(.fleet-asset-popup-coordinates > div) {
+			min-height: 44px;
+			padding: 7px;
+			border-radius: 9px;
+		}
+
+		:global(.fleet-asset-popup-coordinates span) {
+			font-size: 7px;
+		}
+
+		:global(.fleet-asset-popup-coordinates strong) {
+			font-size: 8px;
 		}
 
 		.vessel-detail-panel {
-			left: 6px;
-			right: 6px;
+			left: 10px;
+			right: 10px;
 			top: auto;
-			bottom: 6px;
+			bottom: 10px;
 			width: auto;
 			max-width: none;
-			max-height: 72%;
-			border-radius: 16px;
+			max-height: min(62dvh, 520px);
+			border-radius: 15px;
 		}
 
 		.detail-panel-header {
-			padding: 12px;
+			padding: 10px;
+		}
+
+		.detail-title-wrap {
+			gap: 7px;
+		}
+
+		.detail-title-group h2 {
+			font-size: 14px;
+			line-height: 1.12;
+		}
+
+		.detail-title-group p {
+			font-size: 9px;
+		}
+
+		.detail-eyebrow {
+			font-size: 7.5px;
+		}
+
+		.detail-status-dot {
+			width: 10px;
+			height: 10px;
 		}
 
 		.detail-status-pill {
@@ -6283,31 +6591,93 @@
 		}
 
 		.detail-dashboard-btn {
-			width: 30px;
+			width: 28px;
+			height: 28px;
+			min-height: 28px;
 			justify-content: center;
 			padding: 0;
 		}
 
 		.detail-dashboard-cta {
-			min-height: 32px;
-			margin-top: 8px;
+			min-height: 30px;
+			margin-top: 7px;
 			font-size: 9px;
 		}
 
 		.detail-panel-body {
-			padding: 9px;
+			padding: 8px;
 		}
 
 		.detail-section {
-			padding: 11px;
+			padding: 9px;
+			border-radius: 12px;
+		}
+
+		.detail-section-heading {
+			gap: 8px;
+			margin-bottom: 8px;
+		}
+
+		.detail-section-heading h3 {
+			font-size: 10.5px;
+		}
+
+		.detail-section-kicker {
+			font-size: 8px;
+		}
+
+		.detail-hero-metrics {
+			gap: 6px;
+		}
+
+		.detail-hero-metric {
+			padding: 8px;
+			border-radius: 11px;
+		}
+
+		.detail-hero-metric strong {
+			font-size: 16px;
+		}
+
+		.detail-hero-metric span,
+		.detail-hero-metric small {
+			font-size: 8px;
+		}
+
+		.detail-grid {
+			gap: 6px;
 		}
 
 		.detail-grid.two-col {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
 
+		.detail-item {
+			min-height: 48px;
+			padding: 8px;
+			border-radius: 10px;
+		}
+
+		.detail-item span {
+			font-size: 8px;
+		}
+
 		.detail-item strong {
-			font-size: 8.5px;
+			font-size: 8px;
+		}
+
+		.simple-row {
+			font-size: 8px;
+			grid-template-columns: 1fr 48px;
+		}
+
+		.weather-current {
+			grid-template-columns: 20px 1fr;
+		}
+
+		.weather-meta {
+			grid-column: 1 / -1;
+			text-align: left;
 		}
 	}
 </style>

@@ -156,6 +156,7 @@
 	let visibleMenus = $derived(menus.filter((menu) => hasPermission(menu)));
 
 	let activeIndex = $derived(visibleMenus.findIndex((menu) => menu.key === $activeMenu));
+	let isFleetViewActive = $derived($activeMenu === 'fleet-view');
 
 	let isSidebarOpen = $state(true);
 
@@ -308,6 +309,7 @@
 <button
 	type="button"
 	class:sidebar-open-toggle={isSidebarOpen}
+	class:fleet-floating-toggle={isFleetViewActive}
 	class="main-sidebar-toggle"
 	aria-expanded={isSidebarOpen}
 	aria-label={isSidebarOpen ? 'Close main sidebar' : 'Open main sidebar'}
@@ -327,14 +329,17 @@
 	></button>
 {/if}
 
-<aside class:sidebar-open={isSidebarOpen} class:sidebar-collapsed={!isSidebarOpen} class="sidebar">
+<aside
+	class:sidebar-open={isSidebarOpen}
+	class:sidebar-collapsed={!isSidebarOpen}
+	class:fleet-floating-sidebar={isFleetViewActive}
+	class="sidebar"
+>
 	<div class="sidebar-mobile-header">
 		<div>
 			<h2>Menu</h2>
 			<p>Main navigation</p>
 		</div>
-
-		<button type="button" class="sidebar-close-btn" onclick={closeMobileSidebar}> × </button>
 	</div>
 <!-- 
 	<div class="sidebar-brand" title="VMS Dashboard">⚓</div> -->
@@ -472,6 +477,10 @@
 			rgba(15, 23, 42, 0.92);
 	}
 
+	.main-sidebar-toggle.fleet-floating-toggle {
+		z-index: 1450;
+	}
+
 	.main-sidebar-toggle span:last-child {
 		display: none;
 	}
@@ -558,6 +567,39 @@
 
 	.sidebar.sidebar-collapsed .sidebar-menu,
 	.sidebar.sidebar-collapsed .logout-button {
+		opacity: 0;
+		pointer-events: none;
+	}
+
+	.sidebar.fleet-floating-sidebar {
+		position: fixed;
+		top: 5px;
+		left: 5px;
+		height: calc(100vh - 10px);
+		min-height: 0;
+		width: 64px;
+		z-index: 1400;
+		border: 1px solid rgba(30, 45, 69, 0.9);
+		border-radius: 12px;
+		background: rgba(17, 24, 39, 0.94);
+		box-shadow:
+			0 18px 44px rgba(2, 6, 23, 0.28),
+			0 0 0 1px rgba(255, 255, 255, 0.035);
+		backdrop-filter: blur(16px) saturate(1.18);
+	}
+
+	.sidebar.fleet-floating-sidebar.sidebar-collapsed {
+		width: 64px;
+		padding-top: 52px;
+		padding-bottom: 12px;
+		border-color: rgba(30, 45, 69, 0.9);
+		opacity: 0;
+		pointer-events: none;
+		transform: translateX(calc(-100% - 12px));
+	}
+
+	.sidebar.fleet-floating-sidebar.sidebar-collapsed .sidebar-menu,
+	.sidebar.fleet-floating-sidebar.sidebar-collapsed .logout-button {
 		opacity: 0;
 		pointer-events: none;
 	}
@@ -983,6 +1025,10 @@
 				opacity 0.22s ease;
 		}
 
+		.sidebar.fleet-floating-sidebar {
+			width: 260px;
+		}
+
 		.sidebar.sidebar-collapsed {
 			width: 260px;
 			max-width: calc(100vw - 18px);
@@ -1029,23 +1075,6 @@
 			line-height: 1.15;
 			font-weight: 700;
 		}
-
-		.sidebar-close-btn {
-			display: grid;
-			width: 23px;
-			height: 23px;
-			place-items: center;
-			border: none;
-			border-radius: 8px;
-			background: rgba(255, 255, 255, 0.06);
-			color: var(--text-secondary);
-			font-size: 15px;
-			font-weight: 900;
-			line-height: 1;
-			cursor: pointer;
-			flex-shrink: 0;
-		}
-
 		.alarm-count-badge {
 			top: -8px;
 			right: -10px;
@@ -1059,11 +1088,6 @@
 		.side-icon-img {
 			width: 16px;
 			height: 16px;
-		}
-
-		.sidebar-close-btn:hover {
-			background: var(--color-danger-muted);
-			color: #dc2626;
 		}
 
 		.sidebar-menu {

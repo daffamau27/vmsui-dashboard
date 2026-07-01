@@ -22,6 +22,7 @@
 	const ASSET_LEGEND_TYPES = ['anchor', 'buoy', 'dock', 'shipyard', 'mess', 'office', 'fso', 'rig', 'whp'];
 
 	export let vesselId = null;
+	export let active = false;
 
 	let loading = false;
 	let activeLoading = false;
@@ -58,12 +59,14 @@
 	let routeMap;
 	let markerLayer;
 	let assetMarkerLayer;
+	let vesselMarkerLayer;
 	let routeLine;
 	let mapInitializing = false;
 
 	let assets = [];
 	let assetsLoading = false;
 	let assetsError = '';
+	let vesselMapInfo = null;
 
 	$: canView = permissions.has('view_voyage_plan_vessel');
 	$: currentPlan = selectedAssignment?.voyagePlan || activeAssignment?.voyagePlan || null;
@@ -103,6 +106,16 @@
 			destroyRouteMap();
 		};
 	});
+
+	$: if (!active && routeMap) {
+		destroyRouteMap();
+	}
+
+	$: if (active && mapContainer && routeMap === null && !loading) {
+		tick().then(() => {
+			initializeOrRefreshMap(true);
+		});
+	}
 
 	async function initializePage() {
 		loading = true;
@@ -182,6 +195,201 @@
 			iconAnchor: [16, 16],
 			popupAnchor: [0, -16]
 		});
+	}
+
+	const VESSEL_LATITUDE_KEYS = [
+		'latitude',
+		'lat',
+		'currentLatitude',
+		'current_latitude',
+		'lastLatitude',
+		'last_latitude',
+		'gpsLatitude',
+		'gps_latitude',
+		'gpsLat',
+		'gps_lat',
+		'positionLatitude',
+		'position_latitude'
+	];
+	const VESSEL_LONGITUDE_KEYS = [
+		'longitude',
+		'lng',
+		'lon',
+		'currentLongitude',
+		'current_longitude',
+		'lastLongitude',
+		'last_longitude',
+		'gpsLongitude',
+		'gps_longitude',
+		'gpsLng',
+		'gps_lng',
+		'gpsLon',
+		'gps_lon',
+		'positionLongitude',
+		'position_longitude'
+	];
+	const VESSEL_HEADING_KEYS = ['heading', 'course', 'cog', 'direction', 'bearing'];
+	const VESSEL_NESTED_KEYS = [
+		'data',
+		'vessel',
+		'vesselData',
+		'detail',
+		'raw',
+		'rawLive',
+		'latest',
+		'latestStatus',
+		'latestTelemetry',
+		'telemetry',
+		'position',
+		'location',
+		'gps',
+		'coordinates',
+		'lastPosition',
+		'currentPosition'
+	];
+
+	function readFirstFiniteNumber(source, keys) {
+		if (!source) return NaN;
+
+		for (const key of keys) {
+			const value = Number(source?.[key]);
+			if (Number.isFinite(value)) return value;
+		}
+
+		return NaN;
+	}
+
+	function collectVesselPositionCandidates(...sources) {
+		const candidates = [];
+		const visited = new Set();
+
+		function visit(source, depth = 0) {
+			if (!source || typeof source !== 'object' || depth > 4 || visited.has(source)) return;
+
+			visited.add(source);
+			candidates.push(source);
+
+			for (const key of VESSEL_NESTED_KEYS) {
+				const nested = source?.[key];
+				if (Array.isArray(nested)) {
+					nested.forEach((item) => visit(item, depth + 1));
+				} else {
+					visit(nested, depth + 1);
+				}
+			}
+		}
+
+		sources.forEach((source) => visit(source));
+		return candidates;
+	}
+
+	function getVesselMapPosition() {
+		const candidates = collectVesselPositionCandidates(
+			vesselMapInfo,
+			$selectedVesselInfoStore,
+			selectedAssignment,
+			selectedAssignment?.vessel,
+			selectedAssignment?.vesselData,
+			activeAssignment,
+			activeAssignment?.vessel,
+			activeAssignment?.vesselData
+		);
+
+		for (const candidate of candidates) {
+			const latitude = readFirstFiniteNumber(candidate, VESSEL_LATITUDE_KEYS);
+			const longitude = readFirstFiniteNumber(candidate, VESSEL_LONGITUDE_KEYS);
+
+			if (
+				Number.isFinite(latitude) &&
+				Number.isFinite(longitude) &&
+				!(latitude === 0 && longitude === 0)
+			) {
+				const heading = readFirstFiniteNumber(candidate, VESSEL_HEADING_KEYS);
+				return {
+					latitude,
+					longitude,
+					heading: Number.isFinite(heading) ? heading : 0,
+					name:
+						candidate?.vesselName ||
+						candidate?.name ||
+						candidate?.deviceName ||
+						selectedVesselName ||
+						'Vessel'
+				};
+			}
+		}
+
+		return null;
+	}
+
+	function createVesselMarkerIcon(vessel) {
+		return L.divIcon({
+			className: 'voyage-current-vessel-leaflet-icon',
+			html: `
+				<img
+					class="voyage-current-vessel-marker-icon"
+					src="/assets/vessel.png"
+					alt="${escapeHtml(vessel?.name || 'Vessel')}"
+					style="transform: rotate(${Number(vessel?.heading || 0)}deg) scaleX(1.16);"
+				/>
+			`,
+			iconSize: [28, 60],
+			iconAnchor: [14, 30],
+			popupAnchor: [0, -32]
+		});
+	}
+
+	function renderVesselMarker() {
+		if (!L || !routeMap) return;
+
+		if (!vesselMarkerLayer) {
+			vesselMarkerLayer = L.layerGroup().addTo(routeMap);
+		}
+
+		vesselMarkerLayer.clearLayers();
+
+		const vessel = getVesselMapPosition();
+		if (!vessel) return;
+
+		const marker = L.marker([vessel.latitude, vessel.longitude], {
+			icon: createVesselMarkerIcon(vessel),
+			zIndexOffset: 1800
+		});
+
+		marker.bindPopup(
+			`
+				<div class="voyage-current-vessel-popup">
+					<div class="map-popup-hero">
+						<div class="map-popup-icon vessel-popup-icon">
+							<img src="/assets/vessel.png" alt="Vessel icon" />
+						</div>
+						<div class="map-popup-heading">
+							<span>Selected Vessel</span>
+							<strong>${escapeHtml(vessel.name)}</strong>
+						</div>
+					</div>
+					<div class="map-popup-body">
+						<div class="popup-info-row coordinate-row">
+							<span>Latitude</span>
+							<div class="popup-coordinate-value">${createCopyableCoordinateHtml(vessel.latitude, 'vessel latitude')}</div>
+						</div>
+						<div class="popup-info-row coordinate-row">
+							<span>Longitude</span>
+							<div class="popup-coordinate-value">${createCopyableCoordinateHtml(vessel.longitude, 'vessel longitude')}</div>
+						</div>
+						<div class="popup-info-row">
+							<span>Heading</span>
+							<strong>${Number(vessel.heading || 0).toFixed(1)}°</strong>
+						</div>
+					</div>
+				</div>
+			`,
+			{
+				className: 'voyage-vessel-map-popup'
+			}
+		);
+
+		marker.addTo(vesselMarkerLayer);
 	}
 
 	async function loadFleetAssets() {
@@ -418,6 +626,7 @@
 		selectedAssignment = null;
 		selectedHistoryId = null;
 		historyItems = [];
+		vesselMapInfo = null;
 		page = 1;
 	}
 
@@ -446,7 +655,50 @@
 	async function loadVesselVoyageData(vesselId = selectedVesselId, targetPage = 1) {
 		if (!vesselId) return;
 
-		await Promise.all([loadActiveVoyagePlan(vesselId), loadHistory(vesselId, targetPage)]);
+		await Promise.all([
+			loadSelectedVesselMapInfo(vesselId),
+			loadActiveVoyagePlan(vesselId),
+			loadHistory(vesselId, targetPage)
+		]);
+	}
+
+	async function loadSelectedVesselMapInfo(vesselId = selectedVesselId) {
+		if (!vesselId) return;
+
+		try {
+			const [fleetResult, latestStatusResult] = await Promise.allSettled([
+				apiFetch(`/fleet/vessels/${vesselId}`, {
+					method: 'GET',
+					headers: {
+						Accept: 'application/json'
+					}
+				}),
+				apiFetch(`/vessels/${vesselId}/latest-status`, {
+					method: 'GET',
+					headers: {
+						Accept: 'application/json'
+					}
+				})
+			]);
+
+			const fleetData = fleetResult.status === 'fulfilled' ? fleetResult.value?.data || fleetResult.value : null;
+			const latestStatus =
+				latestStatusResult.status === 'fulfilled'
+					? latestStatusResult.value?.data || latestStatusResult.value
+					: null;
+
+			vesselMapInfo = {
+				...(fleetData || {}),
+				latestStatus,
+				rawFleet: fleetData,
+				rawLatestStatus: latestStatus
+			};
+		} catch (error) {
+			console.warn('[VOYAGE_PLAN_VESSEL][VESSEL_MAP_INFO][ERROR]', error);
+			vesselMapInfo = null;
+		} finally {
+			renderVesselMarker();
+		}
 	}
 
 	async function loadActiveVoyagePlan(vesselId = selectedVesselId) {
@@ -706,7 +958,7 @@
 	}
 
 	async function initializeOrRefreshMap(shouldFit = false) {
-		if (!browser || !mapContainer) return;
+		if (!browser || !active || !mapContainer) return;
 
 		if (!routeMap) {
 			await initializeMap();
@@ -716,7 +968,7 @@
 	}
 
 	async function initializeMap() {
-		if (!browser || !mapContainer || routeMap || mapInitializing) return;
+		if (!browser || !active || !mapContainer || routeMap || mapInitializing) return;
 
 		mapInitializing = true;
 
@@ -732,6 +984,7 @@
 			leaflet.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(routeMap);
 
 			assetMarkerLayer = leaflet.layerGroup().addTo(routeMap);
+			vesselMarkerLayer = leaflet.layerGroup().addTo(routeMap);
 			markerLayer = leaflet.layerGroup().addTo(routeMap);
 			mapContainer.addEventListener('click', handleCoordinateCopyClick, true);
 
@@ -744,6 +997,7 @@
 				.addTo(routeMap);
 
 			renderAssetMarkers();
+			renderVesselMarker();
 
 			routeMap.setView([-2.5489, 118.0149], 5);
 
@@ -759,9 +1013,13 @@
 		if (!L || !routeMap || !markerLayer || !routeLine) return;
 
 		markerLayer.clearLayers();
+		renderVesselMarker();
 
 		const points = routePoints;
 		const latLngs = points.map((point) => [point.latitude, point.longitude]);
+		const vesselPosition = getVesselMapPosition();
+		const vesselLatLng = vesselPosition ? [vesselPosition.latitude, vesselPosition.longitude] : null;
+		const fitLatLngs = vesselLatLng ? [...latLngs, vesselLatLng] : latLngs;
 		routeLine.setLatLngs(latLngs);
 
 		points.forEach((point, index) => {
@@ -822,11 +1080,11 @@
 			marker.addTo(markerLayer);
 		});
 
-		if (shouldFit && latLngs.length >= 2) {
-			const bounds = L.latLngBounds(latLngs);
+		if (shouldFit && fitLatLngs.length >= 2) {
+			const bounds = L.latLngBounds(fitLatLngs);
 			routeMap.fitBounds(bounds, { padding: [34, 34], maxZoom: 13 });
-		} else if (shouldFit && latLngs.length === 1) {
-			routeMap.setView(latLngs[0], 12);
+		} else if (shouldFit && fitLatLngs.length === 1) {
+			routeMap.setView(fitLatLngs[0], 12);
 		}
 
 		setTimeout(() => {
@@ -847,6 +1105,7 @@
 		routeMap = null;
 		markerLayer = null;
 		assetMarkerLayer = null;
+		vesselMarkerLayer = null;
 		routeLine = null;
 	}
 
@@ -1005,7 +1264,9 @@
 				</div>
 
 				<div class="map-shell">
-					<div class="route-map" bind:this={mapContainer}></div>
+					{#if active}
+						<div class="route-map" bind:this={mapContainer}></div>
+					{/if}
 
 					{#if activeLoading || detailLoading || assetsLoading}
 						<div class="map-loading-overlay">
@@ -2039,6 +2300,65 @@
 		height: 32px;
 		object-fit: contain;
 		filter: drop-shadow(0 4px 8px rgba(15, 23, 42, 0.35));
+	}
+
+	:global(.voyage-current-vessel-leaflet-icon) {
+		position: relative;
+		display: block;
+		overflow: visible !important;
+		background: transparent;
+		border: none;
+	}
+
+	:global(.voyage-current-vessel-leaflet-icon::before) {
+		content: '';
+		position: absolute;
+		left: 50%;
+		top: 50%;
+		z-index: 0;
+		width: 42px;
+		height: 42px;
+		border-radius: 999px;
+		transform: translate(-50%, -50%);
+		background: rgba(34, 197, 94, 0.18);
+		box-shadow:
+			0 0 0 8px rgba(34, 197, 94, 0.12),
+			0 0 18px rgba(34, 197, 94, 0.44);
+	}
+
+	:global(.voyage-current-vessel-leaflet-icon::after) {
+		content: '';
+		position: absolute;
+		right: -5px;
+		top: 50%;
+		z-index: 2;
+		width: 9px;
+		height: 9px;
+		transform: translateY(-50%);
+		border: 2px solid rgba(15, 23, 42, 0.82);
+		border-radius: 999px;
+		background: #22c55e;
+		box-shadow: 0 0 9px rgba(34, 197, 94, 0.72);
+	}
+
+	:global(.voyage-current-vessel-marker-icon) {
+		position: relative;
+		z-index: 1;
+		width: 100%;
+		height: 100%;
+		margin: 0;
+		object-fit: contain;
+		display: block;
+		transform-origin: center center;
+		filter:
+			drop-shadow(0 0 4px rgba(255, 255, 255, 0.95))
+			drop-shadow(0 7px 13px rgba(15, 23, 42, 0.32));
+	}
+
+	:global(.vessel-popup-icon img) {
+		width: 28px;
+		height: 28px;
+		object-fit: contain;
 	}
 
 	:global(.voyage-vessel-page .leaflet-popup-content-wrapper),

@@ -11,3 +11,25 @@ export async function getVesselDashboard(vesselId) {
 
   return response?.data || response;
 }
+
+export async function getLatestCctvSnapshots(vesselId, cameraName = "") {
+  if (!vesselId) {
+    throw new Error("vesselId required.");
+  }
+
+  const params = new URLSearchParams();
+
+  if (cameraName) {
+    params.set("camera_name", cameraName);
+  }
+
+  const query = params.toString();
+  const response = await apiRequest(
+    `/cctv/vessels/${vesselId}/snapshots/latest${query ? `?${query}` : ""}`,
+    {
+      method: "GET"
+    }
+  );
+
+  return response?.data || response || [];
+}

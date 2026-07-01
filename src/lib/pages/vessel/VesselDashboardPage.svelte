@@ -6,7 +6,10 @@
     selectedVesselId,
     selectedVesselInfo
   } from "$lib/stores/selectedVessel.svelte.js";
-  import { getVesselDashboard } from "$lib/api/dashboardApi.js";
+  import {
+    getLatestCctvSnapshots,
+    getVesselDashboard
+  } from "$lib/api/dashboardApi.js";
   import { getFleetVesselLiveDetail } from "$lib/api/fleetApi.js";
   import { apiRequest } from "$lib/api/authApi.js";
   import { VMS_TILE_URL, VMS_TILE_OPTIONS } from "$lib/mapStyle.js";
@@ -17,6 +20,9 @@
   let error = $state("");
   let dashboardData = $state(null);
   let liveVesselDetail = $state(null);
+  let cctvSnapshots = $state([]);
+  let cctvSnapshotsLoading = $state(false);
+  let cctvSnapshotsError = $state("");
 
   let currentUser = $state(null);
   let currentUserLoading = $state(false);
@@ -212,15 +218,61 @@
 
     return rawList.map((item, index) => {
       const statusText = String(item?.status || (item?.online === false ? "Offline" : "Live"));
+      const snapshotUrl =
+        item?.presigned_url ||
+        item?.presignedUrl ||
+        item?.snapshotUrl ||
+        item?.snapshot_url ||
+        item?.url ||
+        item?.streamUrl ||
+        "";
+      const capturedAt = item?.captured_at || item?.capturedAt || item?.updatedAt || "";
+      const fileSize = Number(item?.file_size ?? item?.fileSize);
 
       return {
-        name: item?.name || item?.cameraName || `CCTV ${index + 1}`,
+        name: item?.camera_name || item?.cameraName || item?.name || `CCTV ${index + 1}`,
         status: statusText,
-        location: item?.location || item?.position || "-",
-        url: item?.url || item?.streamUrl || item?.snapshotUrl || "",
-        online: item?.online !== false && statusText.toLowerCase() !== "offline"
+        location: item?.location || item?.position || item?.file_path || item?.filePath || "-",
+        url: snapshotUrl,
+        capturedAt,
+        capturedAtText: formatCctvSnapshotTime(capturedAt),
+        fileSize: Number.isFinite(fileSize) ? fileSize : null,
+        fileSizeText: formatFileSize(fileSize),
+        online: item?.online !== false && statusText.toLowerCase() !== "offline" && Boolean(snapshotUrl)
       };
     });
+  }
+
+  function formatCctvSnapshotTime(value) {
+    if (!value) return "";
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+
+    return date.toLocaleString("id-ID", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    });
+  }
+
+  function formatFileSize(value) {
+    const bytes = Number(value);
+    if (!Number.isFinite(bytes) || bytes <= 0) return "";
+
+    const units = ["B", "KB", "MB", "GB"];
+    let size = bytes;
+    let unitIndex = 0;
+
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+
+    return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
   }
 
   function toNumber(value, fallback = 0) {
@@ -385,7 +437,9 @@
   );
 
   let fodUsage = $derived(dashboardData?.fodUsage || {});
-  let cctvItems = $derived(normalizeCctvList(dashboardData?.cctv));
+  let cctvItems = $derived(
+    normalizeCctvList(cctvSnapshots.length ? cctvSnapshots : dashboardData?.cctv)
+  );
 
   let dataReceivedSummary = $derived({
     receivedMinutes: dashboardData?.dataReceivedStats?.received_minutes ?? 0,
@@ -587,47 +641,21 @@
   function createDashboardVesselIcon() {
     if (!L) return null;
 
-    const heading = Number(vesselInfo.heading || 0);
     const isOnline = vesselInfo.online !== false;
 
     return L.divIcon({
       className: `dashboard-vessel-leaflet-icon ${isOnline ? "online" : "offline"}`,
       html: `
-        <div class="dashboard-vessel-marker-shell">
-          <svg
-            class="dashboard-vessel-marker-svg"
-            viewBox="0 0 32 32"
-            aria-hidden="true"
-            style="transform: rotate(${heading}deg);"
-          >
-            <circle
-              cx="16"
-              cy="16"
-              r="14"
-              fill="white"
-              stroke="${isOnline ? "#2563eb" : "#64748b"}"
-              stroke-width="2.6"
-            />
-
-            <path
-              d="M16 5.8L23.2 24.2L16 20.6L8.8 24.2L16 5.8Z"
-              fill="${isOnline ? "#dc2626" : "#64748b"}"
-              stroke="white"
-              stroke-width="2.2"
-              stroke-linejoin="round"
-            />
-
-            <path
-              d="M16 8.4L19.8 20.2L16 18.3V8.4Z"
-              fill="${isOnline ? "#ef4444" : "#94a3b8"}"
-              opacity="0.95"
-            />
-          </svg>
-        </div>
+        <img
+          class="dashboard-vessel-marker-icon"
+          src="/assets/vessel.png"
+          alt="${vesselInfo.vesselName || "Vessel"}"
+          style="transform: rotate(${Number(vesselInfo.heading || 0)}deg) scaleX(1.16);"
+        />
       `,
-      iconSize: [34, 34],
-      iconAnchor: [17, 17],
-      popupAnchor: [0, -17]
+      iconSize: [28, 60],
+      iconAnchor: [14, 30],
+      popupAnchor: [0, -32]
     });
   }
 
@@ -732,6 +760,24 @@
     } finally {
       dashboardMapInitializing = false;
     }
+  }
+
+  function destroyDashboardMap() {
+    removeCurrentParticleLayer();
+    removeWindParticleLayer();
+
+    if (vesselMarker) {
+      vesselMarker.remove();
+      vesselMarker = null;
+    }
+
+    if (dashboardMap) {
+      dashboardMap.remove();
+      dashboardMap = null;
+    }
+
+    dashboardMapContainer = null;
+    lastDashboardMapVesselId = null;
   }
 
   function getWindParticleCount() {
@@ -1387,6 +1433,7 @@
     if (!$selectedVesselId) {
       dashboardData = null;
       liveVesselDetail = null;
+      cctvSnapshots = [];
       error = "No vessel has been selected from Fleet View.";
       return;
     }
@@ -1398,6 +1445,7 @@
       const [dashboardResult, liveResult] = await Promise.all([
         getVesselDashboard($selectedVesselId),
         getFleetVesselLiveDetail($selectedVesselId),
+        loadLatestCctvSnapshots($selectedVesselId),
         loadCurrentUser()
       ]);
 
@@ -1411,8 +1459,42 @@
       error = err?.message || "Failed to load vessel dashboard.";
       dashboardData = null;
       liveVesselDetail = null;
+      cctvSnapshots = [];
     } finally {
       loading = false;
+    }
+  }
+
+  async function loadLatestCctvSnapshots(vesselId = $selectedVesselId) {
+    if (!vesselId) {
+      cctvSnapshots = [];
+      return [];
+    }
+
+    cctvSnapshotsLoading = true;
+    cctvSnapshotsError = "";
+
+    try {
+      const result = await getLatestCctvSnapshots(vesselId);
+      const snapshots = Array.isArray(result)
+        ? result
+        : Array.isArray(result?.items)
+          ? result.items
+          : Array.isArray(result?.snapshots)
+            ? result.snapshots
+            : Array.isArray(result?.data)
+              ? result.data
+              : [];
+
+      cctvSnapshots = snapshots;
+      return snapshots;
+    } catch (err) {
+      console.error("[VESSEL_CCTV_SNAPSHOTS_ERROR]", err);
+      cctvSnapshots = [];
+      cctvSnapshotsError = err?.message || "Failed to load latest CCTV snapshots.";
+      return [];
+    } finally {
+      cctvSnapshotsLoading = false;
     }
   }
 
@@ -1430,6 +1512,14 @@
     };
 
     loadDashboard();
+  });
+
+  $effect(() => {
+    active;
+
+    if (!active && dashboardMap) {
+      destroyDashboardMap();
+    }
   });
 
   $effect(() => {
@@ -1482,18 +1572,7 @@
   });
 
   onDestroy(() => {
-    removeCurrentParticleLayer();
-    removeWindParticleLayer();
-
-    if (vesselMarker) {
-      vesselMarker.remove();
-      vesselMarker = null;
-    }
-
-    if (dashboardMap) {
-      dashboardMap.remove();
-      dashboardMap = null;
-    }
+    destroyDashboardMap();
   });
 </script>
 
@@ -1543,35 +1622,54 @@
       <div class="section-header">
         <div>
           <span class="section-kicker">CCTV Monitoring</span>
-          <h2>Live Camera</h2>
+          <h2>Latest Camera Snapshot</h2>
         </div>
 
-        <strong>{cctvItems.length} cameras</strong>
+        <strong>{cctvSnapshotsLoading ? "Loading..." : `${cctvItems.length} cameras`}</strong>
       </div>
 
-      <div class="cctv-grid" class:empty-cctv={cctvItems.length === 0}>
-        {#if cctvItems.length === 0}
+      <div class="cctv-grid" class:empty-cctv={cctvItems.length === 0 && !cctvSnapshotsLoading}>
+        {#if cctvSnapshotsLoading}
+          {#each Array(4) as _}
+            <div class="cctv-box cctv-skeleton" aria-hidden="true">
+              <span></span>
+              <strong></strong>
+              <small></small>
+            </div>
+          {/each}
+        {:else if cctvItems.length === 0}
           <div class="cctv-empty">
             <div class="cctv-icon">▣</div>
             <strong>CCTV is not available yet</strong>
-            <span>The endpoint returned an empty CCTV value.</span>
+            <span>{cctvSnapshotsError || "Latest snapshot is not available for this vessel yet."}</span>
           </div>
-        {/if}
+        {:else}
 
         {#each cctvItems as cctv}
-          <div class:offline={!cctv.online} class="cctv-box">
+          <div class:offline={!cctv.online} class:has-snapshot={Boolean(cctv.url)} class="cctv-box">
+            {#if cctv.url}
+              <img class="cctv-snapshot-img" src={cctv.url} alt={`${cctv.name} latest snapshot`} loading="lazy" />
+            {/if}
             <div class="cctv-top">
               <span class="camera-dot" title={cctv.status}></span>
-              <span class="cctv-status-text">{cctv.online ? "Live" : "Offline"}</span>
+              <span class="cctv-status-text">{cctv.online ? "Snapshot ready" : "No snapshot"}</span>
             </div>
 
             <div class="cctv-content">
               <div class="cctv-icon">▣</div>
               <div class="cctv-name">{cctv.name}</div>
-              <div class="cctv-location">{cctv.location}</div>
+              {#if cctv.capturedAtText}
+                <div class="cctv-location">Captured {cctv.capturedAtText}</div>
+              {:else}
+                <div class="cctv-location">{cctv.location}</div>
+              {/if}
+              {#if cctv.fileSizeText}
+                <div class="cctv-file-size">{cctv.fileSizeText}</div>
+              {/if}
             </div>
           </div>
-        {/each}
+          {/each}
+        {/if}
       </div>
     </div>
 
@@ -1587,7 +1685,9 @@
         </div>
 
         <div class="map-box">
-          <div class="dashboard-leaflet-map" bind:this={dashboardMapContainer}></div>
+          {#if active}
+            <div class="dashboard-leaflet-map" bind:this={dashboardMapContainer}></div>
+          {/if}
 
           {#if vesselInfo.latitude === null || vesselInfo.longitude === null}
             <div class="dashboard-map-status">Vessel coordinates are not available yet.</div>
@@ -2179,6 +2279,23 @@
       linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px);
     background-size: 22px 22px;
     opacity: 0.35;
+    z-index: 1;
+  }
+
+  .cctv-box.has-snapshot::before {
+    background:
+      linear-gradient(180deg, rgba(15, 23, 42, 0.7) 0%, rgba(15, 23, 42, 0.08) 42%, rgba(15, 23, 42, 0.82) 100%);
+    opacity: 1;
+  }
+
+  .cctv-snapshot-img {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scale(1.01);
   }
 
   .cctv-box.offline {
@@ -2189,7 +2306,7 @@
   .cctv-top,
   .cctv-content {
     position: relative;
-    z-index: 1;
+    z-index: 2;
   }
 
   .cctv-top {
@@ -2227,6 +2344,22 @@
     margin-bottom: 10px;
   }
 
+  .cctv-box.has-snapshot .cctv-content {
+    place-items: start;
+    align-self: stretch;
+    margin: auto 0 0;
+    padding: 9px 10px;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.74);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    backdrop-filter: blur(8px);
+    text-align: left;
+  }
+
+  .cctv-box.has-snapshot .cctv-icon {
+    display: none;
+  }
+
   .cctv-icon {
     width: 38px;
     height: 38px;
@@ -2247,6 +2380,65 @@
     color: #dbe3ec;
     font-size: 11px;
     font-weight: 700;
+  }
+
+  .cctv-file-size {
+    color: #93c5fd;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .cctv-skeleton {
+    min-height: 142px;
+    display: grid;
+    align-content: end;
+    gap: 10px;
+    background: #111827;
+  }
+
+  .cctv-skeleton span,
+  .cctv-skeleton strong,
+  .cctv-skeleton small {
+    position: relative;
+    z-index: 2;
+    display: block;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.16);
+  }
+
+  .cctv-skeleton span {
+    width: 58px;
+    height: 18px;
+  }
+
+  .cctv-skeleton strong {
+    width: 68%;
+    height: 20px;
+  }
+
+  .cctv-skeleton small {
+    width: 46%;
+    height: 12px;
+  }
+
+  .cctv-skeleton span::after,
+  .cctv-skeleton strong::after,
+  .cctv-skeleton small::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.16), transparent);
+    animation: cctv-shimmer 1.35s infinite;
+  }
+
+  @keyframes cctv-shimmer {
+    100% {
+      transform: translateX(100%);
+    }
   }
 
   .cctv-empty {
@@ -2411,36 +2603,24 @@
     border: none;
   }
 
-  :global(.dashboard-vessel-marker-shell) {
-    width: 34px;
-    height: 34px;
-    border-radius: 999px;
-    display: grid;
-    place-items: center;
-    background: rgba(239, 246, 255, 0.98);
-    border: 2px solid #2563eb;
-    box-shadow:
-      0 0 0 5px rgba(37, 99, 235, 0.22),
-      0 0 0 10px rgba(37, 99, 235, 0.09),
-      0 10px 20px rgba(15, 23, 42, 0.22);
-  }
-
-  :global(.dashboard-vessel-marker-svg) {
-    width: 28px;
-    height: 28px;
+  :global(.dashboard-vessel-marker-icon) {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
     display: block;
     transform-origin: center center;
-    filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.28));
+    filter:
+      drop-shadow(0 0 5px rgba(255, 255, 255, 0.95))
+      drop-shadow(0 9px 16px rgba(15, 23, 42, 0.32));
   }
 
-  :global(.dashboard-vessel-leaflet-icon.offline .dashboard-vessel-marker-shell) {
-    background: var(--color-elevated);
-    border-color: var(--text-secondary);
-    box-shadow:
-      0 0 0 5px rgba(100, 116, 139, 0.2),
-      0 0 0 10px rgba(100, 116, 139, 0.08),
-      0 10px 20px rgba(15, 23, 42, 0.18);
-    filter: grayscale(0.35);
+  :global(.dashboard-vessel-leaflet-icon.offline .dashboard-vessel-marker-icon) {
+    opacity: 0.68;
+    filter:
+      grayscale(1)
+      brightness(0.82)
+      drop-shadow(0 0 5px rgba(15, 23, 42, 0.72))
+      drop-shadow(0 9px 16px rgba(15, 23, 42, 0.34));
   }
 
   :global(.dashboard-leaflet-popup .leaflet-popup-content-wrapper) {

@@ -23,7 +23,7 @@
     class="keep-page no-scroll-page"
     class:active-page={$activeMenu === "fleet-view"}
   >
-    <FleetViewPage />
+    <FleetViewPage active={$activeMenu === "fleet-view"} />
   </section>
 
   <section

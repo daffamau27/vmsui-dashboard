@@ -16,6 +16,8 @@
 		createVesselAdminApi,
 		updateVesselAdminApi,
 		deleteVesselAdminApi,
+		getCctvConfigAdminApi,
+		updateCctvConfigAdminApi,
 		getAllAssetsAdminApi,
 		getAssetDetailAdminApi,
 		createAssetAdminApi,
@@ -66,6 +68,7 @@
 		'assets',
 		'engine-curves',
 		'reporting',
+		'cctv-config',
 		'alarm',
 		'global-audit-logs'
 	];
@@ -81,6 +84,15 @@
 	let selectedVessel = null;
 	let vesselMode = 'create';
 	let searchVessel = '';
+
+	let cctvSelectedVessel = null;
+	let cctvConfigLoading = false;
+	let cctvConfigSaving = false;
+	let cctvSearchVessel = '';
+	let cctvConfigMeta = null;
+	let cctvForm = {
+		cameras: []
+	};
 
 	let companies = [];
 	let companiesLoading = false;
@@ -579,6 +591,13 @@
 		loadAlarmVessels();
 	}
 
+	function openCctvConfigTab() {
+		setActiveAdminTab('cctv-config');
+
+		if (!cctvSelectedVessel && vessels.length) {
+			openCctvVessel(vessels[0]);
+		}
+	}
 
 	function setActiveAdminTab(tabKey) {
 		if (!tabKey || activeAdminTab === tabKey) {
@@ -1177,6 +1196,29 @@
 			.some((value) => String(value).toLowerCase().includes(keyword));
 	});
 
+	$: filteredCctvVessels = vessels.filter((vessel) => {
+		const keyword = cctvSearchVessel.trim().toLowerCase();
+
+		if (!keyword) return true;
+
+		const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
+
+		return [
+			vessel?.id ? String(vessel.id) : '',
+			vessel?.deviceId,
+			vessel?.vesselName,
+			getVesselDisplayName(vessel),
+			getVesselDeviceLabel(vessel),
+			getCompanyDisplayName(company)
+		]
+			.filter(Boolean)
+			.some((value) => String(value).toLowerCase().includes(keyword));
+	});
+
+	$: if (activeAdminTab === 'cctv-config' && !cctvSelectedVessel && vessels.length && !cctvConfigLoading) {
+		openCctvVessel(vessels[0]);
+	}
+
 	$: filteredCompanies = companies.filter((company) => {
 		const keyword = searchCompany.trim().toLowerCase();
 
@@ -1404,6 +1446,181 @@
 			}));
 		} finally {
 			vesselsLoading = false;
+		}
+	}
+
+	function createEmptyCctvCamera(index = 0) {
+		return {
+			id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${index}`,
+			camera_name: '',
+			camera_token: ''
+		};
+	}
+
+	function normalizeCctvCameras(cameras = []) {
+		if (!Array.isArray(cameras) || cameras.length === 0) {
+			return [createEmptyCctvCamera(0)];
+		}
+
+		return cameras.map((camera, index) => ({
+			id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${index}`,
+			camera_name: camera?.camera_name || camera?.cameraName || '',
+			camera_token: camera?.camera_token || camera?.cameraToken || ''
+		}));
+	}
+
+	function resetCctvForm() {
+		cctvConfigMeta = null;
+		cctvForm = {
+			cameras: [createEmptyCctvCamera(0)]
+		};
+	}
+
+	async function openCctvVessel(vessel) {
+		if (!vessel?.id) return;
+
+		cctvSelectedVessel = vessel;
+		cctvConfigLoading = true;
+		clearAlert();
+
+		try {
+			const config = await getCctvConfigAdminApi(vessel.id);
+			cctvConfigMeta = config || null;
+			cctvForm = {
+				cameras: normalizeCctvCameras(config?.cameras)
+			};
+		} catch (error) {
+			if (error?.status === 404) {
+				resetCctvForm();
+				showAlert('error', `CCTV config for ${getVesselDisplayName(vessel)} is not found yet. Fill the form to create it.`);
+				return;
+			}
+
+			resetCctvForm();
+			showAlert('error', error.message || 'Failed to load CCTV configuration.');
+		} finally {
+			cctvConfigLoading = false;
+		}
+	}
+
+	function addCctvCamera() {
+		cctvForm = {
+			...cctvForm,
+			cameras: [...cctvForm.cameras, createEmptyCctvCamera(cctvForm.cameras.length)]
+		};
+	}
+
+	function removeCctvCamera(cameraId) {
+		const nextCameras = cctvForm.cameras.filter((camera) => camera.id !== cameraId);
+
+		cctvForm = {
+			...cctvForm,
+			cameras: nextCameras.length ? nextCameras : [createEmptyCctvCamera(0)]
+		};
+	}
+
+	function updateCctvCamera(cameraId, key, value) {
+		cctvForm = {
+			...cctvForm,
+			cameras: cctvForm.cameras.map((camera) =>
+				camera.id === cameraId
+					? {
+							...camera,
+							[key]: value
+						}
+					: camera
+			)
+		};
+	}
+
+	function generateCctvToken(length = 32) {
+		const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+		const randomValues = new Uint32Array(length);
+
+		if (globalThis.crypto?.getRandomValues) {
+			globalThis.crypto.getRandomValues(randomValues);
+		} else {
+			for (let index = 0; index < length; index += 1) {
+				randomValues[index] = Math.floor(Math.random() * characters.length);
+			}
+		}
+
+		return Array.from(randomValues, (value) => characters[value % characters.length]).join('');
+	}
+
+	function generateCctvCameraToken(cameraId) {
+		updateCctvCamera(cameraId, 'camera_token', generateCctvToken(32));
+	}
+
+	function validateCctvConfig() {
+		if (!cctvSelectedVessel?.id) return 'Please select a vessel first.';
+
+		const cameras = cctvForm.cameras
+			.map((camera) => ({
+				camera_name: camera.camera_name.trim(),
+				camera_token: camera.camera_token.trim()
+			}))
+			.filter((camera) => camera.camera_name || camera.camera_token);
+
+		if (!cameras.length) return 'At least one camera configuration is required.';
+
+		const duplicateNames = new Set();
+		const seenNames = new Set();
+		const duplicateTokens = new Set();
+		const seenTokens = new Set();
+
+		for (const camera of cameras) {
+			if (!camera.camera_name) return 'Every camera must have a camera name.';
+			if (!camera.camera_token) return 'Every camera must have a camera token.';
+			if (camera.camera_token.length !== 32) {
+				return `Camera token for "${camera.camera_name}" must be exactly 32 characters.`;
+			}
+
+			const normalizedName = camera.camera_name.toLowerCase();
+			if (seenNames.has(normalizedName)) duplicateNames.add(camera.camera_name);
+			seenNames.add(normalizedName);
+
+			if (seenTokens.has(camera.camera_token)) duplicateTokens.add(camera.camera_token);
+			seenTokens.add(camera.camera_token);
+		}
+
+		if (duplicateNames.size) return `Duplicate camera name: ${[...duplicateNames][0]}.`;
+		if (duplicateTokens.size) return 'Duplicate camera token is not allowed.';
+
+		return '';
+	}
+
+	async function saveCctvConfig() {
+		const validationError = validateCctvConfig();
+
+		if (validationError) {
+			showAlert('error', validationError);
+			return;
+		}
+
+		cctvConfigSaving = true;
+		clearAlert();
+
+		const payload = {
+			cameras: cctvForm.cameras
+				.map((camera) => ({
+					camera_name: camera.camera_name.trim(),
+					camera_token: camera.camera_token.trim()
+				}))
+				.filter((camera) => camera.camera_name && camera.camera_token)
+		};
+
+		try {
+			const config = await updateCctvConfigAdminApi(cctvSelectedVessel.id, payload);
+			cctvConfigMeta = config || null;
+			cctvForm = {
+				cameras: normalizeCctvCameras(config?.cameras || payload.cameras)
+			};
+			showAlert('success', 'CCTV configuration saved successfully.');
+		} catch (error) {
+			showAlert('error', error.message || 'Failed to save CCTV configuration.');
+		} finally {
+			cctvConfigSaving = false;
 		}
 	}
 
@@ -2394,6 +2611,13 @@
 				on:click={() => setActiveAdminTab('reporting')}
 			>
 				Reporting
+			</button>
+			<button
+				type="button"
+				class:active-tab={activeAdminTab === 'cctv-config'}
+				on:click={openCctvConfigTab}
+			>
+				CCTV Config
 			</button>
 			<button
 				type="button"
@@ -3686,6 +3910,184 @@
 									{/each}
 								{/if}
 							</div>
+						</section>
+					{/if}
+				</main>
+			</section>
+		{:else if activeAdminTab === 'cctv-config'}
+			<section class="cctv-admin-workspace">
+				<aside class="cctv-vessel-panel">
+					<div class="panel-title-row">
+						<div>
+							<h2>CCTV Vessels</h2>
+							<p>{filteredCctvVessels.length} of {vessels.length} vessel</p>
+						</div>
+
+						{#if vesselsLoading}
+							<LoadingSkeleton label="Loading vessels" variant="inline" compact />
+						{/if}
+					</div>
+
+					<input
+						class="search-input"
+						type="search"
+						bind:value={cctvSearchVessel}
+						placeholder="Search vessel, device ID..."
+					/>
+
+					<div class="cctv-vessel-list">
+						{#if vesselsLoading}
+							<LoadingSkeleton label="Loading vessels" variant="admin-entity-list" rows={6} compact />
+						{:else if filteredCctvVessels.length === 0}
+							<div class="empty-box">Vessel not found.</div>
+						{:else}
+							{#each filteredCctvVessels as vessel}
+								<button
+									type="button"
+									class:selected-user={cctvSelectedVessel?.id === vessel.id}
+									class="cctv-vessel-row"
+									on:click={() => openCctvVessel(vessel)}
+								>
+									<div>
+										<strong>{getVesselDisplayName(vessel)}</strong>
+										<span>ID {vessel.id} • {getVesselCompanyLabel(vessel)}</span>
+										<small>{getVesselDeviceLabel(vessel)}</small>
+									</div>
+
+									<em>{cctvSelectedVessel?.id === vessel.id ? 'Selected' : 'Config'}</em>
+								</button>
+							{/each}
+						{/if}
+					</div>
+				</aside>
+
+				<main class="cctv-editor-panel">
+					{#if !cctvSelectedVessel}
+						<section class="reporting-empty-card">
+							<h2>Select Vessel</h2>
+							<p>Select a vessel on the left to create or update CCTV camera names and tokens.</p>
+						</section>
+					{:else}
+						<div class="editor-toolbar">
+							<div>
+								<h2>{getVesselDisplayName(cctvSelectedVessel)}</h2>
+								<p>
+									{getVesselDeviceLabel(cctvSelectedVessel)} • ID {cctvSelectedVessel.id}
+								</p>
+							</div>
+
+							<div class="detail-actions">
+								<button
+									type="button"
+									class="ghost-button small"
+									on:click={() => openCctvVessel(cctvSelectedVessel)}
+									disabled={cctvConfigLoading}
+								>
+									Refresh Config
+								</button>
+
+								<button type="button" class="primary-button small" on:click={addCctvCamera}>
+									+ Camera
+								</button>
+							</div>
+						</div>
+
+						<section class="cctv-config-card">
+							<div class="reporting-section-head">
+								<div>
+									<h3>CCTV Camera Configuration</h3>
+									<p>Each camera token must be exactly 32 characters. Saving will upsert the configuration.</p>
+								</div>
+
+								{#if cctvConfigMeta?.updatedAt}
+									<small class="cctv-updated-meta">
+										Updated {formatDate(cctvConfigMeta.updatedAt)}
+									</small>
+								{/if}
+							</div>
+
+							{#if cctvConfigLoading}
+								<LoadingSkeleton label="Loading CCTV config" variant="admin-form" rows={4} />
+							{:else}
+								<div class="cctv-camera-list">
+									{#each cctvForm.cameras as camera, index}
+										<article class="cctv-camera-card">
+											<div class="cctv-camera-head">
+												<div>
+													<span>Camera {index + 1}</span>
+													<strong>{camera.camera_name || 'Unnamed camera'}</strong>
+												</div>
+
+												<button
+													type="button"
+													class="danger-button small"
+													on:click={() => removeCctvCamera(camera.id)}
+													disabled={cctvForm.cameras.length <= 1}
+												>
+													Remove
+												</button>
+											</div>
+
+											<div class="form-grid cctv-camera-grid">
+												<label>
+													<span>Camera Name</span>
+													<input
+														type="text"
+														value={camera.camera_name}
+														placeholder="Front Camera"
+														on:input={(event) =>
+															updateCctvCamera(camera.id, 'camera_name', event.currentTarget.value)}
+													/>
+												</label>
+
+												<label>
+													<span>Camera Token</span>
+													<div class="token-input-wrap">
+														<input
+															type="text"
+															value={camera.camera_token}
+															maxlength="32"
+															placeholder="12345678901234567890123456789012"
+															on:input={(event) =>
+																updateCctvCamera(camera.id, 'camera_token', event.currentTarget.value)}
+														/>
+
+														<button
+															type="button"
+															class="token-generate-btn"
+															on:click={() => generateCctvCameraToken(camera.id)}
+															title="Generate random token"
+															aria-label="Generate random token"
+														>
+															⚂
+														</button>
+													</div>
+													<small class:token-invalid={camera.camera_token.trim().length > 0 &&
+														camera.camera_token.trim().length !== 32}
+													>
+														{camera.camera_token.trim().length}/32 characters
+													</small>
+												</label>
+											</div>
+										</article>
+									{/each}
+								</div>
+
+								<div class="editor-footer">
+									<button type="button" class="ghost-button" on:click={addCctvCamera}>
+										+ Add Camera
+									</button>
+
+									<button
+										type="button"
+										class="primary-button"
+										on:click={saveCctvConfig}
+										disabled={cctvConfigSaving}
+									>
+										{cctvConfigSaving ? 'Saving...' : 'Save CCTV Config'}
+									</button>
+								</div>
+							{/if}
 						</section>
 					{/if}
 				</main>
@@ -5515,7 +5917,8 @@
 		border-top: 1px solid #e2e8f0;
 	}
 
-	.reporting-admin-workspace {
+	.reporting-admin-workspace,
+	.cctv-admin-workspace {
 		display: grid;
 		grid-template-columns: 390px minmax(0, 1fr);
 		gap: 14px;
@@ -5524,14 +5927,17 @@
 	}
 
 	.reporting-vessel-panel,
-	.reporting-editor-panel {
+	.reporting-editor-panel,
+	.cctv-vessel-panel,
+	.cctv-editor-panel {
 		border: 1px solid #e2e8f0;
 		border-radius: 22px;
 		background: var(--color-surface);
 		box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
 	}
 
-	.reporting-vessel-panel {
+	.reporting-vessel-panel,
+	.cctv-vessel-panel {
 		position: sticky;
 		top: 14px;
 		max-height: calc(100vh - 250px);
@@ -5540,7 +5946,8 @@
 		overflow: hidden;
 	}
 
-	.reporting-editor-panel {
+	.reporting-editor-panel,
+	.cctv-editor-panel {
 		min-width: 0;
 		padding: 18px;
 	}
@@ -5556,13 +5963,15 @@
 		min-height: 38px;
 	}
 
-	.reporting-vessel-list {
+	.reporting-vessel-list,
+	.cctv-vessel-list {
 		flex: 1;
 		overflow: auto;
 		padding: 0 10px 12px;
 	}
 
 	.reporting-vessel-row,
+	.cctv-vessel-row,
 	.telegram-row {
 		width: 100%;
 		display: flex;
@@ -5581,8 +5990,10 @@
 	}
 
 	.reporting-vessel-row:hover,
+	.cctv-vessel-row:hover,
 	.telegram-row:hover,
 	.reporting-vessel-row.selected-user,
+	.cctv-vessel-row.selected-user,
 	.telegram-row.selected-user {
 		border-color: #99f6e4;
 		background: var(--color-success-muted);
@@ -5592,19 +6003,24 @@
 	.reporting-vessel-row strong,
 	.reporting-vessel-row span,
 	.reporting-vessel-row small,
+	.cctv-vessel-row strong,
+	.cctv-vessel-row span,
+	.cctv-vessel-row small,
 	.telegram-row strong,
 	.telegram-row small {
 		display: block;
 	}
 
 	.reporting-vessel-row strong,
+	.cctv-vessel-row strong,
 	.telegram-row strong {
 		color: var(--text-primary);
 		font-size: 13px;
 		font-weight: 900;
 	}
 
-	.reporting-vessel-row span {
+	.reporting-vessel-row span,
+	.cctv-vessel-row span {
 		margin-top: 3px;
 		color: var(--text-secondary);
 		font-size: 12px;
@@ -5612,6 +6028,7 @@
 	}
 
 	.reporting-vessel-row small,
+	.cctv-vessel-row small,
 	.telegram-row small {
 		margin-top: 4px;
 		color: #94a3b8;
@@ -5620,6 +6037,7 @@
 	}
 
 	.reporting-vessel-row em,
+	.cctv-vessel-row em,
 	.telegram-row em {
 		height: fit-content;
 		border-radius: 999px;
@@ -5639,7 +6057,8 @@
 	}
 
 	.reporting-empty-card,
-	.reporting-section-card {
+	.reporting-section-card,
+	.cctv-config-card {
 		border: 1px solid #e2e8f0;
 		border-radius: 18px;
 		background: var(--color-elevated);
@@ -5647,25 +6066,29 @@
 	}
 
 	.reporting-empty-card h2,
-	.reporting-section-card h3 {
+	.reporting-section-card h3,
+	.cctv-config-card h3 {
 		color: var(--text-primary);
 		font-size: 16px;
 		font-weight: 900;
 	}
 
 	.reporting-empty-card p,
-	.reporting-section-card p {
+	.reporting-section-card p,
+	.cctv-config-card p {
 		margin-top: 4px;
 		color: var(--text-secondary);
 		font-size: 12px;
 		line-height: 1.45;
 	}
 
-	.reporting-section-card {
+	.reporting-section-card,
+	.cctv-config-card {
 		margin-top: 14px;
 	}
 
-	.reporting-section-card:first-of-type {
+	.reporting-section-card:first-of-type,
+	.cctv-config-card:first-of-type {
 		margin-top: 0;
 	}
 
@@ -5675,6 +6098,111 @@
 		justify-content: space-between;
 		gap: 14px;
 		margin-bottom: 12px;
+	}
+
+	.cctv-updated-meta {
+		display: inline-flex;
+		align-items: center;
+		min-height: 28px;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 999px;
+		padding: 0 10px;
+		color: #bfdbfe;
+		background: rgba(37, 99, 235, 0.14);
+		font-size: 11px;
+		font-weight: 800;
+		white-space: nowrap;
+	}
+
+	.cctv-camera-list {
+		display: grid;
+		gap: 12px;
+	}
+
+	.cctv-camera-card {
+		border: 1px solid #e2e8f0;
+		border-radius: 16px;
+		background: var(--color-surface);
+		padding: 12px;
+	}
+
+	.cctv-camera-head {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 12px;
+		margin-bottom: 12px;
+	}
+
+	.cctv-camera-head span,
+	.cctv-camera-head strong {
+		display: block;
+	}
+
+	.cctv-camera-head span {
+		color: #60a5fa;
+		font-size: 10px;
+		font-weight: 900;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+
+	.cctv-camera-head strong {
+		margin-top: 4px;
+		color: var(--text-primary);
+		font-size: 14px;
+		font-weight: 900;
+	}
+
+	.cctv-camera-grid {
+		grid-template-columns: minmax(180px, 0.8fr) minmax(260px, 1.2fr);
+	}
+
+	.cctv-camera-grid small {
+		display: block;
+		margin-top: 6px;
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 800;
+	}
+
+	.cctv-camera-grid small.token-invalid {
+		color: #fca5a5;
+	}
+
+	.token-input-wrap {
+		position: relative;
+		display: flex;
+		align-items: center;
+	}
+
+	.token-input-wrap input {
+		padding-right: 44px;
+	}
+
+	.token-generate-btn {
+		position: absolute;
+		top: 50%;
+		right: 6px;
+		width: 28px;
+		min-width: 28px;
+		height: 28px;
+		min-height: 28px;
+		border: 1px solid rgba(96, 165, 250, 0.32);
+		border-radius: 10px;
+		padding: 0;
+		background: rgba(37, 99, 235, 0.14);
+		color: #bfdbfe;
+		font-size: 15px;
+		font-weight: 900;
+		line-height: 1;
+		cursor: pointer;
+		transform: translateY(-50%);
+	}
+
+	.token-generate-btn:hover {
+		border-color: rgba(147, 197, 253, 0.72);
+		background: rgba(37, 99, 235, 0.28);
 	}
 
 	.reporting-form-grid {
@@ -6251,11 +6779,13 @@
 	}
 
 	@media (max-width: 1180px) {
-		.reporting-admin-workspace {
+		.reporting-admin-workspace,
+		.cctv-admin-workspace {
 			grid-template-columns: 1fr;
 		}
 
-		.reporting-vessel-panel {
+		.reporting-vessel-panel,
+		.cctv-vessel-panel {
 			position: static;
 			max-height: 420px;
 		}
@@ -6269,7 +6799,8 @@
 		.manual-report-grid,
 		.health-grid,
 		.telegram-layout,
-		.telegram-form-grid {
+		.telegram-form-grid,
+		.cctv-camera-grid {
 			grid-template-columns: 1fr;
 		}
 	}
@@ -6277,6 +6808,8 @@
 	@media (max-width: 760px) {
 		.reporting-section-head,
 		.reporting-vessel-row,
+		.cctv-vessel-row,
+		.cctv-camera-head,
 		.telegram-row {
 			flex-direction: column;
 		}

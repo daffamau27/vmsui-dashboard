@@ -14,7 +14,7 @@
     vesselName = "Vessel",
     speed = "-",
     lastUpdate = "-",
-    iconUrl = "/assets/vessel-marker.svg",
+    iconUrl = "/assets/vessel.png",
     zoom = 12,
     tracePoints = [],
     activeIndex = 0,
@@ -90,17 +90,16 @@ function resetTraceFitIfNeeded() {
     return L.divIcon({
       className: "vessel-map-leaflet-icon",
       html: `
-        <div class="vessel-map-marker-shell">
-          <img
-            src="${iconUrl}"
-            alt="${vesselName}"
-            style="transform: rotate(${toNumber(heading, 0)}deg);"
-          />
-        </div>
+        <img
+          class="vessel-map-marker-icon"
+          src="${iconUrl}"
+          alt="${vesselName}"
+          style="transform: rotate(${toNumber(heading, 0)}deg) scaleX(1.16);"
+        />
       `,
-      iconSize: [42, 42],
-      iconAnchor: [21, 21],
-      popupAnchor: [0, -20]
+      iconSize: [28, 60],
+      iconAnchor: [14, 30],
+      popupAnchor: [0, -32]
     });
   }
 
@@ -416,27 +415,15 @@ $effect(() => {
     border: none;
   }
 
-  :global(.vessel-map-marker-shell) {
-    width: 40px;
-    height: 40px;
-    border-radius: 999px;
-    display: grid;
-    place-items: center;
-    background: white;
-    border: 2px solid #2563eb;
-    box-shadow:
-      0 0 0 6px rgba(37, 99, 235, 0.18),
-      0 0 0 12px rgba(37, 99, 235, 0.08),
-      0 12px 24px rgba(15, 23, 42, 0.24);
-  }
-
-  :global(.vessel-map-marker-shell img) {
-    width: 26px;
-    height: 26px;
+  :global(.vessel-map-marker-icon) {
+    width: 100%;
+    height: 100%;
     object-fit: contain;
     display: block;
     transform-origin: center center;
-    filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.28));
+    filter:
+      drop-shadow(0 0 4px rgba(255, 255, 255, 0.92))
+      drop-shadow(0 8px 14px rgba(15, 23, 42, 0.28));
   }
 
   :global(.trace-start-icon),
@@ -478,43 +465,59 @@ $effect(() => {
   }
 
   :global(.vessel-map-popup-wrapper .leaflet-popup-content-wrapper) {
-    background: var(--color-surface);
-    color: var(--text-primary);
-    border-radius: 10px;
-    border: 1px solid #dbe4ef;
+    background: #0f172a;
+    color: #f8fafc;
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.32);
     box-shadow:
-      0 9px 20px rgba(15, 23, 42, 0.14),
-      0 1px 4px rgba(15, 23, 42, 0.08);
+      0 14px 28px rgba(2, 6, 23, 0.28),
+      0 1px 4px rgba(15, 23, 42, 0.18);
     overflow: hidden;
   }
 
   :global(.vessel-map-popup-wrapper .leaflet-popup-content) {
     margin: 0;
-    width: 210px !important;
+    width: 224px !important;
   }
 
   :global(.vessel-map-popup-wrapper .leaflet-popup-tip) {
-    background: var(--color-surface);
-    border: 1px solid #dbe4ef;
+    background: #0f172a;
+    border: 1px solid rgba(148, 163, 184, 0.32);
+  }
+
+  :global(.vessel-map-popup-wrapper .leaflet-popup-close-button) {
+    color: rgba(226, 232, 240, 0.82) !important;
+    font-size: 18px !important;
+    font-weight: 700 !important;
+    padding: 6px 8px 0 0 !important;
+  }
+
+  :global(.vessel-map-popup-wrapper .leaflet-popup-close-button:hover) {
+    color: #ffffff !important;
   }
 
   :global(.vessel-map-popup-title) {
-    padding: 8px 10px;
+    padding: 9px 12px;
     background:
-      linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(37, 99, 235, 0)),
-      #f8fafc;
-    color: var(--text-primary);
-    font-size: 12px;
-    font-weight: 900;
-    border-bottom: 1px solid #e2e8f0;
+      linear-gradient(135deg, rgba(37, 99, 235, 0.22), rgba(96, 165, 250, 0.04)),
+      #111827;
+    color: #f8fafc;
+    font-size: 12.5px;
+    font-weight: 800;
+    line-height: 1.2;
+    letter-spacing: 0.01em;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+    padding-right: 34px;
   }
 
   :global(.vessel-map-popup-row) {
     display: grid;
-    grid-template-columns: 62px 1fr;
-    gap: 6px;
-    padding: 5px 10px;
-    border-bottom: 1px solid #eef2f7;
+    grid-template-columns: 72px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    background: #0f172a;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
   }
 
   :global(.vessel-map-popup-row:last-child) {
@@ -522,16 +525,20 @@ $effect(() => {
   }
 
   :global(.vessel-map-popup-row span) {
-    color: var(--text-secondary);
-    font-size: 8.8px;
-    font-weight: 800;
+    color: #94a3b8;
+    font-size: 9px;
+    font-weight: 700;
   }
 
   :global(.vessel-map-popup-row strong) {
-    color: var(--text-primary);
-    font-size: 9px;
-    font-weight: 900;
+    color: #f8fafc;
+    font-size: 9.5px;
+    font-weight: 700;
     text-align: right;
+  }
+
+  :global(.vessel-map-popup-row .coordinate-copy-inline) {
+    justify-content: flex-end;
   }
 
   :global(.leaflet-control-zoom) {

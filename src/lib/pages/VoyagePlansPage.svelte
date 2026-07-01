@@ -5,6 +5,7 @@
 	import { browser } from '$app/environment';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
+	import { activeMenu } from '$lib/stores/appNavigation.svelte.js';
 	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
 	import {
 		createCopyableCoordinateHtml,
@@ -16,6 +17,7 @@
 	const ASSET_LEGEND_TYPES = ['anchor', 'buoy', 'dock', 'shipyard', 'mess', 'office', 'fso', 'rig', 'whp'];
 
 	let loading = false;
+	let active = false;
 	let saving = false;
 	let importing = false;
 	let assigning = false;
@@ -133,6 +135,7 @@
 	let undoStack = [];
 	const MAX_UNDO_STACK = 30;
 
+	$: active = $activeMenu === 'voyage-plans';
 	$: canUndoRoute = undoStack.length > 0;
 
 	function clonePlanData(planData = form.planData) {
@@ -483,7 +486,7 @@
 	}
 
 	async function initializeRouteMap() {
-		if (!browser || !showForm || !mapContainer || routeMap || mapInitializing) return;
+		if (!browser || !active || !showForm || !mapContainer || routeMap || mapInitializing) return;
 
 		mapInitializing = true;
 
@@ -570,6 +573,7 @@
 
 	function openRouteMapAfterRender() {
 		tick().then(async () => {
+			if (!active || !showForm) return;
 			await initializeRouteMap();
 			refreshRouteMap(true);
 		});
@@ -1009,9 +1013,18 @@
 				window.removeEventListener('keydown', handleRouteEditorKeydown);
 			}
 
+			destroyRouteMap();
 			cleanupVesselTransferMode();
 		};
 	});
+
+	$: {
+		if (!active) {
+			destroyRouteMap();
+		} else if (showForm) {
+			openRouteMapAfterRender();
+		}
+	}
 
 	function setupVesselTransferMode() {
 		if (!browser) return () => {};
@@ -2538,7 +2551,9 @@
 
 					<section class="route-map-card">
 						<div class="route-map-shell">
-							<div class="route-map" bind:this={mapContainer}></div>
+							{#if active}
+								<div class="route-map" bind:this={mapContainer}></div>
+							{/if}
 
 							<div class="route-map-overlay-toolbar">
 								<div class="route-map-title">

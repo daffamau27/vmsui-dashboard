@@ -34,3 +34,40 @@ export async function getVesselTrace({
 
   return response?.data || response;
 }
+
+export async function getVesselCctvSnapshots({
+  vesselId,
+  cameraName = "",
+  startTime,
+  endTime,
+  page = 1,
+  pageSize = 12
+}) {
+  if (!vesselId) {
+    throw new Error("vesselId wajib diisi.");
+  }
+
+  if (!startTime || !endTime) {
+    throw new Error("Start time dan end time CCTV wajib diisi.");
+  }
+
+  const params = new URLSearchParams({
+    start_time: startTime,
+    end_time: endTime,
+    page: String(page),
+    pageSize: String(pageSize)
+  });
+
+  if (cameraName) {
+    params.set("camera_name", cameraName);
+  }
+
+  const response = await apiRequest(
+    `/cctv/vessels/${vesselId}/snapshots?${params.toString()}`,
+    {
+      method: "GET"
+    }
+  );
+
+  return response?.data || response;
+}
