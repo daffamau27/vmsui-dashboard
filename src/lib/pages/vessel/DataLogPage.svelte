@@ -369,6 +369,20 @@
 				.replace(/\b(Internal|External|Int|Ext)\b/gi, '')
 				.replace(/\s+/g, ' ')
 				.trim();
+		} else if (emsSource === 'ems_internal') {
+			label = label
+				.replace(/\bEMS\s+(Internal|Int)\b/gi, 'VMS')
+				.replace(/\b(Internal|Int)\s+EMS\b/gi, 'VMS')
+				.replace(/\b(Internal|Int)\b/gi, 'VMS')
+				.replace(/\s+/g, ' ')
+				.trim();
+		} else if (emsSource === 'ems_external') {
+			label = label
+				.replace(/\bEMS\s+(External|Ext)\b/gi, 'EMS')
+				.replace(/\b(External|Ext)\s+EMS\b/gi, 'EMS')
+				.replace(/\b(External|Ext)\b/gi, '')
+				.replace(/\s+/g, ' ')
+				.trim();
 		}
 
 		return label;
@@ -788,20 +802,7 @@
 				<div>
 					<span class="section-kicker">Override</span>
 					<h2>Data Log Override</h2>
-					<p>
-						Download the template, import an override Excel file, or delete overrides by
-						source file path.
-					</p>
 				</div>
-
-				<button
-					type="button"
-					class="export-btn"
-					onclick={handleDownloadOverrideTemplate}
-					disabled={overrideDownloadingTemplate}
-				>
-					{overrideDownloadingTemplate ? 'Downloading...' : 'Download Template'}
-				</button>
 			</div>
 
 			<div class="override-grid">

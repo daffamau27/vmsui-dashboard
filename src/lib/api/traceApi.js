@@ -52,8 +52,8 @@ export async function getVesselCctvSnapshots({
   }
 
   const params = new URLSearchParams({
-    start_time: startTime,
-    end_time: endTime,
+    startTime,
+    endTime,
     page: String(page),
     pageSize: String(pageSize)
   });
@@ -62,12 +62,51 @@ export async function getVesselCctvSnapshots({
     params.set("camera_name", cameraName);
   }
 
-  const response = await apiRequest(
-    `/cctv/vessels/${vesselId}/snapshots?${params.toString()}`,
-    {
+  const endpoint = `/cctv/vessels/${vesselId}/snapshots?${params.toString()}`;
+
+  console.log("[CCTV_RANGE_SNAPSHOTS_REQUEST]", {
+    vesselId,
+    cameraName,
+    startTime,
+    endTime,
+    page,
+    pageSize,
+    endpoint
+  });
+
+  let response;
+
+  try {
+    response = await apiRequest(endpoint, {
       method: "GET"
-    }
-  );
+    });
+  } catch (error) {
+    console.error("[CCTV_RANGE_SNAPSHOTS_ERROR]", {
+      vesselId,
+      cameraName,
+      startTime,
+      endTime,
+      page,
+      pageSize,
+      endpoint,
+      status: error?.status,
+      data: error?.data,
+      message: error?.message,
+      error
+    });
+
+    throw error;
+  }
+
+  console.log("[CCTV_RANGE_SNAPSHOTS_RESPONSE]", {
+    vesselId,
+    cameraName,
+    startTime,
+    endTime,
+    page,
+    pageSize,
+    response
+  });
 
   return response?.data || response;
 }

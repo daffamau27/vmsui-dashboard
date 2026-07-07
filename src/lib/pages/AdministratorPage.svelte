@@ -127,12 +127,15 @@
 	let reportingAssignableUsers = [];
 	let reportingAssignableUsersLoading = false;
 	let reportingAssignableSearch = '';
+	let manualRecipientEmail = '';
+	let manualRecipientRole = 'pic';
 	let reportingAssignablePagination = {
 		page: 1,
 		pageSize: 20,
 		totalItems: 0,
 		totalPages: 1
 	};
+	let reportingContentSearch = '';
 
 	let globalAuditLogs = [];
 	let globalAuditPagination = {
@@ -239,11 +242,54 @@
 		autoReport: 'all'
 	};
 
+	const REPORT_CONTENT_PERMISSION_KEYS = [
+		'view_engine_runtime_table',
+		'view_engine_event_status_history',
+		'view_engine_on_off_chart',
+		'view_fuel_consumption_table',
+		'view_fuel_fod',
+		'view_fuel_ecu',
+		'view_fuel_fms',
+		'view_fuel_ems_internal',
+		'view_fuel_ems_external',
+		'view_fuel_engine_maker',
+		'view_engine_rpm_stats_table',
+		'view_speed_stats_table',
+		'view_travel_distance_table',
+		'view_daily_path_map',
+		'view_rpm_vs_fuel_chart',
+		'view_liter_per_nautical_mile_table',
+		'view_high_rpm_outside_safety_zone_table',
+		'view_high_rpm_low_speed_table'
+	];
+
+	const REPORT_CONTENT_FALLBACK_LABELS = {
+		view_engine_runtime_table: 'Engine Runtime Table',
+		view_engine_event_status_history: 'Engine Event Status History',
+		view_engine_on_off_chart: 'Engine On/Off Chart',
+		view_fuel_consumption_table: 'Fuel Consumption Table',
+		view_fuel_fod: 'FOD Fuel',
+		view_fuel_ecu: 'ECU Fuel',
+		view_fuel_fms: 'FMS Fuel',
+		view_fuel_ems_internal: 'VMS Fuel',
+		view_fuel_ems_external: 'EMS Fuel',
+		view_fuel_engine_maker: 'Engine Maker Fuel',
+		view_engine_rpm_stats_table: 'Engine RPM Stats Table',
+		view_speed_stats_table: 'Speed Stats Table',
+		view_travel_distance_table: 'Travel Distance Table',
+		view_daily_path_map: 'Daily Path Map',
+		view_rpm_vs_fuel_chart: 'RPM vs Fuel Chart',
+		view_liter_per_nautical_mile_table: 'Liter per Nautical Mile Table',
+		view_high_rpm_outside_safety_zone_table: 'High RPM Outside Safety Zone Table',
+		view_high_rpm_low_speed_table: 'High RPM Low Speed Table'
+	};
+
 	let autoReportForm = {
 		isEnabled: false,
 		sendTime: '08:00',
 		timezoneMode: 'auto',
 		timezoneOffset: '+07:00',
+		reportSections: [],
 		picEmails: [],
 		ccEmails: [],
 		bccEmails: []
@@ -368,6 +414,38 @@
 		return Boolean(config.is_enabled ?? config.isEnabled);
 	}
 
+	function getAutoReportContentConfig(autoReport = {}) {
+		return (
+			autoReport?.report_content ||
+			autoReport?.reportContent ||
+			autoReport?.report_content_config ||
+			autoReport?.reportContentConfig ||
+			{}
+		);
+	}
+
+	function normalizeReportSections(value = {}) {
+		const content = getAutoReportContentConfig(value);
+		const sections =
+			content?.sections ||
+			content?.permissions ||
+			value?.sections ||
+			value?.reportSections ||
+			[];
+
+		return [...new Set((Array.isArray(sections) ? sections : []).map(String).filter(Boolean))];
+	}
+
+	function formatReportContentLabel(value) {
+		return String(value || '')
+			.replace(/\bEMS\s+(Internal|Int)\b/gi, 'VMS')
+			.replace(/\b(Internal|Int)\s+EMS\b/gi, 'VMS')
+			.replace(/\bEMS\s+(External|Ext)\b/gi, 'EMS')
+			.replace(/\b(External|Ext)\s+EMS\b/gi, 'EMS')
+			.replace(/\s+/g, ' ')
+			.trim();
+	}
+
 	function getEngineHealthConfig(vessel) {
 		return vessel?.engine_health || vessel?.engineHealth || vessel?.engineHealthConfig || {};
 	}
@@ -416,6 +494,41 @@
 
 	function removeAutoReportRecipient(role, email) {
 		toggleAutoReportRecipient(email, role, false);
+	}
+
+	function isValidEmail(value) {
+		return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+	}
+
+	function addManualAutoReportRecipients() {
+		const field = getRecipientField(manualRecipientRole);
+		const emails = normalizeEmailList(String(manualRecipientEmail || '').split(/[\s,;]+/));
+
+		if (!field) {
+			showAlert('error', 'Recipient role is not valid.');
+			return;
+		}
+
+		if (emails.length === 0) {
+			showAlert('error', 'Please enter at least one email address.');
+			return;
+		}
+
+		const invalidEmails = emails.filter((email) => !isValidEmail(email));
+
+		if (invalidEmails.length > 0) {
+			showAlert(
+				'error',
+				`Invalid email: ${invalidEmails.slice(0, 3).join(', ')}${invalidEmails.length > 3 ? '...' : ''}`
+			);
+			return;
+		}
+
+		autoReportForm = {
+			...autoReportForm,
+			[field]: normalizeEmailList([...(autoReportForm[field] || []), ...emails])
+		};
+		manualRecipientEmail = '';
 	}
 
 	function getAssignableUserName(user) {
@@ -651,6 +764,7 @@
 			sendTime: autoReport.send_time || autoReport.sendTime || '08:00',
 			timezoneMode: autoReport.timezone_mode || autoReport.timezoneMode || 'auto',
 			timezoneOffset: autoReport.timezone_offset || autoReport.timezoneOffset || '+07:00',
+			reportSections: normalizeReportSections(autoReport),
 			picEmails: normalizeEmailList(recipients.pic),
 			ccEmails: normalizeEmailList(recipients.cc),
 			bccEmails: normalizeEmailList(recipients.bcc)
@@ -684,6 +798,9 @@
 				pic: normalizeEmailList(autoReportForm.picEmails),
 				cc: normalizeEmailList(autoReportForm.ccEmails),
 				bcc: normalizeEmailList(autoReportForm.bccEmails)
+			},
+			reportContent: {
+				sections: [...new Set((autoReportForm.reportSections || []).map(String).filter(Boolean))]
 			},
 			timezoneMode: autoReportForm.timezoneMode || 'auto',
 			timezoneOffset: autoReportForm.timezoneOffset || '+07:00'
@@ -742,7 +859,8 @@
 					send_time: savedConfig?.sendTime ?? payload.sendTime,
 					timezone_mode: savedConfig?.timezoneMode ?? payload.timezoneMode,
 					timezone_offset: savedConfig?.timezoneOffset ?? payload.timezoneOffset,
-					recipients: savedConfig?.recipients ?? payload.recipients
+					recipients: savedConfig?.recipients ?? payload.recipients,
+					report_content: savedConfig?.report_content ?? savedConfig?.reportContent ?? payload.reportContent
 				}
 			};
 
@@ -1275,6 +1393,34 @@
 	}));
 
 	$: allPermissions = moduleGroups.flatMap((group) => group.permissions);
+
+	$: reportContentPermissions = REPORT_CONTENT_PERMISSION_KEYS.map((key) => {
+		const permission = allPermissions.find((item) => item?.key === key);
+
+		if (permission) {
+			return {
+				...permission,
+				label: formatReportContentLabel(permission.label || REPORT_CONTENT_FALLBACK_LABELS[key] || key),
+				tableLabel: permission.tableLabel || 'Daily Report Content',
+				moduleLabel: permission.moduleLabel || 'Reporting'
+			};
+		}
+
+		return {
+			key,
+			label: REPORT_CONTENT_FALLBACK_LABELS[key] || prettify(key),
+			description: 'Included in the vessel daily report output.',
+			moduleLabel: 'Reporting',
+			tableLabel: 'Daily Report Content',
+			category: 'report_content'
+		};
+	});
+
+	$: reportingContentKeyword = reportingContentSearch.trim().toLowerCase();
+
+	$: visibleReportContentPermissions = reportContentPermissions.filter((permission) =>
+		matchPermission(permission, reportingContentKeyword)
+	);
 
 	$: permissionModules = [
 		{ moduleKey: 'all', moduleLabel: 'All Permissions' },
@@ -2512,6 +2658,38 @@
 			selectedPermissions: []
 		};
 	}
+
+	function hasReportContentSection(key) {
+		return (autoReportForm.reportSections || []).includes(key);
+	}
+
+	function toggleReportContentSection(key) {
+		if (!key) return;
+
+		const current = new Set(autoReportForm.reportSections || []);
+
+		if (current.has(key)) current.delete(key);
+		else current.add(key);
+
+		autoReportForm = {
+			...autoReportForm,
+			reportSections: [...current]
+		};
+	}
+
+	function selectAllReportContentSections() {
+		autoReportForm = {
+			...autoReportForm,
+			reportSections: [...REPORT_CONTENT_PERMISSION_KEYS]
+		};
+	}
+
+	function clearReportContentSections() {
+		autoReportForm = {
+			...autoReportForm,
+			reportSections: []
+		};
+	}
 </script>
 
 <section class="administrator-page">
@@ -3668,6 +3846,66 @@
 								</label>
 							</div>
 
+							<div class="report-content-card">
+								<div class="report-content-head">
+									<div>
+										<h4>Report Content per Vessel</h4>
+										<p>
+											Choose which daily report sections are included for
+											{getVesselDisplayName(selectedReportingVessel)}.
+										</p>
+									</div>
+
+									<div class="report-content-actions">
+										<span>{autoReportForm.reportSections.length} selected</span>
+										<button type="button" class="ghost-button small" on:click={selectAllReportContentSections}>
+											Select All
+										</button>
+										<button type="button" class="ghost-button small" on:click={clearReportContentSections}>
+											Clear
+										</button>
+									</div>
+								</div>
+
+								<label class="report-content-search">
+									<span>Search Section</span>
+									<input
+										type="search"
+										bind:value={reportingContentSearch}
+										placeholder="Search report section, table, or permission key..."
+									/>
+								</label>
+
+								{#if permissionsLoading}
+									<LoadingSkeleton label="Loading report content catalog" variant="admin-compact-list" rows={4} />
+								{:else if visibleReportContentPermissions.length === 0}
+									<div class="empty-box">No report content section found.</div>
+								{:else}
+									<div class="report-content-list">
+										{#each visibleReportContentPermissions as permission}
+											<label
+												class:report-content-item-checked={hasReportContentSection(permission.key)}
+												class="report-content-item"
+											>
+												<input
+													type="checkbox"
+													checked={hasReportContentSection(permission.key)}
+													on:change={() => toggleReportContentSection(permission.key)}
+												/>
+												<span class="report-content-checkmark" aria-hidden="true"></span>
+												<div>
+													<strong>{permission.label || prettify(permission.key)}</strong>
+													<span class="report-content-meta">
+														{permission.tableLabel || permission.moduleLabel || 'Daily Report'}
+													</span>
+													<small>{permission.description || permission.key}</small>
+												</div>
+											</label>
+										{/each}
+									</div>
+								{/if}
+							</div>
+
 							<div class="recipient-picker-card">
 								<div class="recipient-picker-head">
 									<label>
@@ -3693,6 +3931,43 @@
 											Page {reportingAssignablePagination.page || 1} /
 											{reportingAssignablePagination.totalPages || 1}
 										</span>
+									</div>
+								</div>
+
+								<div class="manual-recipient-card">
+									<div>
+										<strong>Manual Email Assignment</strong>
+										<span>Add report recipients manually when they are not listed as assignable users.</span>
+									</div>
+
+									<div class="manual-recipient-form">
+										<label>
+											<span>Email Address</span>
+											<input
+												type="text"
+												bind:value={manualRecipientEmail}
+												placeholder="captain@example.com, owner@example.com"
+												on:keydown={(event) => {
+													if (event.key === 'Enter') {
+														event.preventDefault();
+														addManualAutoReportRecipients();
+													}
+												}}
+											/>
+										</label>
+
+										<label>
+											<span>Role</span>
+											<select bind:value={manualRecipientRole}>
+												<option value="pic">PIC</option>
+												<option value="cc">CC</option>
+												<option value="bcc">BCC</option>
+											</select>
+										</label>
+
+										<button type="button" class="primary-button" on:click={addManualAutoReportRecipients}>
+											Add Email
+										</button>
 									</div>
 								</div>
 
@@ -4577,7 +4852,7 @@
 		padding: 0;
 		overflow: hidden;
 		font-family:
-			Inter,
+			'Plus Jakarta Sans',
 			ui-sans-serif,
 			system-ui,
 			-apple-system,
@@ -5544,6 +5819,63 @@
 		padding: 0 11px;
 	}
 
+	input[type='checkbox'] {
+		position: relative;
+		width: 18px;
+		min-width: 18px;
+		height: 18px;
+		min-height: 18px;
+		margin: 0;
+		padding: 0;
+		display: inline-grid;
+		place-items: center;
+		flex: 0 0 auto;
+		border: 2px solid rgba(148, 163, 184, 0.72);
+		border-radius: 6px;
+		background: rgba(15, 23, 42, 0.22);
+		box-shadow:
+			inset 0 1px 0 rgba(255, 255, 255, 0.06),
+			0 0 0 1px rgba(15, 23, 42, 0.08);
+		appearance: none;
+		-webkit-appearance: none;
+		cursor: pointer;
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease,
+			box-shadow 0.16s ease;
+	}
+
+	input[type='checkbox']::after {
+		content: '';
+		width: 8px;
+		height: 4px;
+		border-left: 2px solid #ffffff;
+		border-bottom: 2px solid #ffffff;
+		opacity: 0;
+		transform: rotate(-45deg) scale(0.75);
+		transition:
+			opacity 0.14s ease,
+			transform 0.14s ease;
+	}
+
+	input[type='checkbox']:checked {
+		border-color: rgba(147, 197, 253, 0.95);
+		background: linear-gradient(135deg, #2563eb, #06b6d4);
+		box-shadow:
+			0 0 0 4px rgba(37, 99, 235, 0.18),
+			inset 0 1px 0 rgba(255, 255, 255, 0.22);
+	}
+
+	input[type='checkbox']:checked::after {
+		opacity: 1;
+		transform: rotate(-45deg) scale(1);
+	}
+
+	input[type='checkbox']:focus-visible {
+		outline: 2px solid rgba(147, 197, 253, 0.9);
+		outline-offset: 3px;
+	}
+
 	textarea {
 		min-height: 76px;
 		resize: vertical;
@@ -6209,6 +6541,209 @@
 		grid-template-columns: 180px 180px 180px;
 	}
 
+	.report-content-card {
+		display: grid;
+		gap: 12px;
+		margin-top: 12px;
+		border: 1px solid rgba(96, 165, 250, 0.18);
+		border-radius: 18px;
+		padding: 14px;
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.025)),
+			var(--color-surface);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+	}
+
+	.report-content-head {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.report-content-head h4 {
+		margin: 0;
+		color: var(--text-primary);
+		font-size: 14px;
+		font-weight: 900;
+	}
+
+	.report-content-head p {
+		max-width: 620px;
+	}
+
+	.report-content-actions {
+		display: inline-flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
+	.report-content-actions span {
+		min-height: 30px;
+		display: inline-flex;
+		align-items: center;
+		border: 1px solid rgba(59, 130, 246, 0.24);
+		border-radius: 999px;
+		padding: 0 10px;
+		background: var(--color-accent-muted);
+		color: var(--text-accent);
+		font-size: 11px;
+		font-weight: 900;
+		white-space: nowrap;
+	}
+
+	.report-content-search {
+		display: grid;
+		gap: 6px;
+	}
+
+	.report-content-search span {
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 900;
+		text-transform: uppercase;
+	}
+
+	.report-content-list {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+		gap: 10px;
+		max-height: 520px;
+		overflow: auto;
+		padding: 0;
+	}
+
+	.report-content-item {
+		position: relative;
+		display: grid;
+		grid-template-columns: 24px minmax(0, 1fr);
+		gap: 11px;
+		align-items: flex-start;
+		min-height: 118px;
+		padding: 14px;
+		border: 1px solid rgba(148, 163, 184, 0.2);
+		border-radius: 15px;
+		background:
+			linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01)),
+			rgba(15, 23, 42, 0.2);
+		cursor: pointer;
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease,
+			box-shadow 0.16s ease,
+			transform 0.16s ease;
+	}
+
+	.report-content-item:hover {
+		border-color: rgba(96, 165, 250, 0.34);
+		background: rgba(37, 99, 235, 0.12);
+		transform: translateY(-1px);
+	}
+
+	.report-content-item.report-content-item-checked {
+		border-color: rgba(59, 130, 246, 0.72);
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.24), rgba(14, 165, 233, 0.08)),
+			rgba(15, 23, 42, 0.22);
+		box-shadow:
+			inset 3px 0 0 rgba(59, 130, 246, 0.95),
+			0 12px 28px rgba(37, 99, 235, 0.1);
+	}
+
+	.report-content-item input {
+		position: absolute;
+		width: 1px;
+		min-width: 1px;
+		height: 1px;
+		min-height: 1px;
+		overflow: hidden;
+		margin: 0;
+		padding: 0;
+		border: 0;
+		clip: rect(0 0 0 0);
+		clip-path: inset(50%);
+		white-space: nowrap;
+		appearance: none;
+	}
+
+	.report-content-checkmark {
+		position: relative;
+		width: 22px;
+		height: 22px;
+		display: inline-grid;
+		place-items: center;
+		margin-top: 1px;
+		border: 2px solid rgba(148, 163, 184, 0.62);
+		border-radius: 8px;
+		background: rgba(15, 23, 42, 0.28);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease,
+			box-shadow 0.16s ease;
+	}
+
+	.report-content-checkmark::after {
+		content: '';
+		width: 9px;
+		height: 5px;
+		border-left: 2px solid #ffffff;
+		border-bottom: 2px solid #ffffff;
+		opacity: 0;
+		transform: rotate(-45deg) scale(0.72);
+		transition:
+			opacity 0.14s ease,
+			transform 0.14s ease;
+	}
+
+	.report-content-item.report-content-item-checked .report-content-checkmark {
+		border-color: rgba(147, 197, 253, 0.9);
+		background: linear-gradient(135deg, #2563eb, #06b6d4);
+		box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.18);
+	}
+
+	.report-content-item.report-content-item-checked .report-content-checkmark::after {
+		opacity: 1;
+		transform: rotate(-45deg) scale(1);
+	}
+
+	.report-content-item strong,
+	.report-content-item small {
+		display: block;
+		min-width: 0;
+	}
+
+	.report-content-item strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		font-weight: 900;
+		line-height: 1.25;
+	}
+
+	.report-content-meta {
+		width: fit-content;
+		max-width: 100%;
+		overflow: hidden;
+		margin-top: 6px;
+		border-radius: 999px;
+		padding: 4px 8px;
+		background: rgba(59, 130, 246, 0.12);
+		color: #bfdbfe;
+		font-size: 10px;
+		font-weight: 900;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.report-content-item small {
+		margin-top: 6px;
+		color: var(--text-secondary);
+		font-size: 11px;
+		line-height: 1.35;
+	}
+
 	.recipient-grid {
 		grid-template-columns: repeat(3, minmax(0, 1fr));
 		margin-top: 12px;
@@ -6229,6 +6764,52 @@
 		grid-template-columns: minmax(0, 1fr) auto;
 		gap: 12px;
 		align-items: end;
+	}
+
+	.manual-recipient-card {
+		display: grid;
+		gap: 12px;
+		border: 1px solid rgba(96, 165, 250, 0.22);
+		border-radius: 16px;
+		padding: 12px;
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(20, 184, 166, 0.06)),
+			var(--color-elevated);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+	}
+
+	.manual-recipient-card strong,
+	.manual-recipient-card span {
+		display: block;
+	}
+
+	.manual-recipient-card strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		font-weight: 800;
+	}
+
+	.manual-recipient-card > div:first-child span {
+		margin-top: 4px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 1.35;
+	}
+
+	.manual-recipient-form {
+		display: grid;
+		grid-template-columns: minmax(220px, 1fr) 140px auto;
+		gap: 10px;
+		align-items: end;
+	}
+
+	.manual-recipient-form label {
+		min-width: 0;
+	}
+
+	.manual-recipient-form button {
+		min-height: 40px;
+		white-space: nowrap;
 	}
 
 	.recipient-page-actions,
@@ -6793,6 +7374,8 @@
 		.reporting-form-grid,
 		.recipient-grid,
 		.recipient-picker-head,
+		.manual-recipient-form,
+		.report-content-list,
 		.telegram-vessel-picker .picker-head,
 		.selected-recipient-grid,
 		.assignable-user-row,
@@ -6807,6 +7390,7 @@
 
 	@media (max-width: 760px) {
 		.reporting-section-head,
+		.report-content-head,
 		.reporting-vessel-row,
 		.cctv-vessel-row,
 		.cctv-camera-head,

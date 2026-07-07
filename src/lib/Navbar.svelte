@@ -8,6 +8,7 @@
 		restoreSelectedVessel
 	} from '$lib/stores/selectedVessel.svelte.js';
 	import { apiRequest } from '$lib/api/authApi.js';
+	import { getDailyReportData } from '$lib/api/dailyReportApi.js';
 	import { pageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 
@@ -184,21 +185,79 @@
 
 	let latestStatusInterval = null;
 	let latestStatusRequestId = 0;
+	let todayDataReceivedRequestId = 0;
 	let lastStatusVesselId = $state(null);
+	let todayDataReceived = $state('-');
+	let todayDataReceivedStats = $state({
+		received: '-',
+		total: 1440
+	});
 
 	let latestVesselStatus = $state({
 		queue: '-',
 		sdcard: '-',
+		sdCardAvailable: false,
+		sdCardUsed: '-',
+		sdCardCapacity: '-',
 		online: false
 	});
 
 	let status = $derived({
-		dataReceived: $pageStatus?.dataReceived ?? '-',
+		dataReceived: todayDataReceived || $pageStatus?.dataReceived || '-',
+		dataReceivedReceived: todayDataReceivedStats.received ?? '-',
+		dataReceivedTotal: todayDataReceivedStats.total ?? 1440,
 		queue: latestVesselStatus.queue ?? '-',
 		sdcard: latestVesselStatus.sdcard ?? '-',
+		sdCardAvailable: latestVesselStatus.sdCardAvailable ?? false,
+		sdCardUsed: latestVesselStatus.sdCardUsed ?? '-',
+		sdCardCapacity: latestVesselStatus.sdCardCapacity ?? '-',
 		online: latestVesselStatus.online ?? false,
 		sourcePage: $pageStatus?.sourcePage ?? ''
 	});
+
+	function padDatePart(value) {
+		return String(value).padStart(2, '0');
+	}
+
+	function todayDate() {
+		const date = new Date();
+		return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
+	}
+
+	function formatDataReceivedStats(stats = {}) {
+		todayDataReceivedStats = {
+			received:
+				stats?.received_minutes ??
+				stats?.receivedMinutes ??
+				stats?.received_slots ??
+				stats?.receivedSlots ??
+				'-',
+			total:
+				stats?.total_minutes ??
+				stats?.totalMinutes ??
+				stats?.total_slots ??
+				stats?.totalSlots ??
+				1440
+		};
+
+		if (stats?.received_minutes !== undefined && stats?.total_minutes !== undefined) {
+			return `${stats.received_minutes} of ${stats.total_minutes} (${stats.percentage ?? '-' }%)`;
+		}
+
+		if (stats?.receivedMinutes !== undefined && stats?.totalMinutes !== undefined) {
+			return `${stats.receivedMinutes} of ${stats.totalMinutes} (${stats.percentage ?? '-' }%)`;
+		}
+
+		if (stats?.received_slots !== undefined && stats?.total_slots !== undefined) {
+			return `${stats.received_slots} of ${stats.total_slots} (${stats.percentage ?? '-' }%)`;
+		}
+
+		if (stats?.receivedSlots !== undefined && stats?.totalSlots !== undefined) {
+			return `${stats.receivedSlots} of ${stats.totalSlots} (${stats.percentage ?? '-' }%)`;
+		}
+
+		return '-';
+	}
 
 	function formatSdCardStatus(sdCardStats) {
 		if (!sdCardStats || sdCardStats.available === false) {
@@ -220,6 +279,39 @@
 		return 'Available';
 	}
 
+	function formatNumber(value) {
+		const number = Number(value);
+		if (!Number.isFinite(number)) return '-';
+		return number.toLocaleString('en-US');
+	}
+
+	function formatStorageFromMb(value) {
+		const number = Number(value);
+		if (!Number.isFinite(number)) return '-';
+
+		if (number >= 1000) {
+			const gb = number / 1000;
+			return `${Number.isInteger(gb) ? gb.toFixed(0) : gb.toFixed(1)} GB`;
+		}
+
+		return `${formatNumber(number)} MB`;
+	}
+
+	function normalizeSdCardDetails(sdCardStats = {}) {
+		const total = Number(sdCardStats?.sd_card_total);
+		const free = Number(sdCardStats?.sd_card_free);
+		const used = Number(
+			sdCardStats?.sd_card_used ??
+				(Number.isFinite(total) && Number.isFinite(free) ? total - free : NaN)
+		);
+
+		return {
+			available: Boolean(sdCardStats?.available),
+			used: formatStorageFromMb(used),
+			capacity: formatStorageFromMb(total)
+		};
+	}
+
 	function normalizeLatestStatus(response) {
 		const data = response?.data?.vessel_id
 			? response.data
@@ -228,10 +320,14 @@
 				: response?.queue !== undefined
 					? response
 					: response?.data || {};
+		const sdCardDetails = normalizeSdCardDetails(data.sd_card_stats);
 
 		return {
 			queue: data.queue ?? '-',
 			sdcard: formatSdCardStatus(data.sd_card_stats),
+			sdCardAvailable: sdCardDetails.available,
+			sdCardUsed: sdCardDetails.used,
+			sdCardCapacity: sdCardDetails.capacity,
 			online: Boolean(data.online)
 		};
 	}
@@ -257,6 +353,9 @@
 			latestVesselStatus = {
 				queue: '-',
 				sdcard: '-',
+				sdCardAvailable: false,
+				sdCardUsed: '-',
+				sdCardCapacity: '-',
 				online: false
 			};
 
@@ -285,8 +384,57 @@
 			latestVesselStatus = {
 				queue: '-',
 				sdcard: '-',
+				sdCardAvailable: false,
+				sdCardUsed: '-',
+				sdCardCapacity: '-',
 				online: false
 			};
+		}
+	}
+
+	async function loadTodayDataReceivedStatus(vesselId) {
+		const effectiveVesselId =
+			vesselId ||
+			$selectedVesselId ||
+			$selectedVesselInfo?.vesselId ||
+			$selectedVesselInfo?.id ||
+			$selectedVesselInfo?.dbId;
+
+		if (!effectiveVesselId) {
+			todayDataReceived = '-';
+			todayDataReceivedStats = { received: '-', total: 1440 };
+			return;
+		}
+
+		const requestId = ++todayDataReceivedRequestId;
+		const date = todayDate();
+
+		try {
+			const response = await getDailyReportData({
+				vesselId: effectiveVesselId,
+				date,
+				timezoneMode: 'auto'
+			});
+
+			if (requestId !== todayDataReceivedRequestId) return;
+
+			const payload = response?.data || response || {};
+			const stats = payload?.data_received_stats || payload?.dataReceivedStats || payload?.stats || {};
+			todayDataReceived = formatDataReceivedStats(stats);
+
+			console.log('[NAVBAR][TODAY_DATA_RECEIVED]', {
+				vesselId: effectiveVesselId,
+				date,
+				dataReceived: todayDataReceived,
+				stats
+			});
+		} catch (err) {
+			console.error('[NAVBAR][TODAY_DATA_RECEIVED_ERROR]', err);
+
+			if (requestId !== todayDataReceivedRequestId) return;
+
+			todayDataReceived = '-';
+			todayDataReceivedStats = { received: '-', total: 1440 };
 		}
 	}
 
@@ -315,9 +463,11 @@
 		}
 
 		loadLatestVesselStatus(effectiveVesselId);
+		loadTodayDataReceivedStatus(effectiveVesselId);
 
 		latestStatusInterval = setInterval(() => {
 			loadLatestVesselStatus(effectiveVesselId);
+			loadTodayDataReceivedStatus(effectiveVesselId);
 		}, 30000);
 	}
 
@@ -432,16 +582,27 @@
 			{/if}
 		</div>
 
-		<div class="topbar-item">
-			Data Received : {status.dataReceived}
+		<div class="topbar-table telemetry-count-card">
+			<div class="topbar-table-title">Telemetry Data Count ({status.dataReceivedTotal})</div>
+			<div class="topbar-table-grid two-cols">
+				<span>Received</span>
+				<span>Queue</span>
+				<strong>{status.dataReceivedReceived}</strong>
+				<strong>{status.queue}</strong>
+			</div>
 		</div>
 
-		<div class="topbar-item">
-			Queue : {status.queue}
-		</div>
-
-		<div class="topbar-item">
-			SD Card : {status.sdcard}
+		<div class="topbar-table sd-card-card">
+			<div class="topbar-table-title">
+				<span class:available-dot={status.sdCardAvailable} class:unavailable-dot={!status.sdCardAvailable} class="sd-available-dot"></span>
+				SD Card (%)
+			</div>
+			<div class="topbar-table-grid two-cols">
+				<span>Used</span>
+				<span>Capacity</span>
+				<strong>{status.sdCardUsed}</strong>
+				<strong>{status.sdCardCapacity}</strong>
+			</div>
 		</div>
 
 		<div class="topbar-item online-box" class:offline-box={!status.online}>
@@ -495,7 +656,7 @@
 
 <style>
 	.topbar {
-		height: 48px;
+		height: 62px;
 		padding: 0 10px;
 		gap: 10px;
 		background: var(--color-surface);
@@ -610,6 +771,118 @@
 		white-space: nowrap;
 		font-size: 11px;
 		font-weight: 700;
+	}
+
+	.topbar-table {
+		height: 54px;
+		min-width: 210px;
+		display: grid;
+		grid-template-rows: 21px 1fr;
+		border: 1px solid rgba(96, 165, 250, 0.22);
+		border-radius: 14px;
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.2), rgba(15, 23, 42, 0.08)),
+			rgba(15, 23, 42, 0.42);
+		color: var(--text-primary);
+		overflow: hidden;
+		box-shadow:
+			0 10px 26px rgba(2, 6, 23, 0.16),
+			inset 0 1px 0 rgba(255, 255, 255, 0.08);
+		backdrop-filter: blur(12px);
+	}
+
+	.telemetry-count-card {
+		min-width: 265px;
+		border-color: rgba(96, 165, 250, 0.32);
+	}
+
+	.sd-card-card {
+		min-width: 210px;
+		border-color: rgba(20, 184, 166, 0.26);
+		background:
+			linear-gradient(135deg, rgba(20, 184, 166, 0.14), rgba(15, 23, 42, 0.08)),
+			rgba(15, 23, 42, 0.42);
+	}
+
+	.topbar-table-title {
+		display: flex;
+		align-items: center;
+		justify-content: flex-start;
+		gap: 7px;
+		padding: 0 10px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+		color: #bfdbfe;
+		font-size: 10px;
+		line-height: 1;
+		font-weight: 800;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+
+	.topbar-table-grid {
+		display: grid;
+		min-height: 0;
+	}
+
+	.topbar-table-grid.two-cols {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.topbar-table-grid span,
+	.topbar-table-grid strong {
+		min-width: 0;
+		display: flex;
+		align-items: center;
+		padding: 0 10px;
+		border-right: 1px solid rgba(148, 163, 184, 0.14);
+		border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+		font-size: 10px;
+		line-height: 1;
+		white-space: nowrap;
+	}
+
+	.topbar-table-grid span {
+		color: #94a3b8;
+		font-weight: 800;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		background: rgba(15, 23, 42, 0.24);
+	}
+
+	.topbar-table-grid span:nth-child(2n),
+	.topbar-table-grid strong:nth-child(2n) {
+		border-right: none;
+	}
+
+	.topbar-table-grid strong {
+		justify-content: flex-end;
+		color: #f8fafc;
+		font-size: 14px;
+		font-weight: 800;
+		letter-spacing: -0.02em;
+		background: rgba(15, 23, 42, 0.1);
+	}
+
+	.sd-available-dot {
+		width: 9px;
+		height: 9px;
+		border-radius: 999px;
+		display: inline-block;
+		flex: 0 0 auto;
+		background: #94a3b8;
+		box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.12);
+	}
+
+	.sd-available-dot.available-dot {
+		background: #12b886;
+		box-shadow:
+			0 0 0 3px rgba(18, 184, 134, 0.14),
+			0 0 12px rgba(18, 184, 134, 0.46);
+	}
+
+	.sd-available-dot.unavailable-dot {
+		background: #94a3b8;
 	}
 
 	.source-box {

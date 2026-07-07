@@ -7,6 +7,8 @@
 	import { VMS_TILE_URL, VMS_TILE_OPTIONS } from '$lib/mapStyle.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
+	import CctvSnapshotImage from '$lib/components/CctvSnapshotImage.svelte';
+	import { getLatestCctvSnapshots } from '$lib/api/dashboardApi.js';
 	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
 	import {
 		createCopyableCoordinateHtml,
@@ -26,13 +28,26 @@
 	let selectedVesselId = $state(null);
 	let selectedVesselDetail = $state(null);
 	let showDetailPanel = $state(false);
+	let detailCctvSnapshots = $state([]);
+	let detailCctvLoading = $state(false);
+	let detailCctvError = $state('');
+	let detailCctvLoadedVesselId = $state(null);
+	let selectedDetailCctvKey = $state('');
 
 	let voyageProgress = $derived(getVoyageProgress(selectedVessel));
+	let detailCctvItems = $derived(normalizeDetailCctvList(detailCctvSnapshots));
+	let mainDetailCctv = $derived(
+		detailCctvItems.find((item) => item.key === selectedDetailCctvKey) || detailCctvItems[0] || null
+	);
+	let detailCctvThumbnails = $derived(
+		mainDetailCctv ? detailCctvItems.filter((item) => item.key !== mainDetailCctv.key) : []
+	);
 
 	let assetData = $state([]);
 	let assetLoading = $state(false);
 	let assetError = $state('');
 	let showAssets = $state(true);
+	let visibleAssetTypes = $state({});
 	let isMapLegendOpen = $state(true);
 	let assetMarkers = new Map();
 	let assetBoundaryCircles = new Map();
@@ -181,14 +196,120 @@
 		};
 	}
 
+	function formatCctvSnapshotTime(value) {
+		if (!value) return '';
+
+		const date = new Date(value);
+		if (Number.isNaN(date.getTime())) return String(value);
+
+		return date.toLocaleString('id-ID', {
+			day: '2-digit',
+			month: 'short',
+			year: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit',
+			second: '2-digit'
+		});
+	}
+
+	function formatCctvFileSize(value) {
+		const bytes = Number(value);
+		if (!Number.isFinite(bytes) || bytes <= 0) return '';
+
+		const units = ['B', 'KB', 'MB', 'GB'];
+		let size = bytes;
+		let unitIndex = 0;
+
+		while (size >= 1024 && unitIndex < units.length - 1) {
+			size /= 1024;
+			unitIndex += 1;
+		}
+
+		return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+	}
+
+	function normalizeDetailCctvList(value) {
+		const rawList = Array.isArray(value)
+			? value
+			: Array.isArray(value?.items)
+				? value.items
+				: Array.isArray(value?.cameras)
+					? value.cameras
+					: [];
+
+		const flattenedList = rawList.flatMap((item) => {
+			if (!Array.isArray(item?.cameras)) return [item];
+
+			return item.cameras.flatMap((camera) => {
+				const snapshots = Array.isArray(camera?.snapshots) ? camera.snapshots : [];
+
+				if (!snapshots.length) {
+					return [
+						{
+							...camera,
+							vesselId: item?.vesselId,
+							vesselName: item?.vesselName
+						}
+					];
+				}
+
+				return snapshots.map((snapshot) => ({
+					...snapshot,
+					camera_name: camera?.camera_name,
+					cameraName: camera?.cameraName,
+					camera_token: camera?.camera_token,
+					vesselId: item?.vesselId,
+					vesselName: item?.vesselName
+				}));
+			});
+		});
+
+		return flattenedList.map((item, index) => {
+			const snapshotUrl =
+				item?.presigned_url ||
+				item?.presignedUrl ||
+				item?.snapshotUrl ||
+				item?.snapshot_url ||
+				item?.url ||
+				item?.streamUrl ||
+				'';
+			const capturedAt = item?.captured_at || item?.capturedAt || item?.updatedAt || '';
+			const fileSize = Number(item?.file_size ?? item?.fileSize);
+			const name = item?.camera_name || item?.cameraName || item?.name || `CCTV ${index + 1}`;
+
+			return {
+				key:
+					item?.camera_token ||
+					item?.cameraToken ||
+					name ||
+					`${snapshotUrl || item?.file_path || item?.filePath || 'cctv'}-${capturedAt || index}`,
+				name,
+				location: item?.location || item?.position || item?.file_path || item?.filePath || '-',
+				url: snapshotUrl,
+				capturedAt,
+				capturedAtText: formatCctvSnapshotTime(capturedAt),
+				fileSizeText: formatCctvFileSize(fileSize),
+				online: Boolean(snapshotUrl)
+			};
+		});
+	}
+
+	function selectDetailCctv(cctv) {
+		if (!cctv?.key) return;
+		selectedDetailCctvKey = cctv.key;
+	}
+
 	let onlineCount = $derived(vesselData.filter((v) => v.online).length);
 	let offlineCount = $derived(vesselData.filter((v) => !v.online).length);
 	let assetLegendItems = $derived.by(() => {
 		const items = new Map();
 
 		for (const asset of assetData) {
+			const rawType = getAssetTypeValue(asset);
+			if (!String(rawType || '').trim()) continue;
+
 			const label = getAssetTypeLabel(asset);
-			const key = String(label || 'Asset').toLowerCase();
+			const key = String(rawType).trim().toLowerCase();
 
 			if (!items.has(key)) {
 				items.set(key, {
@@ -201,6 +322,28 @@
 
 		return Array.from(items.values()).sort((a, b) => a.label.localeCompare(b.label));
 	});
+
+	function getAssetTypeKey(assetOrItem = {}) {
+		return String(assetOrItem.key || getAssetTypeValue(assetOrItem) || getAssetTypeLabel(assetOrItem) || 'asset')
+			.trim()
+			.toLowerCase();
+	}
+
+	function isAssetTypeVisible(assetOrItem = {}) {
+		if (!showAssets) return false;
+
+		const key = getAssetTypeKey(assetOrItem);
+		return visibleAssetTypes[key] !== false;
+	}
+
+	function toggleAssetType(item = {}) {
+		const key = getAssetTypeKey(item);
+
+		visibleAssetTypes = {
+			...visibleAssetTypes,
+			[key]: visibleAssetTypes[key] === false
+		};
+	}
 
 	function mergeVesselWithLiveDetail(vessel, liveDetail) {
 		if (!vessel && !liveDetail) return null;
@@ -1266,6 +1409,8 @@
 		if (!showAssets) return;
 
 		assetData.forEach((asset) => {
+			if (!isAssetTypeVisible(asset)) return;
+
 			const lat = Number(asset.lat ?? asset.latitude);
 			const lng = Number(asset.lng ?? asset.longitude);
 
@@ -1275,7 +1420,7 @@
 			const assetId = String(asset.id);
 
 			const boundaryCircle = L.circle([lat, lng], {
-				radius: 500,
+				radius: 1000,
 				pane: 'assetBoundaryPane',
 				interactive: false,
 				stroke: true,
@@ -2141,6 +2286,45 @@
 		}
 	}
 
+	async function loadDetailCctvSnapshots(vesselId) {
+		if (!vesselId) {
+			detailCctvSnapshots = [];
+			detailCctvLoadedVesselId = null;
+			selectedDetailCctvKey = '';
+			return [];
+		}
+
+		detailCctvLoading = true;
+		detailCctvError = '';
+
+		try {
+			const result = await getLatestCctvSnapshots(vesselId);
+			const snapshots = Array.isArray(result)
+				? result
+				: Array.isArray(result?.items)
+					? result.items
+					: Array.isArray(result?.snapshots)
+						? result.snapshots
+						: Array.isArray(result?.data)
+							? result.data
+							: [];
+
+			detailCctvSnapshots = snapshots;
+			detailCctvLoadedVesselId = String(vesselId);
+			selectedDetailCctvKey = '';
+			return snapshots;
+		} catch (error) {
+			console.error('[FLEET_DETAIL_CCTV_ERROR]', error);
+			detailCctvSnapshots = [];
+			detailCctvError = error?.message || 'Failed to load CCTV snapshots.';
+			detailCctvLoadedVesselId = String(vesselId);
+			selectedDetailCctvKey = '';
+			return [];
+		} finally {
+			detailCctvLoading = false;
+		}
+	}
+
 	async function loadVesselDetail(id) {
 		if (!id) return null;
 
@@ -2374,11 +2558,41 @@
 
 	$effect(() => {
 		showAssets;
+		visibleAssetTypes;
 		assetData;
 
 		if (!map || !L) return;
 
 		buildAssetMarkers();
+	});
+
+	$effect(() => {
+		showDetailPanel;
+		selectedVesselId;
+
+		if (!showDetailPanel || !selectedVesselId) {
+			detailCctvSnapshots = [];
+			detailCctvError = '';
+			detailCctvLoading = false;
+			detailCctvLoadedVesselId = null;
+			selectedDetailCctvKey = '';
+			return;
+		}
+
+		if (String(detailCctvLoadedVesselId) === String(selectedVesselId) || detailCctvLoading) return;
+
+		loadDetailCctvSnapshots(selectedVesselId);
+	});
+
+	$effect(() => {
+		if (!detailCctvItems.length) {
+			if (selectedDetailCctvKey) selectedDetailCctvKey = '';
+			return;
+		}
+
+		if (!detailCctvItems.some((item) => item.key === selectedDetailCctvKey)) {
+			selectedDetailCctvKey = detailCctvItems[0]?.key || '';
+		}
 	});
 
 	$effect(() => {
@@ -2422,8 +2636,7 @@
 		title={isSidebarOpen ? 'Hide vessels' : 'Show vessels'}
 		onclick={toggleSidebar}
 	>
-		<span aria-hidden="true">☰</span>
-		<span>{isSidebarOpen ? 'Hide Vessels' : 'Show Vessels'}</span>
+		<span class="sidebar-toggle-icon" aria-hidden="true">{isSidebarOpen ? '<' : '>'}</span>
 	</button>
 
 	{#if isSidebarOpen}
@@ -2653,6 +2866,98 @@
 								<span aria-hidden="true">↗</span>
 							</button>
 
+							<section class="detail-section detail-cctv-section">
+								<div class="detail-section-heading">
+									<div>
+										<span class="detail-section-kicker">CCTV</span>
+										<h3>Latest camera snapshot</h3>
+									</div>
+									<strong class="detail-cctv-count">
+										{detailCctvLoading ? 'Loading...' : `${detailCctvItems.length} cameras`}
+									</strong>
+								</div>
+
+								{#if detailCctvLoading}
+									<div class="detail-cctv-layout">
+										<div class="detail-cctv-box detail-cctv-main detail-cctv-skeleton" aria-hidden="true">
+											<span></span>
+											<strong></strong>
+											<small></small>
+										</div>
+										<div class="detail-cctv-thumb-row" aria-hidden="true">
+											{#each Array(3) as _}
+												<div class="detail-cctv-box detail-cctv-thumb detail-cctv-skeleton">
+													<strong></strong>
+												</div>
+											{/each}
+										</div>
+									</div>
+								{:else if !detailCctvItems.length}
+									<div class="detail-cctv-empty">
+										{detailCctvError || 'Latest CCTV snapshot is not available for this vessel.'}
+									</div>
+								{:else}
+									<div class="detail-cctv-layout">
+										{#if mainDetailCctv}
+											<div
+												class="detail-cctv-box detail-cctv-main"
+												class:has-snapshot={Boolean(mainDetailCctv.url)}
+												class:offline={!mainDetailCctv.online}
+											>
+												{#if mainDetailCctv.url}
+													<CctvSnapshotImage
+														class="detail-cctv-img"
+														src={mainDetailCctv.url}
+														filePath={mainDetailCctv.location}
+														alt={`${mainDetailCctv.name} latest snapshot`}
+														loading="eager"
+													/>
+												{/if}
+
+												<div class="detail-cctv-content">
+													<strong>{mainDetailCctv.name}</strong>
+													{#if mainDetailCctv.capturedAtText}
+														<span>{mainDetailCctv.capturedAtText}</span>
+													{/if}
+													{#if mainDetailCctv.fileSizeText}
+														<small>{mainDetailCctv.fileSizeText}</small>
+													{/if}
+												</div>
+											</div>
+										{/if}
+
+										{#if detailCctvThumbnails.length}
+											<div class="detail-cctv-thumb-row" aria-label="CCTV camera list">
+												{#each detailCctvThumbnails as cctv (cctv.key)}
+													<button
+														type="button"
+														class="detail-cctv-box detail-cctv-thumb"
+														class:has-snapshot={Boolean(cctv.url)}
+														class:offline={!cctv.online}
+														onclick={() => selectDetailCctv(cctv)}
+														title={`Show ${cctv.name}`}
+													>
+														{#if cctv.url}
+															<CctvSnapshotImage
+																class="detail-cctv-img"
+																src={cctv.url}
+																filePath={cctv.location}
+																alt={`${cctv.name} latest snapshot`}
+																loading="lazy"
+															/>
+														{/if}
+
+														<div class="detail-cctv-content">
+															<strong>{cctv.name}</strong>
+														</div>
+													</button>
+												{/each}
+											</div>
+										{/if}
+									</div>
+								{/if}
+							</section>
+
 							<section class="detail-section">
 								<div class="detail-section-heading">
 									<div>
@@ -2662,9 +2967,6 @@
 									<div class="detail-time-stack">
 										<span class="detail-utc-badge">
 											{getTelemetryUtcLabel(selectedVessel)}
-										</span>
-										<span class="detail-updated-badge">
-											{formatLastUpdatedBadge(selectedVessel.lastUpdated)}
 										</span>
 									</div>
 								</div>
@@ -2683,6 +2985,11 @@
 								</div>
 
 								<div class="detail-grid two-col">
+									<div class="detail-item detail-updated-item">
+										<span>Last Updated</span>
+										<strong>{formatLastUpdatedBadge(selectedVessel.lastUpdated)}</strong>
+									</div>
+
 									<div
 										class="detail-item connection-time-item"
 										class:latest-connected={getLatestConnectionEvent(selectedVessel) === 'connected'}
@@ -2699,26 +3006,15 @@
 										<strong>{formatTelemetryTime(selectedVessel.lastDisconnectTime)}</strong>
 									</div>
 
-									<div class="detail-item">
-										<span>Latitude</span>
+									<div class="detail-item coordinates-detail-item">
+										<span>Coordinates</span>
 										<strong>
 											<CopyableCoordinate
-												value={formatMissingValue(selectedVessel.latitude)}
-												display={formatMissingValue(selectedVessel.latitude)}
-												label="latitude"
+												value={`${formatMissingValue(selectedVessel.latitude)}, ${formatMissingValue(selectedVessel.longitude)}`}
+												display={`${formatMissingValue(selectedVessel.latitude)}, ${formatMissingValue(selectedVessel.longitude)}`}
+												label="latitude and longitude"
 												compact
-											/>
-										</strong>
-									</div>
-
-									<div class="detail-item">
-										<span>Longitude</span>
-										<strong>
-											<CopyableCoordinate
-												value={formatMissingValue(selectedVessel.longitude)}
-												display={formatMissingValue(selectedVessel.longitude)}
-												label="longitude"
-												compact
+												class="coordinate-pair-copy"
 											/>
 										</strong>
 									</div>
@@ -2892,16 +3188,23 @@
 							<div class="legend-section">
 								<div class="legend-item">
 									<span class="asset-boundary-legend" aria-hidden="true"></span>
-									<span>Boundary 500 m</span>
+									<span>Boundary 1 km</span>
 								</div>
 
 								{#if assetLegendItems.length}
-									<div class="legend-asset-icons" aria-label="Asset types on map">
+									<div class="legend-asset-list" aria-label="Asset types on map">
 										{#each assetLegendItems as item}
-											<span class="legend-asset-item" title={item.label}>
+											<button
+												type="button"
+												class:asset-type-visible={isAssetTypeVisible(item)}
+												class="legend-asset-toggle-row"
+												title={`${isAssetTypeVisible(item) ? 'Hide' : 'Show'} ${item.label}`}
+												onclick={() => toggleAssetType(item)}
+											>
 												<img src={item.iconUrl} alt="" />
 												<span>{item.label}</span>
-											</span>
+												<i aria-hidden="true"></i>
+											</button>
 										{/each}
 									</div>
 								{/if}
@@ -2928,15 +3231,6 @@
 									Current: {showCurrentParticles ? 'On' : 'Off'}
 								</button>
 
-								<button
-									type="button"
-									class:active-asset-toggle={showAssets}
-									class="asset-toggle-btn"
-									onclick={() => (showAssets = !showAssets)}
-								>
-									<span class="asset-toggle-icon"></span>
-									Assets: {showAssets ? 'On' : 'Off'}
-								</button>
 							</div>
 						</div>
 					{/if}
@@ -3311,40 +3605,6 @@
 		font-weight: 900;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-	}
-
-	.asset-toggle-icon {
-		width: 9px;
-		height: 9px;
-		border-radius: 999px;
-		background: #f59e0b;
-		box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.16);
-		flex-shrink: 0;
-	}
-
-	.asset-toggle-btn {
-		height: 25px;
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		padding: 0 9px;
-		border: 1px solid rgba(245, 158, 11, 0.34);
-		border-radius: 999px;
-		background: rgba(245, 158, 11, 0.1);
-		color: #fed7aa;
-		font-size: 9px;
-		line-height: 1;
-		font-weight: 800;
-		cursor: pointer;
-	}
-
-	.asset-toggle-btn.active-asset-toggle {
-		background: rgba(245, 158, 11, 0.18);
-		border-color: #f59e0b;
-	}
-
-	.asset-toggle-btn:hover {
-		background: rgba(245, 158, 11, 0.22);
 	}
 
 	:global(.wind-particle-canvas) {
@@ -3726,9 +3986,9 @@
 	.sidebar-toggle-btn {
 		position: absolute;
 		top: 50%;
-		left: calc(var(--fleet-main-sidebar-offset) + 14px);
+		left: calc(var(--fleet-main-sidebar-offset) - 5px);
 		z-index: 950;
-		width: 42px;
+		width: 32px;
 		min-height: 92px;
 		display: inline-flex;
 		flex-direction: column;
@@ -3736,7 +3996,7 @@
 		justify-content: center;
 		gap: 7px;
 		border: 1px solid rgba(147, 197, 253, 0.42);
-		border-radius: 18px;
+		border-radius: 14px;
 		background:
 			linear-gradient(180deg, rgba(30, 64, 175, 0.28), rgba(15, 23, 42, 0.08)),
 			rgba(15, 23, 42, 0.9);
@@ -3803,7 +4063,7 @@
 		content: '<';
 	}
 
-	.sidebar-toggle-btn span:last-of-type {
+	.sidebar-toggle-btn .sidebar-toggle-label {
 		writing-mode: vertical-rl;
 		text-orientation: mixed;
 		letter-spacing: 0.03em;
@@ -4190,24 +4450,25 @@
 		justify-content: center;
 		min-width: 0;
 		max-width: 88px;
-		height: 24px;
-		padding: 0 8px;
+		height: auto;
+		padding: 0;
 		overflow: hidden;
-		border: 1px solid rgba(96, 165, 250, 0.22);
-		border-radius: 999px;
-		background: rgba(37, 99, 235, 0.13);
-		color: #bfdbfe;
-		font-size: 9.4px;
-		font-weight: 800;
-		letter-spacing: 0.04em;
-		line-height: 1;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		color: rgba(191, 219, 254, 0.86);
+		font-size: 8.8px;
+		font-weight: 750;
+		letter-spacing: 0.045em;
+		line-height: 1.15;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+		pointer-events: none;
 	}
 
 	.vessel-card.offline-card .vessel-utc-badge {
-		border-color: rgba(148, 163, 184, 0.2);
-		background: rgba(100, 116, 139, 0.12);
+		border-color: transparent;
+		background: transparent;
 		color: rgba(203, 213, 225, 0.78);
 	}
 
@@ -4245,15 +4506,6 @@
 		background: #22c55e;
 	}
 
-	.vessel-card.selected-card .location-button {
-		background: var(--color-accent-muted);
-		border-color: #bfdbfe;
-	}
-
-	.vessel-card.selected-card .location-button.has-coordinate {
-		background: #dcfce7;
-		border-color: #86efac;
-	}
 	.vessel-metric-row {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4331,7 +4583,7 @@
 	.fleet-map-panel {
 		position: absolute;
 		inset: 0;
-		z-index: 1;
+		z-index: auto;
 		display: flex;
 		flex-direction: column;
 		min-width: 0;
@@ -4450,25 +4702,29 @@
 
 	.map-legend {
 		position: absolute;
-		top: 12px;
-		right: 12px;
+		left: calc(var(--fleet-main-sidebar-offset) + 12px);
+		right: auto;
+		top: auto;
+		bottom: 12px;
 		display: grid;
 		gap: 9px;
-		width: min(310px, calc(100% - 24px));
-		max-height: calc(100% - 24px);
+		width: min(260px, calc(100% - var(--fleet-main-sidebar-offset) - 24px));
+		max-height: min(480px, calc(100% - 24px));
 		overflow: auto;
 		padding: 11px;
 		border-radius: 14px;
 		background:
-			linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.84)),
-			rgba(15, 23, 42, 0.88);
-		border: 1px solid rgba(147, 197, 253, 0.24);
+			linear-gradient(180deg, rgba(15, 23, 42, 0.52), rgba(15, 23, 42, 0.38)),
+			rgba(15, 23, 42, 0.34);
+		border: 1px solid rgba(147, 197, 253, 0.14);
 		box-shadow:
-			0 18px 40px rgba(15, 23, 42, 0.24),
-			inset 0 1px 0 rgba(255, 255, 255, 0.08);
-		backdrop-filter: blur(14px) saturate(1.12);
-		z-index: 700;
+			0 18px 40px rgba(15, 23, 42, 0.12),
+			inset 0 1px 0 rgba(255, 255, 255, 0.045);
+		backdrop-filter: blur(8px) saturate(1.04);
+		z-index: 980;
 		transition:
+			left 0.22s ease,
+			bottom 0.22s ease,
 			width 0.2s ease,
 			padding 0.2s ease,
 			background 0.2s ease,
@@ -4476,13 +4732,47 @@
 			box-shadow 0.2s ease;
 	}
 
+	:global(body .app-content .fleet-page .map-legend) {
+		background:
+			linear-gradient(180deg, rgba(15, 23, 42, 0.52), rgba(15, 23, 42, 0.38)),
+			rgba(15, 23, 42, 0.34) !important;
+		border-color: rgba(147, 197, 253, 0.14) !important;
+		box-shadow:
+			0 18px 40px rgba(15, 23, 42, 0.12),
+			inset 0 1px 0 rgba(255, 255, 255, 0.045) !important;
+		backdrop-filter: blur(8px) saturate(1.04) !important;
+	}
+
+	:global(body .app-content .fleet-page .map-legend.legend-collapsed) {
+		background:
+			linear-gradient(180deg, rgba(15, 23, 42, 0.48), rgba(15, 23, 42, 0.34)),
+			rgba(15, 23, 42, 0.3) !important;
+	}
+
+	:global(body .app-content .fleet-page .map-legend .legend-body),
+	:global(body .app-content .fleet-page .map-legend .legend-section),
+	:global(body .app-content .fleet-page .map-legend .legend-asset-list),
+	:global(body .app-content .fleet-page .map-legend .legend-item) {
+		background: transparent !important;
+		border-color: transparent !important;
+		box-shadow: none !important;
+	}
+
+	.fleet-layout:not(.sidebar-collapsed) .map-legend {
+		left: calc(var(--fleet-main-sidebar-offset) + var(--fleet-sidebar-width) + 16px);
+		width: min(
+			260px,
+			calc(100% - var(--fleet-main-sidebar-offset) - var(--fleet-sidebar-width) - 28px)
+		);
+	}
+
 	.map-legend.legend-collapsed {
 		width: auto;
 		min-width: 0;
 		padding: 8px 9px;
 		background:
-			linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.78)),
-			rgba(15, 23, 42, 0.82);
+			linear-gradient(180deg, rgba(15, 23, 42, 0.48), rgba(15, 23, 42, 0.34)),
+			rgba(15, 23, 42, 0.3);
 	}
 
 	.legend-header {
@@ -4558,8 +4848,8 @@
 
 	.legend-section {
 		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 7px;
+		grid-template-columns: 1fr;
+		gap: 8px;
 		padding: 0;
 		border: 0;
 		background: transparent !important;
@@ -4576,6 +4866,7 @@
 		align-items: center;
 		gap: 7px;
 		min-width: 0;
+		background: transparent;
 		color: rgba(226, 232, 240, 0.9);
 		font-size: 10px;
 		line-height: 1.15;
@@ -4678,34 +4969,84 @@
 		flex: 0 0 auto;
 	}
 
-	.legend-asset-icons {
-		grid-column: 1 / -1;
-		display: flex;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 6px;
+	.legend-asset-list {
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: 4px;
 		min-width: 0;
 	}
 
-	.legend-asset-item {
-		display: inline-flex;
+	.legend-asset-toggle-row {
+		width: 100%;
+		min-height: 27px;
+		display: grid;
+		grid-template-columns: 20px minmax(0, 1fr) auto;
 		align-items: center;
-		gap: 5px;
-		min-height: 26px;
-		padding: 4px 7px;
-		border: 1px solid rgba(245, 158, 11, 0.22);
-		border-radius: 999px;
-		background: rgba(15, 23, 42, 0.36);
+		gap: 8px;
+		padding: 3px 2px;
+		border: 0;
+		border-radius: 8px;
+		background: transparent;
 		color: rgba(226, 232, 240, 0.92);
 		font-size: 9.5px;
 		font-weight: 650;
+		text-align: left;
+		cursor: pointer;
+		transition:
+			color 0.15s ease,
+			background 0.15s ease;
 	}
 
-	.legend-asset-item img {
+	.legend-asset-toggle-row:hover {
+		background: rgba(148, 163, 184, 0.08);
+		color: #ffffff;
+	}
+
+	.legend-asset-toggle-row img {
 		width: 18px;
 		height: 18px;
 		object-fit: contain;
 		filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.34));
+	}
+
+	.legend-asset-toggle-row span {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.legend-asset-toggle-row i {
+		position: relative;
+		width: 26px;
+		height: 14px;
+		border-radius: 999px;
+		background: rgba(100, 116, 139, 0.42);
+		box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.22);
+	}
+
+	.legend-asset-toggle-row i::before {
+		content: '';
+		position: absolute;
+		left: 2px;
+		top: 2px;
+		width: 10px;
+		height: 10px;
+		border-radius: 999px;
+		background: rgba(226, 232, 240, 0.78);
+		transition:
+			transform 0.16s ease,
+			background 0.16s ease;
+	}
+
+	.legend-asset-toggle-row.asset-type-visible i {
+		background: rgba(245, 158, 11, 0.28);
+		box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.45);
+	}
+
+	.legend-asset-toggle-row.asset-type-visible i::before {
+		transform: translateX(12px);
+		background: #f59e0b;
 	}
 
 	.legend-actions {
@@ -4714,7 +5055,7 @@
 		flex-wrap: wrap;
 		gap: 6px;
 		padding-top: 8px;
-		border-top: 1px solid rgba(148, 163, 184, 0.14);
+		border-top: 1px solid rgba(148, 163, 184, 0.1);
 	}
 
 	/* =========================
@@ -5069,6 +5410,11 @@
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 
+	.detail-grid.two-col .detail-updated-item,
+	.detail-grid.two-col .coordinates-detail-item {
+		grid-column: 1 / -1;
+	}
+
 	.detail-item {
 		min-width: 0;
 	}
@@ -5088,6 +5434,20 @@
 		font-size: 8.8px;
 		line-height: 1.25;
 		font-weight: 800;
+		word-break: break-word;
+	}
+
+	.coordinates-detail-item strong {
+		width: 100%;
+	}
+
+	:global(.coordinates-detail-item .coordinate-pair-copy) {
+		width: 100%;
+		justify-content: space-between;
+	}
+
+	:global(.coordinates-detail-item .coordinate-pair-copy .copyable-coordinate-value) {
+		white-space: normal;
 		word-break: break-word;
 	}
 
@@ -5619,8 +5979,7 @@
 		padding: 12px;
 		border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 		background:
-			radial-gradient(circle at 0% 0%, rgba(59, 130, 246, 0.16), transparent 48%),
-			rgba(17, 24, 39, 0.88);
+			radial-gradient(circle at 0% 0%, rgba(59, 130, 246, 0.16), transparent 48%);
 		align-items: flex-start;
 		flex-wrap: wrap;
 	}
@@ -5871,18 +6230,214 @@
 	}
 
 	.detail-utc-badge {
-		padding: 5px 10px;
-		border: 1px solid rgba(96, 165, 250, 0.28);
+		padding: 0;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		color: rgba(191, 219, 254, 0.9);
+		font-size: 9px;
+		font-weight: 750;
+		letter-spacing: 0.06em;
+		line-height: 1.15;
+		text-transform: uppercase;
+		white-space: nowrap;
+		box-shadow: none;
+	}
+
+	.detail-cctv-section {
+		padding: 9px;
+	}
+
+	.detail-cctv-count {
+		flex: 0 0 auto;
+		padding: 4px 7px;
+		border: 1px solid rgba(96, 165, 250, 0.18);
 		border-radius: 999px;
-		background: rgba(37, 99, 235, 0.18);
+		background: rgba(59, 130, 246, 0.12);
 		color: #bfdbfe;
-		font-size: 10px;
-		font-weight: 900;
-		letter-spacing: 0.08em;
+		font-size: 8px;
+		font-weight: 800;
+		letter-spacing: 0.04em;
 		line-height: 1;
 		text-transform: uppercase;
 		white-space: nowrap;
-		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+	}
+
+	.detail-cctv-layout {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+
+	.detail-cctv-thumb-row {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 5px;
+	}
+
+	.detail-cctv-box {
+		position: relative;
+		display: flex;
+		min-width: 0;
+		overflow: hidden;
+		aspect-ratio: 4 / 3;
+		flex-direction: column;
+		justify-content: flex-end;
+		padding: 8px;
+		border: 1px solid rgba(148, 163, 184, 0.14);
+		border-radius: 12px;
+		background:
+			linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0)),
+			#111827;
+		color: #f8fafc;
+	}
+
+	button.detail-cctv-box {
+		width: 100%;
+		border: 1px solid rgba(148, 163, 184, 0.14);
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.detail-cctv-box::before {
+		content: '';
+		position: absolute;
+		inset: 0;
+		z-index: 1;
+		background:
+			linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+			linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+		background-size: 20px 20px;
+		opacity: 0.28;
+		pointer-events: none;
+	}
+
+	.detail-cctv-box.has-snapshot::before {
+		background: linear-gradient(180deg, rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0.72));
+		opacity: 1;
+	}
+
+	.detail-cctv-box.offline {
+		filter: grayscale(0.3);
+		opacity: 0.78;
+	}
+
+	:global(.detail-cctv-img) {
+		position: absolute;
+		inset: 0;
+		z-index: 0;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+
+	.detail-cctv-content {
+		position: relative;
+		z-index: 2;
+		display: grid;
+		align-self: stretch;
+		gap: 2px;
+		margin-top: auto;
+		padding: 7px 8px;
+		border: 1px solid rgba(148, 163, 184, 0.12);
+		border-radius: 10px;
+		background: rgba(15, 23, 42, 0.72);
+		backdrop-filter: blur(8px);
+	}
+
+	.detail-cctv-content strong {
+		overflow: hidden;
+		color: #f8fafc;
+		font-size: 10px;
+		font-weight: 800;
+		line-height: 1.15;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.detail-cctv-content span,
+	.detail-cctv-content small {
+		overflow: hidden;
+		color: #cbd5e1;
+		font-size: 8px;
+		font-weight: 700;
+		line-height: 1.15;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.detail-cctv-thumb {
+		padding: 5px;
+		border-radius: 9px;
+	}
+
+	.detail-cctv-thumb:hover {
+		border-color: rgba(96, 165, 250, 0.46);
+		filter: brightness(1.08);
+	}
+
+	.detail-cctv-thumb .detail-cctv-content {
+		padding: 5px 6px;
+		border-radius: 8px;
+	}
+
+	.detail-cctv-thumb .detail-cctv-content strong {
+		font-size: 8px;
+	}
+
+	.detail-cctv-empty {
+		padding: 14px 10px;
+		border: 1px dashed rgba(148, 163, 184, 0.2);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.22);
+		color: var(--text-secondary);
+		font-size: 9px;
+		font-weight: 750;
+		text-align: center;
+	}
+
+	.detail-cctv-skeleton span,
+	.detail-cctv-skeleton strong,
+	.detail-cctv-skeleton small {
+		position: relative;
+		z-index: 2;
+		display: block;
+		overflow: hidden;
+		border-radius: 999px;
+		background: rgba(148, 163, 184, 0.18);
+	}
+
+	.detail-cctv-skeleton span {
+		width: 48px;
+		height: 12px;
+	}
+
+	.detail-cctv-skeleton strong {
+		width: 72%;
+		height: 14px;
+	}
+
+	.detail-cctv-skeleton small {
+		width: 52%;
+		height: 9px;
+	}
+
+	.detail-cctv-skeleton span::after,
+	.detail-cctv-skeleton strong::after,
+	.detail-cctv-skeleton small::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		transform: translateX(-100%);
+		background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.16), transparent);
+		animation: detail-cctv-shimmer 1.25s infinite;
+	}
+
+	@keyframes detail-cctv-shimmer {
+		100% {
+			transform: translateX(100%);
+		}
 	}
 
 	.detail-hero-metrics {
@@ -6125,7 +6680,7 @@
 			position: absolute;
 			top: 50%;
 			left: calc(var(--fleet-main-sidebar-offset) + 10px);
-			z-index: 950;
+			z-index: 650;
 			width: 38px;
 			height: auto;
 			min-height: 82px;
@@ -6162,7 +6717,7 @@
 			font-size: 12px;
 		}
 
-		.sidebar-toggle-btn span:last-of-type {
+		.sidebar-toggle-btn .sidebar-toggle-label {
 			writing-mode: vertical-rl;
 			font-size: 8px;
 			letter-spacing: 0.03em;
@@ -6292,13 +6847,23 @@
 		}
 
 		.map-legend {
-			top: 8px;
-			right: 8px;
+			top: auto;
+			right: auto;
+			left: calc(var(--fleet-main-sidebar-offset) + 8px);
+			bottom: 8px;
 			width: min(238px, calc(100% - 72px));
 			max-height: min(52vh, 360px);
 			padding: 7px;
 			border-radius: 14px;
 			overflow: hidden;
+		}
+
+		.fleet-layout:not(.sidebar-collapsed) .map-legend {
+			left: min(
+				calc(var(--fleet-main-sidebar-offset) + var(--fleet-sidebar-width) + 10px),
+				calc(100% - 54px)
+			);
+			width: min(238px, calc(100% - 72px));
 		}
 
 		.map-legend.legend-collapsed {
@@ -6374,20 +6939,34 @@
 			height: 20px;
 		}
 
-		.legend-asset-icons {
-			gap: 5px;
+		.legend-asset-list {
+			gap: 3px;
 		}
 
-		.legend-asset-item {
+		.legend-asset-toggle-row {
 			min-height: 25px;
-			padding: 4px 7px;
+			padding: 3px 1px;
 			gap: 5px;
 			font-size: 8px;
 		}
 
-		.legend-asset-item img {
+		.legend-asset-toggle-row img {
 			width: 15px;
 			height: 15px;
+		}
+
+		.legend-asset-toggle-row i {
+			width: 24px;
+			height: 13px;
+		}
+
+		.legend-asset-toggle-row i::before {
+			width: 9px;
+			height: 9px;
+		}
+
+		.legend-asset-toggle-row.asset-type-visible i::before {
+			transform: translateX(11px);
 		}
 
 		.legend-actions {
@@ -6396,8 +6975,7 @@
 		}
 
 		.legend-actions .wind-toggle-btn,
-		.legend-actions .current-toggle-btn,
-		.legend-actions .asset-toggle-btn {
+		.legend-actions .current-toggle-btn {
 			min-height: 26px;
 			padding: 0 8px;
 			font-size: 9px;

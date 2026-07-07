@@ -48,8 +48,6 @@
 {/if}
 
 <style>
-	@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap');
-
 	:global(html),
 	:global(body) {
 		width: 100%;
@@ -59,7 +57,6 @@
 		overflow: hidden;
 		font-family:
 			'Plus Jakarta Sans',
-			Inter,
 			ui-sans-serif,
 			system-ui,
 			-apple-system,
@@ -112,7 +109,7 @@
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 		font-family:
-			Inter,
+			'Plus Jakarta Sans',
 			ui-sans-serif,
 			system-ui,
 			-apple-system,

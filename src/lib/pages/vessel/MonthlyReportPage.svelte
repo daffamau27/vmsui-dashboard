@@ -569,8 +569,8 @@
 	const monthlyEngineFuelSources = [
 		{ key: 'ecu', label: 'ECU' },
 		{ key: 'fms', label: 'FMS' },
-		{ key: 'ems_internal', label: 'EMS Internal' },
-		{ key: 'ems_external', label: 'EMS External' },
+		{ key: 'ems_internal', label: 'VMS' },
+		{ key: 'ems_external', label: 'EMS' },
 		{ key: 'engine_maker', label: 'Engine Maker' }
 	];
 
@@ -606,11 +606,11 @@
 		);
 
 		if (sourceKey === 'ems_internal') {
-			return hasInternal && hasExternal ? 'EMS Internal' : 'EMS';
+			return hasInternal && hasExternal ? 'VMS' : 'EMS';
 		}
 
 		if (sourceKey === 'ems_external') {
-			return hasInternal && hasExternal ? 'EMS External' : 'EMS';
+			return 'EMS';
 		}
 
 		if (sourceKey === 'engine_maker') return 'Engine Maker';

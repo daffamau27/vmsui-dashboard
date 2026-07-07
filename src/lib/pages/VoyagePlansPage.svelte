@@ -2849,7 +2849,7 @@
 		overflow-x: hidden;
 		box-sizing: border-box;
 		font-family:
-			Inter,
+			'Plus Jakarta Sans',
 			ui-sans-serif,
 			system-ui,
 			-apple-system,
@@ -2860,7 +2860,7 @@
 
 	:global(.leaflet-container) {
 		font-family:
-			Inter,
+			'Plus Jakarta Sans',
 			ui-sans-serif,
 			system-ui,
 			-apple-system,
@@ -2948,7 +2948,7 @@
 		border-radius: 14px;
 		background: #0f172a;
 		font-family:
-			Inter,
+			'Plus Jakarta Sans',
 			ui-sans-serif,
 			system-ui,
 			-apple-system,

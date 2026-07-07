@@ -28,7 +28,7 @@
             <span>⚓</span>
           </div>
           <div>
-            <p class="eyebrow">Maritime Monitoring System</p>
+            <p class="eyebrow">Vessel Monitoring System</p>
             <h1>VMS Dashboard</h1>
           </div>
         </div>

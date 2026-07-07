@@ -1,11 +1,12 @@
 <script>
-	import { onMount } from 'svelte';
+	import { flushSync, onDestroy } from 'svelte';
 	import VesselMap from '$lib/VesselMap.svelte';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
 	import { getVesselCctvSnapshots, getVesselTrace } from '$lib/api/traceApi.js';
 	import { fade, fly, scale } from 'svelte/transition';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
+	import CctvSnapshotImage from '$lib/components/CctvSnapshotImage.svelte';
 
 	let { active = false } = $props();
 
@@ -15,7 +16,9 @@
 
 	let isPlaying = $state(false);
 	let activeIndex = $state(0);
-	let loadedKeys = $state({});
+	let playbackRenderTick = $state(0);
+	let playbackInterval = null;
+	let lastPlaybackToggleAt = 0;
 
 	let startDateTime = $state('');
 	let endDateTime = $state('');
@@ -25,33 +28,15 @@
 	let cctvItems = $state([]);
 	let cctvSnapshotsError = $state('');
 	let cctvSnapshotsTotal = $state(0);
-	let selectedCctvIndex = $state(0);
-	let cctvAnimationKey = $state(0);
-	const CCTV_SNAPSHOT_PAGE_SIZE = 12;
-
-	let selectedCctv = $derived(cctvItems[selectedCctvIndex] || cctvItems[0] || null);
-
-	let miniCctvItems = $derived(
-		cctvItems
-			.map((item, index) => ({ ...item, index }))
-			.filter((item) => item.index !== selectedCctvIndex)
-	);
-
-	function selectCctv(index) {
-		if (index === selectedCctvIndex) return;
-
-		selectedCctvIndex = index;
-		cctvAnimationKey += 1;
-	}
+	let cctvSnapshotsBuffering = $state(false);
+	let cctvSnapshotsLoadedPages = $state(0);
+	let selectedCctvPanelKey = $state('');
+	let cctvSnapshotRequestId = 0;
+	const CCTV_SNAPSHOT_PAGE_SIZE = 50;
+	const ENABLE_CCTV_BACKGROUND_BUFFER = true;
 
 	function pad(value) {
 		return String(value).padStart(2, '0');
-	}
-
-	function toLocalInputValue(date) {
-		return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
-			date.getDate()
-		)}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 	}
 
 	function toApiDateTime(value) {
@@ -68,12 +53,7 @@
 
 	function toSnapshotApiDateTime(value) {
 		if (!value) return '';
-
-		const date = new Date(value);
-
-		if (Number.isNaN(date.getTime())) return value;
-
-		return date.toISOString();
+		return toApiDateTime(value);
 	}
 
 	function toNumber(value, fallback = 0) {
@@ -90,35 +70,92 @@
 	function formatDateTime(value) {
 		if (!value) return '-';
 
-		if (/^\d+$/.test(String(value))) {
-			const date = new Date(Number(value));
+		const timestampMs = parseDateTimeMs(value);
 
-			if (!Number.isNaN(date.getTime())) {
-				return date.toLocaleString('en-US', {
-					day: '2-digit',
-					month: 'short',
-					year: 'numeric',
-					hour: '2-digit',
-					minute: '2-digit',
-					second: '2-digit'
-				});
-			}
-		}
-
-		const date = new Date(value);
-
-		if (!Number.isNaN(date.getTime())) {
-			return date.toLocaleString('en-US', {
-				day: '2-digit',
-				month: 'short',
-				year: 'numeric',
-				hour: '2-digit',
-				minute: '2-digit',
-				second: '2-digit'
-			});
+		if (Number.isFinite(timestampMs)) {
+			return formatTimestampMs(timestampMs);
 		}
 
 		return value;
+	}
+
+	function formatTimestampMs(timestampMs) {
+		const date = new Date(timestampMs);
+
+		if (Number.isNaN(date.getTime())) return '-';
+
+		return date.toLocaleString('en-US', {
+			day: '2-digit',
+			month: 'short',
+			year: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit',
+			second: '2-digit'
+		});
+	}
+
+	function parseDateTimeMs(value) {
+		if (!value) return NaN;
+
+		const rawValue = String(value).trim();
+
+		if (/^\d+$/.test(rawValue)) {
+			const number = Number(rawValue);
+			return Number.isFinite(number) ? number : NaN;
+		}
+
+		const timezoneMatch = rawValue.match(/\(UTC([+-])(\d{1,2})(?::?(\d{2}))?\)/i);
+		const timezoneOffsetMinutes = timezoneMatch
+			? (timezoneMatch[1] === '-' ? -1 : 1) *
+				(Number(timezoneMatch[2]) * 60 + Number(timezoneMatch[3] || 0))
+			: null;
+		const cleanedValue = rawValue.replace(/\s*\(UTC[+-]\d{1,2}(?::?\d{2})?\)\s*$/i, '').trim();
+
+		const makeTimestamp = (year, month, day, hour, minute, second) => {
+			if (Number.isFinite(timezoneOffsetMinutes)) {
+				return (
+					Date.UTC(
+						Number(year),
+						Number(month) - 1,
+						Number(day),
+						Number(hour),
+						Number(minute),
+						Number(second)
+					) -
+					timezoneOffsetMinutes * 60 * 1000
+				);
+			}
+
+			return new Date(
+				Number(year),
+				Number(month) - 1,
+				Number(day),
+				Number(hour),
+				Number(minute),
+				Number(second)
+			).getTime();
+		};
+
+		const dmyMatch = cleanedValue.match(
+			/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/
+		);
+
+		if (dmyMatch) {
+			const [, day, month, year, hour, minute, second = '00'] = dmyMatch;
+			return makeTimestamp(year, month, day, hour, minute, second);
+		}
+
+		const ymdMatch = cleanedValue.match(
+			/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/
+		);
+
+		if (ymdMatch) {
+			const [, year, month, day, hour, minute, second = '00'] = ymdMatch;
+			return makeTimestamp(year, month, day, hour, minute, second);
+		}
+
+		const parsed = new Date(cleanedValue).getTime();
+		return Number.isNaN(parsed) ? NaN : parsed;
 	}
 
 	function formatFileSize(value) {
@@ -146,15 +183,49 @@
 
 	function normalizeCctvSnapshots(value) {
 		const payload = value?.items ? value : value?.data?.items ? value.data : value?.data || value;
-		const items = Array.isArray(payload?.items)
+		const rawItems = Array.isArray(payload?.items)
 			? payload.items
 			: Array.isArray(value)
 				? value
 				: [];
+		const items = rawItems.flatMap((item) => {
+			if (!Array.isArray(item?.cameras)) return [item];
 
-		cctvSnapshotsTotal = Number(payload?.total ?? items.length) || 0;
+			return item.cameras.flatMap((camera) => {
+				const snapshots = Array.isArray(camera?.snapshots) ? camera.snapshots : [];
 
-		return items.map((item, index) => {
+				if (!snapshots.length) {
+					return [
+						{
+							...camera,
+							vesselId: item?.vesselId,
+							vesselName: item?.vesselName
+						}
+					];
+				}
+
+				return snapshots.map((snapshot) => ({
+					...snapshot,
+					camera_name: camera?.camera_name,
+					cameraName: camera?.cameraName,
+					camera_token: camera?.camera_token,
+					vesselId: item?.vesselId,
+					vesselName: item?.vesselName
+				}));
+			});
+		});
+
+		cctvSnapshotsTotal =
+			Number(
+				payload?.total ??
+					payload?.pagination?.total ??
+					payload?.pagination?.totalItems ??
+					payload?.meta?.total ??
+					items.length
+			) || 0;
+
+		return items
+			.map((item, index) => {
 			const filePath = item?.file_path || item?.filePath || '';
 			const capturedAt = item?.captured_at || item?.capturedAt || '';
 			const url = item?.presigned_url || item?.presignedUrl || item?.url || '';
@@ -164,18 +235,492 @@
 				item?.name ||
 				getCameraNameFromPath(filePath) ||
 				`Snapshot ${index + 1}`;
+			const timestampMs = parseDateTimeMs(capturedAt);
 
 			return {
+				key: `${cameraName}|${capturedAt}|${url || filePath || index}`,
 				name: cameraName,
+				cameraToken: item?.camera_token || item?.cameraToken || '',
 				status: url ? 'Captured' : 'No image',
 				url,
 				filePath,
 				fileSizeText: formatFileSize(item?.file_size ?? item?.fileSize),
 				capturedAt,
 				capturedAtText: formatDateTime(capturedAt),
+				timestampMs,
 				online: Boolean(url)
 			};
+		})
+			.sort((a, b) => {
+				if (!Number.isFinite(a.timestampMs) && !Number.isFinite(b.timestampMs)) return 0;
+				if (!Number.isFinite(a.timestampMs)) return 1;
+				if (!Number.isFinite(b.timestampMs)) return -1;
+				return a.timestampMs - b.timestampMs;
+			});
+	}
+
+	function mergeCctvSnapshots(existingItems = [], nextItems = []) {
+		const map = new Map();
+
+		for (const item of [...existingItems, ...nextItems]) {
+			const key = item?.key || `${item?.name}|${item?.capturedAt}|${item?.url}`;
+			if (!key) continue;
+			map.set(key, item);
+		}
+
+		return Array.from(map.values()).sort((a, b) => {
+			if (!Number.isFinite(a.timestampMs) && !Number.isFinite(b.timestampMs)) return 0;
+			if (!Number.isFinite(a.timestampMs)) return 1;
+			if (!Number.isFinite(b.timestampMs)) return -1;
+			return a.timestampMs - b.timestampMs;
 		});
+	}
+
+	function getCctvTotalPages(total = cctvSnapshotsTotal) {
+		return Math.max(1, Math.ceil((Number(total) || 0) / CCTV_SNAPSHOT_PAGE_SIZE));
+	}
+
+	function getRangeTimestampMs(value) {
+		if (!value) return NaN;
+
+		const parsed = new Date(value).getTime();
+		if (Number.isFinite(parsed)) return parsed;
+
+		return parseDateTimeMs(value);
+	}
+
+	function getCctvBufferedPercent(items = cctvItems) {
+		const startMs = getRangeTimestampMs(startDateTime);
+		const endMs = getRangeTimestampMs(endDateTime);
+
+		if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+			if (!cctvSnapshotsTotal) return 0;
+			return Math.min(100, Math.max(0, (items.length / cctvSnapshotsTotal) * 100));
+		}
+
+		const loadedTimestamps = items
+			.map((item) => item?.timestampMs)
+			.filter((timestamp) => Number.isFinite(timestamp));
+
+		if (!loadedTimestamps.length) return 0;
+
+		const latestLoadedTime = Math.max(...loadedTimestamps);
+		return Math.min(100, Math.max(0, ((latestLoadedTime - startMs) / (endMs - startMs)) * 100));
+	}
+
+	function findClosestCctvSnapshot(snapshots = [], timestampMs) {
+		if (!snapshots.length) return null;
+
+		if (!Number.isFinite(timestampMs)) {
+			return snapshots[0] || null;
+		}
+
+		let previousSnapshot = null;
+
+		for (const snapshot of snapshots) {
+			if (!Number.isFinite(snapshot?.timestampMs)) continue;
+
+			if (snapshot.timestampMs <= timestampMs) {
+				previousSnapshot = snapshot;
+			} else {
+				break;
+			}
+		}
+
+		return previousSnapshot;
+	}
+
+	function getCctvCameraPanels(items = [], timestampMs = NaN, renderTick = 0) {
+		renderTick;
+		const groups = new Map();
+
+		for (const item of items) {
+			const cameraKey = item?.cameraToken || item?.name || 'Unknown Camera';
+
+			if (!groups.has(cameraKey)) {
+				groups.set(cameraKey, {
+					key: cameraKey,
+					name: item?.name || 'Unknown Camera',
+					cameraToken: item?.cameraToken || '',
+					snapshots: []
+				});
+			}
+
+			groups.get(cameraKey).snapshots.push(item);
+		}
+
+		return Array.from(groups.values()).map((panel) => {
+			const snapshots = panel.snapshots.sort((a, b) => {
+				if (!Number.isFinite(a.timestampMs) && !Number.isFinite(b.timestampMs)) return 0;
+				if (!Number.isFinite(a.timestampMs)) return 1;
+				if (!Number.isFinite(b.timestampMs)) return -1;
+				return a.timestampMs - b.timestampMs;
+			});
+			const activeSnapshot = findClosestCctvSnapshot(snapshots, timestampMs);
+
+			return {
+				...panel,
+				snapshots,
+				activeSnapshot,
+				loadedCount: snapshots.length
+			};
+		});
+	}
+
+	function isCctvPanelFramePending(panel, timestampMs = activeTraceTimestampMs) {
+		if (!cctvSnapshotsBuffering) return false;
+		if (cctvSnapshotsTotal && cctvItems.length >= cctvSnapshotsTotal) return false;
+		if (!Number.isFinite(timestampMs) || !panel?.snapshots?.length) return false;
+
+		const loadedTimestamps = panel.snapshots
+			.map((snapshot) => snapshot?.timestampMs)
+			.filter((timestamp) => Number.isFinite(timestamp));
+
+		if (!loadedTimestamps.length) return false;
+
+		const latestLoadedTimestamp = Math.max(...loadedTimestamps);
+		return Number.isFinite(latestLoadedTimestamp) && timestampMs > latestLoadedTimestamp;
+	}
+
+	function findClosestTraceIndexByTime(timestampMs, points = tracePoints) {
+		if (!Number.isFinite(timestampMs) || !points.length) return -1;
+
+		let bestIndex = -1;
+		let bestDistance = Infinity;
+
+		points.forEach((point, index) => {
+			const pointTime = parseDateTimeMs(point?.timestampRaw || point?.timestamp);
+			if (!Number.isFinite(pointTime)) return;
+
+			const distance = Math.abs(pointTime - timestampMs);
+
+			if (distance < bestDistance) {
+				bestDistance = distance;
+				bestIndex = index;
+			}
+		});
+
+		return bestIndex;
+	}
+
+	function buildTimelineEvents(points = [], snapshots = []) {
+		const events = [];
+
+		points.forEach((point, index) => {
+			const timestampMs = parseDateTimeMs(point?.timestampRaw || point?.timestamp);
+			if (!Number.isFinite(timestampMs)) return;
+
+			events.push({
+				key: `trace|${index}|${timestampMs}`,
+				type: 'trace',
+				timestampMs,
+				traceIndex: index,
+				label: point?.timestamp || formatDateTime(timestampMs),
+				sourceLabel: 'Trace point'
+			});
+		});
+
+		snapshots.forEach((snapshot, index) => {
+			const timestampMs = snapshot?.timestampMs;
+			if (!Number.isFinite(timestampMs)) return;
+
+			events.push({
+				key: `cctv|${snapshot?.key || index}`,
+				type: 'cctv',
+				timestampMs,
+				traceIndex: findClosestTraceIndexByTime(timestampMs),
+				cctvKey: snapshot?.key || '',
+				cameraName: snapshot?.name || 'CCTV',
+				label: snapshot?.capturedAtText || formatDateTime(timestampMs),
+				sourceLabel: snapshot?.name ? `CCTV • ${snapshot.name}` : 'CCTV snapshot'
+			});
+		});
+
+		return events
+			.sort((a, b) => {
+				if (a.timestampMs !== b.timestampMs) return a.timestampMs - b.timestampMs;
+				if (a.type === b.type) return String(a.key).localeCompare(String(b.key));
+				return a.type === 'trace' ? -1 : 1;
+			})
+			.map((event, index) => ({ ...event, index }));
+	}
+
+	function buildMergedTimelineEvents(points = [], snapshots = []) {
+		const eventMap = new Map();
+
+		const ensureEvent = (timestampMs) => {
+			if (!Number.isFinite(timestampMs)) return null;
+
+			const key = String(timestampMs);
+
+			if (!eventMap.has(key)) {
+				eventMap.set(key, {
+					key: `time|${timestampMs}`,
+					type: 'time',
+					hasTrace: false,
+					hasCctv: false,
+					timestampMs,
+					traceIndex: -1,
+					cameraNames: new Set(),
+					label: formatDateTime(timestampMs),
+					sourceLabel: 'Timeline'
+				});
+			}
+
+			return eventMap.get(key);
+		};
+
+		points.forEach((point, index) => {
+			const timestampMs = parseDateTimeMs(point?.timestampRaw || point?.timestamp);
+			if (!Number.isFinite(timestampMs)) return;
+
+			const event = ensureEvent(timestampMs);
+			if (!event) return;
+
+			event.hasTrace = true;
+			event.traceIndex = index;
+			event.label = point?.timestamp || event.label;
+		});
+
+		snapshots.forEach((snapshot) => {
+			const timestampMs = snapshot?.timestampMs;
+			if (!Number.isFinite(timestampMs)) return;
+
+			const event = ensureEvent(timestampMs);
+			if (!event) return;
+
+			event.hasCctv = true;
+			if (event.traceIndex < 0) event.traceIndex = findClosestTraceIndexByTime(timestampMs, points);
+			if (snapshot?.name) event.cameraNames.add(snapshot.name);
+			if (!event.hasTrace) event.label = snapshot?.capturedAtText || event.label;
+		});
+
+		return Array.from(eventMap.values())
+			.sort((a, b) => {
+				if (a.timestampMs !== b.timestampMs) return a.timestampMs - b.timestampMs;
+				return String(a.key).localeCompare(String(b.key));
+			})
+			.map((event, index) => {
+				const cameraNames = Array.from(event.cameraNames);
+				const sourceParts = [];
+
+				if (event.hasTrace) sourceParts.push('Trace');
+				if (event.hasCctv) {
+					sourceParts.push(
+						cameraNames.length === 1
+							? `CCTV • ${cameraNames[0]}`
+							: `CCTV • ${cameraNames.length} cameras`
+					);
+				}
+
+				return {
+					...event,
+					index,
+					type: event.hasTrace && event.hasCctv ? 'trace+cctv' : event.hasCctv ? 'cctv' : 'trace',
+					cameraNames,
+					sourceLabel: sourceParts.join(' + ') || 'Timeline'
+				};
+			});
+	}
+
+	function findClosestTimelineIndexByTime(timestampMs) {
+		return findClosestTimelineIndexInEvents(timelineEvents, timestampMs);
+	}
+
+	function findClosestTimelineIndexInEvents(events = [], timestampMs) {
+		if (!Number.isFinite(timestampMs) || !events.length) return -1;
+
+		let bestIndex = -1;
+		let bestDistance = Infinity;
+
+		events.forEach((event, index) => {
+			if (!Number.isFinite(event?.timestampMs)) return;
+
+			const distance = Math.abs(event.timestampMs - timestampMs);
+			if (distance < bestDistance) {
+				bestDistance = distance;
+				bestIndex = index;
+			}
+		});
+
+		return bestIndex;
+	}
+
+	function getCurrentTimelineTimestampMs() {
+		const eventTimestamp = timelineEvents[activeIndex]?.timestampMs;
+		if (Number.isFinite(eventTimestamp)) return eventTimestamp;
+
+		return parseDateTimeMs(activePoint?.timestampRaw || activePoint?.timestamp);
+	}
+
+	function applyCctvItems(nextItems = [], { preserveTimeline = true } = {}) {
+		const previousTimestamp = getCurrentTimelineTimestampMs();
+		const nextEvents = preserveTimeline ? buildMergedTimelineEvents(tracePoints, nextItems) : [];
+
+		cctvItems = nextItems;
+
+		if (preserveTimeline && Number.isFinite(previousTimestamp) && nextEvents.length) {
+			const nextIndex = findClosestTimelineIndexInEvents(nextEvents, previousTimestamp);
+			if (nextIndex >= 0) activeIndex = nextIndex;
+		}
+	}
+
+	async function bufferRemainingCctvSnapshots({
+		requestId,
+		vesselId,
+		startTime,
+		endTime,
+		totalPages
+	}) {
+		if (totalPages <= 1) return;
+
+		cctvSnapshotsBuffering = true;
+
+		try {
+			for (let page = 2; page <= totalPages; page += 1) {
+				if (requestId !== cctvSnapshotRequestId) {
+					console.log('[TRACE_CCTV_PAGE_SKIP_STALE]', {
+						page,
+						requestId,
+						activeRequestId: cctvSnapshotRequestId
+					});
+					return;
+				}
+
+				console.log('[TRACE_CCTV_PAGE_REQUEST]', {
+					page,
+					totalPages,
+					pageSize: CCTV_SNAPSHOT_PAGE_SIZE,
+					loadedBefore: cctvItems.length,
+					vesselId,
+					startTime,
+					endTime
+				});
+
+				const result = await getVesselCctvSnapshots({
+					vesselId,
+					startTime,
+					endTime,
+					page,
+					pageSize: CCTV_SNAPSHOT_PAGE_SIZE
+				});
+
+				if (requestId !== cctvSnapshotRequestId) {
+					console.log('[TRACE_CCTV_PAGE_RESPONSE_STALE]', {
+						page,
+						requestId,
+						activeRequestId: cctvSnapshotRequestId
+					});
+					return;
+				}
+
+				const nextItems = normalizeCctvSnapshots(result);
+				const beforeMergeCount = cctvItems.length;
+				applyCctvItems(mergeCctvSnapshots(cctvItems, nextItems), { preserveTimeline: true });
+				cctvSnapshotsLoadedPages = page;
+
+				console.log('[TRACE_CCTV_PAGE_LOADED]', {
+					page,
+					totalPages,
+					normalizedItems: nextItems.length,
+					beforeMergeCount,
+					afterMergeCount: cctvItems.length,
+					totalSnapshots: cctvSnapshotsTotal,
+					panels: getCctvCameraPanels(cctvItems, activeTraceTimestampMs).map((panel) => ({
+						name: panel.name,
+						frames: panel.loadedCount,
+						activeFrame: panel.activeSnapshot?.capturedAt || null
+					}))
+				});
+			}
+		} catch (err) {
+			console.error('[VESSEL_TRACE_CCTV_BUFFER_ERROR]', err);
+			cctvSnapshotsError = err?.message || 'Failed to buffer remaining CCTV snapshots.';
+		} finally {
+			if (requestId === cctvSnapshotRequestId) {
+				cctvSnapshotsBuffering = false;
+				console.log('[TRACE_CCTV_BUFFER_DONE]', {
+					loadedPages: cctvSnapshotsLoadedPages,
+					loadedItems: cctvItems.length,
+					totalSnapshots: cctvSnapshotsTotal
+				});
+			}
+		}
+	}
+
+	async function loadTraceCctvSnapshots({ vesselId, startTime, endTime }) {
+		const requestId = ++cctvSnapshotRequestId;
+
+		cctvItems = [];
+		cctvSnapshotsTotal = 0;
+		cctvSnapshotsLoadedPages = 0;
+		cctvSnapshotsBuffering = false;
+
+		console.log('[TRACE_CCTV_PAGE_REQUEST]', {
+			page: 1,
+			totalPages: null,
+			pageSize: CCTV_SNAPSHOT_PAGE_SIZE,
+			loadedBefore: 0,
+			vesselId,
+			startTime,
+			endTime
+		});
+
+		const firstPageResult = await getVesselCctvSnapshots({
+			vesselId,
+			startTime,
+			endTime,
+			page: 1,
+			pageSize: CCTV_SNAPSHOT_PAGE_SIZE
+		});
+
+		if (requestId !== cctvSnapshotRequestId) return null;
+
+		const firstItems = normalizeCctvSnapshots(firstPageResult);
+		applyCctvItems(firstItems, { preserveTimeline: false });
+		cctvSnapshotsLoadedPages = 1;
+
+		const totalPages = getCctvTotalPages();
+
+		console.log('[TRACE_CCTV_PAGE_LOADED]', {
+			page: 1,
+			totalPages,
+			normalizedItems: firstItems.length,
+			beforeMergeCount: 0,
+			afterMergeCount: cctvItems.length,
+			totalSnapshots: cctvSnapshotsTotal,
+			panels: getCctvCameraPanels(cctvItems, activeTraceTimestampMs).map((panel) => ({
+				name: panel.name,
+				frames: panel.loadedCount,
+				activeFrame: panel.activeSnapshot?.capturedAt || null
+			}))
+		});
+
+		if (totalPages > 1 && ENABLE_CCTV_BACKGROUND_BUFFER) {
+			console.log('[TRACE_CCTV_BUFFER_START]', {
+				totalPages,
+				nextPage: 2,
+				totalSnapshots: cctvSnapshotsTotal,
+				pageSize: CCTV_SNAPSHOT_PAGE_SIZE
+			});
+
+			bufferRemainingCctvSnapshots({
+				requestId,
+				vesselId,
+				startTime,
+				endTime,
+				totalPages
+			});
+		} else if (totalPages > 1) {
+			console.log('[TRACE_CCTV_BUFFER_SKIPPED_FOR_FIRST_PAGE_TEST]', {
+				totalPages,
+				loadedPages: cctvSnapshotsLoadedPages,
+				loadedItems: cctvItems.length,
+				totalSnapshots: cctvSnapshotsTotal
+			});
+		}
+
+		return firstPageResult;
 	}
 
 	function normalizeRpm(value) {
@@ -316,9 +861,27 @@
 	}
 
 	let tracePoints = $derived(getTracePoints(traceData));
+	let timelineEvents = $derived(buildMergedTimelineEvents(tracePoints, cctvItems));
+	let activeTimelineEvent = $derived(timelineEvents[activeIndex] || timelineEvents[0] || null);
+	let activeTimelineTimestampMs = $derived(
+		activeTimelineEvent?.timestampMs ??
+			parseDateTimeMs(tracePoints[activeIndex]?.timestampRaw || tracePoints[activeIndex]?.timestamp)
+	);
+	let activeTraceIndex = $derived(
+		Number.isInteger(activeTimelineEvent?.traceIndex) && activeTimelineEvent.traceIndex >= 0
+			? activeTimelineEvent.traceIndex
+			: Math.max(0, findClosestTraceIndexByTime(activeTimelineTimestampMs))
+	);
+	let activeTimelineLabel = $derived(
+		activeTimelineEvent?.label ||
+			formatDateTime(activeTimelineTimestampMs) ||
+			tracePoints[activeTraceIndex]?.timestamp ||
+			'-'
+	);
+	let activeTimelineSourceLabel = $derived(activeTimelineEvent?.sourceLabel || 'Trace timeline');
 
 	let activePoint = $derived(
-		tracePoints[activeIndex] ||
+		tracePoints[activeTraceIndex] ||
 			tracePoints[0] || {
 				latitude: toNumber($selectedVesselInfo?.latitude ?? $selectedVesselInfo?.lat, 0),
 				longitude: toNumber($selectedVesselInfo?.longitude ?? $selectedVesselInfo?.lng, 0),
@@ -347,9 +910,27 @@
 	let activeRpmEntries = $derived(Object.entries(activePoint.rpm || {}));
 
 	let timelineProgress = $derived(
-		tracePoints.length > 1
-			? Math.min(100, Math.max(0, (activeIndex / (tracePoints.length - 1)) * 100))
+		timelineEvents.length > 1
+			? Math.min(100, Math.max(0, (activeIndex / (timelineEvents.length - 1)) * 100))
 			: 0
+	);
+	let cctvBufferedPercent = $derived(getCctvBufferedPercent(cctvItems));
+
+	let activeTraceTimestampMs = $derived(
+		Number.isFinite(activeTimelineTimestampMs)
+			? activeTimelineTimestampMs
+			: parseDateTimeMs(activePoint?.timestampRaw || activePoint?.timestamp)
+	);
+	let cctvCameraPanels = $derived(
+		getCctvCameraPanels(cctvItems, activeTraceTimestampMs, playbackRenderTick)
+	);
+	let mainCctvPanel = $derived(
+		cctvCameraPanels.find((panel) => panel.key === selectedCctvPanelKey) ||
+			cctvCameraPanels[0] ||
+			null
+	);
+	let miniCctvPanels = $derived(
+		mainCctvPanel ? cctvCameraPanels.filter((panel) => panel.key !== mainCctvPanel.key) : []
 	);
 
 	let vesselInfo = $derived({
@@ -362,38 +943,89 @@
 		avgRpm: `${formatNumber(activePoint.avgRpm, 0, '0')} RPM`,
 		fuelPerMinute: `${formatNumber(activePoint.fuelPerMinute, 2, '0.00')} L/min`,
 		weatherForecast: activePoint.weather || $selectedVesselInfo?.weather?.current?.condition || '-',
-		lastUpdate: activePoint.timestamp || '-',
+		lastUpdate: activeTimelineLabel || activePoint.timestamp || '-',
 		onlineStatus: activePoint.online ? 'Online' : 'Offline'
 	});
 
+	function selectCctvPanel(panel) {
+		if (!panel?.key) return;
+		selectedCctvPanelKey = panel.key;
+	}
+
 	async function loadTrace() {
+		stopPlayback('load-trace');
+
+		if (!startDateTime || !endDateTime) {
+			error = 'Please choose a start and end time first.';
+			traceData = null;
+			cctvItems = [];
+			cctvSnapshotsTotal = 0;
+			cctvSnapshotsBuffering = false;
+			cctvSnapshotsLoadedPages = 0;
+			cctvSnapshotRequestId += 1;
+			return;
+		}
+
+		const startMs = getRangeTimestampMs(startDateTime);
+		const endMs = getRangeTimestampMs(endDateTime);
+
+		if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+			error = 'End time must be later than start time.';
+			traceData = null;
+			cctvItems = [];
+			cctvSnapshotsTotal = 0;
+			cctvSnapshotsBuffering = false;
+			cctvSnapshotsLoadedPages = 0;
+			cctvSnapshotRequestId += 1;
+			return;
+		}
+
 		if (!$selectedVesselId) {
 			error = 'No vessel has been selected from Fleet View.';
 			traceData = null;
 			cctvItems = [];
 			cctvSnapshotsTotal = 0;
+			cctvSnapshotsBuffering = false;
+			cctvSnapshotsLoadedPages = 0;
+			cctvSnapshotRequestId += 1;
 			return;
 		}
 
 		loading = true;
 		error = '';
 		cctvSnapshotsError = '';
+		cctvSnapshotRequestId += 1;
 
 		try {
+			const traceStart = toApiDateTime(startDateTime);
+			const traceEnd = toApiDateTime(endDateTime);
+			const cctvStart = toSnapshotApiDateTime(startDateTime);
+			const cctvEnd = toSnapshotApiDateTime(endDateTime);
+
+			console.log('[TRACE_CCTV_SNAPSHOTS_LOAD_PARAMS]', {
+				vesselId: $selectedVesselId,
+				startDateTime,
+				endDateTime,
+				traceStart,
+				traceEnd,
+				cctvStart,
+				cctvEnd,
+				page: 1,
+				pageSize: CCTV_SNAPSHOT_PAGE_SIZE
+			});
+
 			const [result, snapshotResult] = await Promise.all([
 				getVesselTrace({
 					vesselId: $selectedVesselId,
-					start: toApiDateTime(startDateTime),
-					end: toApiDateTime(endDateTime),
+					start: traceStart,
+					end: traceEnd,
 					timezoneMode,
 					timezoneOffset: timezoneMode === 'manual' ? timezoneOffset : ''
 				}),
-				getVesselCctvSnapshots({
+				loadTraceCctvSnapshots({
 					vesselId: $selectedVesselId,
-					startTime: toSnapshotApiDateTime(startDateTime),
-					endTime: toSnapshotApiDateTime(endDateTime),
-					page: 1,
-					pageSize: CCTV_SNAPSHOT_PAGE_SIZE
+					startTime: cctvStart,
+					endTime: cctvEnd
 				}).catch((snapshotErr) => {
 					console.error('[VESSEL_TRACE_CCTV_SNAPSHOTS_ERROR]', snapshotErr);
 					cctvSnapshotsError =
@@ -403,14 +1035,50 @@
 			]);
 
 			traceData = result;
-			cctvItems = snapshotResult ? normalizeCctvSnapshots(snapshotResult) : [];
-			selectedCctvIndex = 0;
 			activeIndex = 0;
-			cctvAnimationKey += 1;
+			playbackRenderTick += 1;
+
+			const parsedTracePoints = getTracePoints(result);
+			const parsedTimelineEvents = buildMergedTimelineEvents(parsedTracePoints, cctvItems);
+			const firstCctvEvent = parsedTimelineEvents.find((event) => event.hasCctv);
+			const firstTraceEvent = parsedTimelineEvents.find((event) => event.hasTrace);
 
 			console.log('[VESSEL_TRACE_RAW]', result);
-			console.log('[VESSEL_TRACE_POINTS_COUNT]', getTracePoints(result).length);
+			console.log('[VESSEL_TRACE_POINTS_COUNT]', parsedTracePoints.length);
 			console.log('[VESSEL_TRACE_CCTV_SNAPSHOTS_COUNT]', cctvItems.length);
+			console.log('[TRACE_TIMELINE_EVENTS_SUMMARY]', {
+				totalTimelineEvents: parsedTimelineEvents.length,
+				totalTraceEvents: parsedTimelineEvents.filter((event) => event.hasTrace).length,
+				totalCctvEvents: parsedTimelineEvents.filter((event) => event.hasCctv).length,
+				firstEvent: parsedTimelineEvents[0]
+					? {
+							label: parsedTimelineEvents[0].label,
+							source: parsedTimelineEvents[0].sourceLabel,
+							timestampMs: parsedTimelineEvents[0].timestampMs
+						}
+					: null,
+				firstTraceEvent: firstTraceEvent
+					? {
+							label: firstTraceEvent.label,
+							source: firstTraceEvent.sourceLabel,
+							timestampMs: firstTraceEvent.timestampMs
+						}
+					: null,
+				firstCctvEvent: firstCctvEvent
+					? {
+							label: firstCctvEvent.label,
+							source: firstCctvEvent.sourceLabel,
+							timestampMs: firstCctvEvent.timestampMs
+						}
+					: null,
+				lastEvent: parsedTimelineEvents.at(-1)
+					? {
+							label: parsedTimelineEvents.at(-1).label,
+							source: parsedTimelineEvents.at(-1).sourceLabel,
+							timestampMs: parsedTimelineEvents.at(-1).timestampMs
+						}
+					: null
+			});
 		} catch (err) {
 			console.error('[VESSEL_TRACE_ERROR]', err);
 			error = err?.message || 'Failed to load vessel trace.';
@@ -422,15 +1090,186 @@
 		}
 	}
 
+	function clearPlaybackInterval(reason = 'manual') {
+		if (!playbackInterval) return;
+
+		clearInterval(playbackInterval);
+		playbackInterval = null;
+
+		console.log('[TRACE_PLAY_INTERVAL_CLEARED]', {
+			reason,
+			activeIndex,
+			totalTimelineEvents: timelineEvents.length,
+			totalTracePoints: tracePoints.length
+		});
+	}
+
+	function runPlaybackTick(source = 'interval') {
+		const currentIndex = activeIndex;
+		const totalTimelineEvents = timelineEvents.length;
+
+		console.log('[TRACE_PLAY_TICK_BEGIN]', {
+			source,
+			activeIndex: currentIndex,
+			totalTimelineEvents,
+			totalTracePoints: tracePoints.length,
+			isPlaying,
+			hasInterval: Boolean(playbackInterval)
+		});
+
+		if (!timelineEvents.length) {
+			clearPlaybackInterval('empty-timeline');
+			isPlaying = false;
+			return;
+		}
+
+		if (currentIndex >= totalTimelineEvents - 1) {
+			console.log('[TRACE_PLAY_STOP_END]', {
+				activeIndex: currentIndex,
+				totalTimelineEvents,
+				source
+			});
+			clearPlaybackInterval('end');
+			isPlaying = false;
+			return;
+		}
+
+		const nextIndex = currentIndex + 1;
+		const nextEvent = timelineEvents[nextIndex];
+		const nextTime = nextEvent?.timestampMs;
+		const nextTraceIndex =
+			Number.isInteger(nextEvent?.traceIndex) && nextEvent.traceIndex >= 0
+				? nextEvent.traceIndex
+				: findClosestTraceIndexByTime(nextTime);
+		const nextPoint = tracePoints[nextTraceIndex] || null;
+
+		flushSync(() => {
+			activeIndex = nextIndex;
+			playbackRenderTick += 1;
+		});
+
+		try {
+			const nextPanels = getCctvCameraPanels(cctvItems, nextTime, playbackRenderTick);
+
+			console.log('[TRACE_PLAY_TICK]', {
+				source,
+				fromIndex: currentIndex,
+				toIndex: nextIndex,
+				totalTimelineEvents,
+				totalTracePoints: tracePoints.length,
+				eventType: nextEvent?.type,
+				eventSource: nextEvent?.sourceLabel,
+				eventTime: nextEvent?.label,
+				traceIndex: nextTraceIndex,
+				traceTime: nextPoint?.timestampRaw || nextPoint?.timestamp,
+				traceLatitude: nextPoint?.latitude,
+				traceLongitude: nextPoint?.longitude,
+				cctvBufferedPercent,
+				cctvLoadedItems: cctvItems.length,
+				cctvPanels: nextPanels.map((panel) => ({
+					name: panel.name,
+					frames: panel.loadedCount,
+					frameTime: panel.activeSnapshot?.capturedAt || null,
+					frameUrl: panel.activeSnapshot?.url || null
+				}))
+			});
+		} catch (err) {
+			console.error('[TRACE_PLAY_TICK_LOG_ERROR]', {
+				source,
+				fromIndex: currentIndex,
+				toIndex: nextIndex,
+				error: err
+			});
+		}
+	}
+
+	function startPlayback() {
+		clearPlaybackInterval('restart');
+
+		console.log('[TRACE_PLAY_START]', {
+			activeIndex,
+			totalTimelineEvents: timelineEvents.length,
+			totalTracePoints: tracePoints.length,
+			cctvItems: cctvItems.length
+		});
+
+		isPlaying = true;
+		runPlaybackTick('start');
+
+		if (!isPlaying) return;
+
+		playbackInterval = setInterval(() => {
+			runPlaybackTick('interval');
+		}, 900);
+
+		console.log('[TRACE_PLAY_INTERVAL_CREATED]', {
+			activeIndex,
+			totalTimelineEvents: timelineEvents.length,
+			totalTracePoints: tracePoints.length,
+			delayMs: 900
+		});
+	}
+
+	function stopPlayback(reason = 'toggle') {
+		clearPlaybackInterval(reason);
+		isPlaying = false;
+	}
+
 	function togglePlayback() {
-		if (!tracePoints.length) return;
-		isPlaying = !isPlaying;
+		if (!timelineEvents.length) {
+			console.warn('[TRACE_PLAY_TOGGLE_BLOCKED]', {
+				reason: 'timelineEvents is empty',
+				traceData,
+				cctvItems: cctvItems.length,
+				cctvSnapshotsTotal
+			});
+			return;
+		}
+
+		const now = Date.now();
+
+		if (now - lastPlaybackToggleAt < 250) {
+			console.warn('[TRACE_PLAY_TOGGLE_IGNORED_FAST_REPEAT]', {
+				activeIndex,
+				totalTimelineEvents: timelineEvents.length,
+				isPlaying
+			});
+			return;
+		}
+
+		lastPlaybackToggleAt = now;
+
+		const nextPlaying = !isPlaying;
+
+		console.log('[TRACE_PLAY_TOGGLE]', {
+			from: isPlaying,
+			to: nextPlaying,
+			activeIndex,
+			activeTraceIndex,
+			totalTimelineEvents: timelineEvents.length,
+			totalTracePoints: tracePoints.length,
+			activeEventType: activeTimelineEvent?.type,
+			activeEventTime: activeTimelineLabel,
+			activePointTime: activePoint?.timestampRaw || activePoint?.timestamp,
+			cctvItems: cctvItems.length,
+			cctvPanels: cctvCameraPanels.map((panel) => ({
+				name: panel.name,
+				frames: panel.loadedCount,
+				activeFrame: panel.activeSnapshot?.capturedAt || null
+			}))
+		});
+
+		if (nextPlaying) {
+			startPlayback();
+		} else {
+			stopPlayback('toggle');
+		}
 	}
 
 	let isDraggingTimeline = $state(false);
 
 	function updateTimelineFromPointer(event) {
-		if (!tracePoints.length) return;
+		if (!timelineEvents.length) return;
 
 		const target = event.currentTarget;
 		const rect = target.getBoundingClientRect();
@@ -438,7 +1277,8 @@
 		const x = clientX - rect.left;
 		const ratio = Math.min(1, Math.max(0, x / rect.width));
 
-		activeIndex = Math.round(ratio * (tracePoints.length - 1));
+		activeIndex = Math.round(ratio * (timelineEvents.length - 1));
+		playbackRenderTick += 1;
 	}
 
 	function moveTimeline(event) {
@@ -446,7 +1286,7 @@
 	}
 
 	function startTimelineDrag(event) {
-		if (!tracePoints.length) return;
+		if (!timelineEvents.length) return;
 
 		isDraggingTimeline = true;
 		isPlaying = false;
@@ -469,59 +1309,45 @@
 	}
 
 	function moveStep(direction) {
-		if (!tracePoints.length) return;
+		if (!timelineEvents.length) return;
 
-		activeIndex = Math.min(tracePoints.length - 1, Math.max(0, activeIndex + direction));
+		activeIndex = Math.min(timelineEvents.length - 1, Math.max(0, activeIndex + direction));
+		playbackRenderTick += 1;
 	}
 
-	onMount(() => {
-		const now = new Date();
-		const start = new Date(now);
-
-		start.setHours(0, 0, 0, 0);
-
-		startDateTime = toLocalInputValue(start);
-		endDateTime = toLocalInputValue(now);
+	onDestroy(() => {
+		clearPlaybackInterval('destroy');
 	});
 
 	$effect(() => {
 		if (!active) {
-			isPlaying = false;
+			stopPlayback('inactive-page');
 		}
 	});
 
 	$effect(() => {
-		if (!isPlaying) return;
-		if (!tracePoints.length) return;
+		if (!timelineEvents.length) {
+			if (activeIndex !== 0) activeIndex = 0;
+			return;
+		}
 
-		const interval = setInterval(() => {
-			if (activeIndex >= tracePoints.length - 1) {
-				isPlaying = false;
-				return;
-			}
-
-			activeIndex += 1;
-		}, 900);
-
-		return () => clearInterval(interval);
+		if (activeIndex > timelineEvents.length - 1) {
+			activeIndex = timelineEvents.length - 1;
+			playbackRenderTick += 1;
+		}
 	});
 
 	$effect(() => {
-		if (!active) return;
-		if (!$selectedVesselId) return;
-		if (!startDateTime || !endDateTime) return;
+		if (!cctvCameraPanels.length) {
+			if (selectedCctvPanelKey) selectedCctvPanelKey = '';
+			return;
+		}
 
-		const key = `${$selectedVesselId}|${startDateTime}|${endDateTime}|${timezoneMode}|${timezoneOffset}`;
-
-		if (loadedKeys[key]) return;
-
-		loadedKeys = {
-			...loadedKeys,
-			[key]: true
-		};
-
-		loadTrace();
+		if (!cctvCameraPanels.some((panel) => panel.key === selectedCctvPanelKey)) {
+			selectedCctvPanelKey = cctvCameraPanels[0]?.key || '';
+		}
 	});
+
 </script>
 
 <section class="trace-root page-content">
@@ -558,7 +1384,7 @@
 					</label>
 				{/if}
 
-				<button type="button" onclick={loadTrace} disabled={loading}>
+				<button type="button" onclick={loadTrace} disabled={loading || !startDateTime || !endDateTime}>
 					{loading ? 'Loading...' : 'Load Trace'}
 				</button>
 			</div>
@@ -583,67 +1409,117 @@
 					<div>
 						<div class="card-title">CCTV Monitoring</div>
 						<div class="card-subtitle" class:cctv-error-text={Boolean(cctvSnapshotsError)}>
-							{cctvSnapshotsError || `${cctvSnapshotsTotal || cctvItems.length} snapshots in selected range`}
+							{cctvSnapshotsError ||
+								`${cctvItems.length}/${cctvSnapshotsTotal || cctvItems.length} snapshots loaded${cctvSnapshotsBuffering ? ' • buffering...' : ''}`}
 						</div>
 					</div>
 				</div>
 
 				<div class="cctv-layout">
-					<div class="cctv-main-shell">
-						{#key cctvAnimationKey}
-							{#if selectedCctv}
-								<div
-									class="cctv-main"
-									class:offline={!selectedCctv.online}
-									class:has-snapshot={Boolean(selectedCctv.url)}
-									in:fly={{ y: 10, duration: 180 }}
-									out:fade={{ duration: 90 }}
+					{#if cctvCameraPanels.length}
+						<div class="cctv-focus-layout">
+							{#if mainCctvPanel}
+								{@const activeFrame = mainCctvPanel.activeSnapshot}
+								{@const framePending = isCctvPanelFramePending(mainCctvPanel)}
+								<article
+									class="cctv-camera-panel cctv-camera-main"
+									data-render-tick={playbackRenderTick}
+									class:offline={!activeFrame?.online}
+									class:has-snapshot={Boolean(activeFrame?.url)}
+									class:frame-pending={framePending}
+									in:scale={{ start: 0.98, duration: 150 }}
 								>
-									{#if selectedCctv.url}
-										<img class="cctv-snapshot-image" src={selectedCctv.url} alt={`${selectedCctv.name} snapshot`} loading="lazy" />
-									{/if}
-
-									<div class="cctv-scanline"></div>
-
-									<div class="cctv-overlay">
-										<span class="camera-name">{selectedCctv.name}</span>
-										<span class="camera-status">{selectedCctv.capturedAtText || selectedCctv.status}</span>
-										{#if selectedCctv.fileSizeText}
-											<span class="camera-file-size">{selectedCctv.fileSizeText}</span>
+									<div class="cctv-camera-frame">
+										{#if activeFrame?.url}
+											{#key activeFrame.key}
+											<CctvSnapshotImage
+												class="cctv-camera-image"
+												src={activeFrame.url}
+												filePath={activeFrame.filePath}
+												frameKey={activeFrame.key}
+												renderTick={playbackRenderTick}
+												alt={`${mainCctvPanel.name} snapshot`}
+												loading="eager"
+											/>
+											{/key}
 										{/if}
+
+										{#if framePending}
+											<div class="cctv-frame-loading" aria-live="polite">
+												<span aria-hidden="true"></span>
+												<small>Loading frame...</small>
+											</div>
+										{/if}
+
+										<div class="cctv-scanline"></div>
 									</div>
-								</div>
-							{:else}
-								<div class="cctv-main offline cctv-empty-main" in:fade={{ duration: 150 }}>
-									<div class="cctv-overlay">
-										<span class="camera-name">No CCTV snapshot</span>
-										<span class="camera-status">Choose a range and load trace</span>
+
+									<div class="cctv-camera-info">
+										<strong>{mainCctvPanel.name}</strong>
+										<span>{framePending ? 'Loading frame...' : activeFrame?.capturedAtText || 'No frame yet'}</span>
+										<small>{mainCctvPanel.loadedCount} frames loaded</small>
 									</div>
+								</article>
+							{/if}
+
+							{#if miniCctvPanels.length}
+								<div class="cctv-thumbnail-row" aria-label="CCTV cameras">
+									{#each miniCctvPanels as panel (panel.key)}
+										{@const activeFrame = panel.activeSnapshot}
+										{@const framePending = isCctvPanelFramePending(panel)}
+										<button
+											type="button"
+											class="cctv-camera-panel cctv-camera-thumb"
+											data-render-tick={playbackRenderTick}
+											class:offline={!activeFrame?.online}
+											class:has-snapshot={Boolean(activeFrame?.url)}
+											class:frame-pending={framePending}
+											onclick={() => selectCctvPanel(panel)}
+											title={`Show ${panel.name}`}
+										>
+											<div class="cctv-camera-frame">
+												{#if activeFrame?.url}
+													{#key activeFrame.key}
+													<CctvSnapshotImage
+														class="cctv-camera-image"
+														src={activeFrame.url}
+														filePath={activeFrame.filePath}
+														frameKey={activeFrame.key}
+														renderTick={playbackRenderTick}
+														alt={`${panel.name} snapshot`}
+														loading="eager"
+													/>
+													{/key}
+												{/if}
+
+												{#if framePending}
+													<div class="cctv-frame-loading compact" aria-live="polite">
+														<span aria-hidden="true"></span>
+													</div>
+												{/if}
+
+												<div class="cctv-scanline"></div>
+											</div>
+
+											<div class="cctv-camera-info">
+												<strong>{panel.name}</strong>
+											</div>
+										</button>
+									{/each}
 								</div>
 							{/if}
-						{/key}
-					</div>
+						</div>
+					{:else}
+						<div class="cctv-main-shell cctv-empty-shell" in:fade={{ duration: 150 }}>
+							<div class="cctv-main offline cctv-empty-main">
+								<div class="cctv-overlay">
+									<span class="camera-name">No CCTV snapshot</span>
+									<span class="camera-status">Choose a range and load trace</span>
+								</div>
+							</div>
+						</div>
+					{/if}
 
-					<div class="cctv-mini-row">
-						{#each miniCctvItems as cctv (cctv.index)}
-							<button
-								type="button"
-								class="cctv-mini"
-								class:offline={!cctv.online}
-								class:has-snapshot={Boolean(cctv.url)}
-								onclick={() => selectCctv(cctv.index)}
-								title={`Show ${cctv.name}`}
-								in:scale={{ start: 0.96, duration: 150 }}
-								out:fade={{ duration: 80 }}
-							>
-								{#if cctv.url}
-									<img src={cctv.url} alt={`${cctv.name} thumbnail`} loading="lazy" />
-								{/if}
-								<span>{cctv.name}</span>
-								<small>{cctv.capturedAtText || cctv.status}</small>
-							</button>
-						{/each}
-					</div>
 				</div>
 			</section>
 
@@ -685,8 +1561,10 @@
 							iconUrl="/assets/vessel.png"
 							zoom={12}
 							{tracePoints}
-							{activeIndex}
+							activeIndex={activeTraceIndex}
+							renderKey={playbackRenderTick}
 							showTraceLine={true}
+							followActivePoint={isPlaying}
 						/>
 					{/if}
 				</div>
@@ -700,7 +1578,7 @@
 						type="button"
 						class="step-btn"
 						onclick={() => moveStep(-1)}
-						disabled={!tracePoints.length || activeIndex <= 0}
+						disabled={!timelineEvents.length || activeIndex <= 0}
 					>
 						‹
 					</button>
@@ -708,8 +1586,12 @@
 					<button
 						type="button"
 						class="play-button"
-						onclick={togglePlayback}
-						disabled={!tracePoints.length}
+						onclick={(event) => {
+							event.preventDefault();
+							event.stopPropagation();
+							togglePlayback();
+						}}
+						disabled={!timelineEvents.length}
 					>
 						{isPlaying ? 'Pause' : 'Play'}
 					</button>
@@ -718,7 +1600,7 @@
 						type="button"
 						class="step-btn"
 						onclick={() => moveStep(1)}
-						disabled={!tracePoints.length || activeIndex >= tracePoints.length - 1}
+						disabled={!timelineEvents.length || activeIndex >= timelineEvents.length - 1}
 					>
 						›
 					</button>
@@ -730,7 +1612,7 @@
 					tabindex="0"
 					aria-label="Trace playback timeline"
 					aria-valuemin="0"
-					aria-valuemax={Math.max(tracePoints.length - 1, 0)}
+					aria-valuemax={Math.max(timelineEvents.length - 1, 0)}
 					aria-valuenow={activeIndex}
 					onpointerdown={startTimelineDrag}
 					onpointermove={dragTimeline}
@@ -739,13 +1621,14 @@
 					onclick={moveTimeline}
 				>
 					<div class="timeline-track"></div>
+					<div class="timeline-buffer" style={`width: ${cctvBufferedPercent}%`}></div>
 					<div class="timeline-progress" style={`width: ${timelineProgress}%`}></div>
 					<div class="timeline-dot" style={`left: ${timelineProgress}%`}></div>
 				</div>
 
 				<div class="timeline-time">
-					<span>{activeIndex + 1}/{tracePoints.length || 0}</span>
-					<strong>{vesselInfo.lastUpdate}</strong>
+					<span>{activeIndex + 1}/{timelineEvents.length || 0} • {activeTimelineSourceLabel}</span>
+					<strong>{activeTimelineLabel}</strong>
 				</div>
 			</div>
 
@@ -1027,14 +1910,222 @@
 	}
 
 	.cctv-layout {
-		flex: 0 0 auto;
+		flex: 1;
 		min-height: 0;
 		padding: 8px;
-		display: grid;
-		grid-template-rows: auto auto;
-		align-content: start;
-		gap: 8px;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
 	}
+
+  .cctv-focus-layout {
+    min-height: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: hidden;
+  }
+
+  .cctv-thumbnail-row {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    max-height: none;
+    overflow-y: auto;
+  }
+
+  .cctv-camera-panel {
+    min-width: 0;
+    width: 100%;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 12px;
+    background: #111827;
+    color: #ffffff;
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: auto auto;
+    cursor: pointer;
+    text-align: left;
+    transition:
+      transform 0.18s ease,
+      border-color 0.18s ease,
+      box-shadow 0.18s ease;
+  }
+
+  .cctv-camera-main {
+    flex: 0 0 auto;
+    min-height: 0;
+    cursor: default;
+  }
+
+  .cctv-camera-thumb {
+    min-height: 0;
+    border-radius: 9px;
+  }
+
+  .cctv-camera-panel:hover {
+    transform: translateY(-2px);
+    border-color: rgba(96, 165, 250, 0.56);
+    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.26);
+  }
+
+  .cctv-camera-main:hover {
+    transform: none;
+    border-color: rgba(148, 163, 184, 0.2);
+    box-shadow: none;
+  }
+
+  .cctv-camera-frame {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0)),
+      #4f5658;
+    overflow: hidden;
+  }
+
+  .cctv-camera-main .cctv-camera-info {
+    min-height: 0;
+    padding: 7px 10px 8px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 10px;
+  }
+
+  .cctv-camera-main .cctv-camera-info strong {
+    grid-column: 1;
+  }
+
+  .cctv-camera-main .cctv-camera-info span {
+    grid-column: 1;
+  }
+
+  .cctv-camera-main .cctv-camera-info small {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    white-space: nowrap;
+  }
+
+  .cctv-camera-frame::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background:
+      linear-gradient(180deg, rgba(15, 23, 42, 0.1), rgba(15, 23, 42, 0.78)),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+      linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    background-size: auto, 22px 22px, 22px 22px;
+    pointer-events: none;
+  }
+
+  :global(.cctv-camera-image) {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .cctv-frame-loading {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 8px;
+    background:
+      radial-gradient(circle at center, rgba(15, 23, 42, 0.18), rgba(15, 23, 42, 0.56)),
+      rgba(15, 23, 42, 0.18);
+    color: #e2e8f0;
+    pointer-events: none;
+  }
+
+  .cctv-frame-loading span {
+    width: 30px;
+    height: 30px;
+    border-radius: 999px;
+    border: 3px solid rgba(147, 197, 253, 0.25);
+    border-top-color: #60a5fa;
+    animation: cctvFrameSpin 0.75s linear infinite;
+  }
+
+  .cctv-frame-loading small {
+    color: #dbeafe;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+  }
+
+  .cctv-frame-loading.compact {
+    gap: 0;
+  }
+
+  .cctv-frame-loading.compact span {
+    width: 22px;
+    height: 22px;
+    border-width: 2px;
+  }
+
+  @keyframes cctvFrameSpin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .cctv-camera-info {
+    min-width: 0;
+    padding: 8px 9px 9px;
+    display: grid;
+    gap: 3px;
+  }
+
+  .cctv-camera-thumb .cctv-camera-info {
+    padding: 5px 6px;
+  }
+
+  .cctv-camera-thumb .cctv-camera-info strong {
+    font-size: 9px;
+  }
+
+  .cctv-camera-info strong {
+    color: #f8fafc;
+    font-size: 12px;
+    line-height: 1.15;
+    font-weight: 850;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .cctv-camera-info span {
+    color: #cbd5e1;
+    font-size: 10px;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .cctv-camera-info small {
+    color: #93c5fd;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .cctv-buffer-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
 
 	.cctv-main-shell {
 		position: relative;
@@ -1044,6 +2135,13 @@
 		max-height: 100%;
 		overflow: hidden;
 		background: #4f5658;
+	}
+
+	.cctv-empty-shell {
+		align-self: start;
+		max-height: none;
+		border-radius: 12px;
+		border: 1px solid rgba(148, 163, 184, 0.2);
 	}
 
   .cctv-main {
@@ -1088,7 +2186,7 @@
     opacity: 1;
   }
 
-  .cctv-snapshot-image {
+  :global(.cctv-snapshot-image) {
     position: absolute;
     inset: 0;
     z-index: 0;
@@ -1181,6 +2279,10 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
+    min-height: 0;
+    overflow-y: auto;
+    align-content: start;
+    padding-right: 4px;
   }
 
   .cctv-mini {
@@ -1220,7 +2322,7 @@
     opacity: 1;
   }
 
-  .cctv-mini img {
+  :global(.cctv-mini-snapshot) {
     position: absolute;
     inset: 0;
     z-index: 0;
@@ -1233,6 +2335,14 @@
     transform: translateY(-2px) scale(1.02);
     box-shadow: 0 5px 12px rgba(15, 23, 42, 0.24);
     background: #3f4648;
+  }
+
+  .cctv-mini.active {
+    outline: 2px solid #60a5fa;
+    outline-offset: -2px;
+    box-shadow:
+      0 0 0 2px rgba(37, 99, 235, 0.28),
+      0 8px 18px rgba(37, 99, 235, 0.2);
   }
 
   .cctv-mini:active {
@@ -1256,6 +2366,42 @@
 
   .cctv-mini.offline {
     background: #7a7f82;
+  }
+
+  .cctv-buffering {
+    cursor: default;
+    pointer-events: none;
+    background: #111827;
+  }
+
+  .cctv-buffering span,
+  .cctv-buffering small {
+    width: 62%;
+    height: 12px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(148, 163, 184, 0.2);
+  }
+
+  .cctv-buffering small {
+    width: 76%;
+    height: 10px;
+  }
+
+  .cctv-buffering span::after,
+  .cctv-buffering small::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.14), transparent);
+    animation: cctvBufferShimmer 1.25s infinite;
+  }
+
+  @keyframes cctvBufferShimmer {
+    100% {
+      transform: translateX(100%);
+    }
   }
 
 	.map-panel {
@@ -1353,6 +2499,7 @@
 	}
 
 	.timeline-track,
+	.timeline-buffer,
 	.timeline-progress,
 	.timeline-dot {
 		pointer-events: none;
@@ -1365,6 +2512,16 @@
 		top: 9px;
 		height: 3px;
 		background: #d5dbe3;
+	}
+
+	.timeline-buffer {
+		position: absolute;
+		left: 0;
+		top: 9px;
+		height: 3px;
+		background: #64748b;
+		opacity: 0.72;
+		transition: width 0.28s ease;
 	}
 
 	.timeline-progress {

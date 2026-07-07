@@ -2451,11 +2451,11 @@
 		const hasExternal = canShowFuelEmsExternal;
 
 		if (sourceKey === 'ems_internal') {
-			return hasInternal && hasExternal ? 'EMS Internal' : 'EMS';
+			return hasInternal && hasExternal ? 'VMS' : 'EMS';
 		}
 
 		if (sourceKey === 'ems_external') {
-			return hasInternal && hasExternal ? 'EMS External' : 'EMS';
+			return 'EMS';
 		}
 
 		if (sourceKey === 'engine_maker') return 'Engine Maker';

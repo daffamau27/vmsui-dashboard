@@ -31,5 +31,11 @@ export async function getLatestCctvSnapshots(vesselId, cameraName = "") {
     }
   );
 
+  console.log("[CCTV_LATEST_SNAPSHOTS_RESPONSE]", {
+    vesselId,
+    cameraName,
+    response
+  });
+
   return response?.data || response || [];
 }

@@ -18,7 +18,9 @@
     zoom = 12,
     tracePoints = [],
     activeIndex = 0,
-    showTraceLine = false
+    renderKey = 0,
+    showTraceLine = false,
+    followActivePoint = false
   } = $props();
 
     let hasInitialTraceFit = false;
@@ -45,8 +47,52 @@
   }
 
   function getPosition() {
+    const activeTracePoint = getActiveTracePoint();
+
+    if (activeTracePoint) {
+      const traceLat = getPointLat(activeTracePoint);
+      const traceLng = getPointLng(activeTracePoint);
+
+      if (Number.isFinite(traceLat) && Number.isFinite(traceLng)) {
+        return [traceLat, traceLng];
+      }
+    }
+
     return [toNumber(latitude, 0), toNumber(longitude, 0)];
   }
+
+function getActiveTracePoint() {
+  if (!showTraceLine || !Array.isArray(tracePoints) || !tracePoints.length) return null;
+
+  const point = tracePoints[Math.max(0, Math.min(activeIndex, tracePoints.length - 1))];
+  const lat = getPointLat(point);
+  const lng = getPointLng(point);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat === 0 && lng === 0) return null;
+
+  return point;
+}
+
+function getCurrentHeading() {
+  const activeTracePoint = getActiveTracePoint();
+  return toNumber(activeTracePoint?.heading ?? activeTracePoint?.course ?? heading, 0);
+}
+
+function getCurrentSpeed() {
+  const activeTracePoint = getActiveTracePoint();
+
+  if (activeTracePoint && activeTracePoint.speed !== undefined) {
+    return `${toNumber(activeTracePoint.speed, 0).toFixed(1)} knot`;
+  }
+
+  return speed || "-";
+}
+
+function getCurrentLastUpdate() {
+  const activeTracePoint = getActiveTracePoint();
+  return activeTracePoint?.timestamp || activeTracePoint?.timestampRaw || lastUpdate || "-";
+}
 
 function getValidTraceLatLngs() {
   if (!Array.isArray(tracePoints)) return [];
@@ -94,7 +140,7 @@ function resetTraceFitIfNeeded() {
           class="vessel-map-marker-icon"
           src="${iconUrl}"
           alt="${vesselName}"
-          style="transform: rotate(${toNumber(heading, 0)}deg) scaleX(1.16);"
+          style="transform: rotate(${getCurrentHeading()}deg) scaleX(1.16);"
         />
       `,
       iconSize: [28, 60],
@@ -133,8 +179,9 @@ function resetTraceFitIfNeeded() {
   }
 
   function createPopupHtml() {
-    const formattedLatitude = toNumber(latitude, 0).toFixed(6);
-    const formattedLongitude = toNumber(longitude, 0).toFixed(6);
+    const [currentLatitude, currentLongitude] = getPosition();
+    const formattedLatitude = toNumber(currentLatitude, 0).toFixed(6);
+    const formattedLongitude = toNumber(currentLongitude, 0).toFixed(6);
 
     return `
       <div class="vessel-map-popup">
@@ -157,12 +204,12 @@ function resetTraceFitIfNeeded() {
 
         <div class="vessel-map-popup-row">
           <span>Speed</span>
-          <strong>${speed || "-"}</strong>
+          <strong>${getCurrentSpeed()}</strong>
         </div>
 
         <div class="vessel-map-popup-row">
           <span>Updated</span>
-          <strong>${lastUpdate || "-"}</strong>
+          <strong>${getCurrentLastUpdate()}</strong>
         </div>
       </div>
     `;
@@ -298,7 +345,14 @@ function updateMarker({ autoCenter = false } = {}) {
   }
 
   if (autoCenter) {
-    map.setView([lat, lng], zoom);
+    if (showTraceLine) {
+      map.panTo([lat, lng], {
+        animate: true,
+        duration: 0.35
+      });
+    } else {
+      map.setView([lat, lng], zoom);
+    }
   }
 }
 
@@ -310,7 +364,7 @@ function refreshMap() {
   drawTraceLine();
 
   updateMarker({
-    autoCenter: !showTraceLine || getValidTraceLatLngs().length < 2
+    autoCenter: followActivePoint || !showTraceLine || getValidTraceLatLngs().length < 2
   });
 
   fitTraceBoundsOnce();
@@ -368,7 +422,9 @@ $effect(() => {
   zoom;
   tracePoints;
   activeIndex;
+  renderKey;
   showTraceLine;
+  followActivePoint;
 
   if (!map || !L) return;
 

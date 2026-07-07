@@ -114,11 +114,11 @@
 		if (key === 'fms') return 'FMS';
 
 		if (key === 'ems_internal') {
-			return hasInternal && hasExternal ? 'EMS Internal' : 'EMS';
+			return hasInternal && hasExternal ? 'VMS' : 'EMS';
 		}
 
 		if (key === 'ems_external') {
-			return hasInternal && hasExternal ? 'EMS External' : 'EMS';
+			return 'EMS';
 		}
 
 		if (key === 'engine_maker') return 'Engine Maker';

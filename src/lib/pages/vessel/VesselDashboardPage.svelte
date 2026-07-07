@@ -10,11 +10,17 @@
     getLatestCctvSnapshots,
     getVesselDashboard
   } from "$lib/api/dashboardApi.js";
-  import { getFleetVesselLiveDetail } from "$lib/api/fleetApi.js";
+  import { getFleetAssets, getFleetVesselLiveDetail } from "$lib/api/fleetApi.js";
   import { apiRequest } from "$lib/api/authApi.js";
   import { VMS_TILE_URL, VMS_TILE_OPTIONS } from "$lib/mapStyle.js";
   import LoadingSkeleton from "$lib/components/LoadingSkeleton.svelte";
   import CopyableCoordinate from "$lib/components/CopyableCoordinate.svelte";
+  import CctvSnapshotImage from "$lib/components/CctvSnapshotImage.svelte";
+  import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from "$lib/utils/assetIcons.js";
+  import {
+    createCopyableCoordinateHtml,
+    handleCoordinateCopyClick
+  } from "$lib/utils/coordinateClipboard.js";
 
   let loading = $state(false);
   let error = $state("");
@@ -23,6 +29,10 @@
   let cctvSnapshots = $state([]);
   let cctvSnapshotsLoading = $state(false);
   let cctvSnapshotsError = $state("");
+  let selectedDashboardCctvKey = $state("");
+  let dashboardAssets = $state([]);
+  let dashboardAssetsLoading = $state(false);
+  let dashboardAssetsError = $state("");
 
   let currentUser = $state(null);
   let currentUserLoading = $state(false);
@@ -36,6 +46,8 @@
   let L = null;
   let dashboardMapInitializing = false;
   let vesselMarker = null;
+  let dashboardAssetMarkers = new Map();
+  let dashboardAssetBoundaryCircles = new Map();
   let lastDashboardMapVesselId = null;
 
   let showWindParticles = $state(true);
@@ -216,7 +228,34 @@
           ? value.cameras
           : [];
 
-    return rawList.map((item, index) => {
+    const flattenedList = rawList.flatMap((item) => {
+      if (!Array.isArray(item?.cameras)) return [item];
+
+      return item.cameras.flatMap((camera) => {
+        const snapshots = Array.isArray(camera?.snapshots) ? camera.snapshots : [];
+
+        if (!snapshots.length) {
+          return [
+            {
+              ...camera,
+              vesselId: item?.vesselId,
+              vesselName: item?.vesselName
+            }
+          ];
+        }
+
+        return snapshots.map((snapshot) => ({
+          ...snapshot,
+          camera_name: camera?.camera_name,
+          cameraName: camera?.cameraName,
+          camera_token: camera?.camera_token,
+          vesselId: item?.vesselId,
+          vesselName: item?.vesselName
+        }));
+      });
+    });
+
+    return flattenedList.map((item, index) => {
       const statusText = String(item?.status || (item?.online === false ? "Offline" : "Live"));
       const snapshotUrl =
         item?.presigned_url ||
@@ -230,6 +269,13 @@
       const fileSize = Number(item?.file_size ?? item?.fileSize);
 
       return {
+        key:
+          item?.camera_token ||
+          item?.cameraToken ||
+          item?.camera_name ||
+          item?.cameraName ||
+          item?.name ||
+          `${snapshotUrl || item?.file_path || item?.filePath || "cctv"}-${capturedAt || index}`,
         name: item?.camera_name || item?.cameraName || item?.name || `CCTV ${index + 1}`,
         status: statusText,
         location: item?.location || item?.position || item?.file_path || item?.filePath || "-",
@@ -284,6 +330,36 @@
     const number = Number(value);
     if (!Number.isFinite(number)) return fallback;
     return number.toFixed(digits);
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function normalizeDashboardAsset(asset = {}) {
+    const latitude = Number(asset.latitude ?? asset.lat);
+    const longitude = Number(asset.longitude ?? asset.lng);
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    if (latitude === 0 && longitude === 0) return null;
+
+    const id = asset.id ?? asset.assetId ?? `${latitude},${longitude}`;
+
+    return {
+      ...asset,
+      id,
+      assetId: asset.assetId ?? asset.asset_id ?? String(id),
+      name: asset.assetName ?? asset.name ?? asset.thingsboardName ?? `Asset ${id}`,
+      assetName: asset.assetName ?? asset.name ?? asset.thingsboardName ?? `Asset ${id}`,
+      assetType: getAssetTypeValue(asset),
+      latitude,
+      longitude
+    };
   }
 
   function formatLiter(value, digits = 2) {
@@ -440,6 +516,17 @@
   let cctvItems = $derived(
     normalizeCctvList(cctvSnapshots.length ? cctvSnapshots : dashboardData?.cctv)
   );
+  let mainDashboardCctv = $derived(
+    cctvItems.find((item) => item.key === selectedDashboardCctvKey) || cctvItems[0] || null
+  );
+  let miniDashboardCctvItems = $derived(
+    mainDashboardCctv ? cctvItems.filter((item) => item.key !== mainDashboardCctv.key) : []
+  );
+
+  function selectDashboardCctv(cctv) {
+    if (!cctv?.key) return;
+    selectedDashboardCctvKey = cctv.key;
+  }
 
   let dataReceivedSummary = $derived({
     receivedMinutes: dashboardData?.dataReceivedStats?.received_minutes ?? 0,
@@ -631,6 +718,18 @@
       dashboardMap.getPane("dashboardCurrentPane").style.pointerEvents = "none";
     }
 
+    if (!dashboardMap.getPane("dashboardAssetBoundaryPane")) {
+      dashboardMap.createPane("dashboardAssetBoundaryPane");
+      dashboardMap.getPane("dashboardAssetBoundaryPane").style.zIndex = "440";
+      dashboardMap.getPane("dashboardAssetBoundaryPane").style.pointerEvents = "none";
+    }
+
+    if (!dashboardMap.getPane("dashboardAssetPane")) {
+      dashboardMap.createPane("dashboardAssetPane");
+      dashboardMap.getPane("dashboardAssetPane").style.zIndex = "450";
+      dashboardMap.getPane("dashboardAssetPane").style.pointerEvents = "auto";
+    }
+
     if (!dashboardMap.getPane("dashboardVesselPane")) {
       dashboardMap.createPane("dashboardVesselPane");
       dashboardMap.getPane("dashboardVesselPane").style.zIndex = "760";
@@ -656,6 +755,119 @@
       iconSize: [28, 60],
       iconAnchor: [14, 30],
       popupAnchor: [0, -32]
+    });
+  }
+
+  function createDashboardAssetIcon(asset) {
+    if (!L) return null;
+
+    const iconUrl = getAssetIconUrl(asset);
+    const typeLabel = getAssetTypeLabel(asset);
+
+    return L.divIcon({
+      className: `dashboard-asset-leaflet-icon asset-type-${String(typeLabel).toLowerCase()}`,
+      html: `
+        <img
+          class="dashboard-asset-marker-icon"
+          src="${iconUrl}"
+          alt="${escapeHtml(typeLabel)} asset"
+          title="${escapeHtml(asset.assetName || asset.name)}"
+        />
+      `,
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
+      popupAnchor: [0, -16]
+    });
+  }
+
+  function createDashboardAssetPopupHtml(asset) {
+    const typeLabel = getAssetTypeLabel(asset);
+    const formattedLatitude = formatNumber(asset.latitude, 6);
+    const formattedLongitude = formatNumber(asset.longitude, 6);
+
+    return `
+      <div class="dashboard-asset-popup">
+        <div class="dashboard-asset-popup-hero">
+          <div class="dashboard-asset-popup-icon" aria-hidden="true">
+            <img src="${getAssetIconUrl(asset)}" alt="" />
+          </div>
+          <div class="dashboard-asset-popup-heading">
+            <span>${escapeHtml(typeLabel)}</span>
+            <strong>${escapeHtml(asset.assetName || asset.name || "Asset")}</strong>
+          </div>
+          <em>${escapeHtml(typeLabel)}</em>
+        </div>
+        <div class="dashboard-asset-popup-grid">
+          <div>
+            <span>Asset ID</span>
+            <strong>${escapeHtml(asset.id ?? asset.assetId ?? "-")}</strong>
+          </div>
+          <div>
+            <span>Latitude</span>
+            ${createCopyableCoordinateHtml(formattedLatitude, "asset latitude")}
+          </div>
+          <div>
+            <span>Longitude</span>
+            ${createCopyableCoordinateHtml(formattedLongitude, "asset longitude")}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function clearDashboardAssetMarkers() {
+    dashboardAssetMarkers.forEach((marker) => marker.remove());
+    dashboardAssetMarkers = new Map();
+
+    dashboardAssetBoundaryCircles.forEach((circle) => circle.remove());
+    dashboardAssetBoundaryCircles = new Map();
+  }
+
+  function buildDashboardAssetMarkers() {
+    if (!dashboardMap || !L) return;
+
+    clearDashboardAssetMarkers();
+
+    dashboardAssets.forEach((asset) => {
+      const lat = Number(asset.latitude);
+      const lng = Number(asset.longitude);
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      if (lat === 0 && lng === 0) return;
+
+      const assetId = String(asset.id ?? `${lat},${lng}`);
+
+      const boundaryCircle = L.circle([lat, lng], {
+        radius: 1000,
+        pane: "dashboardAssetBoundaryPane",
+        interactive: false,
+        stroke: true,
+        color: "#f59e0b",
+        weight: 2,
+        opacity: 0.9,
+        fill: true,
+        fillColor: "#f59e0b",
+        fillOpacity: 0.12,
+        dashArray: "8 8",
+        className: "dashboard-asset-boundary-circle"
+      }).addTo(dashboardMap);
+
+      const marker = L.marker([lat, lng], {
+        icon: createDashboardAssetIcon(asset),
+        pane: "dashboardAssetPane",
+        zIndexOffset: 0,
+        riseOnHover: true
+      }).addTo(dashboardMap);
+
+      marker.bindPopup(createDashboardAssetPopupHtml(asset), {
+        closeButton: true,
+        autoPan: true,
+        maxWidth: 300,
+        className: "dashboard-asset-leaflet-popup"
+      });
+
+      dashboardAssetMarkers.set(assetId, marker);
+      dashboardAssetBoundaryCircles.set(assetId, boundaryCircle);
     });
   }
 
@@ -743,6 +955,8 @@
       L.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(dashboardMap);
 
       setupDashboardMapPanes();
+      dashboardMapContainer.addEventListener("click", handleCoordinateCopyClick, true);
+      buildDashboardAssetMarkers();
 
       if (active && showCurrentParticles) {
         addCurrentParticleLayer();
@@ -765,11 +979,14 @@
   function destroyDashboardMap() {
     removeCurrentParticleLayer();
     removeWindParticleLayer();
+    clearDashboardAssetMarkers();
 
     if (vesselMarker) {
       vesselMarker.remove();
       vesselMarker = null;
     }
+
+    dashboardMapContainer?.removeEventListener?.("click", handleCoordinateCopyClick, true);
 
     if (dashboardMap) {
       dashboardMap.remove();
@@ -1405,6 +1622,8 @@
       canShowFuelEcu
   );
 
+  let shouldShowVmsFuelLabel = $derived(canShowFuelEmsInternal && canShowFuelEmsExternal);
+
   let canShowFodUsage = $derived(
     canViewFuelFod && Boolean(dashboardData?.fodUsage)
   );
@@ -1445,6 +1664,7 @@
       const [dashboardResult, liveResult] = await Promise.all([
         getVesselDashboard($selectedVesselId),
         getFleetVesselLiveDetail($selectedVesselId),
+        loadDashboardAssets(),
         loadLatestCctvSnapshots($selectedVesselId),
         loadCurrentUser()
       ]);
@@ -1462,6 +1682,26 @@
       cctvSnapshots = [];
     } finally {
       loading = false;
+    }
+  }
+
+  async function loadDashboardAssets() {
+    dashboardAssetsLoading = true;
+    dashboardAssetsError = "";
+
+    try {
+      const assets = await getFleetAssets();
+      dashboardAssets = assets.map(normalizeDashboardAsset).filter(Boolean);
+      buildDashboardAssetMarkers();
+      return dashboardAssets;
+    } catch (err) {
+      console.error("[VESSEL_DASHBOARD_ASSETS_ERROR]", err);
+      dashboardAssets = [];
+      dashboardAssetsError = err?.message || "Failed to load asset data.";
+      clearDashboardAssetMarkers();
+      return [];
+    } finally {
+      dashboardAssetsLoading = false;
     }
   }
 
@@ -1499,6 +1739,17 @@
   }
 
   $effect(() => {
+    if (!cctvItems.length) {
+      if (selectedDashboardCctvKey) selectedDashboardCctvKey = "";
+      return;
+    }
+
+    if (!cctvItems.some((item) => item.key === selectedDashboardCctvKey)) {
+      selectedDashboardCctvKey = cctvItems[0]?.key || "";
+    }
+  });
+
+  $effect(() => {
     if (!active) return;
     if (!$selectedVesselId) return;
 
@@ -1531,6 +1782,16 @@
     if (!active || !canViewDailyPathMap) return;
 
     ensureDashboardMap();
+  });
+
+  $effect(() => {
+    active;
+    canViewDailyPathMap;
+    dashboardAssets;
+
+    if (!active || !canViewDailyPathMap || !dashboardMap || !L) return;
+
+    buildDashboardAssetMarkers();
   });
 
   $effect(() => {
@@ -1584,18 +1845,6 @@
       <p>Real-time monitoring for vessel status, position, engine RPM, weather, ocean current, and daily fuel consumption.</p>
     </div>
 
-    <div class="header-right">
-      <div class="header-meta">
-        <span>Status</span>
-        <strong class:online-text={vesselInfo.online} class:offline-text={!vesselInfo.online}>
-          {vesselInfo.online ? "Online" : "Offline"}
-        </strong>
-      </div>
-
-      <button type="button" class="primary-btn" onclick={loadDashboard} disabled={loading || currentUserLoading}>
-        Refresh
-      </button>
-    </div>
   </section>
 
 {#if loading || currentUserLoading}
@@ -1630,13 +1879,21 @@
 
       <div class="cctv-grid" class:empty-cctv={cctvItems.length === 0 && !cctvSnapshotsLoading}>
         {#if cctvSnapshotsLoading}
-          {#each Array(4) as _}
+          <div class="cctv-focus-layout">
             <div class="cctv-box cctv-skeleton" aria-hidden="true">
               <span></span>
               <strong></strong>
               <small></small>
             </div>
-          {/each}
+
+            <div class="cctv-thumbnail-row" aria-hidden="true">
+              {#each Array(3) as _}
+                <div class="cctv-box cctv-skeleton cctv-thumb-box">
+                  <strong></strong>
+                </div>
+              {/each}
+            </div>
+          </div>
         {:else if cctvItems.length === 0}
           <div class="cctv-empty">
             <div class="cctv-icon">▣</div>
@@ -1644,31 +1901,72 @@
             <span>{cctvSnapshotsError || "Latest snapshot is not available for this vessel yet."}</span>
           </div>
         {:else}
+          <div class="cctv-focus-layout">
+            {#if mainDashboardCctv}
+              <div
+                class:offline={!mainDashboardCctv.online}
+                class:has-snapshot={Boolean(mainDashboardCctv.url)}
+                class="cctv-box cctv-main-box"
+              >
+                {#if mainDashboardCctv.url}
+                  <CctvSnapshotImage
+                    class="cctv-snapshot-img"
+                    src={mainDashboardCctv.url}
+                    filePath={mainDashboardCctv.location}
+                    alt={`${mainDashboardCctv.name} latest snapshot`}
+                    loading="eager"
+                  />
+                {/if}
+                <div class="cctv-top">
+                  <span class="camera-dot" title={mainDashboardCctv.status}></span>
+                  <span class="cctv-status-text">{mainDashboardCctv.online ? "Snapshot ready" : "No snapshot"}</span>
+                </div>
 
-        {#each cctvItems as cctv}
-          <div class:offline={!cctv.online} class:has-snapshot={Boolean(cctv.url)} class="cctv-box">
-            {#if cctv.url}
-              <img class="cctv-snapshot-img" src={cctv.url} alt={`${cctv.name} latest snapshot`} loading="lazy" />
+                <div class="cctv-content">
+                  <div class="cctv-icon">▣</div>
+                  <div class="cctv-name">{mainDashboardCctv.name}</div>
+                  {#if mainDashboardCctv.capturedAtText}
+                    <div class="cctv-location">Captured {mainDashboardCctv.capturedAtText}</div>
+                  {:else}
+                    <div class="cctv-location">{mainDashboardCctv.location}</div>
+                  {/if}
+                  {#if mainDashboardCctv.fileSizeText}
+                    <div class="cctv-file-size">{mainDashboardCctv.fileSizeText}</div>
+                  {/if}
+                </div>
+              </div>
             {/if}
-            <div class="cctv-top">
-              <span class="camera-dot" title={cctv.status}></span>
-              <span class="cctv-status-text">{cctv.online ? "Snapshot ready" : "No snapshot"}</span>
-            </div>
 
-            <div class="cctv-content">
-              <div class="cctv-icon">▣</div>
-              <div class="cctv-name">{cctv.name}</div>
-              {#if cctv.capturedAtText}
-                <div class="cctv-location">Captured {cctv.capturedAtText}</div>
-              {:else}
-                <div class="cctv-location">{cctv.location}</div>
-              {/if}
-              {#if cctv.fileSizeText}
-                <div class="cctv-file-size">{cctv.fileSizeText}</div>
-              {/if}
-            </div>
+            {#if miniDashboardCctvItems.length}
+              <div class="cctv-thumbnail-row" aria-label="CCTV camera list">
+                {#each miniDashboardCctvItems as cctv (cctv.key)}
+                  <button
+                    type="button"
+                    class:offline={!cctv.online}
+                    class:has-snapshot={Boolean(cctv.url)}
+                    class="cctv-box cctv-thumb-box"
+                    onclick={() => selectDashboardCctv(cctv)}
+                    title={`Show ${cctv.name}`}
+                  >
+                    {#if cctv.url}
+                      <CctvSnapshotImage
+                        class="cctv-snapshot-img"
+                        src={cctv.url}
+                        filePath={cctv.location}
+                        alt={`${cctv.name} latest snapshot`}
+                        loading="lazy"
+                      />
+                    {/if}
+
+                    <div class="cctv-content">
+                      <div class="cctv-name">{cctv.name}</div>
+                    </div>
+                  </button>
+                {/each}
+              </div>
+            {/if}
           </div>
-          {/each}
+
         {/if}
       </div>
     </div>
@@ -1925,23 +2223,20 @@
           <h2>Current Daily Consumption So Far</h2>
         </div>
 
-        <button type="button" class="secondary-btn" onclick={loadDashboard} disabled={loading || currentUserLoading}>
-          Refresh
-        </button>
       </div>
 
       {#if canViewFuelConsumptionTable && hasVisibleFuelSource}
         <div class="fuel-cols">
           {#if canShowFuelEmsInternal}
             <article class="fuel-metric">
-              <span class="fuel-label">EMS Internal</span>
+              <span class="fuel-label">{shouldShowVmsFuelLabel ? "VMS" : "EMS"}</span>
               <strong class="fuel-value">{fuelSummary.emsInternal}</strong>
             </article>
           {/if}
 
           {#if canShowFuelEmsExternal}
             <article class="fuel-metric">
-              <span class="fuel-label">EMS External</span>
+              <span class="fuel-label">EMS</span>
               <strong class="fuel-value">{fuelSummary.emsExternal}</strong>
             </article>
           {/if}
@@ -1969,13 +2264,8 @@
       {#if canShowFodUsage}
         <div class="fod-usage-summary">
           <article>
-            <span>Accumulated</span>
+            <span>FOD</span>
             <strong>{formatLiter(fodUsage?.accumulatedLiters || 0)}</strong>
-          </article>
-
-          <article class="fod-total-card">
-            <span>Interval</span>
-            <strong>{formatLiter(fodUsage?.intervalLiters ?? 0)}</strong>
           </article>
         </div>
       {/if}
@@ -2010,7 +2300,7 @@
     margin: 0;
     padding: 0;
     font-family:
-      Inter,
+      'Plus Jakarta Sans',
       ui-sans-serif,
       system-ui,
       -apple-system,
@@ -2106,74 +2396,6 @@
     font-weight: 700;
   }
 
-  .header-right {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  .header-meta {
-    min-width: 120px;
-    padding: 10px 12px;
-    border-radius: 12px;
-    background: var(--color-elevated);
-    border: 1px solid #e2e8f0;
-    text-align: right;
-  }
-
-  .header-meta span {
-    display: block;
-    color: var(--text-secondary);
-    font-size: 10px;
-    font-weight: 900;
-    text-transform: uppercase;
-  }
-
-  .header-meta strong {
-    display: block;
-    margin-top: 5px;
-    color: var(--text-primary);
-    font-size: 14px;
-    font-weight: 900;
-  }
-
-  .online-text {
-    color: #047857 !important;
-  }
-
-  .offline-text {
-    color: var(--text-secondary) !important;
-  }
-
-  .primary-btn,
-  .secondary-btn {
-    height: 32px;
-    padding: 0 12px;
-    border: none;
-    font-size: 11px;
-    font-weight: 900;
-  }
-
-  .primary-btn {
-    background: #2563eb;
-    color: #ffffff;
-  }
-
-  .primary-btn:hover {
-    background: #1d4ed8;
-  }
-
-  .secondary-btn {
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--text-primary);
-  }
-
-  .secondary-btn:hover {
-    background: #cbd5e1;
-  }
-
   .status-box {
     margin-top: 14px;
     padding: 10px 12px;
@@ -2196,7 +2418,7 @@
 
   .hero-grid {
     display: grid;
-    grid-template-columns: minmax(360px, 1fr) minmax(420px, 1.15fr);
+    grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
     gap: 14px;
     min-height: 404px;
     margin-top: 14px;
@@ -2208,6 +2430,10 @@
     min-height: 404px;
     display: flex;
     flex-direction: column;
+  }
+
+  .cctv-section {
+    align-self: start;
   }
 
   .section-header {
@@ -2243,20 +2469,35 @@
 
   .cctv-grid {
     flex: 1;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    display: block;
     padding: 14px;
     background: var(--color-elevated);
   }
 
   .empty-cctv {
+    display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .cctv-focus-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    min-height: 0;
+  }
+
+  .cctv-thumbnail-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+    width: 100%;
   }
 
   .cctv-box {
     position: relative;
-    min-height: 142px;
+    min-height: 0;
+    aspect-ratio: 4 / 3;
     border-radius: 12px;
     overflow: hidden;
     background:
@@ -2268,6 +2509,30 @@
     flex-direction: column;
     justify-content: space-between;
     padding: 12px;
+  }
+
+  button.cctv-box {
+    appearance: none;
+    width: 100%;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .cctv-main-box {
+    width: 100%;
+    cursor: default;
+  }
+
+  .cctv-thumb-box {
+    border-radius: 10px;
+    padding: 8px;
+    min-width: 0;
+  }
+
+  .cctv-thumb-box:hover {
+    border-color: rgba(96, 165, 250, 0.52);
+    filter: brightness(1.08);
   }
 
   .cctv-box::before {
@@ -2288,7 +2553,7 @@
     opacity: 1;
   }
 
-  .cctv-snapshot-img {
+  :global(.cctv-snapshot-img) {
     position: absolute;
     inset: 0;
     z-index: 0;
@@ -2360,6 +2625,27 @@
     display: none;
   }
 
+  .cctv-thumb-box .cctv-content {
+    place-items: start;
+    align-self: stretch;
+    margin: auto 0 0;
+    padding: 7px 8px;
+    border-radius: 9px;
+    background: rgba(15, 23, 42, 0.78);
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    text-align: left;
+  }
+
+  .cctv-thumb-box.has-snapshot .cctv-content {
+    padding: 7px 8px;
+    border-radius: 9px;
+  }
+
+  .cctv-thumb-box .cctv-name {
+    font-size: 12px;
+    line-height: 1.2;
+  }
+
   .cctv-icon {
     width: 38px;
     height: 38px;
@@ -2391,7 +2677,6 @@
   }
 
   .cctv-skeleton {
-    min-height: 142px;
     display: grid;
     align-content: end;
     gap: 10px;
@@ -2621,6 +2906,169 @@
       brightness(0.82)
       drop-shadow(0 0 5px rgba(15, 23, 42, 0.72))
       drop-shadow(0 9px 16px rgba(15, 23, 42, 0.34));
+  }
+
+  :global(.dashboard-asset-leaflet-icon) {
+    background: transparent;
+    border: none;
+  }
+
+  :global(.dashboard-asset-marker-icon) {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+    display: block;
+    filter:
+      drop-shadow(0 0 4px rgba(255, 255, 255, 0.9))
+      drop-shadow(0 7px 12px rgba(15, 23, 42, 0.34));
+  }
+
+  :global(.dashboard-asset-boundary-circle) {
+    pointer-events: none;
+  }
+
+  :global(.dashboard-asset-leaflet-popup .leaflet-popup-content-wrapper) {
+    width: 300px;
+    background: #111827;
+    color: #f8fafc;
+    border-radius: 16px;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    box-shadow:
+      0 18px 38px rgba(2, 6, 23, 0.46),
+      0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+    overflow: hidden;
+  }
+
+  :global(.dashboard-asset-leaflet-popup .leaflet-popup-content) {
+    width: 300px !important;
+    margin: 0;
+  }
+
+  :global(.dashboard-asset-leaflet-popup .leaflet-popup-tip) {
+    background: #111827;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+  }
+
+  :global(.dashboard-asset-leaflet-popup .leaflet-popup-close-button) {
+    top: 10px;
+    right: 10px;
+    width: 26px;
+    height: 26px;
+    border-radius: 9px;
+    color: #cbd5e1 !important;
+    background: rgba(30, 41, 59, 0.88);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    font-size: 18px;
+    line-height: 24px;
+  }
+
+  :global(.dashboard-asset-popup) {
+    color: #f8fafc;
+  }
+
+  :global(.dashboard-asset-popup-hero) {
+    display: grid;
+    grid-template-columns: 46px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 14px 38px 14px 14px;
+    background: #1f2937;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  }
+
+  :global(.dashboard-asset-popup-icon) {
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+    display: grid;
+    place-items: center;
+    background: rgba(37, 99, 235, 0.16);
+    border: 1px solid rgba(96, 165, 250, 0.28);
+  }
+
+  :global(.dashboard-asset-popup-icon img) {
+    width: 30px;
+    height: 30px;
+    object-fit: contain;
+  }
+
+  :global(.dashboard-asset-popup-heading) {
+    min-width: 0;
+  }
+
+  :global(.dashboard-asset-popup-heading span) {
+    display: block;
+    color: #60a5fa;
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  :global(.dashboard-asset-popup-heading strong) {
+    display: block;
+    margin-top: 3px;
+    color: #f8fafc;
+    font-size: 17px;
+    line-height: 1.15;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+  }
+
+  :global(.dashboard-asset-popup-hero em) {
+    padding: 5px 9px;
+    border-radius: 999px;
+    background: rgba(37, 99, 235, 0.22);
+    border: 1px solid rgba(96, 165, 250, 0.32);
+    color: #dbeafe;
+    font-size: 10px;
+    font-style: normal;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  :global(.dashboard-asset-popup-grid) {
+    display: grid;
+    gap: 8px;
+    padding: 12px 14px 14px;
+    background: #111827;
+  }
+
+  :global(.dashboard-asset-popup-grid > div) {
+    min-height: 42px;
+    padding: 9px 10px;
+    border-radius: 10px;
+    background: #1f2937;
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  :global(.dashboard-asset-popup-grid span) {
+    color: #94a3b8;
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  :global(.dashboard-asset-popup-grid strong),
+  :global(.dashboard-asset-popup-grid .copyable-coordinate-value) {
+    color: #f8fafc;
+    font-size: 12px;
+    font-weight: 800;
+    text-align: right;
+  }
+
+  :global(.dashboard-asset-popup-grid .copy-coordinate-button) {
+    width: 28px;
+    height: 28px;
+    border-radius: 9px;
+    background: rgba(37, 99, 235, 0.2);
+    border: 1px solid rgba(96, 165, 250, 0.34);
+    color: #bfdbfe;
   }
 
   :global(.dashboard-leaflet-popup .leaflet-popup-content-wrapper) {
@@ -3044,16 +3492,6 @@
       align-items: flex-start;
     }
 
-    .header-right {
-      width: 100%;
-      justify-content: flex-start;
-    }
-
-    .header-meta {
-      text-align: left;
-    }
-
-    .cctv-grid,
     .vessel-info-grid,
     .rpm-grid,
     .summary-grid,
@@ -3064,7 +3502,24 @@
     }
 
     .cctv-box {
-      min-height: 150px;
+      min-height: 0;
+    }
+
+    .cctv-grid {
+      padding: 10px;
+    }
+
+    .cctv-thumbnail-row {
+      gap: 6px;
+    }
+
+    .cctv-thumb-box {
+      border-radius: 9px;
+      padding: 6px;
+    }
+
+    .cctv-thumb-box .cctv-name {
+      font-size: 11px;
     }
 
     .summary-card {

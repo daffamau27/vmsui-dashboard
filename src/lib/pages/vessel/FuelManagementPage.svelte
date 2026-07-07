@@ -80,8 +80,8 @@
 		},
 		{
 			key: 'per_engine_ems_internal',
-			title: 'Per Engine - EMS Internal',
-			description: 'Internal EMS fuel consumption by engine.',
+			title: 'Per Engine - VMS',
+			description: 'VMS fuel consumption by engine.',
 			permission: 'view_fuel_ems_internal',
 			columns: [
 				{ label: 'Engine', field: 'engine', align: 'left' },
@@ -91,8 +91,8 @@
 		},
 		{
 			key: 'per_engine_ems_external',
-			title: 'Per Engine - EMS External',
-			description: 'External EMS fuel consumption by engine.',
+			title: 'Per Engine - EMS',
+			description: 'EMS fuel consumption by engine.',
 			permission: 'view_fuel_ems_external',
 			columns: [
 				{ label: 'Engine', field: 'engine', align: 'left' },
@@ -156,8 +156,8 @@
 	function getEmsDisplayLabel(type) {
 		if (!shouldShowEmsVariantName()) return 'EMS';
 
-		if (type === 'internal') return 'EMS Internal';
-		if (type === 'external') return 'EMS External';
+		if (type === 'internal') return 'VMS';
+		if (type === 'external') return 'EMS';
 
 		return 'EMS';
 	}
