@@ -199,7 +199,7 @@ export async function getFleetVesselsWithEngines() {
 }
 
 export async function getFleetAssets() {
-	const response = await apiRequest('/fleet/assets', {
+	const response = await apiRequest('/assets', {
 		method: 'GET',
 		headers: {
 			accept: 'application/json'

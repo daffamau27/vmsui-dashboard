@@ -1,5 +1,5 @@
 <script>
-  import { onDestroy, tick } from "svelte";
+  import { onDestroy, tick, untrack } from "svelte";
   import { browser } from "$app/environment";
   import RpmCard from "$lib/RpmCard.svelte";
   import {
@@ -18,6 +18,11 @@
   import CctvSnapshotImage from "$lib/components/CctvSnapshotImage.svelte";
   import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from "$lib/utils/assetIcons.js";
   import {
+    addMapZonesToLeafletMap,
+    isZoneAsset,
+    normalizeMapZonesFromAssets
+  } from "$lib/utils/mapZones.js";
+  import {
     createCopyableCoordinateHtml,
     handleCoordinateCopyClick
   } from "$lib/utils/coordinateClipboard.js";
@@ -31,6 +36,7 @@
   let cctvSnapshotsError = $state("");
   let selectedDashboardCctvKey = $state("");
   let dashboardAssets = $state([]);
+  let dashboardZones = $state([]);
   let dashboardAssetsLoading = $state(false);
   let dashboardAssetsError = $state("");
 
@@ -39,7 +45,8 @@
   let currentUserError = $state("");
 
   let { active = false } = $props();
-  let loadedKeys = $state({});
+  let lastDashboardLoadKey = $state("");
+  let dashboardRequestId = 0;
 
   let dashboardMapContainer;
   let dashboardMap = null;
@@ -48,6 +55,7 @@
   let vesselMarker = null;
   let dashboardAssetMarkers = new Map();
   let dashboardAssetBoundaryCircles = new Map();
+  let dashboardZoneLayerGroup = null;
   let lastDashboardMapVesselId = null;
 
   let showWindParticles = $state(true);
@@ -342,6 +350,8 @@
   }
 
   function normalizeDashboardAsset(asset = {}) {
+    if (isZoneAsset(asset)) return null;
+
     const latitude = Number(asset.latitude ?? asset.lat);
     const longitude = Number(asset.longitude ?? asset.lng);
 
@@ -360,6 +370,21 @@
       latitude,
       longitude
     };
+  }
+
+  function rebuildDashboardZoneLayer() {
+    if (!dashboardMap || !L) return;
+
+    if (dashboardZoneLayerGroup) {
+      dashboardZoneLayerGroup.clearLayers();
+      dashboardZoneLayerGroup.remove();
+      dashboardZoneLayerGroup = null;
+    }
+
+    dashboardZoneLayerGroup = addMapZonesToLeafletMap(L, dashboardMap, dashboardZones, {
+      paneName: "dashboardZonePane",
+      zIndex: 355
+    });
   }
 
   function formatLiter(value, digits = 2) {
@@ -955,6 +980,7 @@
       L.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(dashboardMap);
 
       setupDashboardMapPanes();
+      rebuildDashboardZoneLayer();
       dashboardMapContainer.addEventListener("click", handleCoordinateCopyClick, true);
       buildDashboardAssetMarkers();
 
@@ -976,10 +1002,46 @@
     }
   }
 
+  function scheduleDashboardMapRefresh({ recreate = false, center = false } = {}) {
+    if (!browser) return;
+
+    setTimeout(async () => {
+      if (!active || !canViewDailyPathMap) return;
+
+      if (recreate && dashboardMap) {
+        destroyDashboardMap();
+      }
+
+      await tick();
+
+      if (!dashboardMapContainer) return;
+
+      await ensureDashboardMap();
+
+      if (!dashboardMap) return;
+
+      dashboardMap.invalidateSize();
+      updateDashboardMapMarker({ center });
+
+      setTimeout(() => {
+        if (!dashboardMap) return;
+
+        dashboardMap.invalidateSize();
+        updateDashboardMapMarker({ center });
+      }, 120);
+    }, 0);
+  }
+
   function destroyDashboardMap() {
     removeCurrentParticleLayer();
     removeWindParticleLayer();
     clearDashboardAssetMarkers();
+
+    if (dashboardZoneLayerGroup) {
+      dashboardZoneLayerGroup.clearLayers();
+      dashboardZoneLayerGroup.remove();
+      dashboardZoneLayerGroup = null;
+    }
 
     if (vesselMarker) {
       vesselMarker.remove();
@@ -993,7 +1055,6 @@
       dashboardMap = null;
     }
 
-    dashboardMapContainer = null;
     lastDashboardMapVesselId = null;
   }
 
@@ -1648,8 +1709,27 @@
         : "-"
   });
 
-  async function loadDashboard() {
-    if (!$selectedVesselId) {
+  function resetDashboardStateForVessel() {
+    dashboardData = null;
+    liveVesselDetail = null;
+    cctvSnapshots = [];
+    cctvSnapshotsError = "";
+    selectedDashboardCctvKey = "";
+    error = "";
+  }
+
+  function isDashboardRequestCurrent(vesselId, requestId) {
+    return (
+      requestId === dashboardRequestId &&
+      String(vesselId || "") === String($selectedVesselId || "")
+    );
+  }
+
+  async function loadDashboard(vesselId = $selectedVesselId) {
+    const targetVesselId = vesselId || $selectedVesselId;
+    const requestId = ++dashboardRequestId;
+
+    if (!targetVesselId) {
       dashboardData = null;
       liveVesselDetail = null;
       cctvSnapshots = [];
@@ -1662,26 +1742,37 @@
 
     try {
       const [dashboardResult, liveResult] = await Promise.all([
-        getVesselDashboard($selectedVesselId),
-        getFleetVesselLiveDetail($selectedVesselId),
+        getVesselDashboard(targetVesselId),
+        getFleetVesselLiveDetail(targetVesselId),
         loadDashboardAssets(),
-        loadLatestCctvSnapshots($selectedVesselId),
+        loadLatestCctvSnapshots(targetVesselId, requestId),
         loadCurrentUser()
       ]);
+
+      if (!isDashboardRequestCurrent(targetVesselId, requestId)) return;
 
       dashboardData = dashboardResult?.data || dashboardResult || null;
       liveVesselDetail = liveResult || null;
 
-      console.log("[VESSEL_DASHBOARD_DATA]", dashboardData);
-      console.log("[VESSEL_DASHBOARD_LIVE_DETAIL]", liveVesselDetail);
+      console.log("[VESSEL_DASHBOARD_DATA]", { vesselId: targetVesselId, data: dashboardData });
+      console.log("[VESSEL_DASHBOARD_LIVE_DETAIL]", {
+        vesselId: targetVesselId,
+        data: liveVesselDetail
+      });
+
+      scheduleDashboardMapRefresh({ center: true });
     } catch (err) {
+      if (!isDashboardRequestCurrent(targetVesselId, requestId)) return;
+
       console.error("[VESSEL_DASHBOARD_ERROR]", err);
       error = err?.message || "Failed to load vessel dashboard.";
       dashboardData = null;
       liveVesselDetail = null;
       cctvSnapshots = [];
     } finally {
-      loading = false;
+      if (isDashboardRequestCurrent(targetVesselId, requestId)) {
+        loading = false;
+      }
     }
   }
 
@@ -1691,13 +1782,17 @@
 
     try {
       const assets = await getFleetAssets();
+      dashboardZones = normalizeMapZonesFromAssets(assets);
       dashboardAssets = assets.map(normalizeDashboardAsset).filter(Boolean);
+      rebuildDashboardZoneLayer();
       buildDashboardAssetMarkers();
       return dashboardAssets;
     } catch (err) {
       console.error("[VESSEL_DASHBOARD_ASSETS_ERROR]", err);
       dashboardAssets = [];
+      dashboardZones = [];
       dashboardAssetsError = err?.message || "Failed to load asset data.";
+      rebuildDashboardZoneLayer();
       clearDashboardAssetMarkers();
       return [];
     } finally {
@@ -1705,7 +1800,7 @@
     }
   }
 
-  async function loadLatestCctvSnapshots(vesselId = $selectedVesselId) {
+  async function loadLatestCctvSnapshots(vesselId = $selectedVesselId, requestId = dashboardRequestId) {
     if (!vesselId) {
       cctvSnapshots = [];
       return [];
@@ -1726,15 +1821,21 @@
               ? result.data
               : [];
 
+      if (!isDashboardRequestCurrent(vesselId, requestId)) return snapshots;
+
       cctvSnapshots = snapshots;
       return snapshots;
     } catch (err) {
+      if (!isDashboardRequestCurrent(vesselId, requestId)) return [];
+
       console.error("[VESSEL_CCTV_SNAPSHOTS_ERROR]", err);
       cctvSnapshots = [];
       cctvSnapshotsError = err?.message || "Failed to load latest CCTV snapshots.";
       return [];
     } finally {
-      cctvSnapshotsLoading = false;
+      if (isDashboardRequestCurrent(vesselId, requestId)) {
+        cctvSnapshotsLoading = false;
+      }
     }
   }
 
@@ -1750,19 +1851,30 @@
   });
 
   $effect(() => {
-    if (!active) return;
-    if (!$selectedVesselId) return;
+    const isActive = active;
+    const vesselId = $selectedVesselId;
+    const key = `${vesselId || ""}`;
 
-    const key = `${$selectedVesselId}`;
+    if (!isActive) return;
 
-    if (loadedKeys[key]) return;
+    if (!vesselId) {
+      if (lastDashboardLoadKey) lastDashboardLoadKey = "";
+      untrack(() => {
+        resetDashboardStateForVessel();
+        loadDashboard(null);
+      });
+      return;
+    }
 
-    loadedKeys = {
-      ...loadedKeys,
-      [key]: true
-    };
+    if (key === lastDashboardLoadKey) return;
 
-    loadDashboard();
+    lastDashboardLoadKey = key;
+
+    untrack(() => {
+      resetDashboardStateForVessel();
+      scheduleDashboardMapRefresh({ recreate: true, center: true });
+      loadDashboard(vesselId);
+    });
   });
 
   $effect(() => {
@@ -1992,6 +2104,17 @@
           {/if}
 
           <div class="dashboard-map-legend">
+            {#each dashboardZones as zone}
+              <span class="dashboard-zone-legend-item">
+                <i
+                  class="dashboard-zone-legend-swatch"
+                  style={`--zone-color: ${zone.color}; --zone-fill: ${zone.fillColor};`}
+                  aria-hidden="true"
+                ></i>
+                {zone.name}
+              </span>
+            {/each}
+
             <button
               type="button"
               class:active-wind-toggle={showWindParticles}
@@ -2810,6 +2933,26 @@
     box-shadow: 0 4px 10px rgba(15, 23, 42, 0.07);
   }
 
+  .dashboard-zone-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    color: #cbd5e1;
+    font-size: 10px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .dashboard-zone-legend-swatch {
+    width: 22px;
+    height: 16px;
+    border: 2px dashed var(--zone-color, #38bdf8);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--zone-fill, #0ea5e9) 24%, transparent);
+    flex: 0 0 auto;
+  }
+
   .wind-legend-line,
   .current-legend-line {
     width: 15px;
@@ -3090,6 +3233,52 @@
   :global(.dashboard-leaflet-popup .leaflet-popup-tip) {
     background: var(--color-surface);
     border: 1px solid #dbe4ef;
+  }
+
+  :global(.vms-zone-popup-wrapper .leaflet-popup-content-wrapper) {
+    border: 1px solid rgba(96, 165, 250, 0.28);
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.94);
+    color: #f8fafc;
+    box-shadow: 0 18px 36px rgba(15, 23, 42, 0.36);
+    overflow: hidden;
+  }
+
+  :global(.vms-zone-popup-wrapper .leaflet-popup-content) {
+    margin: 0;
+    width: 180px !important;
+  }
+
+  :global(.vms-zone-popup-wrapper .leaflet-popup-tip) {
+    background: rgba(15, 23, 42, 0.94);
+  }
+
+  :global(.vms-zone-popup) {
+    display: grid;
+    gap: 5px;
+    padding: 10px 12px;
+  }
+
+  :global(.vms-zone-popup strong) {
+    color: #f8fafc;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  :global(.vms-zone-popup span) {
+    color: #94a3b8;
+    font-size: 11px;
+    font-weight: 650;
+  }
+
+  :global(.vms-zone-tooltip) {
+    border: 1px solid rgba(96, 165, 250, 0.26);
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.88);
+    color: #f8fafc;
+    font-size: 10px;
+    font-weight: 800;
+    box-shadow: 0 10px 20px rgba(15, 23, 42, 0.28);
   }
 
   :global(.dashboard-map-popup-title) {

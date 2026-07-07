@@ -11,6 +11,11 @@
 	import { getLatestCctvSnapshots } from '$lib/api/dashboardApi.js';
 	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
 	import {
+		addMapZonesToLeafletMap,
+		isZoneAsset,
+		normalizeMapZonesFromAssets
+	} from '$lib/utils/mapZones.js';
+	import {
 		createCopyableCoordinateHtml,
 		handleCoordinateCopyClick
 	} from '$lib/utils/coordinateClipboard.js';
@@ -48,6 +53,7 @@
 	let assetError = $state('');
 	let showAssets = $state(true);
 	let visibleAssetTypes = $state({});
+	let zoneData = $state([]);
 	let isMapLegendOpen = $state(true);
 	let assetMarkers = new Map();
 	let assetBoundaryCircles = new Map();
@@ -62,6 +68,7 @@
 	let map = null;
 	let L = null;
 	let markers = new Map();
+	let zoneLayerGroup = null;
 	let isFleetMounted = false;
 	let mapInitializing = false;
 
@@ -182,6 +189,8 @@
 	}
 
 	function normalizeFleetAsset(asset = {}) {
+		if (isZoneAsset(asset)) return null;
+
 		const id = asset.id ?? asset.assetId;
 
 		return {
@@ -194,6 +203,21 @@
 			lat: asset.latitude ?? asset.lat,
 			lng: asset.longitude ?? asset.lng
 		};
+	}
+
+	function rebuildZoneLayer() {
+		if (!map || !L) return;
+
+		if (zoneLayerGroup) {
+			zoneLayerGroup.clearLayers();
+			zoneLayerGroup.remove();
+			zoneLayerGroup = null;
+		}
+
+		zoneLayerGroup = addMapZonesToLeafletMap(L, map, zoneData, {
+			paneName: 'fleetZonePane',
+			zIndex: 355
+		});
 	}
 
 	function formatCctvSnapshotTime(value) {
@@ -2263,7 +2287,10 @@
 		try {
 			const assets = await getFleetAssets();
 
+			zoneData = normalizeMapZonesFromAssets(assets);
 			assetData = assets.map(normalizeFleetAsset).filter((asset) => {
+				if (!asset) return false;
+
 				const lat = Number(asset.lat ?? asset.latitude);
 				const lng = Number(asset.lng ?? asset.longitude);
 
@@ -2274,6 +2301,7 @@
 			});
 
 			if (map && L) {
+				rebuildZoneLayer();
 				buildAssetMarkers();
 			}
 		} catch (error) {
@@ -2281,6 +2309,7 @@
 
 			assetError = error?.message || 'Failed to load asset data.';
 			assetData = [];
+			zoneData = [];
 		} finally {
 			assetLoading = false;
 		}
@@ -2428,6 +2457,7 @@
 			L.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(map);
 
 			setupMapPanes();
+			rebuildZoneLayer();
 			buildMarkers();
 			buildAssetMarkers();
 
@@ -2480,6 +2510,12 @@
 		assetBoundaryCircles.forEach((circle) => circle.remove());
 		assetBoundaryCircles.clear();
 		assetBoundaryCircles = new Map();
+
+		if (zoneLayerGroup) {
+			zoneLayerGroup.clearLayers();
+			zoneLayerGroup.remove();
+			zoneLayerGroup = null;
+		}
 
 		if (map) {
 			map.off('contextmenu', handleMapRightClick);
@@ -3209,6 +3245,21 @@
 									</div>
 								{/if}
 							</div>
+
+							{#if zoneData.length}
+								<div class="legend-section">
+									{#each zoneData as zone}
+										<div class="legend-item">
+											<span
+												class="zone-boundary-legend"
+												style={`--zone-color: ${zone.color}; --zone-fill: ${zone.fillColor};`}
+												aria-hidden="true"
+											></span>
+											<span>{zone.name}</span>
+										</div>
+									{/each}
+								</div>
+							{/if}
 
 							<div class="legend-actions">
 								<button
@@ -4967,6 +5018,63 @@
 		background: rgba(245, 158, 11, 0.14);
 		box-shadow: 0 0 10px rgba(245, 158, 11, 0.24);
 		flex: 0 0 auto;
+	}
+
+	.zone-boundary-legend {
+		width: 24px;
+		height: 18px;
+		border: 2px dashed var(--zone-color, #38bdf8);
+		border-radius: 6px;
+		background: color-mix(in srgb, var(--zone-fill, #0ea5e9) 24%, transparent);
+		box-shadow: 0 0 10px color-mix(in srgb, var(--zone-color, #38bdf8) 28%, transparent);
+		flex: 0 0 auto;
+	}
+
+	:global(.fleet-page .vms-zone-popup-wrapper .leaflet-popup-content-wrapper),
+	:global(.vms-zone-popup-wrapper .leaflet-popup-content-wrapper) {
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.94);
+		color: #f8fafc;
+		box-shadow: 0 18px 36px rgba(15, 23, 42, 0.36);
+		backdrop-filter: blur(10px);
+	}
+
+	:global(.vms-zone-popup-wrapper .leaflet-popup-content) {
+		margin: 0;
+		width: 180px !important;
+	}
+
+	:global(.vms-zone-popup-wrapper .leaflet-popup-tip) {
+		background: rgba(15, 23, 42, 0.94);
+	}
+
+	:global(.vms-zone-popup) {
+		display: grid;
+		gap: 5px;
+		padding: 10px 12px;
+	}
+
+	:global(.vms-zone-popup strong) {
+		color: #f8fafc;
+		font-size: 13px;
+		font-weight: 800;
+	}
+
+	:global(.vms-zone-popup span) {
+		color: #94a3b8;
+		font-size: 11px;
+		font-weight: 650;
+	}
+
+	:global(.vms-zone-tooltip) {
+		border: 1px solid rgba(96, 165, 250, 0.26);
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.88);
+		color: #f8fafc;
+		font-size: 10px;
+		font-weight: 800;
+		box-shadow: 0 10px 20px rgba(15, 23, 42, 0.28);
 	}
 
 	.legend-asset-list {

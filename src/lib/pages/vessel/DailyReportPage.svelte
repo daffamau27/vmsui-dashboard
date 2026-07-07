@@ -14,6 +14,8 @@
 	import { VMS_TILE_URL, VMS_TILE_OPTIONS } from '$lib/mapStyle.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
+	import { getFleetAssets } from '$lib/api/fleetApi.js';
+	import { addMapZonesToLeafletMap, normalizeMapZonesFromAssets } from '$lib/utils/mapZones.js';
 	import {
 		createCopyableCoordinateHtml,
 		handleCoordinateCopyClick
@@ -30,6 +32,7 @@
 	let vesselEnginesLoading = $state(false);
 	let vesselEnginesError = $state('');
 	let loadedEngineDetailVesselId = $state(null);
+	let mapZones = $state([]);
 
 	let reportDate = $state('');
 	let timezoneMode = $state('auto');
@@ -1720,12 +1723,27 @@
 			.filter(Boolean);
 	}
 
-	function tripLeafletMap(node, points = []) {
+	function getTripMapPayload(value) {
+		if (Array.isArray(value)) {
+			return {
+				points: value,
+				zones: []
+			};
+		}
+
+		return {
+			points: Array.isArray(value?.points) ? value.points : [],
+			zones: Array.isArray(value?.zones) ? value.zones : []
+		};
+	}
+
+	function tripLeafletMap(node, payload = { points: [], zones: [] }) {
 		let map = null;
 		let leaflet = null;
 		let routeLayer = null;
 		let startMarker = null;
 		let endMarker = null;
+		let zoneLayer = null;
 		let disposed = false;
 
 		node.addEventListener('click', handleCoordinateCopyClick, true);
@@ -1742,9 +1760,10 @@
 			});
 		}
 
-		async function render(nextPoints = []) {
+		async function render(nextPayload = { points: [], zones: [] }) {
 			if (disposed) return;
 
+			const { points: nextPoints, zones: nextZones } = getTripMapPayload(nextPayload);
 			const validPoints = Array.isArray(nextPoints) ? nextPoints : [];
 
 			if (!leaflet) {
@@ -1766,6 +1785,17 @@
 
 				leaflet.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(map);
 			}
+
+			if (zoneLayer) {
+				zoneLayer.clearLayers();
+				zoneLayer.remove();
+				zoneLayer = null;
+			}
+
+			zoneLayer = addMapZonesToLeafletMap(leaflet, map, nextZones, {
+				paneName: 'dailyTripZonePane',
+				zIndex: 355
+			});
 
 			if (routeLayer) {
 				routeLayer.remove();
@@ -1849,15 +1879,21 @@
 			}, 120);
 		}
 
-		render(points);
+		render(payload);
 
 		return {
-			update(nextPoints) {
-				render(nextPoints);
+			update(nextPayload) {
+				render(nextPayload);
 			},
 			destroy() {
 				disposed = true;
 				node.removeEventListener('click', handleCoordinateCopyClick, true);
+
+				if (zoneLayer) {
+					zoneLayer.clearLayers();
+					zoneLayer.remove();
+					zoneLayer = null;
+				}
 
 				if (map) {
 					map.remove();
@@ -2593,8 +2629,19 @@
 		}
 	}
 
+	async function loadMapZones() {
+		try {
+			const assets = await getFleetAssets();
+			mapZones = normalizeMapZonesFromAssets(assets);
+		} catch (err) {
+			console.error('[DAILY_MAP_ZONES_ERROR]', err);
+			mapZones = [];
+		}
+	}
+
 	onMount(() => {
 		reportDate = todayDate();
+		loadMapZones();
 	});
 
 	$effect(() => {
@@ -2819,9 +2866,26 @@
 
 						<div class="trip-route-map">
 							{#if active}
-								<div class="trip-leaflet-map" use:tripLeafletMap={tripMapPoints}></div>
+								<div
+									class="trip-leaflet-map"
+									use:tripLeafletMap={{ points: tripMapPoints, zones: mapZones }}
+								></div>
 							{/if}
 						</div>
+
+						{#if mapZones.length}
+							<div class="trip-zone-legend" aria-label="Zone legend">
+								{#each mapZones as zone}
+									<span>
+										<i
+											style={`--zone-color: ${zone.color}; --zone-fill: ${zone.fillColor};`}
+											aria-hidden="true"
+										></i>
+										{zone.name}
+									</span>
+								{/each}
+							</div>
+						{/if}
 					</article>
 
 					<article class="trip-summary-card">
@@ -3772,10 +3836,87 @@
 		height: 100%;
 	}
 
+	.trip-zone-legend {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		margin: -4px 14px 14px;
+		padding: 0;
+	}
+
+	.trip-zone-legend span {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		min-height: 24px;
+		padding: 4px 8px;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		border-radius: 999px;
+		background: var(--color-elevated);
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 800;
+	}
+
+	.trip-zone-legend i {
+		width: 20px;
+		height: 14px;
+		border: 2px dashed var(--zone-color, #38bdf8);
+		border-radius: 5px;
+		background: color-mix(in srgb, var(--zone-fill, #0ea5e9) 24%, transparent);
+		flex: 0 0 auto;
+	}
+
 	.trip-leaflet-map :global(.leaflet-container) {
 		width: 100%;
 		height: 100%;
 		border-radius: 12px;
+	}
+
+	.trip-leaflet-map :global(.vms-zone-popup-wrapper .leaflet-popup-content-wrapper) {
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.94);
+		color: #f8fafc;
+		box-shadow: 0 18px 36px rgba(15, 23, 42, 0.36);
+		overflow: hidden;
+	}
+
+	.trip-leaflet-map :global(.vms-zone-popup-wrapper .leaflet-popup-content) {
+		margin: 0;
+		width: 180px !important;
+	}
+
+	.trip-leaflet-map :global(.vms-zone-popup-wrapper .leaflet-popup-tip) {
+		background: rgba(15, 23, 42, 0.94);
+	}
+
+	.trip-leaflet-map :global(.vms-zone-popup) {
+		display: grid;
+		gap: 5px;
+		padding: 10px 12px;
+	}
+
+	.trip-leaflet-map :global(.vms-zone-popup strong) {
+		color: #f8fafc;
+		font-size: 13px;
+		font-weight: 800;
+	}
+
+	.trip-leaflet-map :global(.vms-zone-popup span) {
+		color: #94a3b8;
+		font-size: 11px;
+		font-weight: 650;
+	}
+
+	.trip-leaflet-map :global(.vms-zone-tooltip) {
+		border: 1px solid rgba(96, 165, 250, 0.26);
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.88);
+		color: #f8fafc;
+		font-size: 10px;
+		font-weight: 800;
+		box-shadow: 0 10px 20px rgba(15, 23, 42, 0.28);
 	}
 
 	.trip-leaflet-map :global(.trip-map-marker) {

@@ -12,7 +12,13 @@
 	import { VMS_TILE_URL, VMS_TILE_OPTIONS } from '$lib/mapStyle.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
+	import { getFleetAssets } from '$lib/api/fleetApi.js';
 	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
+	import {
+		addMapZonesToLeafletMap,
+		isZoneAsset,
+		normalizeMapZonesFromAssets
+	} from '$lib/utils/mapZones.js';
 	import {
 		createCopyableCoordinateHtml,
 		handleCoordinateCopyClick
@@ -60,10 +66,12 @@
 	let markerLayer;
 	let assetMarkerLayer;
 	let vesselMarkerLayer;
+	let zoneLayerGroup;
 	let routeLine;
 	let mapInitializing = false;
 
 	let assets = [];
+	let zones = [];
 	let assetsLoading = false;
 	let assetsError = '';
 	let vesselMapInfo = null;
@@ -166,6 +174,8 @@
 	}
 
 	function normalizeAsset(asset) {
+		if (isZoneAsset(asset)) return null;
+
 		const latitude = Number(asset?.latitude);
 		const longitude = Number(asset?.longitude);
 
@@ -180,6 +190,21 @@
 			longitude,
 			raw: asset
 		};
+	}
+
+	function renderZoneLayer() {
+		if (!L || !routeMap) return;
+
+		if (zoneLayerGroup) {
+			zoneLayerGroup.clearLayers();
+			zoneLayerGroup.remove();
+			zoneLayerGroup = null;
+		}
+
+		zoneLayerGroup = addMapZonesToLeafletMap(L, routeMap, zones, {
+			paneName: 'voyageVesselZonePane',
+			zIndex: 355
+		});
 	}
 
 	function createAssetMarkerIcon(asset) {
@@ -397,24 +422,21 @@
 		assetsError = '';
 
 		try {
-			const result = await apiFetch('/fleet/assets', {
-				method: 'GET',
-				headers: {
-					Accept: 'application/json'
-				}
-			});
+			const rows = await getFleetAssets();
 
-			const rows = Array.isArray(result?.data) ? result.data : Array.isArray(result) ? result : [];
-
+			zones = normalizeMapZonesFromAssets(rows);
 			assets = rows.map(normalizeAsset).filter(Boolean);
 
 			console.log('[VOYAGE_PLAN_VESSEL][ASSETS]', assets);
 
+			renderZoneLayer();
 			renderAssetMarkers();
 		} catch (error) {
 			console.error('[VOYAGE_PLAN_VESSEL][ASSETS][ERROR]', error);
 			assets = [];
+			zones = [];
 			assetsError = error?.message || 'Failed to load fleet assets.';
+			renderZoneLayer();
 			renderAssetMarkers();
 		} finally {
 			assetsLoading = false;
@@ -983,6 +1005,7 @@
 
 			leaflet.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(routeMap);
 
+			renderZoneLayer();
 			assetMarkerLayer = leaflet.layerGroup().addTo(routeMap);
 			vesselMarkerLayer = leaflet.layerGroup().addTo(routeMap);
 			markerLayer = leaflet.layerGroup().addTo(routeMap);
@@ -1106,6 +1129,7 @@
 		markerLayer = null;
 		assetMarkerLayer = null;
 		vesselMarkerLayer = null;
+		zoneLayerGroup = null;
 		routeLine = null;
 	}
 
@@ -1324,6 +1348,21 @@
 							</span>
 						{/each}
 					</div>
+
+					{#if zones.length}
+						<div class="legend-group">
+							<span class="legend-title">Zones</span>
+							{#each zones as zone}
+								<span class="legend-item">
+									<i
+										class="legend-zone-swatch"
+										style={`--zone-color: ${zone.color}; --zone-fill: ${zone.fillColor};`}
+									></i>
+									{zone.name}
+								</span>
+							{/each}
+						</div>
+					{/if}
 				</div>
 			</section>
 
@@ -2065,6 +2104,61 @@
 		height: 18px;
 		object-fit: contain;
 		filter: drop-shadow(0 2px 4px rgba(15, 23, 42, 0.25));
+	}
+
+	.legend-zone-swatch {
+		width: 20px;
+		height: 14px;
+		border: 2px dashed var(--zone-color, #38bdf8);
+		border-radius: 5px;
+		background: color-mix(in srgb, var(--zone-fill, #0ea5e9) 24%, transparent);
+		flex: 0 0 auto;
+	}
+
+	:global(.vms-zone-popup-wrapper .leaflet-popup-content-wrapper) {
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.94);
+		color: #f8fafc;
+		box-shadow: 0 18px 36px rgba(15, 23, 42, 0.36);
+		overflow: hidden;
+	}
+
+	:global(.vms-zone-popup-wrapper .leaflet-popup-content) {
+		margin: 0;
+		width: 180px !important;
+	}
+
+	:global(.vms-zone-popup-wrapper .leaflet-popup-tip) {
+		background: rgba(15, 23, 42, 0.94);
+	}
+
+	:global(.vms-zone-popup) {
+		display: grid;
+		gap: 5px;
+		padding: 10px 12px;
+	}
+
+	:global(.vms-zone-popup strong) {
+		color: #f8fafc;
+		font-size: 13px;
+		font-weight: 800;
+	}
+
+	:global(.vms-zone-popup span) {
+		color: #94a3b8;
+		font-size: 11px;
+		font-weight: 650;
+	}
+
+	:global(.vms-zone-tooltip) {
+		border: 1px solid rgba(96, 165, 250, 0.26);
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.88);
+		color: #f8fafc;
+		font-size: 10px;
+		font-weight: 800;
+		box-shadow: 0 10px 20px rgba(15, 23, 42, 0.28);
 	}
 
 	.detail-list {

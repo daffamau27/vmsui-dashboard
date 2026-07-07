@@ -1,7 +1,9 @@
 <script>
   import { onMount, onDestroy, tick } from "svelte";
   import { browser } from "$app/environment";
+  import { getFleetAssets } from "$lib/api/fleetApi.js";
   import { VMS_TILE_URL, VMS_TILE_OPTIONS } from "$lib/mapStyle.js";
+  import { addMapZonesToLeafletMap, normalizeMapZonesFromAssets } from "$lib/utils/mapZones.js";
   import {
     createCopyableCoordinateHtml,
     handleCoordinateCopyClick
@@ -30,8 +32,10 @@
   let marker = null;
   let L = null;
   let isMounted = false;
+  let mapZones = $state([]);
 
   let traceLayerGroup = null;
+  let zoneLayerGroup = null;
 
   function toNumber(value, fallback = 0) {
     const number = Number(value);
@@ -375,6 +379,35 @@ function refreshMap() {
   }, 80);
 }
 
+function rebuildZoneLayer() {
+  if (!map || !L) return;
+
+  if (zoneLayerGroup) {
+    zoneLayerGroup.clearLayers();
+    zoneLayerGroup.remove();
+    zoneLayerGroup = null;
+  }
+
+  zoneLayerGroup = addMapZonesToLeafletMap(L, map, mapZones, {
+    paneName: "vesselMapZonePane",
+    zIndex: 355
+  });
+}
+
+async function loadMapZones() {
+  try {
+    const assets = await getFleetAssets();
+    if (!isMounted) return;
+
+    mapZones = normalizeMapZonesFromAssets(assets);
+    rebuildZoneLayer();
+  } catch (error) {
+    console.error("[VESSEL_MAP_ZONES_ERROR]", error);
+    mapZones = [];
+    rebuildZoneLayer();
+  }
+}
+
   onMount(async () => {
     if (!browser) return;
 
@@ -401,9 +434,11 @@ function refreshMap() {
 
     L.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(map);
 
+    rebuildZoneLayer();
     traceLayerGroup = L.layerGroup().addTo(map);
     container.addEventListener("click", handleCoordinateCopyClick, true);
 
+    loadMapZones();
     refreshMap();
 
     setTimeout(() => {
@@ -440,6 +475,12 @@ $effect(() => {
       traceLayerGroup = null;
     }
 
+    if (zoneLayerGroup) {
+      zoneLayerGroup.clearLayers();
+      zoneLayerGroup.remove();
+      zoneLayerGroup = null;
+    }
+
     if (marker) {
       marker.remove();
       marker = null;
@@ -456,14 +497,117 @@ $effect(() => {
   });
 </script>
 
-<div class="vessel-map-root" bind:this={mapContainer}></div>
+<div class="vessel-map-shell">
+  <div class="vessel-map-root" bind:this={mapContainer}></div>
+  <div class="vessel-map-zone-legend" aria-label="Zone legend">
+    {#each mapZones as zone}
+      <span>
+        <i
+          style={`--zone-color: ${zone.color}; --zone-fill: ${zone.fillColor};`}
+          aria-hidden="true"
+        ></i>
+        {zone.name}
+      </span>
+    {/each}
+  </div>
+</div>
 
 <style>
+  .vessel-map-shell {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 260px;
+  }
+
   .vessel-map-root {
     width: 100%;
     height: 100%;
     min-height: 260px;
     background: var(--color-accent-muted);
+  }
+
+  .vessel-map-zone-legend {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    z-index: 720;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-width: calc(100% - 20px);
+    padding: 6px 8px;
+    border: 1px solid rgba(96, 165, 250, 0.24);
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.76);
+    color: #e2e8f0;
+    box-shadow: 0 12px 26px rgba(15, 23, 42, 0.24);
+    backdrop-filter: blur(8px);
+    pointer-events: none;
+  }
+
+  .vessel-map-zone-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .vessel-map-zone-legend i {
+    width: 20px;
+    height: 14px;
+    border: 2px dashed var(--zone-color, #38bdf8);
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--zone-fill, #0ea5e9) 24%, transparent);
+  }
+
+  :global(.vms-zone-popup-wrapper .leaflet-popup-content-wrapper) {
+    border: 1px solid rgba(96, 165, 250, 0.28);
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.94);
+    color: #f8fafc;
+    box-shadow: 0 18px 36px rgba(15, 23, 42, 0.36);
+    overflow: hidden;
+  }
+
+  :global(.vms-zone-popup-wrapper .leaflet-popup-content) {
+    margin: 0;
+    width: 180px !important;
+  }
+
+  :global(.vms-zone-popup-wrapper .leaflet-popup-tip) {
+    background: rgba(15, 23, 42, 0.94);
+  }
+
+  :global(.vms-zone-popup) {
+    display: grid;
+    gap: 5px;
+    padding: 10px 12px;
+  }
+
+  :global(.vms-zone-popup strong) {
+    color: #f8fafc;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  :global(.vms-zone-popup span) {
+    color: #94a3b8;
+    font-size: 11px;
+    font-weight: 650;
+  }
+
+  :global(.vms-zone-tooltip) {
+    border: 1px solid rgba(96, 165, 250, 0.26);
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.88);
+    color: #f8fafc;
+    font-size: 10px;
+    font-weight: 800;
+    box-shadow: 0 10px 20px rgba(15, 23, 42, 0.28);
   }
 
   :global(.vessel-map-leaflet-icon) {
