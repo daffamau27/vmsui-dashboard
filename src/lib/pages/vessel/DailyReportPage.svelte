@@ -214,6 +214,15 @@
 		});
 	}
 
+	function formatCoordinatePair(latitude, longitude) {
+		const lat = Number(latitude);
+		const lng = Number(longitude);
+
+		if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '-';
+
+		return `${formatNumber(lat, 6)}, ${formatNumber(lng, 6)}`;
+	}
+
 	function formatHour(value) {
 		if (value === undefined || value === null || value === '') return '-';
 
@@ -338,6 +347,53 @@
 		}
 
 		return sources.length ? sources.join(' + ') : '-';
+	}
+
+	function getPriorityFuelSourceForDistance(summary = {}) {
+		const candidates = [
+			{
+				key: 'ems_external',
+				label: 'EMS',
+				canView: canViewFuelEmsExternal,
+				fuelLiter: toFuelNumber(summary?.ems_external ?? summary?.emsExternal)
+			},
+			{
+				key: 'ems_internal',
+				label: 'VMS',
+				canView: canViewFuelEmsInternal,
+				fuelLiter: toFuelNumber(summary?.ems_internal ?? summary?.emsInternal)
+			},
+			{
+				key: 'fms',
+				label: 'FMS',
+				canView: canViewFuelFms,
+				fuelLiter: toFuelNumber(summary?.fms)
+			},
+			{
+				key: 'ecu',
+				label: 'ECU',
+				canView: canViewFuelEcu,
+				fuelLiter: toFuelNumber(summary?.ecu)
+			}
+		];
+
+		const selected = candidates.find((candidate) => {
+			return candidate.canView && candidate.fuelLiter > 0;
+		});
+
+		if (!selected) {
+			return {
+				key: '',
+				label: '-',
+				fuelLiter: 0,
+				literPerNm: null
+			};
+		}
+
+		return {
+			...selected,
+			literPerNm: calculateLiterPerNm(selected.fuelLiter, totalDistanceNmForFuel)
+		};
 	}
 
 	function formatPlainLiter(value) {
@@ -1830,6 +1886,8 @@
 
 			const startPoint = validPoints[0];
 			const endPoint = validPoints[validPoints.length - 1];
+			const startCoordinatePair = formatCoordinatePair(startPoint.lat, startPoint.lng);
+			const endCoordinatePair = formatCoordinatePair(endPoint.lat, endPoint.lng);
 
 			startMarker = leaflet
 				.marker([startPoint.lat, startPoint.lng], {
@@ -1840,8 +1898,7 @@
 					<div class="trip-map-popup">
 						<strong class="trip-map-popup-title">Start Point</strong>
 						<div class="trip-map-popup-row"><span>Time</span><b>${startPoint.time}</b></div>
-						<div class="trip-map-popup-row"><span>Lat</span>${createCopyableCoordinateHtml(startPoint.lat, 'start latitude')}</div>
-						<div class="trip-map-popup-row"><span>Lng</span>${createCopyableCoordinateHtml(startPoint.lng, 'start longitude')}</div>
+						<div class="trip-map-popup-row"><span>Coordinate</span>${createCopyableCoordinateHtml(startCoordinatePair, 'start coordinate')}</div>
 					</div>
 				`,
 					{
@@ -1860,8 +1917,7 @@
 					<div class="trip-map-popup">
 						<strong class="trip-map-popup-title">End Point</strong>
 						<div class="trip-map-popup-row"><span>Time</span><b>${endPoint.time}</b></div>
-						<div class="trip-map-popup-row"><span>Lat</span>${createCopyableCoordinateHtml(endPoint.lat, 'end latitude')}</div>
-						<div class="trip-map-popup-row"><span>Lng</span>${createCopyableCoordinateHtml(endPoint.lng, 'end longitude')}</div>
+						<div class="trip-map-popup-row"><span>Coordinate</span>${createCopyableCoordinateHtml(endCoordinatePair, 'end coordinate')}</div>
 					</div>
 				`,
 					{
@@ -2249,8 +2305,6 @@
 				: 0)
 	);
 
-	let visibleFuelSourceForDistance = $derived(getVisibleFuelSourceLabel());
-
 	let canAccessDailyReport = $derived(hasPermission('access_daily_report'));
 
 	let canViewEngineRuntimeTable = $derived(hasPermission('view_engine_runtime_table'));
@@ -2362,13 +2416,11 @@
 
 	let fmsLiterPerNm = $derived(calculateLiterPerNm(fmsFuelValue, totalDistanceNmForFuel));
 
-	let totalFuelLiterForDistance = $derived(getTotalFuelLiter(fuelSummary));
+	let priorityFuelSourceForDistance = $derived(getPriorityFuelSourceForDistance(fuelSummary));
 
-	let fuelSourceForDistance = $derived(getFuelSourceLabel(fuelSummary));
+	let literPerNauticalMile = $derived(priorityFuelSourceForDistance.literPerNm);
 
-	let literPerNauticalMile = $derived(
-		calculateLiterPerNm(totalFuelLiterForDistance, totalDistanceNmForFuel)
-	);
+	let visibleFuelSourceForDistance = $derived(priorityFuelSourceForDistance.label);
 
 	let rpmFuelCurveChartGroups = $derived(buildRpmFuelCurveChartGroups(normalizedReport));
 
@@ -2922,16 +2974,15 @@
 								<span>Start Coordinate</span>
 								<strong class="coordinate-pair">
 									<CopyableCoordinate
-										value={formatNumber(dailyTripSummary.startLat, 6)}
-										display={formatNumber(dailyTripSummary.startLat, 6)}
-										label="start latitude"
-										compact
-									/>
-									<span>,</span>
-									<CopyableCoordinate
-										value={formatNumber(dailyTripSummary.startLng, 6)}
-										display={formatNumber(dailyTripSummary.startLng, 6)}
-										label="start longitude"
+										value={formatCoordinatePair(
+											dailyTripSummary.startLat,
+											dailyTripSummary.startLng
+										)}
+										display={formatCoordinatePair(
+											dailyTripSummary.startLat,
+											dailyTripSummary.startLng
+										)}
+										label="start coordinate"
 										compact
 									/>
 								</strong>
@@ -2941,16 +2992,9 @@
 								<span>End Coordinate</span>
 								<strong class="coordinate-pair">
 									<CopyableCoordinate
-										value={formatNumber(dailyTripSummary.endLat, 6)}
-										display={formatNumber(dailyTripSummary.endLat, 6)}
-										label="end latitude"
-										compact
-									/>
-									<span>,</span>
-									<CopyableCoordinate
-										value={formatNumber(dailyTripSummary.endLng, 6)}
-										display={formatNumber(dailyTripSummary.endLng, 6)}
-										label="end longitude"
+										value={formatCoordinatePair(dailyTripSummary.endLat, dailyTripSummary.endLng)}
+										display={formatCoordinatePair(dailyTripSummary.endLat, dailyTripSummary.endLng)}
+										label="end coordinate"
 										compact
 									/>
 								</strong>

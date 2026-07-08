@@ -1111,13 +1111,6 @@
 		/>
 	{:else}
 		<section class="summary-grid">
-		{#if canViewEngineRuntimeTable}
-			<article class="summary-card">
-				<span>Total Runtime</span>
-				<strong>{getSummaryRuntime()}</strong>
-			</article>
-		{/if}
-
 		{#if canViewFuelConsumptionTable && hasMonthlyFuelColumns}
 			<article class="summary-card">
 				<span>Total Fuel</span>
@@ -1475,7 +1468,7 @@
 	.summary-grid {
 		margin-top: 12px;
 		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 12px;
 	}
 

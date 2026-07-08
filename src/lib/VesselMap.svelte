@@ -38,6 +38,14 @@
   let traceLayerGroup = null;
   let zoneLayerGroup = null;
 
+  const TRACE_SPEED_RANGES = [
+    { label: "0–1 kn", min: 0, max: 1, color: "#9ca3af" },
+    { label: "1–12 kn", min: 1, max: 12, color: "#ef4444" },
+    { label: "12–15 kn", min: 12, max: 15, color: "#f97316" },
+    { label: "15–18 kn", min: 15, max: 18, color: "#facc15" },
+    { label: "18+ kn", min: 18, max: Infinity, color: "#10b981" }
+  ];
+
   function toNumber(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
@@ -102,17 +110,59 @@ function getCurrentLastUpdate() {
 function getValidTraceLatLngs() {
   if (!Array.isArray(tracePoints)) return [];
 
+  return getValidTracePoints().map((item) => item.latLng);
+}
+
+function getValidTracePoints() {
+  if (!Array.isArray(tracePoints)) return [];
+
   return tracePoints
-    .map((point) => {
+    .map((point, originalIndex) => {
       const lat = getPointLat(point);
       const lng = getPointLng(point);
 
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
       if (lat === 0 && lng === 0) return null;
 
-      return [lat, lng];
+      return {
+        point,
+        originalIndex,
+        latLng: [lat, lng],
+        speed: toNumber(point?.speed ?? point?.sog ?? point?.speedOverGround, 0)
+      };
     })
     .filter(Boolean);
+}
+
+function getTraceSpeedColor(speed) {
+  const value = Math.max(0, toNumber(speed, 0));
+
+  if (value <= 1) return TRACE_SPEED_RANGES[0].color;
+  if (value <= 12) return TRACE_SPEED_RANGES[1].color;
+  if (value <= 15) return TRACE_SPEED_RANGES[2].color;
+  if (value <= 18) return TRACE_SPEED_RANGES[3].color;
+
+  return TRACE_SPEED_RANGES[4].color;
+}
+
+function drawColoredTraceSegments(points, { untilIndex = points.length - 1, weight = 4, opacity = 0.55 } = {}) {
+  if (!L || !traceLayerGroup || !Array.isArray(points) || points.length < 2) return;
+
+  const lastIndex = Math.max(1, Math.min(untilIndex, points.length - 1));
+
+  for (let index = 1; index <= lastIndex; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const segmentSpeed = current?.speed ?? previous?.speed ?? 0;
+
+    L.polyline([previous.latLng, current.latLng], {
+      color: getTraceSpeedColor(segmentSpeed),
+      weight,
+      opacity,
+      lineCap: "round",
+      lineJoin: "round"
+    }).addTo(traceLayerGroup);
+  }
 }
 
 function getTraceSignature() {
@@ -245,36 +295,29 @@ function resetTraceFitIfNeeded() {
 
     if (!showTraceLine) return;
 
-    const latLngs = getValidTraceLatLngs();
+    const validPoints = getValidTracePoints();
+    const latLngs = validPoints.map((item) => item.latLng);
 
     console.log("[VESSEL_MAP_TRACE_LATLNGS]", latLngs.length);
 
     if (latLngs.length < 2) return;
 
-    const passedIndex = Math.max(0, Math.min(activeIndex, latLngs.length - 1));
-    const passedLatLngs = latLngs.slice(0, passedIndex + 1);
+    const passedIndex = Math.max(
+      0,
+      validPoints.findLastIndex((item) => item.originalIndex <= activeIndex)
+    );
 
-    const fullLine = L.polyline(latLngs, {
-        color: "#60a5fa",
-        weight: 4,
-        opacity: 0.55,
-        lineCap: "round",
-        lineJoin: "round"
+    drawColoredTraceSegments(validPoints, {
+      untilIndex: validPoints.length - 1,
+      weight: 4,
+      opacity: 0.48
     });
 
-    fullLine.addTo(traceLayerGroup);
-
-    if (passedLatLngs.length > 1) {
-        const activeLine = L.polyline(passedLatLngs, {
-        color: "#2563eb",
-        weight: 5,
-        opacity: 0.95,
-        lineCap: "round",
-        lineJoin: "round"
-        });
-
-        activeLine.addTo(traceLayerGroup);
-    }
+    drawColoredTraceSegments(validPoints, {
+      untilIndex: passedIndex,
+      weight: 6,
+      opacity: 0.98
+    });
 
     L.marker(latLngs[0], {
         icon: createStartIcon(),
@@ -501,6 +544,16 @@ $effect(() => {
 
 <div class="vessel-map-shell">
   <div class="vessel-map-root" bind:this={mapContainer}></div>
+  {#if showTraceLine}
+    <div class="trace-speed-legend" aria-label="Trace speed legend">
+      {#each TRACE_SPEED_RANGES as range}
+        <span>
+          <i style={`--trace-speed-color: ${range.color};`} aria-hidden="true"></i>
+          {range.label}
+        </span>
+      {/each}
+    </div>
+  {/if}
   <div class="vessel-map-zone-legend" aria-label="Zone legend">
     {#each mapZones as zone}
       <span>
@@ -564,6 +617,43 @@ $effect(() => {
     border: 2px dashed var(--zone-color, #38bdf8);
     border-radius: 5px;
     background: color-mix(in srgb, var(--zone-fill, #0ea5e9) 24%, transparent);
+  }
+
+  .trace-speed-legend {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 735;
+    display: grid;
+    gap: 4px;
+    min-width: 96px;
+    padding: 8px 10px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.74);
+    color: #e2e8f0;
+    box-shadow: 0 14px 28px rgba(15, 23, 42, 0.24);
+    backdrop-filter: blur(10px);
+    pointer-events: none;
+  }
+
+  .trace-speed-legend span {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    align-items: center;
+    gap: 7px;
+    font-size: 10px;
+    font-weight: 750;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  .trace-speed-legend i {
+    width: 18px;
+    height: 8px;
+    border-radius: 2px;
+    background: var(--trace-speed-color, #94a3b8);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12) inset;
   }
 
   :global(.vms-zone-popup-wrapper .leaflet-popup-content-wrapper) {

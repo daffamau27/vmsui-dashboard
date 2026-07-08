@@ -1,14 +1,52 @@
 <script>
+  import { onMount } from "svelte";
   import { login, authLoading, authError } from "$lib/stores/authStore.js";
+
+  const LOGIN_IMAGE_ASSETS = ["/assets/login1.png", "/assets/SeMAR.png"];
 
   let username = $state("");
   let password = $state("");
   let showPassword = $state(false);
+  let loginAssetsReady = $state(false);
+
+  function preloadImage(src) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      let settled = false;
+
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        resolve({ src, ok });
+      };
+
+      img.decoding = "async";
+      img.onload = () => finish(true);
+      img.onerror = () => finish(false);
+      img.src = src;
+
+      if (img.complete) {
+        finish(Boolean(img.naturalWidth));
+      }
+    });
+  }
+
+  onMount(() => {
+    let cancelled = false;
+
+    Promise.all(LOGIN_IMAGE_ASSETS.map(preloadImage)).then(() => {
+      if (!cancelled) loginAssetsReady = true;
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  });
 
   async function handleLogin(event) {
     event.preventDefault();
 
-    if (!username.trim() || !password.trim()) {
+    if (!loginAssetsReady || !username.trim() || !password.trim()) {
       return;
     }
 
@@ -16,7 +54,17 @@
   }
 </script>
 
-<section class="login-page">
+<section class:assets-ready={loginAssetsReady} class="login-page" aria-busy={!loginAssetsReady}>
+  {#if !loginAssetsReady}
+    <div class="login-preload-screen" aria-live="polite">
+      <div class="login-preload-logo">
+        <img src="/assets/SeMAR.png" alt="SeMAR" />
+      </div>
+      <div class="login-preload-spinner" aria-hidden="true"></div>
+      <span>Loading login assets...</span>
+    </div>
+  {/if}
+
   <div class="login-shell">
     <aside class="login-panel">
       <div class="login-panel-inner">
@@ -79,7 +127,7 @@
           <button
             type="submit"
             class="login-btn"
-            disabled={$authLoading || !username.trim() || !password.trim()}
+            disabled={!loginAssetsReady || $authLoading || !username.trim() || !password.trim()}
           >
             {$authLoading ? "Signing in..." : "Login"}
           </button>
@@ -103,6 +151,64 @@
     overflow: hidden;
     background: #07111f;
     box-sizing: border-box;
+  }
+
+  .login-preload-screen {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: 16px;
+    color: #94a3b8;
+    font-size: 11px;
+    font-weight: 850;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    background:
+      radial-gradient(circle at 42% 30%, rgba(37, 99, 235, 0.18), transparent 28%),
+      linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+      #07111f;
+    background-size: auto, 40px 40px, 40px 40px, auto;
+  }
+
+  .login-preload-logo {
+    width: min(190px, 56vw);
+    display: grid;
+    place-items: center;
+  }
+
+  .login-preload-logo img {
+    display: block;
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+  }
+
+  .login-preload-spinner {
+    width: 28px;
+    height: 28px;
+    border: 2px solid rgba(96, 165, 250, 0.18);
+    border-top-color: #60a5fa;
+    border-radius: 50%;
+    animation: loginPreloadSpin 0.78s linear infinite;
+  }
+
+  .login-shell {
+    opacity: 0;
+    transform: translateY(8px) scale(0.995);
+    pointer-events: none;
+    transition:
+      opacity 0.28s ease,
+      transform 0.28s ease;
+  }
+
+  .login-page.assets-ready .login-shell {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
   }
 
   .login-page::before {
@@ -472,6 +578,12 @@
     to {
       opacity: 1;
       transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes loginPreloadSpin {
+    to {
+      transform: rotate(360deg);
     }
   }
 
