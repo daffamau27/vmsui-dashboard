@@ -6,10 +6,41 @@
 	import Sidebar from '$lib/Sidebar.svelte';
 	import { initAuth, isLoggedIn, authReady } from '$lib/stores/authStore.js';
 	import { activeMenu } from '$lib/stores/appNavigation.svelte.js';
+	import { activeVesselMenu } from '$lib/stores/vesselNavigation.svelte.js';
 
 	let { children } = $props();
 
+	const pageTitles = {
+		profile: 'Profile',
+		administrator: 'Administrator',
+		'fleet-view': 'Fleet View',
+		vessel: 'Vessel',
+		'all-vessel-summary': 'All Vessel Summary',
+		alarm: 'Alarm',
+		'audit-log': 'Audit Log',
+		'voyage-plans': 'Voyage Plans'
+	};
+
+	const vesselPageTitles = {
+		dashboard: 'Dashboard',
+		'daily-report': 'Daily Report',
+		'monthly-report': 'Monthly Report',
+		'periodical-report': 'Periodical Report',
+		'voyage-plan': 'Voyage Plan',
+		trace: 'Trace',
+		'data-log': 'Data Log',
+		'fuel-management': 'Fuel Management'
+	};
+
 	let isLoginPage = $derived(page.url.pathname === '/');
+	let currentPageTitle = $derived(
+		isLoginPage
+			? 'Login'
+			: $activeMenu === 'vessel'
+				? vesselPageTitles[$activeVesselMenu] || pageTitles.vessel
+				: pageTitles[$activeMenu] || 'Dashboard'
+	);
+	let documentTitle = $derived(`VMS - ${currentPageTitle}`);
 
 	onMount(async () => {
 		await initAuth();
@@ -28,6 +59,13 @@
 		}
 	});
 </script>
+
+<svelte:head>
+	<title>{documentTitle}</title>
+	<link rel="icon" type="image/png" href="/assets/logo.png?v=2" />
+	<link rel="shortcut icon" type="image/png" href="/assets/logo.png?v=2" />
+	<link rel="apple-touch-icon" href="/assets/logo.png?v=2" />
+</svelte:head>
 
 {#if !$authReady}
 	<div class="loading-screen">

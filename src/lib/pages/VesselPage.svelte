@@ -738,7 +738,7 @@
 				class="vessel-selector"
 				onclick={() => (vesselDropdownOpen = !vesselDropdownOpen)}
 			>
-				<span class="vessel-selector-icon" aria-hidden="true">⚓</span>
+				<span class="vessel-selector-icon" aria-hidden="true">🚢</span>
 				<span class="selector-copy">
 					<small>Active vessel</small>
 					<strong>{selectedVessel}</strong>
@@ -783,7 +783,7 @@
 								class:active-vessel={Number($selectedVesselId) === Number(getVesselId(vessel))}
 								onclick={() => selectVessel(vessel)}
 							>
-								<span class="vessel-item-icon" aria-hidden="true">⚓</span>
+								<span class="vessel-item-icon" aria-hidden="true">🚢</span>
 								<span class="vessel-item-copy">
 									<strong>{vessel.vesselName || vessel.name}</strong>
 									<small>{vessel.companyName || vessel.deviceName || 'Vessel monitoring'}</small>

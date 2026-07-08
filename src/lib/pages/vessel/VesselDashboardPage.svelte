@@ -2543,16 +2543,16 @@
 
   .hero-grid {
     display: grid;
-    grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
+    grid-template-columns: minmax(330px, 440px) minmax(0, 1fr);
     gap: 14px;
-    min-height: 404px;
+    min-height: 430px;
     margin-top: 14px;
   }
 
   .cctv-section,
   .map-section {
     min-width: 0;
-    min-height: 404px;
+    min-height: 430px;
     display: flex;
     flex-direction: column;
   }
