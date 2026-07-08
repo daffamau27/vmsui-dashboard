@@ -1556,6 +1556,14 @@
 		font-size: 13px;
 	}
 
+	.menu-icon {
+		background:
+			rgba(59, 130, 246, 0.13)
+			url('/assets/workspace.png') center / 17px 17px no-repeat;
+		color: transparent;
+		font-size: 0;
+	}
+
 	.selector-copy,
 	.status-copy,
 	.vessel-item-copy {
