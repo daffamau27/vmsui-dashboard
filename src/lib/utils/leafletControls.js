@@ -64,14 +64,14 @@ function createSwitchableScaleControl(leaflet, options = {}) {
 			leaflet.DomEvent.disableScrollPropagation(container);
 			leaflet.DomEvent.on(unitSelect, 'change', this._handleUnitChange, this);
 
-			map.on('moveend zoomend resize', this._update, this);
+			map.on('load moveend zoomend resize', this._update, this);
 			this._update();
 
 			return container;
 		},
 
 		onRemove(map) {
-			map.off('moveend zoomend resize', this._update, this);
+			map.off('load moveend zoomend resize', this._update, this);
 			if (this._unitSelect) {
 				leaflet.DomEvent.off(this._unitSelect, 'change', this._handleUnitChange, this);
 			}
@@ -87,10 +87,15 @@ function createSwitchableScaleControl(leaflet, options = {}) {
 
 		_update() {
 			if (!this._map || !this._label || !this._bar || !this._unitSelect) return;
+			if (!this._map._loaded) {
+				this._label.textContent = 'Bar = -';
+				this._bar.style.width = `${Math.round(this._maxWidth * 0.72)}px`;
+				this._unitSelect.value = this._unit;
+				return;
+			}
 
-			const bounds = this._map.getBounds?.();
 			const size = this._map.getSize?.();
-			if (!bounds || !size?.x) return;
+			if (!size?.x || !size?.y) return;
 
 			const y = size.y / 2;
 			const maxMeters =

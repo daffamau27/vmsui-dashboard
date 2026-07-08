@@ -63,6 +63,8 @@
 	let openingDetailFromPopupForVesselId = null;
 
 	let isSidebarOpen = $state(true);
+	let mapStageContainer;
+	let isFleetFullscreen = $state(false);
 
 	let mapContainer;
 	let vesselListContainer;
@@ -966,6 +968,54 @@
 		}
 
 		openSidebar();
+	}
+
+	function getFullscreenElement() {
+		if (!browser) return null;
+		return (
+			document.fullscreenElement ||
+			document.webkitFullscreenElement ||
+			document.mozFullScreenElement ||
+			document.msFullscreenElement ||
+			null
+		);
+	}
+
+	async function toggleFleetFullscreen() {
+		if (!browser || !mapStageContainer) return;
+
+		try {
+			if (getFullscreenElement() === mapStageContainer) {
+				const exitFullscreen =
+					document.exitFullscreen ||
+					document.webkitExitFullscreen ||
+					document.mozCancelFullScreen ||
+					document.msExitFullscreen;
+				await exitFullscreen?.call(document);
+				return;
+			}
+
+			const requestFullscreen =
+				mapStageContainer.requestFullscreen ||
+				mapStageContainer.webkitRequestFullscreen ||
+				mapStageContainer.mozRequestFullScreen ||
+				mapStageContainer.msRequestFullscreen;
+			await requestFullscreen?.call(mapStageContainer);
+		} catch (error) {
+			console.warn('[FLEET_FULLSCREEN_ERROR]', error);
+		}
+	}
+
+	function handleFleetFullscreenChange() {
+		isFleetFullscreen = getFullscreenElement() === mapStageContainer;
+
+		setTimeout(() => {
+			map?.invalidateSize?.();
+		}, 80);
+
+		setTimeout(() => {
+			map?.invalidateSize?.();
+		}, 280);
 	}
 
 	function handleMobilePanelOpen(event) {
@@ -2534,6 +2584,10 @@
 		isSidebarOpen = window.innerWidth > 760;
 
 		window.addEventListener('mobile-panel-open', handleMobilePanelOpen);
+		document.addEventListener('fullscreenchange', handleFleetFullscreenChange);
+		document.addEventListener('webkitfullscreenchange', handleFleetFullscreenChange);
+		document.addEventListener('mozfullscreenchange', handleFleetFullscreenChange);
+		document.addEventListener('MSFullscreenChange', handleFleetFullscreenChange);
 
 		await initializeFleetMap();
 
@@ -2556,6 +2610,10 @@
 
 		if (browser) {
 			window.removeEventListener('mobile-panel-open', handleMobilePanelOpen);
+			document.removeEventListener('fullscreenchange', handleFleetFullscreenChange);
+			document.removeEventListener('webkitfullscreenchange', handleFleetFullscreenChange);
+			document.removeEventListener('mozfullscreenchange', handleFleetFullscreenChange);
+			document.removeEventListener('MSFullscreenChange', handleFleetFullscreenChange);
 		}
 
 		destroyFleetMap();
@@ -2797,7 +2855,7 @@
 		</aside>
 
 		<section class="fleet-map-panel">
-			<div class="map-stage">
+			<div class:is-fullscreen={isFleetFullscreen} class="map-stage" bind:this={mapStageContainer}>
 				{#if fleetError}
 					<div class="fleet-api-error">
 						{fleetError}
@@ -2837,6 +2895,18 @@
 						</button>
 					</div>
 				{/if}
+
+				<button
+					type="button"
+					class:is-fullscreen={isFleetFullscreen}
+					class="fleet-fullscreen-btn"
+					aria-pressed={isFleetFullscreen}
+					aria-label={isFleetFullscreen ? 'Exit fullscreen map' : 'Open fullscreen map'}
+					title={isFleetFullscreen ? 'Exit fullscreen' : 'Fullscreen map'}
+					onclick={toggleFleetFullscreen}
+				>
+					<span aria-hidden="true">{isFleetFullscreen ? '↙' : '⛶'}</span>
+				</button>
 
 				{#if showDetailPanel && selectedVessel}
 					<aside class="vessel-detail-panel" class:detail-offline={!selectedVessel.online}>
@@ -3346,7 +3416,6 @@
 		min-height: 0;
 		max-height: 100%;
 		background: var(--color-base);
-		padding: 5px;
 		color: var(--text-primary);
 		overflow: hidden;
 		font-size: 9.5px;
@@ -4665,6 +4734,116 @@
 		box-shadow:
 			0 1px 2px rgba(15, 23, 42, 0.04),
 			0 8px 24px rgba(15, 23, 42, 0.06);
+	}
+
+	.map-stage:fullscreen,
+	.map-stage.is-fullscreen {
+		width: 100vw;
+		height: 100vh;
+		border: 0;
+		border-radius: 0;
+		background: #0b1120;
+	}
+
+	.map-stage:-webkit-full-screen {
+		width: 100vw;
+		height: 100vh;
+		border: 0;
+		border-radius: 0;
+		background: #0b1120;
+	}
+
+	:global(.fleet-page .map-stage:fullscreen .vms-map-controls .leaflet-top.leaflet-left),
+	:global(.fleet-page .map-stage.is-fullscreen .vms-map-controls .leaflet-top.leaflet-left) {
+		top: 14px;
+		left: 14px;
+	}
+
+	:global(
+		.fleet-page
+			.fleet-layout:not(.sidebar-collapsed)
+			.map-stage:fullscreen
+			.vms-map-controls
+			.leaflet-top.leaflet-left
+	),
+	:global(
+		.fleet-page
+			.fleet-layout:not(.sidebar-collapsed)
+			.map-stage.is-fullscreen
+			.vms-map-controls
+			.leaflet-top.leaflet-left
+	) {
+		left: 14px;
+	}
+
+	:global(.fleet-page .map-stage:fullscreen .map-legend),
+	:global(.fleet-page .map-stage.is-fullscreen .map-legend) {
+		left: 14px;
+		bottom: 14px;
+		width: min(260px, calc(100% - 28px));
+	}
+
+	:global(.fleet-page .fleet-layout:not(.sidebar-collapsed) .map-stage:fullscreen .map-legend),
+	:global(.fleet-page .fleet-layout:not(.sidebar-collapsed) .map-stage.is-fullscreen .map-legend) {
+		left: 14px;
+		width: min(260px, calc(100% - 28px));
+	}
+
+	.fleet-fullscreen-btn {
+		position: absolute;
+		right: 14px;
+		bottom: 14px;
+		z-index: 990;
+		width: 42px;
+		height: 42px;
+		display: inline-grid;
+		place-items: center;
+		border: 1px solid rgba(147, 197, 253, 0.42);
+		border-radius: 14px;
+		background:
+			linear-gradient(180deg, rgba(37, 99, 235, 0.24), rgba(15, 23, 42, 0.04)),
+			rgba(15, 23, 42, 0.86);
+		color: #eaf2ff;
+		box-shadow:
+			0 14px 30px rgba(15, 23, 42, 0.28),
+			inset 0 1px 0 rgba(255, 255, 255, 0.08);
+		backdrop-filter: blur(12px) saturate(1.12);
+		cursor: pointer;
+		transition:
+			transform 0.16s ease,
+			background 0.16s ease,
+			border-color 0.16s ease,
+			box-shadow 0.16s ease;
+	}
+
+	.fleet-fullscreen-btn span {
+		display: inline-grid;
+		place-items: center;
+		width: 25px;
+		height: 25px;
+		border-radius: 10px;
+		background: rgba(37, 99, 235, 0.52);
+		color: #ffffff;
+		font-size: 18px;
+		font-weight: 900;
+		line-height: 1;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+	}
+
+	.fleet-fullscreen-btn:hover {
+		transform: translateY(-1px);
+		border-color: rgba(191, 219, 254, 0.72);
+		background:
+			linear-gradient(180deg, rgba(37, 99, 235, 0.34), rgba(15, 23, 42, 0.08)),
+			rgba(15, 23, 42, 0.92);
+		box-shadow:
+			0 18px 34px rgba(15, 23, 42, 0.34),
+			inset 0 1px 0 rgba(255, 255, 255, 0.1);
+	}
+
+	.fleet-fullscreen-btn.is-fullscreen span {
+		background: rgba(248, 113, 113, 0.22);
+		color: #fecaca;
 	}
 
 	.leaflet-map {
@@ -6745,7 +6924,6 @@
 			height: 100%;
 			min-height: 0;
 			max-height: 100%;
-			padding: 4px;
 			overflow: hidden;
 			font-size: 9px;
 		}

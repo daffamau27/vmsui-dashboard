@@ -14,7 +14,6 @@
 		normalizeMapZonesFromAssets
 	} from '$lib/utils/mapZones.js';
 	import { VMS_TILE_OPTIONS, VMS_TILE_URL } from '$lib/mapStyle.js';
-	import { addLeafletZoomAndScale } from '$lib/utils/leafletControls.js';
 	import {
 		createCopyableCoordinateHtml,
 		handleCoordinateCopyClick
@@ -106,6 +105,7 @@
 
 	let L;
 	let mapContainer;
+	let routeMapShellContainer;
 	let routeMap;
 	let markerLayer;
 	let assetMarkerLayer;
@@ -113,12 +113,17 @@
 	let routeLine;
 	let selectedPointIndex = 0;
 	let routeMarkerDragging = false;
+	let routeMapScaleUnit = 'metric';
+	let routeMapScaleLabel = 'Bar = -';
+	let routeMapScaleWidth = 80;
 
 	let assets = [];
 	let zones = [];
 	let assetsLoading = false;
 	let assetsError = '';
 	let mapInitializing = false;
+	let routeMapResizeObserver = null;
+	let isRouteMapFullscreen = false;
 
 	let pointContextMenu = {
 		visible: false,
@@ -450,6 +455,14 @@
 
 	const INDONESIA_CENTER = [-2.5489, 118.0149];
 	const INDONESIA_ZOOM = 5;
+	const ROUTE_SCALE_STORAGE_KEY = 'vms-map-scale-unit';
+	const ROUTE_SCALE_UNITS = ['metric', 'nautical', 'imperial'];
+	const ROUTE_SCALE_UNIT_LABELS = {
+		metric: 'KM',
+		nautical: 'NM',
+		imperial: 'MI'
+	};
+	const ROUTE_SCALE_MAX_WIDTH = 112;
 
 	function hasCoordinateValue(value) {
 		return value !== '' && value !== null && value !== undefined && String(value).trim() !== '';
@@ -486,6 +499,129 @@
 			}));
 	}
 
+	function initializeRouteMapScaleUnit() {
+		if (!browser) return;
+
+		try {
+			const stored = window.localStorage?.getItem(ROUTE_SCALE_STORAGE_KEY);
+			if (ROUTE_SCALE_UNITS.includes(stored)) {
+				routeMapScaleUnit = stored;
+			}
+		} catch {
+			// Storage access is optional; keep the default metric unit.
+		}
+	}
+
+	function setRouteMapScaleUnit(unit) {
+		routeMapScaleUnit = ROUTE_SCALE_UNITS.includes(unit) ? unit : 'metric';
+
+		try {
+			window.localStorage?.setItem(ROUTE_SCALE_STORAGE_KEY, routeMapScaleUnit);
+		} catch {
+			// Ignore localStorage errors.
+		}
+
+		updateRouteMapScale();
+	}
+
+	function zoomRouteMap(direction) {
+		if (!routeMap) return;
+
+		if (direction === 'in') {
+			routeMap.zoomIn();
+		} else {
+			routeMap.zoomOut();
+		}
+	}
+
+	function updateRouteMapScale() {
+		if (!routeMap?._loaded) {
+			routeMapScaleLabel = 'Bar = -';
+			routeMapScaleWidth = Math.round(ROUTE_SCALE_MAX_WIDTH * 0.72);
+			return;
+		}
+
+		const size = routeMap.getSize?.();
+		if (!size?.x || !size?.y) return;
+
+		const y = size.y / 2;
+		const maxMeters =
+			routeMap.distance(
+				routeMap.containerPointToLatLng([0, y]),
+				routeMap.containerPointToLatLng([ROUTE_SCALE_MAX_WIDTH, y])
+			) || 0;
+		const scale = getRouteScaleForUnit(maxMeters, routeMapScaleUnit, ROUTE_SCALE_MAX_WIDTH);
+
+		routeMapScaleLabel = scale.label;
+		routeMapScaleWidth = scale.width;
+	}
+
+	function getRouteScaleForUnit(maxMeters, unit, maxWidth) {
+		if (!Number.isFinite(maxMeters) || maxMeters <= 0) {
+			return { label: 'Bar = -', width: Math.round(maxWidth * 0.72) };
+		}
+
+		if (unit === 'nautical') {
+			const maxNm = maxMeters / 1852;
+			const nm = getRouteRoundScaleNumber(maxNm);
+			return {
+				label: `Bar = ${formatRouteScaleNumber(nm)} NM`,
+				width: getRouteScaleWidth((nm * 1852) / maxMeters, maxWidth)
+			};
+		}
+
+		if (unit === 'imperial') {
+			const maxFeet = maxMeters * 3.280839895;
+			if (maxFeet >= 5280) {
+				const miles = getRouteRoundScaleNumber(maxFeet / 5280);
+				return {
+					label: `Bar = ${formatRouteScaleNumber(miles)} mi`,
+					width: getRouteScaleWidth((miles * 1609.344) / maxMeters, maxWidth)
+				};
+			}
+
+			const feet = getRouteRoundScaleNumber(maxFeet);
+			return {
+				label: `Bar = ${formatRouteScaleNumber(feet)} ft`,
+				width: getRouteScaleWidth((feet * 0.3048) / maxMeters, maxWidth)
+			};
+		}
+
+		const meters = getRouteRoundScaleNumber(maxMeters);
+		if (meters >= 1000) {
+			return {
+				label: `Bar = ${formatRouteScaleNumber(meters / 1000)} km`,
+				width: getRouteScaleWidth(meters / maxMeters, maxWidth)
+			};
+		}
+
+		return {
+			label: `Bar = ${formatRouteScaleNumber(meters)} m`,
+			width: getRouteScaleWidth(meters / maxMeters, maxWidth)
+		};
+	}
+
+	function getRouteScaleWidth(ratio, maxWidth) {
+		const width = Math.round(Math.max(0.25, Math.min(1, ratio)) * maxWidth);
+		return Math.max(36, Math.min(maxWidth, width));
+	}
+
+	function getRouteRoundScaleNumber(value) {
+		if (!Number.isFinite(value) || value <= 0) return 0;
+
+		const pow10 = 10 ** Math.floor(Math.log10(value));
+		const digit = value / pow10;
+		const roundedDigit = digit >= 5 ? 5 : digit >= 3 ? 3 : digit >= 2 ? 2 : 1;
+		return roundedDigit * pow10;
+	}
+
+	function formatRouteScaleNumber(value) {
+		if (!Number.isFinite(value)) return '-';
+		if (value >= 100 || Number.isInteger(value)) return String(Math.round(value));
+		if (value >= 10) return value.toFixed(1).replace(/\.0$/, '');
+		return value.toFixed(2).replace(/\.?0+$/, '');
+	}
+
 	async function ensureLeaflet() {
 		if (!browser) return null;
 		if (L) return L;
@@ -496,7 +632,7 @@
 	}
 
 	async function initializeRouteMap() {
-		if (!browser || !active || !showForm || !mapContainer || routeMap || mapInitializing) return;
+		if (!browser || !showForm || !mapContainer || routeMap || mapInitializing) return;
 
 		mapInitializing = true;
 
@@ -510,7 +646,6 @@
 			});
 
 			leaflet.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(routeMap);
-			addLeafletZoomAndScale(leaflet, routeMap);
 
 			renderZoneLayer();
 			assetMarkerLayer = leaflet.layerGroup().addTo(routeMap);
@@ -543,7 +678,11 @@
 				if (movingPointIndex !== null && movingPointIndex !== undefined) {
 					updateMoveConfirmPosition();
 				}
+
+				updateRouteMapScale();
 			});
+
+			routeMap.on('moveend zoomend resize load', updateRouteMapScale);
 
 			const existingPoints = getValidRoutePoints();
 
@@ -554,15 +693,86 @@
 				routeMap.setView(INDONESIA_CENTER, INDONESIA_ZOOM);
 			}
 
-			setTimeout(() => {
-				routeMap?.invalidateSize();
-			}, 120);
+			updateRouteMapScale();
+
+			setupRouteMapResizeObserver();
+			refreshRouteMapLayout();
 		} finally {
 			mapInitializing = false;
 		}
 	}
 
+	function refreshRouteMapLayout() {
+		if (!routeMap) return;
+
+		[0, 80, 180, 360, 700].forEach((delay) => {
+			setTimeout(() => {
+				if (!routeMap) return;
+				routeMap.invalidateSize({ pan: false });
+				refreshRouteMap();
+				renderAssetMarkers();
+				renderZoneLayer();
+				updateRouteMapScale();
+			}, delay);
+		});
+	}
+
+	function setupRouteMapResizeObserver() {
+		if (!browser || !mapContainer || !routeMap || typeof ResizeObserver === 'undefined') return;
+
+		routeMapResizeObserver?.disconnect?.();
+		routeMapResizeObserver = new ResizeObserver(() => {
+			routeMap?.invalidateSize?.({ pan: false });
+			updateRouteMapScale();
+		});
+		routeMapResizeObserver.observe(mapContainer);
+	}
+
+	function getFullscreenElement() {
+		if (!browser) return null;
+		return (
+			document.fullscreenElement ||
+			document.webkitFullscreenElement ||
+			document.mozFullScreenElement ||
+			document.msFullscreenElement ||
+			null
+		);
+	}
+
+	async function toggleRouteMapFullscreen() {
+		if (!browser || !routeMapShellContainer) return;
+
+		try {
+			if (getFullscreenElement() === routeMapShellContainer) {
+				const exitFullscreen =
+					document.exitFullscreen ||
+					document.webkitExitFullscreen ||
+					document.mozCancelFullScreen ||
+					document.msExitFullscreen;
+				await exitFullscreen?.call(document);
+				return;
+			}
+
+			const requestFullscreen =
+				routeMapShellContainer.requestFullscreen ||
+				routeMapShellContainer.webkitRequestFullscreen ||
+				routeMapShellContainer.mozRequestFullScreen ||
+				routeMapShellContainer.msRequestFullscreen;
+			await requestFullscreen?.call(routeMapShellContainer);
+		} catch (error) {
+			console.warn('[VOYAGE_PLANS_FULLSCREEN_ERROR]', error);
+		}
+	}
+
+	function handleRouteMapFullscreenChange() {
+		isRouteMapFullscreen = getFullscreenElement() === routeMapShellContainer;
+		refreshRouteMapLayout();
+	}
+
 	function destroyRouteMap() {
+		routeMapResizeObserver?.disconnect?.();
+		routeMapResizeObserver = null;
+
 		if (mapContainer) {
 			mapContainer.removeEventListener('click', handleCoordinateCopyClick, true);
 		}
@@ -581,8 +791,9 @@
 
 	function openRouteMapAfterRender() {
 		tick().then(async () => {
-			if (!active || !showForm) return;
+			if (!showForm) return;
 			await initializeRouteMap();
+			refreshRouteMapLayout();
 			refreshRouteMap(true);
 		});
 	}
@@ -1024,7 +1235,12 @@
 		let cleanupVesselTransferMode = () => {};
 
 		if (browser) {
+			initializeRouteMapScaleUnit();
 			window.addEventListener('keydown', handleRouteEditorKeydown);
+			document.addEventListener('fullscreenchange', handleRouteMapFullscreenChange);
+			document.addEventListener('webkitfullscreenchange', handleRouteMapFullscreenChange);
+			document.addEventListener('mozfullscreenchange', handleRouteMapFullscreenChange);
+			document.addEventListener('MSFullscreenChange', handleRouteMapFullscreenChange);
 			cleanupVesselTransferMode = setupVesselTransferMode();
 		}
 
@@ -1033,6 +1249,10 @@
 		return () => {
 			if (browser) {
 				window.removeEventListener('keydown', handleRouteEditorKeydown);
+				document.removeEventListener('fullscreenchange', handleRouteMapFullscreenChange);
+				document.removeEventListener('webkitfullscreenchange', handleRouteMapFullscreenChange);
+				document.removeEventListener('mozfullscreenchange', handleRouteMapFullscreenChange);
+				document.removeEventListener('MSFullscreenChange', handleRouteMapFullscreenChange);
 			}
 
 			destroyRouteMap();
@@ -1041,7 +1261,7 @@
 	});
 
 	$: {
-		if (!active) {
+		if (!active && !showForm) {
 			destroyRouteMap();
 		} else if (showForm) {
 			openRouteMapAfterRender();
@@ -1410,6 +1630,15 @@
 	}
 
 	function closeForm() {
+		if (browser && getFullscreenElement() === routeMapShellContainer) {
+			const exitFullscreen =
+				document.exitFullscreen ||
+				document.webkitExitFullscreen ||
+				document.mozCancelFullScreen ||
+				document.msExitFullscreen;
+			exitFullscreen?.call(document);
+		}
+		isRouteMapFullscreen = false;
 		destroyRouteMap();
 		showForm = false;
 		editMode = false;
@@ -2572,10 +2801,39 @@
 					</aside>
 
 					<section class="route-map-card">
-						<div class="route-map-shell">
-							{#if active}
-								<div class="route-map" bind:this={mapContainer}></div>
-							{/if}
+						<div
+							class:is-fullscreen={isRouteMapFullscreen}
+							class="route-map-shell"
+							bind:this={routeMapShellContainer}
+						>
+							<div class="route-map" bind:this={mapContainer}></div>
+
+							<div class="route-map-native-controls" aria-label="Route map controls">
+								<div class="route-map-zoom-control" aria-label="Zoom controls">
+									<button type="button" aria-label="Zoom in" on:click={() => zoomRouteMap('in')}>
+										+
+									</button>
+									<button type="button" aria-label="Zoom out" on:click={() => zoomRouteMap('out')}>
+										−
+									</button>
+								</div>
+
+								<div class="route-map-scale-control">
+									<div class="route-map-scale-bar" style={`width: ${routeMapScaleWidth}px;`}>
+										<span>{routeMapScaleLabel}</span>
+									</div>
+									<select
+										aria-label="Change scale unit"
+										title="Change scale unit"
+										bind:value={routeMapScaleUnit}
+										on:change={(event) => setRouteMapScaleUnit(event.currentTarget.value)}
+									>
+										{#each ROUTE_SCALE_UNITS as unit}
+											<option value={unit}>{ROUTE_SCALE_UNIT_LABELS[unit]}</option>
+										{/each}
+									</select>
+								</div>
+							</div>
 
 							<div class="route-map-overlay-toolbar">
 								<div class="route-map-title">
@@ -2613,6 +2871,18 @@
 									</button>
 								</div>
 							</div>
+
+							<button
+								class:is-fullscreen={isRouteMapFullscreen}
+								class="route-map-fullscreen-btn"
+								type="button"
+								aria-pressed={isRouteMapFullscreen}
+								aria-label={isRouteMapFullscreen ? 'Exit fullscreen map' : 'Open fullscreen map'}
+								title={isRouteMapFullscreen ? 'Exit fullscreen' : 'Fullscreen map'}
+								on:click={toggleRouteMapFullscreen}
+							>
+								<span aria-hidden="true">{isRouteMapFullscreen ? '↙' : '⛶'}</span>
+							</button>
 
 							{#if movingPointIndex !== null && movingPointIndex !== undefined && moveConfirmPosition.visible}
 								<div
@@ -2800,7 +3070,6 @@
 										on:dragend={handleVesselDragEnd}
 									>
 										<span>{vessel.vesselName}</span>
-										<small>ID {vessel.id}</small>
 									</button>
 								{:else}
 									<em>All vessels are allowed.</em>
@@ -4525,18 +4794,273 @@
 		overflow: hidden;
 	}
 
+	.route-map-shell:fullscreen,
+	.route-map-shell.is-fullscreen {
+		width: 100vw;
+		height: 100vh;
+		min-height: 100vh;
+		background: #0b1120;
+	}
+
+	.route-map-shell:-webkit-full-screen {
+		width: 100vw;
+		height: 100vh;
+		min-height: 100vh;
+		background: #0b1120;
+	}
+
 	.route-map-shell .route-map,
 	.route-map {
+		position: relative;
+		isolation: isolate;
 		width: 100%;
 		height: 100%;
 		min-height: 100%;
 		background: var(--color-accent-muted);
 	}
 
+	:global(.voyage-page .route-map .leaflet-map-pane),
+	:global(.voyage-page .route-map .leaflet-pane) {
+		position: absolute;
+		top: 0;
+		left: 0;
+	}
+
+	:global(.voyage-page .route-map .leaflet-map-pane) {
+		z-index: 1;
+	}
+
+	:global(.voyage-page .route-map .leaflet-tile-pane) {
+		z-index: 200;
+		opacity: 1 !important;
+		filter: none !important;
+	}
+
+	:global(.voyage-page .route-map .leaflet-overlay-pane) {
+		z-index: 400;
+	}
+
+	:global(.voyage-page .route-map .leaflet-shadow-pane) {
+		z-index: 500;
+	}
+
+	:global(.voyage-page .route-map .leaflet-marker-pane) {
+		z-index: 600;
+	}
+
+	:global(.voyage-page .route-map .leaflet-tooltip-pane) {
+		z-index: 700;
+	}
+
+	:global(.voyage-page .route-map .leaflet-popup-pane) {
+		z-index: 800;
+	}
+
+	:global(.voyage-page .route-map .leaflet-control-container) {
+		position: absolute;
+		inset: 0;
+		z-index: 980;
+		pointer-events: none;
+	}
+
+	:global(.voyage-page .route-map.vms-map-controls .leaflet-top.leaflet-left) {
+		top: auto !important;
+		right: auto !important;
+		bottom: 14px !important;
+		left: 14px !important;
+		padding: 0 !important;
+		z-index: 980;
+		pointer-events: auto;
+		align-items: flex-end;
+	}
+
+	:global(.voyage-page .route-map.vms-map-controls .leaflet-top.leaflet-left .leaflet-control) {
+		z-index: 981;
+	}
+
+	.route-map-native-controls {
+		position: absolute;
+		left: 14px;
+		bottom: 14px;
+		z-index: 940;
+		display: flex;
+		align-items: flex-end;
+		gap: 8px;
+		pointer-events: auto;
+	}
+
+	.route-map-zoom-control {
+		width: auto;
+		height: 34px;
+		display: grid;
+		grid-template-columns: 34px 34px;
+		grid-template-rows: 34px;
+		overflow: hidden;
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.82);
+		box-shadow: var(--shadow-md);
+		backdrop-filter: blur(12px);
+	}
+
+	.route-map-zoom-control button {
+		width: 34px;
+		height: 34px;
+		display: grid;
+		place-items: center;
+		padding: 0;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		color: #eaf2ff;
+		font: inherit;
+		font-size: 19px;
+		font-weight: 800;
+		line-height: 1;
+		cursor: pointer;
+	}
+
+	.route-map-zoom-control button:first-child {
+		border-right: 1px solid rgba(255, 255, 255, 0.12);
+	}
+
+	.route-map-zoom-control button:hover {
+		background: rgba(37, 99, 235, 0.28);
+		color: #ffffff;
+	}
+
+	.route-map-scale-control {
+		min-height: 34px;
+		min-width: 124px;
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		padding: 5px 6px 5px 9px;
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.82);
+		box-shadow: var(--shadow-md);
+		color: #eaf2ff;
+		backdrop-filter: blur(12px);
+	}
+
+	.route-map-scale-bar {
+		min-width: 36px;
+		max-width: 112px;
+		display: inline-flex;
+		align-items: center;
+		padding-bottom: 3px;
+		border-bottom: 2px solid rgba(147, 197, 253, 0.95);
+		transition: width 0.16s ease;
+	}
+
+	.route-map-scale-bar span {
+		white-space: nowrap;
+		color: #eaf2ff;
+		font-size: 10px;
+		font-weight: 800;
+		line-height: 1;
+	}
+
+	.route-map-scale-control select {
+		width: 45px;
+		height: 26px;
+		min-height: 26px;
+		padding: 0 7px;
+		border: 1px solid rgba(255, 255, 255, 0.14);
+		border-radius: 10px;
+		background:
+			linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
+			rgba(30, 41, 59, 0.92);
+		color: #e5edff;
+		font-size: 11px;
+		font-weight: 800;
+		line-height: 1;
+		outline: 0;
+		cursor: pointer;
+		appearance: none;
+		text-align: center;
+		text-align-last: center;
+	}
+
+	.route-map-scale-control select:hover {
+		border-color: rgba(147, 197, 253, 0.42);
+		background:
+			linear-gradient(180deg, rgba(59, 130, 246, 0.18), rgba(255, 255, 255, 0.02)),
+			rgba(30, 41, 59, 0.95);
+	}
+
+	.route-map-scale-control select:focus-visible {
+		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28);
+	}
+
+	.route-map-scale-control select option {
+		background: #0f172a;
+		color: #eaf2ff;
+	}
+
+	.route-map-fullscreen-btn {
+		position: absolute;
+		right: 14px;
+		bottom: 14px;
+		z-index: 930;
+		width: 42px;
+		height: 42px;
+		padding: 0;
+		display: inline-grid;
+		place-items: center;
+		border: 1px solid rgba(147, 197, 253, 0.42);
+		border-radius: 14px;
+		background:
+			linear-gradient(180deg, rgba(37, 99, 235, 0.24), rgba(15, 23, 42, 0.04)),
+			rgba(15, 23, 42, 0.88);
+		color: #eaf2ff;
+		box-shadow:
+			0 14px 30px rgba(15, 23, 42, 0.28),
+			inset 0 1px 0 rgba(255, 255, 255, 0.08);
+		backdrop-filter: blur(12px) saturate(1.12);
+		cursor: pointer;
+		transition:
+			transform 0.16s ease,
+			background 0.16s ease,
+			border-color 0.16s ease,
+			box-shadow 0.16s ease;
+	}
+
+	.route-map-fullscreen-btn span {
+		display: inline-grid;
+		place-items: center;
+		width: 25px;
+		height: 25px;
+		border-radius: 10px;
+		background: rgba(37, 99, 235, 0.52);
+		color: #ffffff;
+		font-size: 18px;
+		font-weight: 900;
+		line-height: 1;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+	}
+
+	.route-map-fullscreen-btn:hover {
+		transform: translateY(-1px);
+		border-color: rgba(191, 219, 254, 0.72);
+		background:
+			linear-gradient(180deg, rgba(37, 99, 235, 0.34), rgba(15, 23, 42, 0.08)),
+			rgba(15, 23, 42, 0.94);
+		box-shadow:
+			0 18px 34px rgba(15, 23, 42, 0.34),
+			inset 0 1px 0 rgba(255, 255, 255, 0.1);
+	}
+
+	.route-map-fullscreen-btn.is-fullscreen span {
+		background: rgba(248, 113, 113, 0.22);
+		color: #fecaca;
+	}
+
 	.route-map-legend {
 		display: grid;
-		gap: 8px;
-		padding: 10px 12px;
+		gap: 10px;
+		padding: 12px 14px;
 		border-top: 1px solid #e5edf5;
 		background: var(--color-elevated);
 		color: var(--text-primary);
@@ -4546,14 +5070,16 @@
 		display: flex;
 		align-items: center;
 		flex-wrap: wrap;
-		gap: 7px;
+		column-gap: 14px;
+		row-gap: 7px;
 		min-width: 0;
 	}
 
 	.legend-title {
+		flex: 0 0 66px;
 		color: var(--text-secondary);
 		font-size: 10px;
-		font-weight: 900;
+		font-weight: 800;
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 	}
@@ -4562,15 +5088,15 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
-		min-height: 24px;
-		padding: 4px 8px;
-		border: 1px solid rgba(148, 163, 184, 0.22);
-		border-radius: 999px;
-		background: var(--color-surface);
+		min-height: 20px;
+		padding: 0;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
 		color: var(--text-secondary);
 		font-size: 11px;
-		font-weight: 800;
-		line-height: 1;
+		font-weight: 700;
+		line-height: 1.2;
 		white-space: nowrap;
 	}
 

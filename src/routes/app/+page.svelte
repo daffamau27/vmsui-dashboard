@@ -55,7 +55,7 @@
   </section>
 
   <section
-    class="keep-page scroll-page"
+    class="keep-page no-scroll-page"
     class:active-page={$activeMenu === "voyage-plans"}
   >
     <VoyagePlansPage />

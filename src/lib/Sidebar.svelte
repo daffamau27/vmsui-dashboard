@@ -73,19 +73,52 @@
 	let activeAlarmCount = $state(0);
 
 	let permissionLoading = $state(true);
+	let assetAccessMode = $state('selected');
+	let vesselAccessMode = $state('selected');
 	let permissionMode = $state('selected');
 	let permissions = $state([]);
 
+	function normalizeAccessMode(mode) {
+		return String(mode || 'selected').toLowerCase();
+	}
+
+	function extractPermissionKey(item) {
+		if (typeof item === 'string') return item;
+
+		return item?.key || item?.permissionKey || item?.name || item?.code || item?.permission || '';
+	}
+
 	function applyPermissionAccess(permissionAccess = {}) {
-		permissionMode = permissionAccess?.mode || 'selected';
-		permissions = Array.isArray(permissionAccess?.permissions) ? permissionAccess.permissions : [];
+		permissionMode = normalizeAccessMode(permissionAccess?.mode);
+
+		const rawPermissions = Array.isArray(permissionAccess?.permissions)
+			? permissionAccess.permissions
+			: Array.isArray(permissionAccess?.details)
+				? permissionAccess.details
+				: [];
+
+		permissions = rawPermissions.map(extractPermissionKey).filter(Boolean);
+	}
+
+	function applyCurrentUserAccess(user = {}) {
+		assetAccessMode = normalizeAccessMode(user?.assetAccess?.mode);
+		vesselAccessMode = normalizeAccessMode(user?.vesselAccess?.mode);
+		applyPermissionAccess(user?.permissionAccess || {});
+	}
+
+	function hasFullAdministratorAccess() {
+		return (
+			assetAccessMode === 'all' &&
+			vesselAccessMode === 'all' &&
+			permissionMode === 'all'
+		);
 	}
 
 	function hasPermission(menu) {
 		if (menu?.alwaysShow) return true;
 
 		if (menu?.superAdminOnly) {
-			return permissionMode === 'all';
+			return hasFullAdministratorAccess();
 		}
 
 		if (permissionMode === 'all') return true;
@@ -171,14 +204,26 @@
 				method: 'GET'
 			});
 
-			applyPermissionAccess(response?.data?.permissionAccess || {});
+			const user = response?.data || response || {};
+			applyCurrentUserAccess(user);
+
+			currentUser.set(user);
+			try {
+				localStorage.setItem('currentUser', JSON.stringify(user));
+			} catch {
+				// Cache is optional; sidebar access should still work without storage.
+			}
 
 			console.log('[SIDEBAR][CURRENT_USER_PERMISSION]', {
-				mode: permissionMode,
+				assetAccessMode,
+				vesselAccessMode,
+				permissionMode,
 				permissions
 			});
 		} catch (err) {
 			console.error('[SIDEBAR][CURRENT_USER_PERMISSION][ERROR]', err);
+			assetAccessMode = 'selected';
+			vesselAccessMode = 'selected';
 			permissionMode = 'selected';
 			permissions = [];
 		} finally {
@@ -287,8 +332,8 @@
 		isSidebarOpen = window.innerWidth > 760;
 
 		const currentPermissionAccess = $currentUser?.permissionAccess;
-		if (currentPermissionAccess) {
-			applyPermissionAccess(currentPermissionAccess);
+		if (currentPermissionAccess || $currentUser?.assetAccess || $currentUser?.vesselAccess) {
+			applyCurrentUserAccess($currentUser || {});
 		}
 
 		window.addEventListener('mobile-panel-open', handleMobilePanelOpen);

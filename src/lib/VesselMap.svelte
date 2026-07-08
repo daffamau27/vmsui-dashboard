@@ -743,7 +743,4 @@ $effect(() => {
     justify-content: flex-end;
   }
 
-  :global(.leaflet-control-zoom) {
-    display: none !important;
-  }
 </style>
