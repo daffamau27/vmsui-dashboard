@@ -110,7 +110,7 @@
     position: absolute;
     inset: 0;
     z-index: 0;
-    background: url("/assets/login.png") right center / auto 100% no-repeat;
+    background: url("/assets/login1.png") right center / auto 100% no-repeat;
     pointer-events: none;
   }
 
