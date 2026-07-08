@@ -975,6 +975,178 @@ body .app-content .leaflet-bar a:hover {
   color: var(--text-accent) !important;
 }
 
+body .app-content .vms-map-controls .leaflet-top.leaflet-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 0 0 12px;
+  pointer-events: none;
+}
+
+body .app-content .vms-map-controls .leaflet-top.leaflet-left .leaflet-control {
+  margin: 0 !important;
+  pointer-events: auto;
+}
+
+body .app-content .vms-map-controls .leaflet-control-zoom {
+  display: grid !important;
+  grid-template-columns: 34px 34px;
+  grid-template-rows: 34px;
+  width: auto;
+  height: 34px;
+  overflow: hidden;
+  border-radius: 12px !important;
+  background: rgba(15, 23, 42, 0.82) !important;
+  backdrop-filter: blur(12px);
+}
+
+body .app-content .vms-map-controls .leaflet-control-zoom a {
+  width: 34px !important;
+  height: 34px !important;
+  display: grid !important;
+  place-items: center;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #eaf2ff !important;
+  font-size: 19px !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  text-indent: 0;
+}
+
+body .app-content .vms-map-controls .leaflet-control-zoom a:first-child {
+  border-right: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
+
+body .app-content .vms-map-controls .leaflet-control-zoom a:hover {
+  background: rgba(37, 99, 235, 0.28) !important;
+  color: #ffffff !important;
+}
+
+body .app-content .vms-map-controls .leaflet-control-scale {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 12px !important;
+  background: rgba(15, 23, 42, 0.82) !important;
+  box-shadow: var(--shadow-md) !important;
+  backdrop-filter: blur(12px);
+}
+
+body .app-content .vms-map-controls .leaflet-control-scale-line {
+  margin: 0 !important;
+  padding: 0 7px 2px !important;
+  border: 0 !important;
+  border-bottom: 2px solid rgba(147, 197, 253, 0.95) !important;
+  background: transparent !important;
+  color: #eaf2ff !important;
+  font-family: inherit !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  line-height: 1.15 !important;
+  text-shadow: none !important;
+}
+
+body .app-content .vms-map-controls .leaflet-control-scale-line::before {
+  content: "Bar = ";
+  color: #93c5fd;
+  font-weight: 800;
+}
+
+body .app-content .vms-map-controls .vms-scale-control {
+  min-height: 34px;
+  min-width: 124px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 12px !important;
+  background: rgba(15, 23, 42, 0.82) !important;
+  box-shadow: var(--shadow-md) !important;
+  color: #eaf2ff !important;
+  backdrop-filter: blur(12px);
+}
+
+body .app-content .vms-map-controls .vms-scale-control__bar {
+  min-width: 36px;
+  max-width: 112px;
+  display: inline-flex;
+  align-items: center;
+  padding-bottom: 3px;
+  border-bottom: 2px solid rgba(147, 197, 253, 0.95);
+  transition: width 0.16s ease;
+}
+
+body .app-content .vms-map-controls .vms-scale-control__label {
+  white-space: nowrap;
+  color: #eaf2ff;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+body .app-content .vms-map-controls .vms-scale-control__unit {
+  width: 46px;
+  height: 23px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(96, 165, 250, 0.38);
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.18);
+  color: #bfdbfe;
+  font-family: inherit;
+  font-size: 8.5px;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+  outline: none;
+  padding: 0 17px 0 7px;
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #bfdbfe 50%),
+    linear-gradient(135deg, #bfdbfe 50%, transparent 50%);
+  background-position:
+    calc(100% - 10px) 9px,
+    calc(100% - 6px) 9px;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease,
+    transform 0.16s ease;
+}
+
+body .app-content .vms-map-controls .vms-scale-control__unit:hover {
+  border-color: rgba(147, 197, 253, 0.72);
+  background: rgba(37, 99, 235, 0.34);
+  background-image:
+    linear-gradient(45deg, transparent 50%, #ffffff 50%),
+    linear-gradient(135deg, #ffffff 50%, transparent 50%);
+  background-position:
+    calc(100% - 10px) 9px,
+    calc(100% - 6px) 9px;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+  color: #ffffff;
+}
+
+body .app-content .vms-map-controls .vms-scale-control__unit:focus-visible {
+  border-color: rgba(147, 197, 253, 0.86);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.24);
+}
+
+body .app-content .vms-map-controls .vms-scale-control__unit option {
+  background: #111827;
+  color: #f8fafc;
+}
+
 /* Keep native select menus readable across all dark dashboard pages. */
 body .app-content select {
   color-scheme: dark;

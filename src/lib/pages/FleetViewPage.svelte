@@ -5,6 +5,7 @@
 	import { setSelectedVessel } from '$lib/stores/selectedVessel.svelte.js';
 	import { activeMenu, setActiveMenu } from '$lib/stores/appNavigation.svelte.js';
 	import { VMS_TILE_URL, VMS_TILE_OPTIONS } from '$lib/mapStyle.js';
+	import { addLeafletZoomAndScale } from '$lib/utils/leafletControls.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
 	import CctvSnapshotImage from '$lib/components/CctvSnapshotImage.svelte';
@@ -2455,6 +2456,7 @@
 			}).setView([-2.8, 114.5], 5);
 
 			L.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(map);
+			addLeafletZoomAndScale(L, map);
 
 			setupMapPanes();
 			rebuildZoneLayer();
@@ -4751,6 +4753,20 @@
 		z-index: 900;
 	}
 
+	:global(.fleet-page .vms-map-controls .leaflet-top.leaflet-left) {
+		left: calc(var(--fleet-main-sidebar-offset) + 12px);
+		top: 12px;
+		padding: 0;
+		z-index: 910;
+		transition:
+			left 0.22s ease,
+			top 0.22s ease;
+	}
+
+	:global(.fleet-page .fleet-layout:not(.sidebar-collapsed) .vms-map-controls .leaflet-top.leaflet-left) {
+		left: calc(var(--fleet-main-sidebar-offset) + var(--fleet-sidebar-width) + 16px);
+	}
+
 	.map-legend {
 		position: absolute;
 		left: calc(var(--fleet-main-sidebar-offset) + 12px);
@@ -6692,12 +6708,6 @@
 		}
 	}
 
-	.leaflet-control-zoom-in,
-	.leaflet-control-zoom-out,
-	:global(.leaflet-control-zoom) {
-		display: none !important;
-	}
-
 	/* =========================
      TABLET
      ========================= */
@@ -6952,6 +6962,19 @@
 			height: 100%;
 			min-height: 0;
 			border-radius: 12px;
+		}
+
+		:global(.fleet-page .vms-map-controls .leaflet-top.leaflet-left) {
+			top: 8px;
+			left: calc(var(--fleet-main-sidebar-offset) + 8px);
+			gap: 6px;
+		}
+
+		:global(.fleet-page .fleet-layout:not(.sidebar-collapsed) .vms-map-controls .leaflet-top.leaflet-left) {
+			left: min(
+				calc(var(--fleet-main-sidebar-offset) + var(--fleet-sidebar-width) + 10px),
+				calc(100% - 118px)
+			);
 		}
 
 		.map-legend {

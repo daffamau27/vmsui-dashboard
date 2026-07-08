@@ -10,6 +10,7 @@
 	} from '$lib/stores/selectedVessel.svelte.js';
 	import 'leaflet/dist/leaflet.css';
 	import { VMS_TILE_URL, VMS_TILE_OPTIONS } from '$lib/mapStyle.js';
+	import { addLeafletZoomAndScale } from '$lib/utils/leafletControls.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
 	import { getFleetAssets } from '$lib/api/fleetApi.js';
@@ -999,11 +1000,12 @@
 			if (!leaflet) return;
 
 			routeMap = leaflet.map(mapContainer, {
-				zoomControl: true,
+				zoomControl: false,
 				preferCanvas: true
 			});
 
 			leaflet.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(routeMap);
+			addLeafletZoomAndScale(leaflet, routeMap);
 
 			renderZoneLayer();
 			assetMarkerLayer = leaflet.layerGroup().addTo(routeMap);

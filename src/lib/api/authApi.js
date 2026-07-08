@@ -89,7 +89,7 @@ export async function apiRequest(path, options = {}) {
       : `Bearer ${token}`;
   }
 
-  const { rawResponse, ...fetchOptions } = options;
+  const { rawResponse, responseType, ...fetchOptions } = options;
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...fetchOptions,
@@ -132,6 +132,18 @@ export async function apiRequest(path, options = {}) {
 
   if (rawResponse) {
     return response;
+  }
+
+  if (responseType === "blob") {
+    return await response.blob();
+  }
+
+  if (responseType === "arrayBuffer") {
+    return await response.arrayBuffer();
+  }
+
+  if (responseType === "text") {
+    return await response.text();
   }
 
   if (response.status === 204) {

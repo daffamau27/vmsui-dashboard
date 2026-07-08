@@ -12,6 +12,7 @@
 	import { getFleetVesselDetail } from '$lib/api/fleetApi.js';
 	import { downloadApiFile, apiRequest } from '$lib/api/authApi.js';
 	import { VMS_TILE_URL, VMS_TILE_OPTIONS } from '$lib/mapStyle.js';
+	import { addLeafletZoomAndScale } from '$lib/utils/leafletControls.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
 	import { getFleetAssets } from '$lib/api/fleetApi.js';
@@ -1775,7 +1776,7 @@
 
 			if (!map) {
 				map = leaflet.map(node, {
-					zoomControl: true,
+					zoomControl: false,
 					scrollWheelZoom: true,
 					dragging: true,
 					doubleClickZoom: true,
@@ -1784,6 +1785,7 @@
 				});
 
 				leaflet.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(map);
+				addLeafletZoomAndScale(leaflet, map);
 			}
 
 			if (zoneLayer) {

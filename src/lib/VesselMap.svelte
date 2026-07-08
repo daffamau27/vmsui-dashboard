@@ -3,6 +3,7 @@
   import { browser } from "$app/environment";
   import { getFleetAssets } from "$lib/api/fleetApi.js";
   import { VMS_TILE_URL, VMS_TILE_OPTIONS } from "$lib/mapStyle.js";
+  import { addLeafletZoomAndScale } from "$lib/utils/leafletControls.js";
   import { addMapZonesToLeafletMap, normalizeMapZonesFromAssets } from "$lib/utils/mapZones.js";
   import {
     createCopyableCoordinateHtml,
@@ -433,6 +434,7 @@ async function loadMapZones() {
     }).setView([lat, lng], zoom);
 
     L.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(map);
+    addLeafletZoomAndScale(L, map);
 
     rebuildZoneLayer();
     traceLayerGroup = L.layerGroup().addTo(map);

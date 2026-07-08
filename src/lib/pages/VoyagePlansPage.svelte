@@ -14,6 +14,7 @@
 		normalizeMapZonesFromAssets
 	} from '$lib/utils/mapZones.js';
 	import { VMS_TILE_OPTIONS, VMS_TILE_URL } from '$lib/mapStyle.js';
+	import { addLeafletZoomAndScale } from '$lib/utils/leafletControls.js';
 	import {
 		createCopyableCoordinateHtml,
 		handleCoordinateCopyClick
@@ -504,11 +505,12 @@
 			if (!leaflet) return;
 
 			routeMap = leaflet.map(mapContainer, {
-				zoomControl: true,
+				zoomControl: false,
 				preferCanvas: true
 			});
 
 			leaflet.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(routeMap);
+			addLeafletZoomAndScale(leaflet, routeMap);
 
 			renderZoneLayer();
 			assetMarkerLayer = leaflet.layerGroup().addTo(routeMap);
