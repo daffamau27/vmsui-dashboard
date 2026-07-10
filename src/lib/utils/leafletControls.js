@@ -136,44 +136,24 @@ function getScaleForUnit(maxMeters, unit, maxWidth) {
 		return { label: 'Bar = -', width: Math.round(maxWidth * 0.72) };
 	}
 
+	return {
+		label: getScaleLabel(maxMeters, unit),
+		width: maxWidth
+	};
+}
+
+function getScaleLabel(meters, unit) {
+	if (!Number.isFinite(meters) || meters <= 0) return 'Bar = -';
+
 	if (unit === 'nautical') {
-		const maxNm = maxMeters / 1852;
-		const nm = getRoundNumber(maxNm);
-		return {
-			label: `Bar = ${formatScaleNumber(nm)} NM`,
-			width: getScaleWidth((nm * 1852) / maxMeters, maxWidth)
-		};
+		return `Bar = ${formatConvertedScaleNumber(meters / 1852)} NM`;
 	}
 
 	if (unit === 'imperial') {
-		const maxFeet = maxMeters * 3.280839895;
-		if (maxFeet >= 5280) {
-			const miles = getRoundNumber(maxFeet / 5280);
-			return {
-				label: `Bar = ${formatScaleNumber(miles)} mi`,
-				width: getScaleWidth((miles * 1609.344) / maxMeters, maxWidth)
-			};
-		}
-
-		const feet = getRoundNumber(maxFeet);
-		return {
-			label: `Bar = ${formatScaleNumber(feet)} ft`,
-			width: getScaleWidth((feet * 0.3048) / maxMeters, maxWidth)
-		};
+		return `Bar = ${formatConvertedScaleNumber(meters / 1609.344)} mi`;
 	}
 
-	const meters = getRoundNumber(maxMeters);
-	if (meters >= 1000) {
-		return {
-			label: `Bar = ${formatScaleNumber(meters / 1000)} km`,
-			width: getScaleWidth(meters / maxMeters, maxWidth)
-		};
-	}
-
-	return {
-		label: `Bar = ${formatScaleNumber(meters)} m`,
-		width: getScaleWidth(meters / maxMeters, maxWidth)
-	};
+	return `Bar = ${formatConvertedScaleNumber(meters / 1000)} km`;
 }
 
 function getScaleWidth(ratio, maxWidth) {
@@ -195,4 +175,13 @@ function formatScaleNumber(value) {
 	if (value >= 100 || Number.isInteger(value)) return String(Math.round(value));
 	if (value >= 10) return value.toFixed(1).replace(/\.0$/, '');
 	return value.toFixed(2).replace(/\.?0+$/, '');
+}
+
+function formatConvertedScaleNumber(value) {
+	if (!Number.isFinite(value)) return '-';
+	if (value >= 1000) return String(Math.round(value));
+	if (value >= 100) return value.toFixed(1).replace(/\.0$/, '');
+	if (value >= 10) return value.toFixed(2).replace(/\.?0+$/, '');
+	if (value >= 1) return value.toFixed(3).replace(/\.?0+$/, '');
+	return value.toFixed(6).replace(/\.?0+$/, '');
 }

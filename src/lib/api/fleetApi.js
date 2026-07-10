@@ -61,7 +61,7 @@ function normalizeFleetVessel(item) {
           ? false
           : null,
 
-    hireStatus: item?.hireStatus || "-",
+    hireStatus: item?.hireStatus ?? item?.hire_status ?? "-",
     lastUpdated: item?.lastUpdated || "-",
     lastConnectTime: item?.lastConnectTime || "-",
     lastDisconnectTime: item?.lastDisconnectTime || "-",
@@ -117,7 +117,7 @@ function normalizeLiveVessel(item) {
     heading: toNumber(item?.heading, null),
     online: item?.online === undefined || item?.online === null ? null : Boolean(item.online),
 
-    hireStatus: item?.hireStatus || "-",
+    hireStatus: item?.hireStatus ?? item?.hire_status ?? "-",
     lastConnectTime: item?.lastConnectTime || "-",
     lastDisconnectTime: item?.lastDisconnectTime || "-",
     lastUpdated: item?.lastUpdated || "-",

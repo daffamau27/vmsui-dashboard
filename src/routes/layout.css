@@ -264,6 +264,23 @@ a {
   .leaflet-tooltip, .leaflet-draw-tooltip {
     @apply !bg-foreground !text-background !animate-none !rounded-md !border-none !p-0 !px-3 !py-1.5 !shadow-none;
   }
+  .leaflet-tooltip.fleet-vessel-tooltip-wrapper {
+    background: rgba(15, 23, 42, 0.96) !important;
+    color: #f8fafc !important;
+    border: 1px solid rgba(96, 165, 250, 0.38) !important;
+    border-radius: 12px !important;
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.34) !important;
+    opacity: 1 !important;
+    padding: 0 !important;
+  }
+  .leaflet-tooltip.fleet-vessel-tooltip-wrapper .fleet-vessel-tooltip strong {
+    color: #ffffff !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  }
+  .leaflet-tooltip.fleet-vessel-tooltip-wrapper .fleet-vessel-tooltip span {
+    color: #93c5fd !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+  }
   .leaflet-draw-tooltip:before {
     @apply bg-foreground !top-1/2 !right-0.5 size-2.5 translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] !border-none;
   }

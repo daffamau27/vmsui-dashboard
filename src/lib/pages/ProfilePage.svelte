@@ -8,6 +8,7 @@
 		changePasswordApi
 	} from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import AuditLogPage from '$lib/pages/AuditLogPage.svelte';
 
 	let loading = true;
 	let savingProfile = false;
@@ -19,6 +20,7 @@
 	let currentUser = null;
 	let vessels = [];
 	let assets = [];
+	let auditRefreshToken = 0;
 
 	let profileForm = {
 		name: '',
@@ -65,6 +67,7 @@
 			errorMessage = error.message || 'Failed to load profile data.';
 		} finally {
 			loading = false;
+			auditRefreshToken += 1;
 		}
 	}
 
@@ -405,6 +408,10 @@
 					{/if}
 				</article>
 			</section>
+
+			<section class="profile-audit-section" aria-label="Profile audit log">
+				<AuditLogPage refreshToken={auditRefreshToken} />
+			</section>
 		</section>
 	{/if}
 </section>
@@ -594,6 +601,23 @@
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 14px;
 		align-items: start;
+	}
+
+	.profile-audit-section {
+		min-width: 0;
+	}
+
+	.profile-audit-section :global(.audit-page) {
+		height: auto;
+		min-height: 0;
+		max-height: none;
+		padding: 0 0 18px;
+		background: transparent;
+		overflow: visible;
+	}
+
+	.profile-audit-section :global(.audit-header-card) {
+		margin-top: 0;
 	}
 
 	.panel {

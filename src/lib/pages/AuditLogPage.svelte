@@ -3,7 +3,7 @@
 	import { apiRequest } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 
-	let { active = true } = $props();
+	let { active = true, refreshToken = 0 } = $props();
 
 	let loading = $state(false);
 	let detailLoading = $state(false);
@@ -25,6 +25,9 @@
 
 	let auditScope = $state('my');
 	let userIdFilter = $state('');
+	let auditPageMounted = false;
+	let lastRefreshToken = refreshToken;
+	let wasActive = active;
 
 	let exportStartDate = $state('');
 	let exportEndDate = $state('');
@@ -361,17 +364,27 @@
 		}
 
 		await loadAuditLogs();
+		auditPageMounted = true;
 	});
 
 	$effect(() => {
-		if (active) {
+		if (!auditPageMounted) return;
+
+		if (refreshToken !== lastRefreshToken) {
+			lastRefreshToken = refreshToken;
 			loadAuditLogs();
 		}
+
+		if (active && !wasActive) {
+			loadAuditLogs();
+		}
+
+		wasActive = active;
 	});
 </script>
 
 <section class="audit-page">
-	<section class="audit-header-card">
+	<!-- <section class="audit-header-card">
 		<div>
 			<div class="page-kicker">Audit Log</div>
 			<h1>Audit Log Page</h1>
@@ -390,7 +403,7 @@
 				{exporting ? 'Exporting...' : 'Export CSV'}
 			</button>
 		</div>
-	</section>
+	</section> -->
 
 	{#if error}
 		<div class="status-box error-box">
@@ -403,28 +416,6 @@
 			{successMessage}
 		</div>
 	{/if}
-
-	<section class="audit-summary-grid">
-		<article class="summary-card">
-			<span>Total Logs</span>
-			<strong>{totalLogCount}</strong>
-		</article>
-
-		<article class="summary-card">
-			<span>Create</span>
-			<strong>{createCount}</strong>
-		</article>
-
-		<article class="summary-card">
-			<span>Update</span>
-			<strong>{updateCount}</strong>
-		</article>
-
-		<article class="summary-card">
-			<span>Delete</span>
-			<strong>{deleteCount}</strong>
-		</article>
-	</section>
 
 	<section class="table-section">
 		<div class="section-header">

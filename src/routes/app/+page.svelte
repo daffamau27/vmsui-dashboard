@@ -6,7 +6,6 @@
   import VesselPage from "$lib/pages/VesselPage.svelte";
   import AllVesselSummaryPage from "$lib/pages/AllVesselSummaryPage.svelte";
   import AlarmPage from "$lib/pages/AlarmPage.svelte";
-  import AuditLogPage from "$lib/pages/AuditLogPage.svelte";
   import VoyagePlansPage from "$lib/pages/VoyagePlansPage.svelte";
   import AdministratorPage from "$lib/pages/AdministratorPage.svelte";
 </script>
@@ -45,13 +44,6 @@
     class:active-page={$activeMenu === "alarm"}
   >
     <AlarmPage />
-  </section>
-
-  <section
-    class="keep-page scroll-page"
-    class:active-page={$activeMenu === "audit-log"}
-  >
-    <AuditLogPage />
   </section>
 
   <section

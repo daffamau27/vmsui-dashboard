@@ -79,6 +79,7 @@
 	let search = '';
 	let showForm = false;
 	let editMode = false;
+	let editAllowedOnly = false;
 	let confirmDeleteId = null;
 
 	let form = getEmptyForm();
@@ -212,6 +213,7 @@
 
 		if (!isUndo) return;
 		if (!showForm) return;
+		if (editAllowedOnly) return;
 		if (!canUndoRoute) return;
 
 		event.preventDefault();
@@ -254,6 +256,7 @@
 	}
 
 	function openPointContextMenu(pointIndex, event) {
+		if (editAllowedOnly) return;
 		if (!routeMap) return;
 
 		const containerPoint = routeMap.latLngToContainerPoint(event.latlng);
@@ -270,6 +273,7 @@
 	}
 
 	function startMovePointFromContext(index) {
+		if (editAllowedOnly) return;
 		if (!form.planData[index]) return;
 
 		movingPointIndex = index;
@@ -288,6 +292,7 @@
 	}
 
 	function moveSelectedPointToLatLng(index, latlng) {
+		if (editAllowedOnly) return;
 		if (index === null || index === undefined) return;
 		if (!form.planData[index]) return;
 
@@ -320,6 +325,7 @@
 	}
 
 	function confirmMovePoint() {
+		if (editAllowedOnly) return;
 		if (!pendingMovePoint.active) return;
 
 		const index = pendingMovePoint.index;
@@ -401,6 +407,7 @@
 	}
 
 	function movePointOrder(index, direction) {
+		if (editAllowedOnly) return;
 		resetMoveState();
 
 		const targetIndex = direction === 'up' ? index - 1 : index + 1;
@@ -426,6 +433,7 @@
 	}
 
 	function deletePointFromMap(index) {
+		if (editAllowedOnly) return;
 		resetMoveState();
 
 		if (form.planData.length <= 1) return;
@@ -561,44 +569,31 @@
 			return { label: 'Bar = -', width: Math.round(maxWidth * 0.72) };
 		}
 
+		const meters = getRouteRoundScaleNumber(maxMeters);
+		const width = getRouteScaleWidth(meters / maxMeters, maxWidth);
+
+		return {
+			label: getRouteScaleLabel(meters, unit),
+			width
+		};
+	}
+
+	function getRouteScaleLabel(meters, unit) {
+		if (!Number.isFinite(meters) || meters <= 0) return 'Bar = -';
+
 		if (unit === 'nautical') {
-			const maxNm = maxMeters / 1852;
-			const nm = getRouteRoundScaleNumber(maxNm);
-			return {
-				label: `Bar = ${formatRouteScaleNumber(nm)} NM`,
-				width: getRouteScaleWidth((nm * 1852) / maxMeters, maxWidth)
-			};
+			return `Bar = ${formatRouteConvertedScaleNumber(meters / 1852)} NM`;
 		}
 
 		if (unit === 'imperial') {
-			const maxFeet = maxMeters * 3.280839895;
-			if (maxFeet >= 5280) {
-				const miles = getRouteRoundScaleNumber(maxFeet / 5280);
-				return {
-					label: `Bar = ${formatRouteScaleNumber(miles)} mi`,
-					width: getRouteScaleWidth((miles * 1609.344) / maxMeters, maxWidth)
-				};
-			}
-
-			const feet = getRouteRoundScaleNumber(maxFeet);
-			return {
-				label: `Bar = ${formatRouteScaleNumber(feet)} ft`,
-				width: getRouteScaleWidth((feet * 0.3048) / maxMeters, maxWidth)
-			};
+			return `Bar = ${formatRouteConvertedScaleNumber(meters / 1609.344)} mi`;
 		}
 
-		const meters = getRouteRoundScaleNumber(maxMeters);
 		if (meters >= 1000) {
-			return {
-				label: `Bar = ${formatRouteScaleNumber(meters / 1000)} km`,
-				width: getRouteScaleWidth(meters / maxMeters, maxWidth)
-			};
+			return `Bar = ${formatRouteScaleNumber(meters / 1000)} km`;
 		}
 
-		return {
-			label: `Bar = ${formatRouteScaleNumber(meters)} m`,
-			width: getRouteScaleWidth(meters / maxMeters, maxWidth)
-		};
+		return `Bar = ${formatRouteScaleNumber(meters)} m`;
 	}
 
 	function getRouteScaleWidth(ratio, maxWidth) {
@@ -620,6 +615,15 @@
 		if (value >= 100 || Number.isInteger(value)) return String(Math.round(value));
 		if (value >= 10) return value.toFixed(1).replace(/\.0$/, '');
 		return value.toFixed(2).replace(/\.?0+$/, '');
+	}
+
+	function formatRouteConvertedScaleNumber(value) {
+		if (!Number.isFinite(value)) return '-';
+		if (value >= 1000) return String(Math.round(value));
+		if (value >= 100) return value.toFixed(1).replace(/\.0$/, '');
+		if (value >= 10) return value.toFixed(2).replace(/\.?0+$/, '');
+		if (value >= 1) return value.toFixed(3).replace(/\.?0+$/, '');
+		return value.toFixed(6).replace(/\.?0+$/, '');
 	}
 
 	async function ensureLeaflet() {
@@ -839,6 +843,8 @@
 	}
 
 	function handleMapClick(event) {
+		if (editAllowedOnly) return;
+
 		if (movingPointIndex !== null && movingPointIndex !== undefined) {
 			moveSelectedPointToLatLng(movingPointIndex, event.latlng);
 			return;
@@ -853,6 +859,11 @@
 		}
 
 		if (routeMarkerDragging) return;
+
+		if (editAllowedOnly) {
+			selectPoint(point.index);
+			return;
+		}
 
 		closePointContextMenu();
 
@@ -870,6 +881,8 @@
 	}
 
 	function updatePointCoordinate(index, latlng) {
+		if (editAllowedOnly) return;
+
 		pushUndoState('Drag point');
 
 		form.planData = form.planData.map((point, pointIndex) =>
@@ -916,7 +929,7 @@
 			const isMoving = point.index === movingPointIndex;
 
 			const marker = L.marker([point.latitude, point.longitude], {
-				draggable: true,
+				draggable: !editAllowedOnly,
 				icon: L.divIcon({
 					className: '',
 					html: `
@@ -934,10 +947,12 @@
 			});
 
 			marker.on('contextmenu', (event) => {
+				if (editAllowedOnly) return;
 				openPointContextMenu(point.index, event);
 			});
 
 			marker.on('dragstart', () => {
+				if (editAllowedOnly) return;
 				routeMarkerDragging = true;
 				closePointContextMenu();
 				selectedPointIndex = point.index;
@@ -945,6 +960,7 @@
 			});
 
 			marker.on('dragend', () => {
+				if (editAllowedOnly) return;
 				updatePointCoordinate(point.index, marker.getLatLng());
 				setTimeout(() => {
 					routeMarkerDragging = false;
@@ -981,6 +997,8 @@
 	}
 
 	function clearRoutePoints() {
+		if (editAllowedOnly) return;
+
 		pushUndoState('Clear route');
 
 		form.planData = [createPoint(1)];
@@ -1398,6 +1416,32 @@
 		};
 	}
 
+	function normalizeVoyagePlan(plan = {}) {
+		const id = Number(plan.id ?? plan.voyagePlanId ?? plan.voyage_plan_id);
+		const existingPlan = plans.find((item) => Number(item.id) === id);
+		const allowedVesselIds = Array.isArray(plan.allowedVesselIds)
+			? plan.allowedVesselIds
+			: Array.isArray(plan.allowed_vessel_ids)
+				? plan.allowed_vessel_ids
+				: [];
+		const planData = Array.isArray(plan.planData)
+			? plan.planData
+			: Array.isArray(plan.plan_data)
+				? plan.plan_data
+				: [];
+
+		return {
+			...existingPlan,
+			...plan,
+			id: Number.isFinite(id) ? id : plan.id,
+			voyageName: plan.voyageName || plan.voyage_name || plan.name || existingPlan?.voyageName || '',
+			isActive: Boolean(plan.isActive ?? plan.is_active ?? existingPlan?.isActive),
+			isUsed: Boolean(plan.isUsed ?? plan.is_used ?? existingPlan?.isUsed),
+			allowedVesselIds: allowedVesselIds.map(Number).filter(Number.isFinite),
+			planData
+		};
+	}
+
 	function getCheckpointSummary(checkpoints = []) {
 		const total = checkpoints.length;
 		const completed = checkpoints.filter((checkpoint) =>
@@ -1487,7 +1531,10 @@
 	}
 
 	function isPlanInUse(planId) {
-		return activePlanUsage.has(Number(planId));
+		const normalizedPlanId = Number(planId);
+		const plan = plans.find((item) => Number(item.id) === normalizedPlanId);
+
+		return Boolean(plan?.isUsed) || activePlanUsage.has(normalizedPlanId);
 	}
 
 	function getPlanUsageLabel(planId) {
@@ -1550,8 +1597,10 @@
 		loading = true;
 		try {
 			const result = await apiFetch(`/voyage-plans?page=${targetPage}&pageSize=${pageSize}`);
-			plans = result?.data?.items || [];
-			pagination = result?.data?.pagination || pagination;
+			const data = result?.data || {};
+			const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
+			plans = items.map(normalizeVoyagePlan);
+			pagination = data?.pagination || pagination;
 			page = pagination.page || targetPage;
 
 			if (!selectedPlanId && plans[0]?.id) {
@@ -1573,7 +1622,7 @@
 		if (showLoading) loading = true;
 		try {
 			const result = await apiFetch(`/voyage-plans/${id}`);
-			selectedPlan = result?.data || null;
+			selectedPlan = result?.data ? normalizeVoyagePlan(result.data) : null;
 			assignForm.voyagePlanId = selectedPlan?.id || '';
 		} catch (error) {
 			errorMessage = error.message;
@@ -1589,6 +1638,7 @@
 		selectedAllowedVesselId = '';
 		handleVesselDragEnd();
 		editMode = false;
+		editAllowedOnly = false;
 		showForm = true;
 		selectedPointIndex = 0;
 		resetUndoStack();
@@ -1597,10 +1647,7 @@
 
 	async function startEdit(planId) {
 		clearMessages();
-		if (isPlanInUse(planId)) {
-			errorMessage = 'This voyage plan is currently assigned to an active vessel and cannot be edited.';
-			return;
-		}
+		const planIsInUse = isPlanInUse(planId);
 
 		await openPlan(planId);
 		if (!selectedPlan) return;
@@ -1623,6 +1670,7 @@
 		selectedAllowedVesselId = '';
 		handleVesselDragEnd();
 		editMode = true;
+		editAllowedOnly = planIsInUse;
 		showForm = true;
 		selectedPointIndex = 0;
 		resetUndoStack();
@@ -1642,6 +1690,7 @@
 		destroyRouteMap();
 		showForm = false;
 		editMode = false;
+		editAllowedOnly = false;
 		form = getEmptyForm();
 		selectedNotAllowedVesselId = '';
 		selectedAllowedVesselId = '';
@@ -1652,6 +1701,8 @@
 	}
 
 	function addPoint() {
+		if (editAllowedOnly) return;
+
 		pushUndoState('Add empty point');
 
 		form.planData = [...form.planData, createPoint(form.planData.length + 1)];
@@ -1660,6 +1711,8 @@
 	}
 
 	function removePoint(index) {
+		if (editAllowedOnly) return;
+
 		resetMoveState();
 
 		if (form.planData.length <= 1) return;
@@ -1676,6 +1729,8 @@
 	}
 
 	function reorderPoints() {
+		if (editAllowedOnly) return;
+
 		form.planData = form.planData.map((point, rowIndex) => ({ ...point, order: rowIndex + 1 }));
 		refreshRouteMap();
 	}
@@ -1832,7 +1887,9 @@
 		clearMessages();
 		saving = true;
 		try {
-			const payload = validatePlanPayload();
+			const payload = editAllowedOnly
+				? { allowedVesselIds: form.allowedVesselIds.map(Number).filter(Number.isFinite) }
+				: validatePlanPayload();
 			const path = editMode ? `/voyage-plans/${form.id}` : '/voyage-plans';
 			const method = editMode ? 'PUT' : 'POST';
 			const result = await apiFetch(path, {
@@ -2163,7 +2220,18 @@
 												{#if planIsInUse}
 													<span class="plan-lock-pill" title={planUsageLabel}>In use</span>
 												{/if}
-												{#if confirmDeleteId === plan.id}
+												{#if planIsInUse}
+													<button
+														class="icon-action"
+														type="button"
+														title="Edit allowed vessels"
+														aria-label="Edit allowed vessels"
+														on:click={() => startEdit(plan.id)}
+														disabled={saving || activePlanLocksLoading}
+													>
+														✎
+													</button>
+												{:else if confirmDeleteId === plan.id}
 													<button
 														class="icon-action danger"
 														type="button"
@@ -2189,10 +2257,10 @@
 													<button
 														class="icon-action"
 														type="button"
-														title={planIsInUse ? planUsageLabel : 'Edit'}
+														title="Edit"
 														aria-label="Edit"
 														on:click={() => startEdit(plan.id)}
-														disabled={saving || planIsInUse || activePlanLocksLoading}
+														disabled={saving || activePlanLocksLoading}
 													>
 														✎
 													</button>
@@ -2201,7 +2269,7 @@
 														class="icon-action"
 														class:active-toggle={plan.isActive}
 														type="button"
-														title={planIsInUse ? planUsageLabel : plan.isActive ? 'Deactivate' : 'Activate'}
+														title={plan.isActive ? 'Deactivate' : 'Activate'}
 														aria-label={plan.isActive ? 'Deactivate' : 'Activate'}
 														on:click={() => toggleActive(plan)}
 														disabled={saving || planIsInUse || activePlanLocksLoading}
@@ -2212,7 +2280,7 @@
 													<button
 														class="icon-action danger ghost-danger"
 														type="button"
-														title={planIsInUse ? planUsageLabel : 'Delete'}
+														title="Delete"
 														aria-label="Delete"
 														on:click={() => (confirmDeleteId = plan.id)}
 														disabled={saving || planIsInUse || activePlanLocksLoading}
@@ -2653,8 +2721,15 @@
 		<section class="modal-card" on:click|stopPropagation>
 			<div class="modal-header">
 				<div>
-					<div class="page-kicker">{editMode ? 'Edit Voyage Plan' : 'Create Voyage Plan'}</div>
+					<div class="page-kicker">
+						{editAllowedOnly ? 'Edit Allowed Vessels' : editMode ? 'Edit Voyage Plan' : 'Create Voyage Plan'}
+					</div>
 					<h2>{editMode ? form.voyageName : 'New Voyage Plan'}</h2>
+					{#if editAllowedOnly}
+						<p class="modal-lock-note">
+							This plan is currently in use. Route points, status, and voyage name are locked.
+						</p>
+					{/if}
 				</div>
 				<button class="icon-button" type="button" on:click={closeForm}>×</button>
 			</div>
@@ -2701,10 +2776,21 @@
 					</div>
 				{/if}
 
-				<div class="route-map-editor">
+				<div class:locked-editor={editAllowedOnly} class="route-map-editor">
+					{#if editAllowedOnly}
+						<div class="locked-editor-overlay" aria-hidden="true">
+							<div>
+								<strong>Route is locked</strong>
+								<span>Only allowed vessels can be changed while this plan is in use.</span>
+							</div>
+						</div>
+					{/if}
+
 					<aside class="route-point-panel">
 						<div class="point-hint">
-							Click the map to add a point. Markers can be moved to update coordinates.
+							{editAllowedOnly
+								? 'Route points are locked while this plan is assigned to an active vessel.'
+								: 'Click the map to add a point. Markers can be moved to update coordinates.'}
 						</div>
 
 						<div class="route-editor">
@@ -2730,6 +2816,7 @@
 													type="number"
 													bind:value={point.order}
 													on:change={reorderPoints}
+													disabled={editAllowedOnly}
 												/>
 											</td>
 
@@ -2742,6 +2829,7 @@
 														placeholder="-6.1751"
 														on:focus={() => pushUndoState('Edit coordinate')}
 														on:input={() => refreshRouteMap()}
+														disabled={editAllowedOnly}
 													/>
 													<CopyableCoordinate
 														value={point.latitude}
@@ -2761,6 +2849,7 @@
 														placeholder="106.865"
 														on:focus={() => pushUndoState('Edit coordinate')}
 														on:input={() => refreshRouteMap()}
+														disabled={editAllowedOnly}
 													/>
 													<CopyableCoordinate
 														value={point.longitude}
@@ -2778,6 +2867,7 @@
 													bind:value={point.speed_kn}
 													placeholder="8"
 													on:focus={() => pushUndoState('Edit speed')}
+													disabled={editAllowedOnly}
 												/>
 											</td>
 
@@ -2788,6 +2878,7 @@
 													title="Remove point"
 													aria-label="Remove point"
 													on:click|stopPropagation={() => removePoint(index)}
+													disabled={editAllowedOnly}
 												>
 													🗑
 												</button>
@@ -2838,7 +2929,11 @@
 							<div class="route-map-overlay-toolbar">
 								<div class="route-map-title">
 									<h3>Route Points</h3>
-									<span>Click map to add point, right-click marker to move, reorder, or delete.</span>
+									<span>
+										{editAllowedOnly
+											? 'Route editing is locked for active assignments.'
+											: 'Click map to add point, right-click marker to move, reorder, or delete.'}
+									</span>
 								</div>
 
 								<div class="route-title-actions">
@@ -2846,7 +2941,7 @@
 										type="button"
 										class="toolbar-button"
 										on:click={undoRouteChange}
-										disabled={!canUndoRoute}
+										disabled={!canUndoRoute || editAllowedOnly}
 										title={canUndoRoute
 											? `Undo: ${undoStack[undoStack.length - 1]?.label}`
 											: 'No undo available'}
@@ -2854,7 +2949,7 @@
 										Undo
 									</button>
 
-									<button class="toolbar-button" type="button" on:click={addPoint}>
+									<button class="toolbar-button" type="button" on:click={addPoint} disabled={editAllowedOnly}>
 										+ Add Point
 									</button>
 
@@ -2866,6 +2961,7 @@
 										class="toolbar-button danger ghost-danger"
 										type="button"
 										on:click={clearRoutePoints}
+										disabled={editAllowedOnly}
 									>
 										Clear
 									</button>
@@ -3014,14 +3110,27 @@
 					</section>
 				</div>
 
-				<div class="form-grid">
+				<div class:locked-section-shell={editAllowedOnly} class="form-grid">
+					{#if editAllowedOnly}
+						<div class="form-lock-overlay" aria-hidden="true">
+							<div>
+								<strong>Plan settings locked</strong>
+								<span>Name and active status cannot be changed for an in-use plan.</span>
+							</div>
+						</div>
+					{/if}
+
 					<label>
 						<span>Voyage Name</span>
-						<input bind:value={form.voyageName} placeholder="Plan Jakarta to Surabaya" />
+						<input
+							bind:value={form.voyageName}
+							placeholder="Plan Jakarta to Surabaya"
+							disabled={editAllowedOnly}
+						/>
 					</label>
 
 					<label class="switch-line">
-						<input type="checkbox" bind:checked={form.isActive} />
+						<input type="checkbox" bind:checked={form.isActive} disabled={editAllowedOnly} />
 						<span>Active</span>
 					</label>
 				</div>
@@ -3135,7 +3244,7 @@
 			<div class="modal-footer">
 				<button type="button" on:click={closeForm}>Cancel</button>
 				<button class="primary-button" type="button" on:click={submitPlan} disabled={saving}>
-					{saving ? 'Saving...' : 'Save Voyage Plan'}
+					{saving ? 'Saving...' : editAllowedOnly ? 'Save Allowed Vessels' : 'Save Voyage Plan'}
 				</button>
 			</div>
 		</section>
@@ -4442,10 +4551,65 @@
 	}
 
 	.form-grid {
+		position: relative;
 		display: grid;
 		grid-template-columns: 1fr auto;
 		gap: 12px;
 		padding: 14px;
+	}
+
+	.form-grid.locked-section-shell {
+		border: 1px solid rgba(245, 158, 11, 0.32);
+		border-radius: 14px;
+		background:
+			linear-gradient(135deg, rgba(245, 158, 11, 0.08), transparent 44%),
+			rgba(15, 23, 42, 0.38);
+		overflow: hidden;
+	}
+
+	.form-lock-overlay,
+	.locked-editor-overlay {
+		position: absolute;
+		z-index: 45;
+		display: grid;
+		place-items: center;
+		padding: 18px;
+		pointer-events: auto;
+	}
+
+	.form-lock-overlay {
+		inset: 0;
+		border-radius: inherit;
+		background: rgba(15, 23, 42, 0.42);
+		backdrop-filter: blur(1.5px);
+	}
+
+	.form-lock-overlay > div,
+	.locked-editor-overlay > div {
+		display: grid;
+		gap: 5px;
+		max-width: 360px;
+		padding: 12px 14px;
+		border: 1px solid rgba(245, 158, 11, 0.34);
+		border-radius: 14px;
+		background: rgba(15, 23, 42, 0.9);
+		color: #f8fafc;
+		text-align: center;
+		box-shadow: 0 16px 32px rgba(2, 6, 23, 0.32);
+	}
+
+	.form-lock-overlay strong,
+	.locked-editor-overlay strong {
+		font-size: 12px;
+		font-weight: 750;
+	}
+
+	.form-lock-overlay span,
+	.locked-editor-overlay span {
+		color: #fcd34d;
+		font-size: 10px;
+		font-weight: 650;
+		line-height: 1.35;
 	}
 
 	.modal-body .route-section-title {
@@ -4654,6 +4818,14 @@
 		padding: 14px 18px;
 	}
 
+	.modal-lock-note {
+		margin: 7px 0 0;
+		color: #fbbf24;
+		font-size: 11px;
+		font-weight: 750;
+		line-height: 1.4;
+	}
+
 	.modal-footer {
 		justify-content: flex-end;
 		border-top: 1px solid #e5edf5;
@@ -4739,6 +4911,7 @@
 	}
 
 	.route-map-editor {
+		position: relative;
 		display: grid;
 		grid-template-columns: minmax(360px, 0.78fr) minmax(480px, 1.42fr);
 		gap: 0;
@@ -4750,6 +4923,38 @@
 		background: var(--color-surface);
 		overflow: hidden;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+	}
+
+	.route-map-editor.locked-editor {
+		border-color: rgba(245, 158, 11, 0.35);
+		background:
+			linear-gradient(135deg, rgba(245, 158, 11, 0.08), transparent 34%),
+			var(--color-surface);
+	}
+
+	.route-map-editor.locked-editor .route-map,
+	.route-map-editor.locked-editor .route-marker {
+		cursor: not-allowed;
+	}
+
+	.route-map-editor.locked-editor input:disabled,
+	.form-grid input:disabled,
+	.switch-line input:disabled + span {
+		cursor: not-allowed;
+		opacity: 0.68;
+	}
+
+	.route-map-editor.locked-editor .point-hint {
+		background: rgba(245, 158, 11, 0.12);
+		color: #fbbf24;
+	}
+
+	.locked-editor-overlay {
+		inset: 0;
+		background:
+			radial-gradient(circle at 50% 46%, rgba(245, 158, 11, 0.14), transparent 28%),
+			rgba(2, 6, 23, 0.38);
+		backdrop-filter: blur(1px);
 	}
 
 	.route-point-panel,

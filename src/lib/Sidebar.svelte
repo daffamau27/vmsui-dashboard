@@ -44,25 +44,18 @@
 			permissions: ['access_all_vessel_summary']
 		},
 		{
-			icon: '/assets/alarmpage.png',
-			title: 'Alarm',
-			key: 'alarm',
-			type: 'image',
-			permissions: ['access_alarm']
-		},
-		{
-			icon: '/assets/auditlogpage.png',
-			title: 'Audit Log',
-			key: 'audit-log',
-			type: 'image',
-			permissions: ['access_audit_logs']
-		},
-		{
 			icon: '/assets/voyageplanspage.png',
 			title: 'Voyage Plans',
 			key: 'voyage-plans',
 			type: 'image',
 			permissions: ['access_voyage_plan_fleet']
+		},
+		{
+			icon: '/assets/alarmpage.png',
+			title: 'Alarm',
+			key: 'alarm',
+			type: 'image',
+			permissions: ['access_alarm']
 		}
 	];
 

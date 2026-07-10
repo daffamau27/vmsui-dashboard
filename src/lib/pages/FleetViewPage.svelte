@@ -55,7 +55,7 @@
 	let showAssets = $state(true);
 	let visibleAssetTypes = $state({});
 	let zoneData = $state([]);
-	let isMapLegendOpen = $state(true);
+	let isMapLegendOpen = $state(false);
 	let assetMarkers = new Map();
 	let assetBoundaryCircles = new Map();
 
@@ -71,6 +71,8 @@
 	let map = null;
 	let L = null;
 	let markers = new Map();
+	let vesselHoverTooltip = null;
+	let vesselHoverTooltipVesselId = null;
 	let zoneLayerGroup = null;
 	let isFleetMounted = false;
 	let mapInitializing = false;
@@ -176,7 +178,7 @@
 			speed: vessel.speed ?? '-',
 			heading: vessel.heading ?? 0,
 			online: Boolean(vessel.online),
-			hireStatus: vessel.hireStatus ?? '-',
+			hireStatus: vessel.hireStatus ?? vessel.hire_status ?? vessel.onHire ?? vessel.on_hire ?? '-',
 			companyName: vessel.companyName ?? '-',
 			timezone:
 				vessel.timezone ??
@@ -448,6 +450,9 @@
 	}
 
 	function normalizeHireStatus(value) {
+		if (value === true) return 'On Hire';
+		if (value === false) return 'Off Hire';
+
 		const text = String(value ?? '').trim();
 
 		if (!text || text === '-') return 'Hire unknown';
@@ -456,6 +461,8 @@
 
 		if (normalized.includes('off')) return 'Off Hire';
 		if (normalized.includes('on')) return 'On Hire';
+		if (['true', '1', 'active'].includes(normalized)) return 'On Hire';
+		if (['false', '0', 'inactive'].includes(normalized)) return 'Off Hire';
 
 		return text;
 	}
@@ -1100,6 +1107,64 @@
     `;
 	}
 
+	function createVesselTooltipHtml(vessel) {
+		return `
+      <div class="fleet-vessel-tooltip">
+        <strong>${formatValue(vessel.name)}</strong>
+        <span>Speed: ${formatNumber(vessel.speed, 1, '0.0')} kt</span>
+        <span>Hire: ${normalizeHireStatus(vessel.hireStatus)}</span>
+      </div>
+    `;
+	}
+
+	function removeStaleVesselTooltipElements() {
+		if (!browser) return;
+
+		document.querySelectorAll('.fleet-vessel-tooltip-wrapper').forEach((element) => {
+			element.remove();
+		});
+	}
+
+	function closeVesselTooltips(vesselId = null) {
+		if (vesselId && String(vesselHoverTooltipVesselId) !== String(vesselId)) return;
+
+		markers.forEach((marker) => {
+			marker.closeTooltip?.();
+		});
+
+		if (vesselHoverTooltip) {
+			if (map?.hasLayer?.(vesselHoverTooltip)) {
+				map.removeLayer(vesselHoverTooltip);
+			}
+
+			vesselHoverTooltip.remove?.();
+			vesselHoverTooltip = null;
+		}
+
+		vesselHoverTooltipVesselId = null;
+		removeStaleVesselTooltipElements();
+	}
+
+	function openVesselHoverTooltip(vessel, marker) {
+		if (!map || !L || !vessel || !marker) return;
+
+		closeVesselTooltips();
+
+		vesselHoverTooltipVesselId = String(vessel.id);
+		vesselHoverTooltip = L.tooltip({
+			direction: 'top',
+			offset: [0, -28],
+			opacity: 1,
+			permanent: false,
+			interactive: false,
+			className: 'fleet-vessel-tooltip-wrapper'
+		})
+			.setLatLng(marker.getLatLng())
+			.setContent(createVesselTooltipHtml(vessel));
+
+		vesselHoverTooltip.addTo(map);
+	}
+
 	function createAssetPopupHtml(asset) {
 		const iconUrl = getAssetIconUrl(asset);
 		const typeLabel = getAssetTypeLabel(asset);
@@ -1345,10 +1410,14 @@
 	function buildMarkers() {
 		if (!map || !L) return;
 
+		closeVesselTooltips();
+
 		markers.forEach((marker) => {
 			marker.off();
 			marker.closePopup?.();
+			marker.closeTooltip?.();
 			marker.unbindPopup?.();
+			marker.unbindTooltip?.();
 
 			if (map?.hasLayer?.(marker)) {
 				map.removeLayer(marker);
@@ -1384,7 +1453,16 @@
 				className: 'fleet-leaflet-popup'
 			});
 
+			marker.on('mouseover', () => {
+				openVesselHoverTooltip(vessel, marker);
+			});
+
+			marker.on('mouseout', () => {
+				closeVesselTooltips(vesselId);
+			});
+
 			marker.on('click', () => {
+				closeVesselTooltips();
 				openVesselPopupFromInteraction(vesselId, { zoom: map?.getZoom?.() ?? 7 });
 			});
 
@@ -2542,6 +2620,7 @@
 	function destroyFleetMap() {
 		mapContainer?.removeEventListener?.('click', handleFleetPopupAction, true);
 
+		closeVesselTooltips();
 		cancelMeasure();
 		removeCurrentParticleLayer();
 		removeWindParticleLayer();
@@ -2549,7 +2628,9 @@
 		markers.forEach((marker) => {
 			marker.off?.();
 			marker.closePopup?.();
+			marker.closeTooltip?.();
 			marker.unbindPopup?.();
+			marker.unbindTooltip?.();
 			marker.remove?.();
 		});
 		markers.clear();
@@ -2845,6 +2926,15 @@
 											? 'Coordinate available'
 											: 'Coordinate unavailable'}
 									></div>
+									<span
+										class:on-hire={isOnHireStatus(vessel.hireStatus)}
+										class:off-hire={isOffHireStatus(vessel.hireStatus)}
+										class:unknown-hire={!isOnHireStatus(vessel.hireStatus) &&
+											!isOffHireStatus(vessel.hireStatus)}
+										class="vessel-hire-badge"
+									>
+										{normalizeHireStatus(vessel.hireStatus)}
+									</span>
 								</div>
 							</div>
 						</button>
@@ -3276,62 +3366,64 @@
 
 					{#if isMapLegendOpen}
 						<div class="legend-body">
-							<div class="legend-section">
-								<div class="legend-item">
-									<span class="legend-vessel-marker online" aria-hidden="true"></span>
-									<span>Vessel online</span>
+							<div class="legend-scroll-area">
+								<div class="legend-section">
+									<div class="legend-item">
+										<span class="legend-vessel-marker online" aria-hidden="true"></span>
+										<span>Vessel online</span>
+									</div>
+
+									<div class="legend-item">
+										<span class="legend-vessel-marker offline" aria-hidden="true"></span>
+										<span>Vessel offline</span>
+									</div>
+
+									<div class="legend-item">
+										<span class="legend-vessel-marker selected" aria-hidden="true"></span>
+										<span>Selected vessel</span>
+									</div>
 								</div>
 
-								<div class="legend-item">
-									<span class="legend-vessel-marker offline" aria-hidden="true"></span>
-									<span>Vessel offline</span>
+								<div class="legend-section">
+									<div class="legend-item">
+										<span class="asset-boundary-legend" aria-hidden="true"></span>
+										<span>Boundary 1 km</span>
+									</div>
+
+									{#if assetLegendItems.length}
+										<div class="legend-asset-list" aria-label="Asset types on map">
+											{#each assetLegendItems as item}
+												<button
+													type="button"
+													class:asset-type-visible={isAssetTypeVisible(item)}
+													class="legend-asset-toggle-row"
+													title={`${isAssetTypeVisible(item) ? 'Hide' : 'Show'} ${item.label}`}
+													onclick={() => toggleAssetType(item)}
+												>
+													<img src={item.iconUrl} alt="" />
+													<span>{item.label}</span>
+													<i aria-hidden="true"></i>
+												</button>
+											{/each}
+										</div>
+									{/if}
 								</div>
 
-								<div class="legend-item">
-									<span class="legend-vessel-marker selected" aria-hidden="true"></span>
-									<span>Selected vessel</span>
-								</div>
-							</div>
-
-							<div class="legend-section">
-								<div class="legend-item">
-									<span class="asset-boundary-legend" aria-hidden="true"></span>
-									<span>Boundary 1 km</span>
-								</div>
-
-								{#if assetLegendItems.length}
-									<div class="legend-asset-list" aria-label="Asset types on map">
-										{#each assetLegendItems as item}
-											<button
-												type="button"
-												class:asset-type-visible={isAssetTypeVisible(item)}
-												class="legend-asset-toggle-row"
-												title={`${isAssetTypeVisible(item) ? 'Hide' : 'Show'} ${item.label}`}
-												onclick={() => toggleAssetType(item)}
-											>
-												<img src={item.iconUrl} alt="" />
-												<span>{item.label}</span>
-												<i aria-hidden="true"></i>
-											</button>
+								{#if zoneData.length}
+									<div class="legend-section">
+										{#each zoneData as zone}
+											<div class="legend-item">
+												<span
+													class="zone-boundary-legend"
+													style={`--zone-color: ${zone.color}; --zone-fill: ${zone.fillColor};`}
+													aria-hidden="true"
+												></span>
+												<span>{zone.name}</span>
+											</div>
 										{/each}
 									</div>
 								{/if}
 							</div>
-
-							{#if zoneData.length}
-								<div class="legend-section">
-									{#each zoneData as zone}
-										<div class="legend-item">
-											<span
-												class="zone-boundary-legend"
-												style={`--zone-color: ${zone.color}; --zone-fill: ${zone.fillColor};`}
-												aria-hidden="true"
-											></span>
-											<span>{zone.name}</span>
-										</div>
-									{/each}
-								</div>
-							{/if}
 
 							<div class="legend-actions">
 								<button
@@ -4561,9 +4653,61 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: flex-end;
-		gap: 6px;
+		flex-wrap: wrap;
+		gap: 5px;
 		flex: 0 0 auto;
-		max-width: 128px;
+		max-width: 118px;
+	}
+
+	.vessel-hire-badge {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 5px;
+		order: 3;
+		flex: 0 0 auto;
+		width: fit-content;
+		margin-left: auto;
+		min-height: 18px;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		border-radius: 999px;
+		padding: 3px 7px;
+		color: rgba(226, 232, 240, 0.88);
+		background: rgba(15, 23, 42, 0.1);
+		font-size: 8px;
+		font-weight: 850;
+		line-height: 1;
+		letter-spacing: 0.035em;
+		text-transform: uppercase;
+		white-space: nowrap;
+		pointer-events: none;
+	}
+
+	.vessel-hire-badge::before {
+		content: '';
+		width: 6px;
+		height: 6px;
+		border-radius: 999px;
+		background: currentColor;
+		box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 16%, transparent);
+	}
+
+	.vessel-hire-badge.on-hire {
+		border-color: rgba(34, 197, 94, 0.28);
+		background: rgba(34, 197, 94, 0.12);
+		color: #86efac;
+	}
+
+	.vessel-hire-badge.off-hire {
+		border-color: rgba(245, 158, 11, 0.3);
+		background: rgba(245, 158, 11, 0.13);
+		color: #fbbf24;
+	}
+
+	.vessel-hire-badge.unknown-hire {
+		border-color: rgba(148, 163, 184, 0.2);
+		background: rgba(148, 163, 184, 0.1);
+		color: rgba(203, 213, 225, 0.86);
 	}
 
 	.vessel-utc-badge {
@@ -4952,11 +5096,12 @@
 		right: auto;
 		top: auto;
 		bottom: 12px;
-		display: grid;
+		display: flex;
+		flex-direction: column;
 		gap: 9px;
 		width: min(260px, calc(100% - var(--fleet-main-sidebar-offset) - 24px));
 		max-height: min(480px, calc(100% - 24px));
-		overflow: auto;
+		overflow: hidden;
 		padding: 11px;
 		border-radius: 14px;
 		background:
@@ -4996,6 +5141,7 @@
 	}
 
 	:global(body .app-content .fleet-page .map-legend .legend-body),
+	:global(body .app-content .fleet-page .map-legend .legend-scroll-area),
 	:global(body .app-content .fleet-page .map-legend .legend-section),
 	:global(body .app-content .fleet-page .map-legend .legend-asset-list),
 	:global(body .app-content .fleet-page .map-legend .legend-item) {
@@ -5088,8 +5234,39 @@
 	}
 
 	.legend-body {
+		display: flex;
+		flex-direction: column;
+		gap: 9px;
+		min-height: 0;
+		flex: 1 1 auto;
+	}
+
+	.legend-scroll-area {
 		display: grid;
 		gap: 9px;
+		min-height: 0;
+		flex: 1 1 auto;
+		overflow-y: auto;
+		overflow-x: hidden;
+		padding-right: 4px;
+		margin-right: -2px;
+		scroll-behavior: smooth;
+		overscroll-behavior: contain;
+		scrollbar-width: thin;
+		scrollbar-color: rgba(203, 213, 225, 0.34) transparent;
+	}
+
+	.legend-scroll-area::-webkit-scrollbar {
+		width: 4px;
+	}
+
+	.legend-scroll-area::-webkit-scrollbar-thumb {
+		border-radius: 999px;
+		background: rgba(203, 213, 225, 0.34);
+	}
+
+	.legend-scroll-area::-webkit-scrollbar-track {
+		background: transparent;
 	}
 
 	.legend-section {
@@ -5121,24 +5298,24 @@
 
 	.legend-vessel-marker {
 		position: relative;
-		width: 20px;
-		height: 36px;
+		width: 28px;
+		height: 38px;
 		display: inline-grid;
 		place-items: center;
 		flex: 0 0 auto;
-		border-radius: 0;
-		background: transparent;
+		border-radius: 12px;
+		background: rgba(34, 197, 94, 0.12);
 		border: 0;
 		box-shadow:
-			0 0 0 5px rgba(34, 197, 94, 0.16),
-			0 0 14px rgba(34, 197, 94, 0.38),
-			0 6px 12px rgba(15, 23, 42, 0.2);
+			inset 0 0 0 1px rgba(34, 197, 94, 0.22),
+			0 0 0 4px rgba(34, 197, 94, 0.1),
+			0 8px 16px rgba(15, 23, 42, 0.18);
 	}
 
 	.legend-vessel-marker::before {
 		content: '';
 		width: 20px;
-		height: 36px;
+		height: 34px;
 		background-image: url('/assets/vessel.png');
 		background-size: contain;
 		background-repeat: no-repeat;
@@ -5149,24 +5326,12 @@
 			drop-shadow(0 5px 8px rgba(15, 23, 42, 0.28));
 	}
 
-	.legend-vessel-marker::after {
-		content: '';
-		position: absolute;
-		right: -7px;
-		top: 50%;
-		transform: translateY(-50%);
-		width: 7px;
-		height: 7px;
-		border: 2px solid #ffffff;
-		border-radius: 999px;
-		background: #22c55e;
-	}
-
 	.legend-vessel-marker.offline {
+		background: rgba(100, 116, 139, 0.14);
 		box-shadow:
-			0 0 0 5px rgba(239, 68, 68, 0.14),
-			0 0 14px rgba(239, 68, 68, 0.34),
-			0 6px 12px rgba(15, 23, 42, 0.24);
+			inset 0 0 0 1px rgba(148, 163, 184, 0.18),
+			0 0 0 4px rgba(100, 116, 139, 0.1),
+			0 8px 16px rgba(15, 23, 42, 0.22);
 	}
 
 	.legend-vessel-marker.offline::before {
@@ -5178,31 +5343,23 @@
 			drop-shadow(0 5px 8px rgba(15, 23, 42, 0.34));
 	}
 
-	.legend-vessel-marker.offline::after {
-		background: #ef4444;
-		border-color: #1e293b;
-	}
-
 	.legend-vessel-marker.selected {
-		width: 23px;
+		width: 30px;
 		height: 40px;
+		background: rgba(59, 130, 246, 0.16);
 		box-shadow:
-			0 0 0 6px rgba(59, 130, 246, 0.18),
-			0 0 16px rgba(37, 99, 235, 0.48),
-			0 6px 12px rgba(15, 23, 42, 0.22);
+			inset 0 0 0 1px rgba(96, 165, 250, 0.28),
+			0 0 0 5px rgba(59, 130, 246, 0.12),
+			0 8px 16px rgba(15, 23, 42, 0.2);
 	}
 
 	.legend-vessel-marker.selected::before {
-		width: 23px;
-		height: 40px;
+		width: 21px;
+		height: 36px;
 		filter:
 			drop-shadow(0 0 5px rgba(59, 130, 246, 0.98))
 			drop-shadow(0 0 10px rgba(37, 99, 235, 0.5))
 			drop-shadow(0 6px 12px rgba(15, 23, 42, 0.28));
-	}
-
-	.legend-vessel-marker.selected::after {
-		background: #22c55e;
 	}
 
 	.asset-boundary-legend {
@@ -5389,21 +5546,6 @@
 			0 0 18px rgba(34, 197, 94, 0.44);
 	}
 
-	:global(.vessel-leaflet-icon::after) {
-		content: '';
-		position: absolute;
-		right: -5px;
-		top: 50%;
-		z-index: 2;
-		width: 9px;
-		height: 9px;
-		transform: translateY(-50%);
-		border: 2px solid rgba(15, 23, 42, 0.82);
-		border-radius: 999px;
-		background: #22c55e;
-		box-shadow: 0 0 9px rgba(34, 197, 94, 0.72);
-	}
-
 	:global(.fleet-vessel-marker-icon) {
 		position: relative;
 		z-index: 1;
@@ -5455,11 +5597,6 @@
 			0 0 18px rgba(239, 68, 68, 0.4);
 	}
 
-	:global(.vessel-leaflet-icon.offline::after) {
-		background: #ef4444;
-		box-shadow: 0 0 9px rgba(239, 68, 68, 0.72);
-	}
-
 	:global(.vessel-leaflet-icon.offline.selected .fleet-vessel-marker-icon) {
 		opacity: 0.82;
 		filter:
@@ -5468,6 +5605,42 @@
 			drop-shadow(0 0 5px rgba(248, 113, 113, 0.88))
 			drop-shadow(0 0 12px rgba(239, 68, 68, 0.5))
 			drop-shadow(0 10px 18px rgba(15, 23, 42, 0.3));
+	}
+
+	:global(.fleet-page .leaflet-tooltip.fleet-vessel-tooltip-wrapper) {
+		border: 1px solid rgba(96, 165, 250, 0.34) !important;
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.94) !important;
+		color: #f8fafc !important;
+		box-shadow: 0 14px 28px rgba(15, 23, 42, 0.3) !important;
+		backdrop-filter: blur(10px);
+		padding: 0 !important;
+	}
+
+	:global(.fleet-page .leaflet-tooltip.fleet-vessel-tooltip-wrapper.leaflet-tooltip-top::before) {
+		display: block !important;
+		border-top-color: rgba(15, 23, 42, 0.94) !important;
+	}
+
+	:global(.fleet-page .fleet-vessel-tooltip) {
+		display: grid;
+		gap: 4px;
+		padding: 8px 10px;
+		min-width: 120px;
+	}
+
+	:global(.fleet-page .fleet-vessel-tooltip strong) {
+		color: #f8fafc !important;
+		font-size: 12px;
+		font-weight: 850;
+		line-height: 1.1;
+	}
+
+	:global(.fleet-page .fleet-vessel-tooltip span) {
+		color: #bfdbfe !important;
+		font-size: 10px;
+		font-weight: 700;
+		line-height: 1.2;
 	}
 
 	/* =========================
@@ -7202,10 +7375,15 @@
 		}
 
 		.legend-body {
-			max-height: calc(min(52vh, 360px) - 42px);
 			gap: 7px;
-			overflow-y: auto;
-			padding-right: 2px;
+			overflow: hidden;
+			padding-right: 0;
+		}
+
+		.legend-scroll-area {
+			max-height: calc(min(52vh, 360px) - 84px);
+			gap: 7px;
+			padding-right: 4px;
 		}
 
 		.legend-section {
@@ -7224,18 +7402,19 @@
 		}
 
 		.legend-vessel-marker {
-			width: 16px;
-			height: 28px;
+			width: 24px;
+			height: 32px;
+			border-radius: 10px;
 		}
 
 		.legend-vessel-marker::before {
-			width: 16px;
-			height: 28px;
+			width: 17px;
+			height: 29px;
 		}
 
 		.legend-vessel-marker.selected {
-			width: 18px;
-			height: 31px;
+			width: 26px;
+			height: 34px;
 		}
 
 		.legend-vessel-marker.selected::before {

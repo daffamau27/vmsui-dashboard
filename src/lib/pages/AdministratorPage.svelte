@@ -15,6 +15,7 @@
 		getAllVesselsAdminApi,
 		createVesselAdminApi,
 		updateVesselAdminApi,
+		updateVesselHireStatusAdminApi,
 		deleteVesselAdminApi,
 		getCctvConfigAdminApi,
 		updateCctvConfigAdminApi,
@@ -364,6 +365,35 @@
 
 	function getVesselDeviceLabel(vessel) {
 		return vessel?.deviceId || vessel?.device_id || vessel?.deviceName || vessel?.thingsboardName || '-';
+	}
+
+	function getVesselHireStatus(vessel) {
+		const value =
+			vessel?.hireStatus ??
+			vessel?.hire_status ??
+			vessel?.onHire ??
+			vessel?.on_hire ??
+			false;
+
+		if (typeof value === 'string') {
+			const normalized = value.trim().toLowerCase();
+			return ['true', '1', 'on', 'on hire', 'on_hire', 'active'].includes(normalized);
+		}
+
+		return Boolean(value);
+	}
+
+	function getVesselHireValue(vessel) {
+		return getVesselHireStatus(vessel) ? 'true' : 'false';
+	}
+
+	function getVesselHireLabel(vesselOrValue) {
+		const isOnHire =
+			typeof vesselOrValue === 'string'
+				? vesselOrValue === 'true'
+				: getVesselHireStatus(vesselOrValue);
+
+		return isOnHire ? 'On Hire' : 'Off Hire';
 	}
 
 	function getCompanyDisplayName(company) {
@@ -1289,7 +1319,8 @@
 		return {
 			deviceId: '',
 			vesselName: '',
-			companyId: ''
+			companyId: '',
+			hireStatus: 'false'
 		};
 	}
 
@@ -1308,7 +1339,8 @@
 			vessel?.vesselName,
 			vessel?.companyId ? String(vessel.companyId) : '',
 			company?.name,
-			getCompanyThingsboardId(company)
+			getCompanyThingsboardId(company),
+			getVesselHireLabel(vessel)
 		]
 			.filter(Boolean)
 			.some((value) => String(value).toLowerCase().includes(keyword));
@@ -1865,7 +1897,8 @@
 		vesselForm = {
 			deviceId: vessel?.deviceId || '',
 			vesselName: vessel?.vesselName || '',
-			companyId: vessel?.companyId ?? ''
+			companyId: vessel?.companyId ?? '',
+			hireStatus: getVesselHireValue(vessel)
 		};
 
 		clearAlert();
@@ -1893,6 +1926,10 @@
 		};
 	}
 
+	function buildVesselHirePayload() {
+		return vesselForm.hireStatus === 'true';
+	}
+
 	async function saveVessel() {
 		clearAlert();
 
@@ -1907,9 +1944,15 @@
 
 		try {
 			const payload = buildVesselPayload();
+			const hireStatus = buildVesselHirePayload();
 
 			if (vesselMode === 'create') {
 				const created = await createVesselAdminApi(payload);
+				const createdId = created?.id;
+
+				if (createdId && hireStatus) {
+					await updateVesselHireStatusAdminApi(createdId, hireStatus);
+				}
 
 				showAlert(
 					'success',
@@ -1917,9 +1960,15 @@
 				);
 
 				await loadVessels();
-				openEditVesselForm(created);
+				const refreshed = vessels.find((vessel) => Number(vessel?.id) === Number(createdId)) || created;
+				openEditVesselForm(refreshed);
 			} else if (selectedVessel?.id) {
 				const updated = await updateVesselAdminApi(selectedVessel.id, payload);
+				const currentHireStatus = getVesselHireStatus(selectedVessel);
+
+				if (currentHireStatus !== hireStatus) {
+					await updateVesselHireStatusAdminApi(selectedVessel.id, hireStatus);
+				}
 
 				showAlert(
 					'success',
@@ -1927,7 +1976,9 @@
 				);
 
 				await loadVessels();
-				openEditVesselForm(updated);
+				const refreshed =
+					vessels.find((vessel) => Number(vessel?.id) === Number(selectedVessel.id)) || updated;
+				openEditVesselForm(refreshed);
 			}
 		} catch (error) {
 			showAlert('error', error.message || 'Failed to save vessel.');
@@ -3176,7 +3227,16 @@
 										<small>{getVesselDeviceLabel(vessel)}</small>
 									</div>
 
-									<em>{getVesselCompanyLabel(vessel)}</em>
+									<div class="vessel-row-meta">
+										<em>{getVesselCompanyLabel(vessel)}</em>
+										<span
+											class:on-hire={getVesselHireStatus(vessel)}
+											class:off-hire={!getVesselHireStatus(vessel)}
+											class="hire-status-pill"
+										>
+											{getVesselHireLabel(vessel)}
+										</span>
+									</div>
 								</button>
 							{/each}
 						{/if}
@@ -3246,6 +3306,14 @@
 									{/each}
 								</select>
 								<small class="field-help">Load the company list from GET /companies.</small>
+							</label>
+
+							<label>
+								<span>Hire Status</span>
+								<select bind:value={vesselForm.hireStatus}>
+									<option value="true">On Hire</option>
+									<option value="false">Off Hire</option>
+								</select>
 							</label>
 						</div>
 
@@ -5689,6 +5757,52 @@
 		font-style: normal;
 		font-weight: 900;
 		white-space: nowrap;
+	}
+
+	.vessel-row-meta {
+		display: inline-flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 7px;
+		min-width: 0;
+	}
+
+	.hire-status-pill {
+		display: inline-flex !important;
+		align-items: center;
+		gap: 6px;
+		width: fit-content;
+		margin-top: 0 !important;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		border-radius: 999px;
+		padding: 5px 9px;
+		font-size: 10px !important;
+		font-weight: 900 !important;
+		line-height: 1;
+		letter-spacing: 0.03em;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+
+	.hire-status-pill::before {
+		content: '';
+		width: 7px;
+		height: 7px;
+		border-radius: 999px;
+		background: currentColor;
+		box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent);
+	}
+
+	.hire-status-pill.on-hire {
+		border-color: rgba(34, 197, 94, 0.28);
+		background: rgba(34, 197, 94, 0.12);
+		color: #86efac !important;
+	}
+
+	.hire-status-pill.off-hire {
+		border-color: rgba(245, 158, 11, 0.28);
+		background: rgba(245, 158, 11, 0.12);
+		color: #fbbf24 !important;
 	}
 
 	.user-meta {
@@ -8143,6 +8257,34 @@
 	.telegram-row em.active-reporting {
 		background: #dcfce7;
 		color: #166534;
+	}
+
+	.user-row.selected-user,
+	.vessel-row.selected-user,
+	.asset-row.selected-user,
+	.engine-curve-row.selected-user,
+	.reporting-vessel-row.selected-user,
+	.cctv-vessel-row.selected-user,
+	.telegram-row.selected-user {
+		position: relative;
+		border-color: rgba(59, 130, 246, 0.78) !important;
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.26), rgba(14, 165, 233, 0.08)),
+			var(--color-accent-muted) !important;
+		box-shadow:
+			inset 4px 0 0 #3b82f6,
+			0 12px 28px rgba(37, 99, 235, 0.16) !important;
+		transform: translateY(-1px);
+	}
+
+	.user-row.selected-user strong,
+	.vessel-row.selected-user strong,
+	.asset-row.selected-user strong,
+	.engine-curve-row.selected-user strong,
+	.reporting-vessel-row.selected-user strong,
+	.cctv-vessel-row.selected-user strong,
+	.telegram-row.selected-user strong {
+		color: #eff6ff !important;
 	}
 
 	.update-action {

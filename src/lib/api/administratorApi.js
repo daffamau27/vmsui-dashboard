@@ -108,6 +108,21 @@ export async function updateVesselAdminApi(id, payload) {
   return unwrap(response);
 }
 
+export async function updateVesselHireStatusAdminApi(id, hireStatus) {
+  if (!id) {
+    throw new Error("Vessel ID tidak valid.");
+  }
+
+  const response = await apiRequest(`/vessels/${id}/hire`, {
+    method: "PUT",
+    body: JSON.stringify({
+      hireStatus: Boolean(hireStatus)
+    })
+  });
+
+  return unwrap(response);
+}
+
 export async function deleteVesselAdminApi(id) {
   if (!id) {
     throw new Error("Vessel ID tidak valid.");

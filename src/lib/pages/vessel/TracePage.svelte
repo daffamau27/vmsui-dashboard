@@ -16,8 +16,11 @@
 
 	let isPlaying = $state(false);
 	let activeIndex = $state(0);
+	let activePlaybackTimestampMs = $state(NaN);
 	let playbackRenderTick = $state(0);
 	let playbackInterval = null;
+	let playbackClockStartedAtRealMs = 0;
+	let playbackClockStartedAtTraceMs = NaN;
 	let lastPlaybackToggleAt = 0;
 
 	let startDateTime = $state('');
@@ -34,6 +37,29 @@
 	let cctvSnapshotRequestId = 0;
 	const CCTV_SNAPSHOT_PAGE_SIZE = 50;
 	const ENABLE_CCTV_BACKGROUND_BUFFER = true;
+	const CCTV_BACKGROUND_PAGE_DELAY_MS = 900;
+	const TRACE_MS_PER_REAL_MS = 60;
+	const PLAYBACK_TICK_INTERVAL_MS = 100;
+	const TRACE_DEBUG = false;
+
+	function traceDebug(...args) {
+		if (TRACE_DEBUG) console.log(...args);
+	}
+
+	function sleep(ms) {
+		return new Promise((resolve) => setTimeout(resolve, ms));
+	}
+
+	function waitForIdle(timeout = 900) {
+		return new Promise((resolve) => {
+			if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+				window.requestIdleCallback(() => resolve(), { timeout });
+				return;
+			}
+
+			setTimeout(resolve, timeout);
+		});
+	}
 
 	function pad(value) {
 		return String(value).padStart(2, '0');
@@ -315,23 +341,55 @@
 			return snapshots[0] || null;
 		}
 
-		let previousSnapshot = null;
+		const index = lowerBoundSnapshotIndex(snapshots, timestampMs + 1) - 1;
+		return snapshots[Math.max(0, index)] || null;
+	}
 
-		for (const snapshot of snapshots) {
-			if (!Number.isFinite(snapshot?.timestampMs)) continue;
+	function lowerBoundSnapshotIndex(snapshots = [], timestampMs) {
+		let low = 0;
+		let high = snapshots.length;
 
-			if (snapshot.timestampMs <= timestampMs) {
-				previousSnapshot = snapshot;
+		while (low < high) {
+			const mid = Math.floor((low + high) / 2);
+			const midTime = snapshots[mid]?.timestampMs;
+
+			if (!Number.isFinite(midTime) || midTime < timestampMs) {
+				low = mid + 1;
 			} else {
-				break;
+				high = mid;
 			}
 		}
 
-		return previousSnapshot;
+		return low;
 	}
 
-	function getCctvCameraPanels(items = [], timestampMs = NaN, renderTick = 0) {
-		renderTick;
+	function findPlaybackCctvSnapshot(snapshots = [], timestampMs) {
+		if (!snapshots.length) return null;
+
+		if (!Number.isFinite(timestampMs)) {
+			return snapshots[0] || null;
+		}
+
+		const minuteStart = Math.floor(timestampMs / 60000) * 60000;
+		const minuteEnd = minuteStart + 60000;
+		const minuteStartIndex = lowerBoundSnapshotIndex(snapshots, minuteStart);
+		const minuteEndIndex = lowerBoundSnapshotIndex(snapshots, minuteEnd);
+		const minuteCount = Math.max(0, minuteEndIndex - minuteStartIndex);
+
+		if (minuteCount) {
+			const slotDurationMs = 60000 / minuteCount;
+			const slotIndex = Math.min(
+				minuteCount - 1,
+				Math.max(0, Math.floor((timestampMs - minuteStart) / slotDurationMs))
+			);
+
+			return snapshots[minuteStartIndex + slotIndex] || null;
+		}
+
+		return findClosestCctvSnapshot(snapshots, timestampMs);
+	}
+
+	function buildCctvCameraIndex(items = []) {
 		const groups = new Map();
 
 		for (const item of items) {
@@ -350,13 +408,23 @@
 		}
 
 		return Array.from(groups.values()).map((panel) => {
-			const snapshots = panel.snapshots.sort((a, b) => {
+			panel.snapshots.sort((a, b) => {
 				if (!Number.isFinite(a.timestampMs) && !Number.isFinite(b.timestampMs)) return 0;
 				if (!Number.isFinite(a.timestampMs)) return 1;
 				if (!Number.isFinite(b.timestampMs)) return -1;
 				return a.timestampMs - b.timestampMs;
 			});
-			const activeSnapshot = findClosestCctvSnapshot(snapshots, timestampMs);
+
+			return panel;
+		});
+	}
+
+	function getCctvCameraPanels(cameraIndex = [], timestampMs = NaN, renderTick = 0) {
+		renderTick;
+
+		return cameraIndex.map((panel) => {
+			const snapshots = panel.snapshots || [];
+			const activeSnapshot = findPlaybackCctvSnapshot(snapshots, timestampMs);
 
 			return {
 				...panel,
@@ -546,7 +614,74 @@
 		return bestIndex;
 	}
 
+	function findTimelineIndexAtOrBefore(events = [], timestampMs) {
+		if (!Number.isFinite(timestampMs) || !events.length) return -1;
+
+		let previousIndex = -1;
+
+		for (let index = 0; index < events.length; index += 1) {
+			const eventTime = events[index]?.timestampMs;
+			if (!Number.isFinite(eventTime)) continue;
+
+			if (eventTime <= timestampMs) {
+				previousIndex = index;
+			} else {
+				break;
+			}
+		}
+
+		return previousIndex >= 0 ? previousIndex : 0;
+	}
+
+	function findTraceIndexAtOrBefore(timestampMs, points = tracePoints) {
+		if (!Number.isFinite(timestampMs) || !points.length) return -1;
+
+		let previousIndex = -1;
+
+		for (let index = 0; index < points.length; index += 1) {
+			const pointTime = parseDateTimeMs(points[index]?.timestampRaw || points[index]?.timestamp);
+			if (!Number.isFinite(pointTime)) continue;
+
+			if (pointTime <= timestampMs) {
+				previousIndex = index;
+			} else {
+				break;
+			}
+		}
+
+		return previousIndex >= 0 ? previousIndex : 0;
+	}
+
+	function getTimelineBounds(events = timelineEvents) {
+		const validEvents = events.filter((event) => Number.isFinite(event?.timestampMs));
+
+		return {
+			start: validEvents[0]?.timestampMs ?? NaN,
+			end: validEvents.at(-1)?.timestampMs ?? NaN
+		};
+	}
+
+	function clampPlaybackTimestamp(timestampMs, events = timelineEvents) {
+		const { start, end } = getTimelineBounds(events);
+		if (!Number.isFinite(timestampMs)) return Number.isFinite(start) ? start : NaN;
+		if (Number.isFinite(start) && timestampMs < start) return start;
+		if (Number.isFinite(end) && timestampMs > end) return end;
+		return timestampMs;
+	}
+
+	function setPlaybackTimestamp(timestampMs, { bumpRender = true } = {}) {
+		const nextTimestamp = clampPlaybackTimestamp(timestampMs);
+		if (!Number.isFinite(nextTimestamp)) return;
+
+		activePlaybackTimestampMs = nextTimestamp;
+		const nextIndex = findTimelineIndexAtOrBefore(timelineEvents, nextTimestamp);
+		if (nextIndex >= 0) activeIndex = nextIndex;
+		if (bumpRender) playbackRenderTick += 1;
+	}
+
 	function getCurrentTimelineTimestampMs() {
+		if (Number.isFinite(activePlaybackTimestampMs)) return activePlaybackTimestampMs;
+
 		const eventTimestamp = timelineEvents[activeIndex]?.timestampMs;
 		if (Number.isFinite(eventTimestamp)) return eventTimestamp;
 
@@ -560,8 +695,9 @@
 		cctvItems = nextItems;
 
 		if (preserveTimeline && Number.isFinite(previousTimestamp) && nextEvents.length) {
-			const nextIndex = findClosestTimelineIndexInEvents(nextEvents, previousTimestamp);
+			const nextIndex = findTimelineIndexAtOrBefore(nextEvents, previousTimestamp);
 			if (nextIndex >= 0) activeIndex = nextIndex;
+			activePlaybackTimestampMs = clampPlaybackTimestamp(previousTimestamp, nextEvents);
 		}
 	}
 
@@ -579,7 +715,7 @@
 		try {
 			for (let page = 2; page <= totalPages; page += 1) {
 				if (requestId !== cctvSnapshotRequestId) {
-					console.log('[TRACE_CCTV_PAGE_SKIP_STALE]', {
+					traceDebug('[TRACE_CCTV_PAGE_SKIP_STALE]', {
 						page,
 						requestId,
 						activeRequestId: cctvSnapshotRequestId
@@ -587,7 +723,12 @@
 					return;
 				}
 
-				console.log('[TRACE_CCTV_PAGE_REQUEST]', {
+				await waitForIdle();
+				await sleep(CCTV_BACKGROUND_PAGE_DELAY_MS);
+
+				if (requestId !== cctvSnapshotRequestId) return;
+
+				traceDebug('[TRACE_CCTV_PAGE_REQUEST]', {
 					page,
 					totalPages,
 					pageSize: CCTV_SNAPSHOT_PAGE_SIZE,
@@ -606,7 +747,7 @@
 				});
 
 				if (requestId !== cctvSnapshotRequestId) {
-					console.log('[TRACE_CCTV_PAGE_RESPONSE_STALE]', {
+					traceDebug('[TRACE_CCTV_PAGE_RESPONSE_STALE]', {
 						page,
 						requestId,
 						activeRequestId: cctvSnapshotRequestId
@@ -619,18 +760,13 @@
 				applyCctvItems(mergeCctvSnapshots(cctvItems, nextItems), { preserveTimeline: true });
 				cctvSnapshotsLoadedPages = page;
 
-				console.log('[TRACE_CCTV_PAGE_LOADED]', {
+				traceDebug('[TRACE_CCTV_PAGE_LOADED]', {
 					page,
 					totalPages,
 					normalizedItems: nextItems.length,
 					beforeMergeCount,
 					afterMergeCount: cctvItems.length,
-					totalSnapshots: cctvSnapshotsTotal,
-					panels: getCctvCameraPanels(cctvItems, activeTraceTimestampMs).map((panel) => ({
-						name: panel.name,
-						frames: panel.loadedCount,
-						activeFrame: panel.activeSnapshot?.capturedAt || null
-					}))
+					totalSnapshots: cctvSnapshotsTotal
 				});
 			}
 		} catch (err) {
@@ -639,7 +775,7 @@
 		} finally {
 			if (requestId === cctvSnapshotRequestId) {
 				cctvSnapshotsBuffering = false;
-				console.log('[TRACE_CCTV_BUFFER_DONE]', {
+				traceDebug('[TRACE_CCTV_BUFFER_DONE]', {
 					loadedPages: cctvSnapshotsLoadedPages,
 					loadedItems: cctvItems.length,
 					totalSnapshots: cctvSnapshotsTotal
@@ -656,7 +792,7 @@
 		cctvSnapshotsLoadedPages = 0;
 		cctvSnapshotsBuffering = false;
 
-		console.log('[TRACE_CCTV_PAGE_REQUEST]', {
+		traceDebug('[TRACE_CCTV_PAGE_REQUEST]', {
 			page: 1,
 			totalPages: null,
 			pageSize: CCTV_SNAPSHOT_PAGE_SIZE,
@@ -682,22 +818,17 @@
 
 		const totalPages = getCctvTotalPages();
 
-		console.log('[TRACE_CCTV_PAGE_LOADED]', {
+		traceDebug('[TRACE_CCTV_PAGE_LOADED]', {
 			page: 1,
 			totalPages,
 			normalizedItems: firstItems.length,
 			beforeMergeCount: 0,
 			afterMergeCount: cctvItems.length,
-			totalSnapshots: cctvSnapshotsTotal,
-			panels: getCctvCameraPanels(cctvItems, activeTraceTimestampMs).map((panel) => ({
-				name: panel.name,
-				frames: panel.loadedCount,
-				activeFrame: panel.activeSnapshot?.capturedAt || null
-			}))
+			totalSnapshots: cctvSnapshotsTotal
 		});
 
 		if (totalPages > 1 && ENABLE_CCTV_BACKGROUND_BUFFER) {
-			console.log('[TRACE_CCTV_BUFFER_START]', {
+			traceDebug('[TRACE_CCTV_BUFFER_START]', {
 				totalPages,
 				nextPage: 2,
 				totalSnapshots: cctvSnapshotsTotal,
@@ -712,7 +843,7 @@
 				totalPages
 			});
 		} else if (totalPages > 1) {
-			console.log('[TRACE_CCTV_BUFFER_SKIPPED_FOR_FIRST_PAGE_TEST]', {
+			traceDebug('[TRACE_CCTV_BUFFER_SKIPPED_FOR_FIRST_PAGE_TEST]', {
 				totalPages,
 				loadedPages: cctvSnapshotsLoadedPages,
 				loadedItems: cctvItems.length,
@@ -855,7 +986,7 @@
 			})
 			.filter(Boolean);
 
-		console.log('[TRACE_POINTS_PARSED]', points.length, points.slice(0, 3));
+		traceDebug('[TRACE_POINTS_PARSED]', points.length, points.slice(0, 3));
 
 		return points;
 	}
@@ -864,16 +995,21 @@
 	let timelineEvents = $derived(buildMergedTimelineEvents(tracePoints, cctvItems));
 	let activeTimelineEvent = $derived(timelineEvents[activeIndex] || timelineEvents[0] || null);
 	let activeTimelineTimestampMs = $derived(
-		activeTimelineEvent?.timestampMs ??
+		Number.isFinite(activePlaybackTimestampMs)
+			? activePlaybackTimestampMs
+			: activeTimelineEvent?.timestampMs ??
 			parseDateTimeMs(tracePoints[activeIndex]?.timestampRaw || tracePoints[activeIndex]?.timestamp)
 	);
 	let activeTraceIndex = $derived(
-		Number.isInteger(activeTimelineEvent?.traceIndex) && activeTimelineEvent.traceIndex >= 0
-			? activeTimelineEvent.traceIndex
-			: Math.max(0, findClosestTraceIndexByTime(activeTimelineTimestampMs))
+		Number.isFinite(activeTimelineTimestampMs)
+			? Math.max(0, findTraceIndexAtOrBefore(activeTimelineTimestampMs))
+			: Number.isInteger(activeTimelineEvent?.traceIndex) && activeTimelineEvent.traceIndex >= 0
+				? activeTimelineEvent.traceIndex
+				: Math.max(0, findClosestTraceIndexByTime(activeTimelineTimestampMs))
 	);
 	let activeTimelineLabel = $derived(
-		activeTimelineEvent?.label ||
+		(Number.isFinite(activeTimelineTimestampMs) ? formatDateTime(activeTimelineTimestampMs) : '') ||
+			activeTimelineEvent?.label ||
 			formatDateTime(activeTimelineTimestampMs) ||
 			tracePoints[activeTraceIndex]?.timestamp ||
 			'-'
@@ -910,11 +1046,14 @@
 	let activeRpmEntries = $derived(Object.entries(activePoint.rpm || {}));
 
 	let timelineProgress = $derived(
-		timelineEvents.length > 1
-			? Math.min(100, Math.max(0, (activeIndex / (timelineEvents.length - 1)) * 100))
-			: 0
+		(() => {
+			const { start, end } = getTimelineBounds(timelineEvents);
+			if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+			return Math.min(100, Math.max(0, ((activeTimelineTimestampMs - start) / (end - start)) * 100));
+		})()
 	);
 	let cctvBufferedPercent = $derived(getCctvBufferedPercent(cctvItems));
+	let cctvCameraIndex = $derived(buildCctvCameraIndex(cctvItems));
 
 	let activeTraceTimestampMs = $derived(
 		Number.isFinite(activeTimelineTimestampMs)
@@ -922,7 +1061,7 @@
 			: parseDateTimeMs(activePoint?.timestampRaw || activePoint?.timestamp)
 	);
 	let cctvCameraPanels = $derived(
-		getCctvCameraPanels(cctvItems, activeTraceTimestampMs, playbackRenderTick)
+		getCctvCameraPanels(cctvCameraIndex, activeTraceTimestampMs, playbackRenderTick)
 	);
 	let mainCctvPanel = $derived(
 		cctvCameraPanels.find((panel) => panel.key === selectedCctvPanelKey) ||
@@ -958,6 +1097,7 @@
 		if (!startDateTime || !endDateTime) {
 			error = 'Please choose a start and end time first.';
 			traceData = null;
+			activePlaybackTimestampMs = NaN;
 			cctvItems = [];
 			cctvSnapshotsTotal = 0;
 			cctvSnapshotsBuffering = false;
@@ -972,6 +1112,7 @@
 		if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
 			error = 'End time must be later than start time.';
 			traceData = null;
+			activePlaybackTimestampMs = NaN;
 			cctvItems = [];
 			cctvSnapshotsTotal = 0;
 			cctvSnapshotsBuffering = false;
@@ -983,6 +1124,7 @@
 		if (!$selectedVesselId) {
 			error = 'No vessel has been selected from Fleet View.';
 			traceData = null;
+			activePlaybackTimestampMs = NaN;
 			cctvItems = [];
 			cctvSnapshotsTotal = 0;
 			cctvSnapshotsBuffering = false;
@@ -1002,7 +1144,7 @@
 			const cctvStart = toSnapshotApiDateTime(startDateTime);
 			const cctvEnd = toSnapshotApiDateTime(endDateTime);
 
-			console.log('[TRACE_CCTV_SNAPSHOTS_LOAD_PARAMS]', {
+			traceDebug('[TRACE_CCTV_SNAPSHOTS_LOAD_PARAMS]', {
 				vesselId: $selectedVesselId,
 				startDateTime,
 				endDateTime,
@@ -1040,13 +1182,14 @@
 
 			const parsedTracePoints = getTracePoints(result);
 			const parsedTimelineEvents = buildMergedTimelineEvents(parsedTracePoints, cctvItems);
+			activePlaybackTimestampMs = parsedTimelineEvents[0]?.timestampMs ?? NaN;
 			const firstCctvEvent = parsedTimelineEvents.find((event) => event.hasCctv);
 			const firstTraceEvent = parsedTimelineEvents.find((event) => event.hasTrace);
 
-			console.log('[VESSEL_TRACE_RAW]', result);
-			console.log('[VESSEL_TRACE_POINTS_COUNT]', parsedTracePoints.length);
-			console.log('[VESSEL_TRACE_CCTV_SNAPSHOTS_COUNT]', cctvItems.length);
-			console.log('[TRACE_TIMELINE_EVENTS_SUMMARY]', {
+			traceDebug('[VESSEL_TRACE_RAW]', result);
+			traceDebug('[VESSEL_TRACE_POINTS_COUNT]', parsedTracePoints.length);
+			traceDebug('[VESSEL_TRACE_CCTV_SNAPSHOTS_COUNT]', cctvItems.length);
+			traceDebug('[TRACE_TIMELINE_EVENTS_SUMMARY]', {
 				totalTimelineEvents: parsedTimelineEvents.length,
 				totalTraceEvents: parsedTimelineEvents.filter((event) => event.hasTrace).length,
 				totalCctvEvents: parsedTimelineEvents.filter((event) => event.hasCctv).length,
@@ -1083,6 +1226,7 @@
 			console.error('[VESSEL_TRACE_ERROR]', err);
 			error = err?.message || 'Failed to load vessel trace.';
 			traceData = null;
+			activePlaybackTimestampMs = NaN;
 			cctvItems = [];
 			cctvSnapshotsTotal = 0;
 		} finally {
@@ -1095,8 +1239,10 @@
 
 		clearInterval(playbackInterval);
 		playbackInterval = null;
+		playbackClockStartedAtRealMs = 0;
+		playbackClockStartedAtTraceMs = NaN;
 
-		console.log('[TRACE_PLAY_INTERVAL_CLEARED]', {
+		traceDebug('[TRACE_PLAY_INTERVAL_CLEARED]', {
 			reason,
 			activeIndex,
 			totalTimelineEvents: timelineEvents.length,
@@ -1107,10 +1253,12 @@
 	function runPlaybackTick(source = 'interval') {
 		const currentIndex = activeIndex;
 		const totalTimelineEvents = timelineEvents.length;
+		const { start, end } = getTimelineBounds(timelineEvents);
 
-		console.log('[TRACE_PLAY_TICK_BEGIN]', {
+		traceDebug('[TRACE_PLAY_TICK_BEGIN]', {
 			source,
 			activeIndex: currentIndex,
+			activePlaybackTimestampMs,
 			totalTimelineEvents,
 			totalTracePoints: tracePoints.length,
 			isPlaying,
@@ -1123,40 +1271,56 @@
 			return;
 		}
 
-		if (currentIndex >= totalTimelineEvents - 1) {
-			console.log('[TRACE_PLAY_STOP_END]', {
-				activeIndex: currentIndex,
+		if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+			clearPlaybackInterval('invalid-timeline-bounds');
+			isPlaying = false;
+			return;
+		}
+
+		const baseTraceTime = Number.isFinite(playbackClockStartedAtTraceMs)
+			? playbackClockStartedAtTraceMs
+			: clampPlaybackTimestamp(activePlaybackTimestampMs);
+		const elapsedRealMs =
+			source === 'start' ? 0 : Math.max(0, Date.now() - playbackClockStartedAtRealMs);
+		const nextTime = Math.min(end, baseTraceTime + elapsedRealMs * TRACE_MS_PER_REAL_MS);
+		const nextIndex = findTimelineIndexAtOrBefore(timelineEvents, nextTime);
+
+		if (nextTime >= end) {
+			setPlaybackTimestamp(end);
+
+			traceDebug('[TRACE_PLAY_STOP_END]', {
+				activeIndex,
 				totalTimelineEvents,
+				playbackTime: formatDateTime(end),
 				source
 			});
+
 			clearPlaybackInterval('end');
 			isPlaying = false;
 			return;
 		}
 
-		const nextIndex = currentIndex + 1;
 		const nextEvent = timelineEvents[nextIndex];
-		const nextTime = nextEvent?.timestampMs;
 		const nextTraceIndex =
 			Number.isInteger(nextEvent?.traceIndex) && nextEvent.traceIndex >= 0
 				? nextEvent.traceIndex
-				: findClosestTraceIndexByTime(nextTime);
+				: findTraceIndexAtOrBefore(nextTime);
 		const nextPoint = tracePoints[nextTraceIndex] || null;
 
 		flushSync(() => {
-			activeIndex = nextIndex;
-			playbackRenderTick += 1;
+			setPlaybackTimestamp(nextTime);
 		});
 
 		try {
-			const nextPanels = getCctvCameraPanels(cctvItems, nextTime, playbackRenderTick);
+			const nextPanels = getCctvCameraPanels(cctvCameraIndex, nextTime, playbackRenderTick);
 
-			console.log('[TRACE_PLAY_TICK]', {
+			traceDebug('[TRACE_PLAY_TICK]', {
 				source,
 				fromIndex: currentIndex,
 				toIndex: nextIndex,
 				totalTimelineEvents,
 				totalTracePoints: tracePoints.length,
+				playbackTime: formatDateTime(nextTime),
 				eventType: nextEvent?.type,
 				eventSource: nextEvent?.sourceLabel,
 				eventTime: nextEvent?.label,
@@ -1174,7 +1338,7 @@
 				}))
 			});
 		} catch (err) {
-			console.error('[TRACE_PLAY_TICK_LOG_ERROR]', {
+			traceDebug('[TRACE_PLAY_TICK_LOG_ERROR]', {
 				source,
 				fromIndex: currentIndex,
 				toIndex: nextIndex,
@@ -1185,9 +1349,25 @@
 
 	function startPlayback() {
 		clearPlaybackInterval('restart');
+		const { start, end } = getTimelineBounds(timelineEvents);
 
-		console.log('[TRACE_PLAY_START]', {
+		if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+			isPlaying = false;
+			return;
+		}
+
+		const currentTimestamp = Number.isFinite(activePlaybackTimestampMs)
+			? clampPlaybackTimestamp(activePlaybackTimestampMs)
+			: start;
+		const startTimestamp = currentTimestamp >= end ? start : currentTimestamp;
+		setPlaybackTimestamp(startTimestamp, { bumpRender: false });
+		playbackClockStartedAtTraceMs = startTimestamp;
+		playbackClockStartedAtRealMs = Date.now();
+
+		traceDebug('[TRACE_PLAY_START]', {
 			activeIndex,
+			playbackStartTime: formatDateTime(startTimestamp),
+			speed: '1 real second = 1 trace minute',
 			totalTimelineEvents: timelineEvents.length,
 			totalTracePoints: tracePoints.length,
 			cctvItems: cctvItems.length
@@ -1200,13 +1380,14 @@
 
 		playbackInterval = setInterval(() => {
 			runPlaybackTick('interval');
-		}, 900);
+		}, PLAYBACK_TICK_INTERVAL_MS);
 
-		console.log('[TRACE_PLAY_INTERVAL_CREATED]', {
+		traceDebug('[TRACE_PLAY_INTERVAL_CREATED]', {
 			activeIndex,
 			totalTimelineEvents: timelineEvents.length,
 			totalTracePoints: tracePoints.length,
-			delayMs: 900
+			delayMs: PLAYBACK_TICK_INTERVAL_MS,
+			traceMsPerRealMs: TRACE_MS_PER_REAL_MS
 		});
 	}
 
@@ -1241,7 +1422,7 @@
 
 		const nextPlaying = !isPlaying;
 
-		console.log('[TRACE_PLAY_TOGGLE]', {
+		traceDebug('[TRACE_PLAY_TOGGLE]', {
 			from: isPlaying,
 			to: nextPlaying,
 			activeIndex,
@@ -1276,9 +1457,16 @@
 		const clientX = event.clientX ?? event.touches?.[0]?.clientX ?? 0;
 		const x = clientX - rect.left;
 		const ratio = Math.min(1, Math.max(0, x / rect.width));
+		const { start, end } = getTimelineBounds(timelineEvents);
 
-		activeIndex = Math.round(ratio * (timelineEvents.length - 1));
-		playbackRenderTick += 1;
+		if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+			activeIndex = Math.round(ratio * (timelineEvents.length - 1));
+			activePlaybackTimestampMs = timelineEvents[activeIndex]?.timestampMs ?? NaN;
+			playbackRenderTick += 1;
+			return;
+		}
+
+		setPlaybackTimestamp(start + (end - start) * ratio);
 	}
 
 	function moveTimeline(event) {
@@ -1289,7 +1477,7 @@
 		if (!timelineEvents.length) return;
 
 		isDraggingTimeline = true;
-		isPlaying = false;
+		stopPlayback('timeline-drag');
 
 		event.currentTarget.setPointerCapture?.(event.pointerId);
 		updateTimelineFromPointer(event);
@@ -1311,8 +1499,8 @@
 	function moveStep(direction) {
 		if (!timelineEvents.length) return;
 
-		activeIndex = Math.min(timelineEvents.length - 1, Math.max(0, activeIndex + direction));
-		playbackRenderTick += 1;
+		const nextIndex = Math.min(timelineEvents.length - 1, Math.max(0, activeIndex + direction));
+		setPlaybackTimestamp(timelineEvents[nextIndex]?.timestampMs ?? activePlaybackTimestampMs);
 	}
 
 	onDestroy(() => {
@@ -1328,12 +1516,23 @@
 	$effect(() => {
 		if (!timelineEvents.length) {
 			if (activeIndex !== 0) activeIndex = 0;
+			if (Number.isFinite(activePlaybackTimestampMs)) activePlaybackTimestampMs = NaN;
 			return;
 		}
 
 		if (activeIndex > timelineEvents.length - 1) {
 			activeIndex = timelineEvents.length - 1;
 			playbackRenderTick += 1;
+		}
+
+		const nextTimestamp = clampPlaybackTimestamp(activePlaybackTimestampMs);
+		if (
+			Number.isFinite(nextTimestamp) &&
+			(!Number.isFinite(activePlaybackTimestampMs) ||
+				Math.abs(activePlaybackTimestampMs - nextTimestamp) > 1)
+		) {
+			activePlaybackTimestampMs = nextTimestamp;
+			activeIndex = findTimelineIndexAtOrBefore(timelineEvents, nextTimestamp);
 		}
 	});
 
@@ -1431,7 +1630,6 @@
 								>
 									<div class="cctv-camera-frame">
 										{#if activeFrame?.url}
-											{#key activeFrame.key}
 											<CctvSnapshotImage
 												class="cctv-camera-image"
 												src={activeFrame.url}
@@ -1441,7 +1639,6 @@
 												alt={`${mainCctvPanel.name} snapshot`}
 												loading="eager"
 											/>
-											{/key}
 										{/if}
 
 										{#if framePending}
@@ -1479,7 +1676,6 @@
 										>
 											<div class="cctv-camera-frame">
 												{#if activeFrame?.url}
-													{#key activeFrame.key}
 													<CctvSnapshotImage
 														class="cctv-camera-image"
 														src={activeFrame.url}
@@ -1489,7 +1685,6 @@
 														alt={`${panel.name} snapshot`}
 														loading="eager"
 													/>
-													{/key}
 												{/if}
 
 												{#if framePending}
