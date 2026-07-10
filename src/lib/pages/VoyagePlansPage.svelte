@@ -1171,45 +1171,6 @@
 				opacity: 0.95
 			});
 
-			marker.bindPopup(
-				`
-					<div class="asset-popup route-asset-popup">
-						<div class="map-popup-hero">
-							<div class="map-popup-icon">
-								<img src="${getAssetIconUrl(asset)}" alt="${escapeHtml(getAssetTypeLabel(asset))} icon" />
-							</div>
-							<div class="map-popup-heading">
-								<span>Fleet Asset</span>
-								<strong>${escapeHtml(asset.assetName)}</strong>
-							</div>
-							<em>${escapeHtml(getAssetTypeLabel(asset))}</em>
-						</div>
-
-						<div class="map-popup-body">
-							<div class="popup-info-row">
-								<span>Asset ID</span>
-								<strong>${escapeHtml(asset.id ?? '-')}</strong>
-							</div>
-							<div class="popup-info-row coordinate-row">
-								<span>Latitude</span>
-								<div class="popup-coordinate-value">${createCopyableCoordinateHtml(asset.latitude, 'asset latitude')}</div>
-							</div>
-							<div class="popup-info-row coordinate-row">
-								<span>Longitude</span>
-								<div class="popup-coordinate-value">${createCopyableCoordinateHtml(asset.longitude, 'asset longitude')}</div>
-							</div>
-						</div>
-
-						<div class="map-popup-note">
-							Click marker to add this asset as a route point.
-						</div>
-					</div>
-				`,
-				{
-					className: 'voyage-plan-map-popup'
-				}
-			);
-
 			marker.on('click', (event) => {
 				if (event?.originalEvent) {
 					L.DomEvent.stopPropagation(event.originalEvent);

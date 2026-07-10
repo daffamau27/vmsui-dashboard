@@ -217,17 +217,19 @@ function resetTraceFitIfNeeded() {
   function createFinishIcon() {
     return L.divIcon({
       className: "trace-finish-icon",
-      html: `<div class="trace-finish-marker">F</div>`,
+      html: `<div class="trace-finish-marker">E</div>`,
       iconSize: [24, 24],
       iconAnchor: [12, 12],
       popupAnchor: [0, -12]
     });
   }
 
-  function createTracePointIcon() {
+  function createTracePointIcon(speedValue = 0) {
+    const color = getTraceSpeedColor(speedValue);
+
     return L.divIcon({
       className: "trace-point-icon",
-      html: `<div class="trace-point-marker"></div>`,
+      html: `<div class="trace-point-marker" style="--trace-point-color: ${color};"></div>`,
       iconSize: [10, 10],
       iconAnchor: [5, 5]
     });
@@ -338,7 +340,7 @@ function resetTraceFitIfNeeded() {
     latLngs.forEach((latLng, index) => {
         if (index !== 0 && index !== latLngs.length - 1 && index % pointStep === 0) {
         L.marker(latLng, {
-            icon: createTracePointIcon(),
+            icon: createTracePointIcon(validPoints[index]?.speed),
             interactive: false,
             zIndexOffset: 400
         }).addTo(traceLayerGroup);
@@ -751,7 +753,7 @@ $effect(() => {
     width: 7px;
     height: 7px;
     border-radius: 999px;
-    background: #2563eb;
+    background: var(--trace-point-color, #9ca3af);
     border: 2px solid #ffffff;
     box-shadow: 0 2px 5px rgba(15, 23, 42, 0.22);
   }
