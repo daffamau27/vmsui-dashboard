@@ -26,7 +26,6 @@
 	let loading = false;
 	let active = false;
 	let saving = false;
-	let importing = false;
 	let assigning = false;
 	let errorMessage = '';
 	let successMessage = '';
@@ -91,11 +90,11 @@
 	let useButtonVesselTransfer = false;
 	let useVerticalVesselTransfer = false;
 	let importForm = {
-		voyageName: '',
-		isActive: true,
 		fileName: '',
-		fileBase64: '',
-		previewRows: []
+		previewRows: [],
+		importedCount: 0,
+		message: '',
+		error: ''
 	};
 
 	let assignForm = {
@@ -117,6 +116,14 @@
 	let routeMapScaleUnit = 'metric';
 	let routeMapScaleLabel = 'Bar = -';
 	let routeMapScaleWidth = 80;
+	let showPlanMapView = false;
+	let planViewMapContainer;
+	let planViewMap;
+	let planViewRouteLine;
+	let planViewRouteLayer;
+	let planViewAssetLayer;
+	let planViewZoneLayer;
+	let planViewResizeObserver = null;
 
 	let assets = [];
 	let zones = [];
@@ -793,6 +800,149 @@
 		routeLine = null;
 	}
 
+	function getPlanValidRoutePoints(plan = selectedPlan) {
+		return (plan?.planData || [])
+			.map((point, index) => ({
+				...point,
+				index
+			}))
+			.filter(isValidCoordinate)
+			.map((point) => ({
+				...point,
+				latitude: Number(point.latitude),
+				longitude: Number(point.longitude)
+			}));
+	}
+
+	function openPlanMapView(plan = selectedPlan) {
+		if (!plan) return;
+		selectedPlan = plan;
+		selectedPlanId = plan.id;
+		showPlanMapView = true;
+
+		tick().then(initializePlanViewMap);
+	}
+
+	function closePlanMapView() {
+		showPlanMapView = false;
+		destroyPlanViewMap();
+	}
+
+	async function initializePlanViewMap() {
+		if (!browser || !showPlanMapView || !planViewMapContainer || planViewMap) return;
+
+		const leaflet = await ensureLeaflet();
+		if (!leaflet || !planViewMapContainer || !showPlanMapView) return;
+
+		planViewMap = leaflet.map(planViewMapContainer, {
+			zoomControl: false,
+			preferCanvas: true
+		});
+
+		leaflet.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(planViewMap);
+		planViewZoneLayer = addMapZonesToLeafletMap(leaflet, planViewMap, zones, {
+			paneName: 'voyagePlanViewZonePane',
+			zIndex: 355
+		});
+		planViewAssetLayer = leaflet.layerGroup().addTo(planViewMap);
+		planViewRouteLayer = leaflet.layerGroup().addTo(planViewMap);
+		planViewRouteLine = leaflet
+			.polyline([], {
+				color: '#2f65e8',
+				weight: 4,
+				opacity: 0.95
+			})
+			.addTo(planViewMap);
+
+		renderPlanViewMap();
+		setupPlanViewResizeObserver();
+
+		[0, 80, 180, 360].forEach((delay) => {
+			setTimeout(() => {
+				if (!planViewMap) return;
+				planViewMap.invalidateSize({ pan: false });
+				renderPlanViewMap(true);
+			}, delay);
+		});
+	}
+
+	function setupPlanViewResizeObserver() {
+		if (!browser || !planViewMapContainer || !planViewMap || typeof ResizeObserver === 'undefined') return;
+
+		planViewResizeObserver?.disconnect?.();
+		planViewResizeObserver = new ResizeObserver(() => {
+			planViewMap?.invalidateSize?.({ pan: false });
+		});
+		planViewResizeObserver.observe(planViewMapContainer);
+	}
+
+	function renderPlanViewMap(shouldFit = true) {
+		if (!L || !planViewMap || !planViewRouteLayer || !planViewRouteLine) return;
+
+		planViewRouteLayer.clearLayers();
+		planViewAssetLayer?.clearLayers();
+
+		assets.forEach((asset) => {
+			const marker = L.marker([asset.latitude, asset.longitude], {
+				icon: createAssetMarkerIcon(asset),
+				interactive: false
+			});
+			marker.addTo(planViewAssetLayer);
+		});
+
+		const validPoints = getPlanValidRoutePoints(selectedPlan);
+		const latLngs = validPoints.map((point) => [point.latitude, point.longitude]);
+		planViewRouteLine.setLatLngs(latLngs);
+
+		validPoints.forEach((point, index) => {
+			const isFirst = index === 0;
+			const isLast = index === validPoints.length - 1;
+			const marker = L.marker([point.latitude, point.longitude], {
+				icon: L.divIcon({
+					className: '',
+					html: `
+						<div class="route-marker plan-view ${isFirst ? 'start' : ''} ${isLast ? 'end' : ''}">
+							${isFirst ? 'S' : isLast ? 'E' : point.order || index + 1}
+						</div>
+					`,
+					iconSize: [30, 30],
+					iconAnchor: [15, 15]
+				})
+			});
+
+			marker.addTo(planViewRouteLayer);
+		});
+
+		if (shouldFit && validPoints.length >= 2) {
+			planViewMap.fitBounds(L.latLngBounds(latLngs), {
+				padding: [38, 38],
+				maxZoom: 13
+			});
+		} else if (shouldFit && validPoints.length === 1) {
+			planViewMap.setView(latLngs[0], 12);
+		} else if (!planViewMap._loaded) {
+			planViewMap.setView(INDONESIA_CENTER, INDONESIA_ZOOM);
+		} else if (shouldFit) {
+			planViewMap.setView(INDONESIA_CENTER, INDONESIA_ZOOM);
+		}
+	}
+
+	function destroyPlanViewMap() {
+		planViewResizeObserver?.disconnect?.();
+		planViewResizeObserver = null;
+
+		if (planViewMap) {
+			planViewMap.off();
+			planViewMap.remove();
+		}
+
+		planViewMap = null;
+		planViewRouteLine = null;
+		planViewRouteLayer = null;
+		planViewAssetLayer = null;
+		planViewZoneLayer = null;
+	}
+
 	function openRouteMapAfterRender() {
 		tick().then(async () => {
 			if (!showForm) return;
@@ -1050,6 +1200,16 @@
 		return { order, latitude: '', longitude: '', speed_kn: '' };
 	}
 
+	function resetImportForm() {
+		importForm = {
+			fileName: '',
+			previewRows: [],
+			importedCount: 0,
+			message: '',
+			error: ''
+		};
+	}
+
 	function clearMessages() {
 		errorMessage = '';
 		successMessage = '';
@@ -1139,6 +1299,7 @@
 
 			renderZoneLayer();
 			renderAssetMarkers();
+			refreshPlanViewMapOverlays();
 		} catch (error) {
 			console.error('[VOYAGE_PLANS][ASSETS][ERROR]', error);
 			assets = [];
@@ -1146,9 +1307,27 @@
 			assetsError = error?.message || 'Failed to load fleet assets.';
 			renderZoneLayer();
 			renderAssetMarkers();
+			refreshPlanViewMapOverlays();
 		} finally {
 			assetsLoading = false;
 		}
+	}
+
+	function refreshPlanViewMapOverlays() {
+		if (!L || !planViewMap) return;
+
+		if (planViewZoneLayer) {
+			planViewZoneLayer.clearLayers?.();
+			planViewZoneLayer.remove?.();
+			planViewZoneLayer = null;
+		}
+
+		planViewZoneLayer = addMapZonesToLeafletMap(L, planViewMap, zones, {
+			paneName: 'voyagePlanViewZonePane',
+			zIndex: 355
+		});
+
+		renderPlanViewMap(false);
 	}
 
 	function renderAssetMarkers() {
@@ -1235,12 +1414,13 @@
 			}
 
 			destroyRouteMap();
+			destroyPlanViewMap();
 			cleanupVesselTransferMode();
 		};
 	});
 
 	$: {
-		if (!active && !showForm) {
+		if (!active && !showForm && !showPlanMapView) {
 			destroyRouteMap();
 		} else if (showForm) {
 			openRouteMapAfterRender();
@@ -1595,6 +1775,7 @@
 	function startCreate() {
 		clearMessages();
 		form = getEmptyForm();
+		resetImportForm();
 		selectedNotAllowedVesselId = '';
 		selectedAllowedVesselId = '';
 		handleVesselDragEnd();
@@ -1627,6 +1808,7 @@
 		};
 
 		if (!form.planData.length) form.planData = [createPoint(1)];
+		resetImportForm();
 		selectedNotAllowedVesselId = '';
 		selectedAllowedVesselId = '';
 		handleVesselDragEnd();
@@ -1653,6 +1835,7 @@
 		editMode = false;
 		editAllowedOnly = false;
 		form = getEmptyForm();
+		resetImportForm();
 		selectedNotAllowedVesselId = '';
 		selectedAllowedVesselId = '';
 		handleVesselDragEnd();
@@ -1939,26 +2122,70 @@
 
 	async function handleExcelUpload(event) {
 		clearMessages();
+		if (editAllowedOnly) return;
+
 		const file = event.target.files?.[0];
 		if (!file) return;
 
-		importForm.fileName = file.name;
+		importForm = {
+			...importForm,
+			fileName: file.name,
+			previewRows: [],
+			importedCount: 0,
+			message: '',
+			error: ''
+		};
+
 		try {
 			const arrayBuffer = await file.arrayBuffer();
 			const workbook = XLSX.read(arrayBuffer, { type: 'array' });
 			const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
 			const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
 			validateExcelRows(rows);
-			importForm.previewRows = rows.slice(0, 6).map(normalizeExcelRow);
-			importForm.fileBase64 = arrayBufferToBase64(arrayBuffer);
-			if (!importForm.voyageName.trim()) {
-				importForm.voyageName = file.name.replace(/\.xlsx?$/i, '').replace(/[_-]/g, ' ');
+
+			const importedPoints = rows
+				.map(normalizeExcelRow)
+				.sort((a, b) => a.order - b.order)
+				.map((point, index) => ({
+					order: index + 1,
+					latitude: point.latitude,
+					longitude: point.longitude,
+					speed_kn: point.speed_kn
+				}));
+
+			if (!importedPoints.length) throw new Error('No route points found in the Excel file.');
+
+			pushUndoState('Import Excel route points');
+			form.planData = importedPoints;
+			selectedPointIndex = 0;
+
+			if (!form.voyageName.trim()) {
+				form.voyageName = file.name.replace(/\.xlsx?$/i, '').replace(/[_-]+/g, ' ').trim();
 			}
+
+			importForm = {
+				...importForm,
+				previewRows: importedPoints.slice(0, 6),
+				importedCount: importedPoints.length,
+				message: `${importedPoints.length} route points imported from Excel.`,
+				error: ''
+			};
+
+			refreshRouteMap();
+			setTimeout(() => {
+				fitRouteMap();
+			}, 80);
 		} catch (error) {
-			importForm.fileBase64 = '';
-			importForm.previewRows = [];
-			errorMessage = error.message;
+			importForm = {
+				...importForm,
+				previewRows: [],
+				importedCount: 0,
+				message: '',
+				error: error.message
+			};
 		}
+
+		event.target.value = '';
 	}
 
 	function validateExcelRows(rows) {
@@ -1991,55 +2218,6 @@
 					? ''
 					: Number(row.speed_kn)
 		};
-	}
-
-	function arrayBufferToBase64(buffer) {
-		let binary = '';
-		const bytes = new Uint8Array(buffer);
-		const chunkSize = 8192;
-		for (let i = 0; i < bytes.length; i += chunkSize) {
-			binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-		}
-		return btoa(binary);
-	}
-
-	async function importExcel() {
-		clearMessages();
-		if (!importForm.voyageName.trim()) {
-			errorMessage = 'Voyage name for import is required.';
-			return;
-		}
-		if (!importForm.fileBase64) {
-			errorMessage = 'Select an Excel file first.';
-			return;
-		}
-
-		importing = true;
-		try {
-			const result = await apiFetch('/voyage-plans/import-excel', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					voyageName: importForm.voyageName.trim(),
-					fileBase64: importForm.fileBase64,
-					isActive: !!importForm.isActive
-				})
-			});
-			successMessage = result?.message || 'Voyage plan imported successfully.';
-			importForm = {
-				voyageName: '',
-				isActive: true,
-				fileName: '',
-				fileBase64: '',
-				previewRows: []
-			};
-			await loadPlans(1);
-			await openPlan(result?.data?.id, false);
-		} catch (error) {
-			errorMessage = error.message;
-		} finally {
-			importing = false;
-		}
 	}
 
 	async function assignPlan() {
@@ -2103,9 +2281,6 @@
 
 		<div class="header-actions">
 			{#if canManage}
-				<button class="ghost-button" type="button" on:click={downloadTemplate}
-					>Download Template</button
-				>
 				<button class="primary-button" type="button" on:click={startCreate}>Create Plan</button>
 			{/if}
 		</div>
@@ -2126,7 +2301,7 @@
 			<p>This user does not have the <b>access_voyage_plan_fleet</b> permission.</p>
 		</div>
 	{:else}
-		<section class="voyage-grid">
+		<section class:has-assign-panel={canAssign} class="voyage-grid">
 			<section class="panel list-panel">
 				<div class="panel-toolbar">
 					<div>
@@ -2299,13 +2474,18 @@
 						<span>{selectedPlan ? selectedPlan.voyageName : 'No selected plan'}</span>
 					</div>
 					{#if selectedPlan}
-						<span
-							class:badge-active={selectedPlan.isActive}
-							class:badge-muted={!selectedPlan.isActive}
-							class="badge large"
-						>
-							{selectedPlan.isActive ? 'Active' : 'Inactive'}
-						</span>
+						<div class="detail-toolbar-actions">
+							<button class="toolbar-button map-view-button" type="button" on:click={() => openPlanMapView(selectedPlan)}>
+								View on map
+							</button>
+							<span
+								class:badge-active={selectedPlan.isActive}
+								class:badge-muted={!selectedPlan.isActive}
+								class="badge large"
+							>
+								{selectedPlan.isActive ? 'Active' : 'Inactive'}
+							</span>
+						</div>
 					{/if}
 				</div>
 
@@ -2376,80 +2556,8 @@
 					<div class="empty-state">Select a voyage plan to view details.</div>
 				{/if}
 			</section>
-		</section>
-
-		{#if canManage || canAssign}
-			<section class="bottom-grid">
-				{#if canManage}
-					<section class="panel import-panel">
-						<div class="panel-toolbar">
-							<div>
-								<h2>Import Excel</h2>
-								<span>Format: order, latitude, longitude, speed_kn</span>
-							</div>
-						</div>
-
-						<div class="form-grid compact">
-							<label>
-								<span>Voyage Name</span>
-								<input bind:value={importForm.voyageName} placeholder="Imported Plan Name" />
-							</label>
-							<label class="switch-line">
-								<input type="checkbox" bind:checked={importForm.isActive} />
-								<span>Set as active</span>
-							</label>
-							<label class="file-box">
-								<input type="file" accept=".xlsx,.xls" on:change={handleExcelUpload} />
-								<span>{importForm.fileName || 'Choose Excel File'}</span>
-							</label>
-							<button
-								class="primary-button"
-								type="button"
-								on:click={importExcel}
-								disabled={importing || !importForm.fileBase64}
-							>
-								{importing ? 'Importing...' : 'Import Excel'}
-							</button>
-						</div>
-
-						{#if importForm.previewRows.length}
-							<div class="preview-box">
-								<b>Preview</b>
-								<table>
-									<thead>
-										<tr><th>order</th><th>latitude</th><th>longitude</th><th>speed_kn</th></tr>
-									</thead>
-									<tbody>
-										{#each importForm.previewRows as row}
-											<tr
-												><td>{row.order}</td
-												><td
-													><CopyableCoordinate
-														value={row.latitude}
-														display={row.latitude}
-														label="latitude"
-														compact
-													/></td
-												><td
-													><CopyableCoordinate
-														value={row.longitude}
-														display={row.longitude}
-														label="longitude"
-														compact
-													/></td
-												><td>{row.speed_kn}</td
-												></tr
-											>
-										{/each}
-									</tbody>
-								</table>
-							</div>
-						{/if}
-					</section>
-				{/if}
-
-				{#if canAssign}
-					<section class="panel assign-panel">
+			{#if canAssign}
+				<section class="panel assign-panel">
 						<div class="panel-toolbar assign-toolbar">
 							<div>
 								<div class="panel-kicker">Assignment</div>
@@ -2520,10 +2628,9 @@
 								</div>
 							</div>
 						</div>
-					</section>
-				{/if}
-			</section>
-		{/if}
+				</section>
+			{/if}
+		</section>
 
 		<section class="panel active-assignments-panel">
 			<div class="panel-toolbar assignments-toolbar">
@@ -2747,7 +2854,35 @@
 						</div>
 					{/if}
 
-					<aside class="route-point-panel">
+					<aside class:has-route-import={!editAllowedOnly} class="route-point-panel">
+						{#if !editAllowedOnly}
+							<div class="route-import-card">
+								<div class="route-import-copy">
+									<strong>Import route from Excel</strong>
+									<span>Columns: order, latitude, longitude, speed_kn.</span>
+								</div>
+
+								<div class="route-import-actions">
+									<label class="route-import-file">
+										<input type="file" accept=".xlsx,.xls" on:change={handleExcelUpload} />
+										<span>{importForm.fileName || 'Choose Excel'}</span>
+									</label>
+
+									<button class="toolbar-button" type="button" on:click={downloadTemplate}>
+										Template
+									</button>
+								</div>
+
+								{#if importForm.message}
+									<div class="route-import-message success">{importForm.message}</div>
+								{/if}
+
+								{#if importForm.error}
+									<div class="route-import-message error">{importForm.error}</div>
+								{/if}
+							</div>
+						{/if}
+
 						<div class="point-hint">
 							{editAllowedOnly
 								? 'Route points are locked while this plan is assigned to an active vessel.'
@@ -3212,6 +3347,128 @@
 	</div>
 {/if}
 
+{#if showPlanMapView && selectedPlan}
+	<div class="modal-backdrop plan-view-backdrop" on:click={closePlanMapView}>
+		<section class="plan-view-window" on:click|stopPropagation>
+			<div class="modal-header plan-view-header">
+				<div>
+					<div class="page-kicker">Voyage Plan Map</div>
+					<h2>{selectedPlan.voyageName}</h2>
+					<p>
+						{(selectedPlan.planData || []).length} route points •
+						{(selectedPlan.allowedVesselIds || []).length} allowed vessels
+					</p>
+				</div>
+				<button class="icon-button" type="button" on:click={closePlanMapView}>×</button>
+			</div>
+
+			<div class="plan-view-body">
+				<aside class="plan-view-info">
+					<div class="plan-view-summary">
+						<div>
+							<span>Plan ID</span>
+							<strong>#{selectedPlan.id}</strong>
+						</div>
+						<div>
+							<span>Status</span>
+							<strong>{selectedPlan.isActive ? 'Active' : 'Inactive'}</strong>
+						</div>
+						<div>
+							<span>Route Points</span>
+							<strong>{(selectedPlan.planData || []).length}</strong>
+						</div>
+					</div>
+
+					<section class="plan-view-card">
+						<div class="plan-view-card-head">
+							<h3>Allowed Vessels</h3>
+							<span>{(selectedPlan.allowedVesselIds || []).length} vessels</span>
+						</div>
+						<div class="plan-view-vessel-list">
+							{#each selectedPlan.allowedVesselIds || [] as vesselId}
+								<span>{vesselLabel(vesselId)}</span>
+							{:else}
+								<em>No allowed vessels yet.</em>
+							{/each}
+						</div>
+					</section>
+
+					<section class="plan-view-card route-points-card">
+						<div class="plan-view-card-head">
+							<h3>Route Points</h3>
+							<span>Latitude / Longitude</span>
+						</div>
+						<div class="plan-view-table-wrap">
+							<table>
+								<thead>
+									<tr>
+										<th>Order</th>
+										<th>Latitude</th>
+										<th>Longitude</th>
+										<th>Speed</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each selectedPlan.planData || [] as point}
+										<tr>
+											<td>{point.order}</td>
+											<td>
+												<CopyableCoordinate
+													value={point.latitude}
+													display={point.latitude}
+													label="latitude"
+													compact
+												/>
+											</td>
+											<td>
+												<CopyableCoordinate
+													value={point.longitude}
+													display={point.longitude}
+													label="longitude"
+													compact
+												/>
+											</td>
+											<td>{point.speed_kn ?? '-'}</td>
+										</tr>
+									{:else}
+										<tr>
+											<td colspan="4" class="empty-cell">No route points yet.</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					</section>
+				</aside>
+
+				<section class="plan-view-map-card">
+					<div class="plan-view-map-toolbar">
+						<div>
+							<h3>Route Preview</h3>
+							<span>Plan path, route points, fleet assets, and zones.</span>
+						</div>
+						<button type="button" class="toolbar-button" on:click={() => renderPlanViewMap(true)}>
+							Fit map
+						</button>
+					</div>
+					<div class="plan-view-map" bind:this={planViewMapContainer}></div>
+					<div class="plan-view-map-legend">
+						<span><i class="legend-route-line"></i> Route line</span>
+						<span><i class="legend-route-dot start"></i> Start</span>
+						<span><i class="legend-route-dot selected"></i> End</span>
+						{#if assets.length}
+							<span>Assets: {assets.length}</span>
+						{/if}
+						{#if zones.length}
+							<span>Zones: {zones.length}</span>
+						{/if}
+					</div>
+				</section>
+			</div>
+		</section>
+	</div>
+{/if}
+
 <style>
 	.voyage-page {
 		width: 100%;
@@ -3643,16 +3900,33 @@
 	.voyage-grid {
 		display: grid;
 		grid-template-columns: minmax(520px, 1.08fr) minmax(410px, 0.92fr);
+		grid-template-areas: 'list detail';
 		gap: 14px;
-		align-items: start;
+		align-items: stretch;
 		margin-top: 14px;
 	}
 
-	.bottom-grid {
+	.voyage-grid.has-assign-panel {
+		grid-template-areas:
+			'list detail'
+			'assign detail';
+		grid-template-rows: auto minmax(0, 1fr);
+		background: #0a0e1a;
+	}
+
+	.list-panel {
+		grid-area: list;
+	}
+
+	.detail-panel {
+		grid-area: detail;
 		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 14px;
-		margin-top: 14px;
+		grid-template-rows: auto auto auto minmax(0, 1fr);
+		min-height: 100%;
+	}
+
+	.assign-panel {
+		grid-area: assign;
 	}
 
 	.active-assignments-panel {
@@ -3942,6 +4216,27 @@
 		flex-wrap: wrap;
 	}
 
+	.detail-toolbar-actions {
+		display: inline-flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
+	.map-view-button {
+		border: 1px solid rgba(96, 165, 250, 0.32);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.14);
+		color: #bfdbfe;
+	}
+
+	.map-view-button:hover:not(:disabled) {
+		border-color: rgba(147, 197, 253, 0.58);
+		background: rgba(37, 99, 235, 0.26);
+		color: #ffffff;
+	}
+
 	.map-mini-meta span {
 		display: inline-flex;
 		align-items: center;
@@ -4081,7 +4376,12 @@
 	}
 
 	.detail-panel .route-table-wrap {
-		max-height: 38vh;
+		min-height: 0;
+		max-height: none;
+	}
+
+	.detail-panel .route-table-wrap table {
+		min-width: 100%;
 	}
 
 	table {
@@ -4773,6 +5073,215 @@
 			transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
 	}
 
+	.plan-view-backdrop {
+		padding: 18px;
+		align-items: center;
+	}
+
+	.plan-view-window {
+		width: min(1560px, 100%);
+		height: min(920px, calc(100vh - 36px));
+		display: grid;
+		grid-template-rows: auto minmax(0, 1fr);
+		overflow: hidden;
+		border: 1px solid rgba(148, 163, 184, 0.28);
+		border-radius: 22px;
+		background: #0a0e1a !important;
+		color: var(--text-primary);
+		box-shadow: 0 28px 80px rgba(2, 6, 23, 0.52);
+	}
+
+	.plan-view-header {
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.14), transparent 42%),
+			#111827 !important;
+	}
+
+	.plan-view-header p {
+		margin-top: 6px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 1.35;
+	}
+
+	.plan-view-body {
+		min-height: 0;
+		display: grid;
+		grid-template-columns: minmax(360px, 0.42fr) minmax(560px, 1fr);
+		gap: 14px;
+		padding: 14px;
+		background: #0a0e1a !important;
+	}
+
+	.plan-view-info,
+	.plan-view-map-card {
+		min-height: 0;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		border-radius: 18px;
+		background: rgba(17, 24, 39, 0.86) !important;
+		box-shadow: 0 16px 34px rgba(2, 6, 23, 0.26);
+	}
+
+	.plan-view-info {
+		display: grid;
+		grid-template-rows: auto auto minmax(0, 1fr);
+		gap: 12px;
+		padding: 12px;
+		overflow: hidden;
+	}
+
+	.plan-view-summary {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 10px;
+	}
+
+	.plan-view-summary div {
+		display: grid;
+		gap: 6px;
+		padding: 12px;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		border-radius: 14px;
+		background: rgba(30, 41, 59, 0.66);
+	}
+
+	.plan-view-summary span,
+	.plan-view-card-head span {
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 850;
+		letter-spacing: 0.06em;
+		line-height: 1;
+		text-transform: uppercase;
+	}
+
+	.plan-view-summary strong {
+		color: var(--text-primary);
+		font-size: 15px;
+		font-weight: 850;
+		line-height: 1.15;
+	}
+
+	.plan-view-card {
+		min-height: 0;
+		display: grid;
+		grid-template-rows: auto minmax(0, 1fr);
+		overflow: hidden;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 16px;
+		background: rgba(15, 23, 42, 0.62) !important;
+	}
+
+	.plan-view-card-head,
+	.plan-view-map-toolbar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 12px 14px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+		background: rgba(30, 41, 59, 0.38);
+	}
+
+	.plan-view-card-head h3,
+	.plan-view-map-toolbar h3 {
+		color: var(--text-primary);
+		font-size: 14px;
+		font-weight: 850;
+		line-height: 1.2;
+	}
+
+	.plan-view-map-toolbar span {
+		display: block;
+		margin-top: 3px;
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 700;
+		letter-spacing: 0;
+		text-transform: none;
+	}
+
+	.plan-view-vessel-list {
+		display: flex;
+		flex-wrap: wrap;
+		align-content: flex-start;
+		gap: 8px;
+		padding: 12px;
+		overflow: auto;
+	}
+
+	.plan-view-vessel-list span {
+		display: inline-flex;
+		align-items: center;
+		min-height: 28px;
+		padding: 5px 10px;
+		border: 1px solid rgba(191, 219, 254, 0.28);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.12);
+		color: #bfdbfe;
+		font-size: 11px;
+		font-weight: 750;
+		line-height: 1;
+	}
+
+	.plan-view-vessel-list em {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.route-points-card {
+		min-height: 260px;
+	}
+
+	.plan-view-table-wrap {
+		min-height: 0;
+		overflow: auto;
+	}
+
+	.plan-view-table-wrap table {
+		min-width: 520px;
+	}
+
+	.plan-view-map-card {
+		display: grid;
+		grid-template-rows: auto minmax(0, 1fr) auto;
+		overflow: hidden;
+	}
+
+	.plan-view-map {
+		min-height: 0;
+		background: #020617;
+	}
+
+	.plan-view-map-legend {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px 12px;
+		padding: 10px 14px;
+		border-top: 1px solid rgba(148, 163, 184, 0.18);
+		background: rgba(30, 41, 59, 0.58);
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 750;
+	}
+
+	.plan-view-map-legend span {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+	}
+
+	:global(.route-marker.plan-view.start) {
+		background: #10b981;
+	}
+
+	:global(.route-marker.plan-view.end) {
+		background: #ef4444;
+	}
+
 	.modal-header,
 	.modal-footer {
 		margin: 0;
@@ -4929,6 +5438,118 @@
 		grid-template-rows: auto minmax(0, 1fr);
 		overflow: hidden;
 		border-right: 1px solid #e5edf5;
+	}
+
+	.route-point-panel.has-route-import {
+		grid-template-rows: auto auto minmax(0, 1fr);
+	}
+
+	.route-import-card {
+		display: grid;
+		gap: 10px;
+		padding: 12px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.14), rgba(14, 165, 233, 0.06)),
+			rgba(15, 23, 42, 0.28);
+	}
+
+	.route-import-copy {
+		display: grid;
+		gap: 3px;
+	}
+
+	.route-import-copy strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		font-weight: 700;
+	}
+
+	.route-import-copy span,
+	.route-import-preview span {
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+	}
+
+	.route-import-actions {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 8px;
+		align-items: center;
+	}
+
+	.route-import-file {
+		position: relative;
+		display: grid;
+		min-width: 0;
+		cursor: pointer;
+	}
+
+	.route-import-file input {
+		position: absolute;
+		inset: 0;
+		opacity: 0;
+		cursor: pointer;
+	}
+
+	.route-import-file span {
+		overflow: hidden;
+		min-height: 34px;
+		border: 1px solid rgba(148, 163, 184, 0.24);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.42);
+		color: var(--text-primary);
+		padding: 8px 11px;
+		font-size: 12px;
+		font-weight: 700;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.route-import-message {
+		border-radius: 10px;
+		padding: 8px 10px;
+		font-size: 11px;
+		font-weight: 700;
+		line-height: 1.4;
+	}
+
+	.route-import-message.success {
+		border: 1px solid rgba(34, 197, 94, 0.28);
+		background: rgba(34, 197, 94, 0.12);
+		color: #86efac;
+	}
+
+	.route-import-message.error {
+		border: 1px solid rgba(248, 113, 113, 0.3);
+		background: rgba(239, 68, 68, 0.12);
+		color: #fca5a5;
+	}
+
+	.route-import-preview {
+		display: grid;
+		gap: 7px;
+		border-radius: 12px;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		background: rgba(2, 6, 23, 0.18);
+		padding: 9px;
+	}
+
+	.route-import-preview div {
+		display: grid;
+		gap: 4px;
+	}
+
+	.route-import-preview small {
+		overflow: hidden;
+		color: var(--text-primary);
+		font-size: 11px;
+		font-weight: 650;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.point-hint {
@@ -5570,11 +6191,41 @@
 
 	@media (max-width: 1180px) {
 		.voyage-grid,
-		.bottom-grid,
 		.assign-form-grid,
 		.assignment-filter-grid,
 		.route-map-editor {
 			grid-template-columns: 1fr;
+		}
+
+		.voyage-grid,
+		.voyage-grid.has-assign-panel {
+			grid-template-areas:
+				'list'
+				'detail'
+				'assign';
+			grid-template-rows: auto;
+		}
+
+		.detail-panel {
+			min-height: 0;
+		}
+
+		.plan-view-backdrop {
+			padding: 12px;
+		}
+
+		.plan-view-window {
+			height: calc(100vh - 24px);
+		}
+
+		.plan-view-body {
+			grid-template-columns: 1fr;
+			grid-template-rows: minmax(320px, 0.95fr) minmax(420px, 1.05fr);
+			overflow: auto;
+		}
+
+		.plan-view-info {
+			min-height: 320px;
 		}
 
 		.route-map-editor {
@@ -5619,6 +6270,36 @@
 			width: 100%;
 			height: 100vh;
 			max-height: 100vh;
+		}
+
+		.plan-view-backdrop {
+			padding: 0;
+		}
+
+		.plan-view-window {
+			width: 100%;
+			height: 100vh;
+			max-height: 100vh;
+			border-radius: 0;
+		}
+
+		.plan-view-body {
+			padding: 10px;
+			gap: 10px;
+			grid-template-rows: auto minmax(420px, 1fr);
+		}
+
+		.plan-view-summary {
+			grid-template-columns: 1fr;
+		}
+
+		.plan-view-info {
+			min-height: 0;
+			overflow: visible;
+		}
+
+		.plan-view-table-wrap {
+			max-height: 320px;
 		}
 	}
 

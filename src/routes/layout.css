@@ -679,6 +679,13 @@ body .app-content :is(
   box-shadow: var(--shadow-sm) !important;
 }
 
+body .app-content .voyage-page .voyage-grid.has-assign-panel {
+  background: #0a0e1a !important;
+  background-color: #0a0e1a !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
 body .app-content :is(
   .administrator-page,
   .fleet-page,
