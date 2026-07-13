@@ -636,7 +636,7 @@
 </script>
 
 <section class="vessel-shell">
-	<header class="vessel-topbar">
+	<header class="vessel-topbar" class:dropdown-open={menuOpen || vesselDropdownOpen}>
 		<div class="topbar-left">
 			<div class="dropdown">
 				<button type="button" class="dropdown-button" onclick={() => (menuOpen = !menuOpen)}>
@@ -1650,6 +1650,8 @@
 	}
 
 	.online-box {
+		height: 52px;
+		min-height: 52px;
 		min-width: 96px;
 		border-color: rgba(16, 185, 129, 0.18);
 		background: rgba(16, 185, 129, 0.08);
@@ -1697,7 +1699,8 @@
 		box-shadow: 0 18px 48px rgba(0, 0, 0, 0.48);
 		backdrop-filter: blur(18px);
 		animation: vesselMenuIn 150ms ease;
-		z-index: 3200;
+		z-index: 10000;
+		pointer-events: auto;
 	}
 
 	.dropdown-menu {
@@ -1906,6 +1909,11 @@
 			scrollbar-width: none;
 		}
 
+		.vessel-topbar.dropdown-open {
+			overflow: visible;
+			z-index: 10000;
+		}
+
 		.vessel-topbar::-webkit-scrollbar {
 			display: none;
 		}
@@ -1919,6 +1927,11 @@
 		.vessel-selector,
 		.topbar-item {
 			height: 38px;
+		}
+
+		.online-box {
+			height: 52px;
+			min-height: 52px;
 		}
 
 		.dropdown-button {
@@ -1949,14 +1962,19 @@
 		.vessel-menu {
 			position: fixed;
 			top: 58px;
+			z-index: 10001;
+			max-height: calc(100dvh - 70px);
+			overflow-y: auto;
 		}
 
 		.dropdown-menu {
-			left: 70px;
+			left: max(8px, env(safe-area-inset-left));
+			width: min(280px, calc(100vw - 16px));
+			min-width: 0;
 		}
 
 		.vessel-menu {
-			right: 8px;
+			right: max(8px, env(safe-area-inset-right));
 			width: min(280px, calc(100vw - 16px));
 		}
 	}
@@ -1972,6 +1990,11 @@
 		.vessel-selector,
 		.topbar-item {
 			height: 36px;
+		}
+
+		.online-box {
+			height: 52px;
+			min-height: 52px;
 		}
 
 		.dropdown-button {
