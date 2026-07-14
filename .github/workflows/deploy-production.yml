@@ -13,19 +13,12 @@ permissions:
 
 env:
   NODE_VERSION: 20
-  APP_PORT: 8082
-  HOST_PORT: ${{ vars.PRODUCTION_PORT || '8082' }}
-  CONTAINER_NAME: vms-dashboard-production
 
 jobs:
   build:
     name: Build and publish production image
     runs-on: ubuntu-latest
     environment: production
-
-    outputs:
-      image: ${{ steps.image.outputs.image }}
-      tag: ${{ steps.image.outputs.tag }}
 
     steps:
       - name: Checkout repository
@@ -77,46 +70,3 @@ jobs:
             ${{ steps.image.outputs.image }}:production-latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  deploy:
-    name: Deploy production
-    needs: build
-    runs-on: ubuntu-latest
-    environment: production
-
-    steps:
-      - name: Deploy container through SSH
-        uses: appleboy/ssh-action@v1.2.0
-        env:
-          IMAGE: ${{ needs.build.outputs.image }}
-          TAG: ${{ needs.build.outputs.tag }}
-          CONTAINER_NAME: ${{ env.CONTAINER_NAME }}
-          HOST_PORT: ${{ env.HOST_PORT }}
-          APP_PORT: ${{ env.APP_PORT }}
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME || github.actor }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-        with:
-          host: ${{ secrets.PRODUCTION_SSH_HOST }}
-          username: ${{ secrets.PRODUCTION_SSH_USER }}
-          key: ${{ secrets.PRODUCTION_SSH_KEY }}
-          port: ${{ secrets.PRODUCTION_SSH_PORT || 22 }}
-          envs: IMAGE,TAG,CONTAINER_NAME,HOST_PORT,APP_PORT,GHCR_USERNAME,GHCR_TOKEN
-          script: |
-            set -e
-
-            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
-
-            docker pull "$IMAGE:$TAG"
-            docker stop "$CONTAINER_NAME" || true
-            docker rm "$CONTAINER_NAME" || true
-
-            docker run -d \
-              --name "$CONTAINER_NAME" \
-              --restart unless-stopped \
-              -p "$HOST_PORT:$APP_PORT" \
-              -e NODE_ENV=production \
-              -e HOST=0.0.0.0 \
-              -e PORT="$APP_PORT" \
-              "$IMAGE:$TAG"
-
-            docker image prune -f
