@@ -83,7 +83,7 @@
 
         <div class="login-copy">
           <h2>Welcome!</h2>
-          <p>Sign in to monitor vessel activity, voyage plans, telemetry, reports, and fleet operations.</p>
+          <!-- <p>Sign in to monitor vessel activity, voyage plans, telemetry, reports, and fleet operations.</p> -->
         </div>
 
         <form class="login-card" onsubmit={handleLogin}>
