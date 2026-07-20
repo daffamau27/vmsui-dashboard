@@ -53,8 +53,6 @@
 
 	let selectedImportFile = $state(null);
 	let selectedImportFileName = $state('');
-	let autoLoadKey = $state('');
-
 	$effect(() => {
 		if (!active) return;
 
@@ -185,9 +183,10 @@
 		return config?.description || '';
 	}
 
-	let canManageRob = $derived(canViewFuelConsumptionTable);
-	let canManageTransactions = $derived(canViewFuelConsumptionTable);
-	let canImportVdor = $derived(canViewFuelConsumptionTable);
+	let canManageRob = $derived(hasPermission('manage_fuel_rob'));
+	let canManageTransactions = $derived(hasPermission('manage_fuel_transactions'));
+	let canImportVdor = $derived(hasPermission('import_fuel_vdor'));
+	let canManageFuelOperations = $derived(canManageRob || canManageTransactions || canImportVdor);
 
 	function canViewTableConfig(config) {
 		if (!canViewFuelConsumptionTable) return false;
@@ -250,23 +249,6 @@
 		}
 
 		return cards;
-	});
-
-	$effect(() => {
-		const isActive = active;
-		const vesselId = currentVesselId;
-		const date = selectedDate;
-		const mode = timezoneMode;
-		const offset = timezoneOffset;
-
-		if (!isActive || !vesselId || !date) return;
-
-		const key = `${vesselId}|${date}|${mode}|${offset}`;
-		if (autoLoadKey === key) return;
-
-		autoLoadKey = key;
-		loadDashboardFor({ vesselId, date, mode, offset });
-		loadHistoryFor({ vesselId, date, page: 1, limit: historyLimit });
 	});
 
 	$effect(() => {
@@ -427,6 +409,11 @@
 	async function submitRob() {
 		clearMessages();
 
+		if (!canManageRob) {
+			errorMessage = 'This account does not have permission to manage Fuel ROB.';
+			return;
+		}
+
 		if (!currentVesselId) {
 			errorMessage = 'Please select a vessel first.';
 			return;
@@ -461,6 +448,11 @@
 
 	async function submitTransaction() {
 		clearMessages();
+
+		if (!canManageTransactions) {
+			errorMessage = 'This account does not have permission to manage fuel transactions.';
+			return;
+		}
 
 		if (!currentVesselId) {
 			errorMessage = 'Please select a vessel first.';
@@ -514,6 +506,11 @@
 	async function removeTransaction(item) {
 		clearMessages();
 
+		if (!canManageTransactions) {
+			errorMessage = 'This account does not have permission to manage fuel transactions.';
+			return;
+		}
+
 		if (!item?.id || !item?.is_deletable) return;
 		if (!window.confirm(`Delete transaction ${item.action} on ${item.date}?`)) return;
 
@@ -552,6 +549,11 @@
 	async function submitImportVdor() {
 		clearMessages();
 
+		if (!canImportVdor) {
+			errorMessage = 'This account does not have permission to import VDOR.';
+			return;
+		}
+
 		if (!currentVesselId) {
 			errorMessage = 'Please select a vessel first.';
 			return;
@@ -585,6 +587,12 @@
 
 	async function downloadTemplate() {
 		clearMessages();
+
+		if (!canImportVdor) {
+			errorMessage = 'This account does not have permission to download the VDOR template.';
+			return;
+		}
+
 		actionLoading = 'template';
 
 		try {
@@ -743,7 +751,7 @@
 				onclick={refreshCurrent}
 				disabled={loadingData || loadingHistory}
 			>
-				{loadingData || loadingHistory ? 'Loading...' : 'Refresh'}
+				{loadingData || loadingHistory ? 'Loading...' : 'Load Data'}
 			</button>
 		</div>
 	</header>
@@ -867,7 +875,7 @@
 				<LoadingSkeleton label="Loading fuel operation permissions" variant="fuel-operations" />
 			{:else if currentUserError}
 				<div class="empty-state">{currentUserError}</div>
-			{:else if canViewFuelConsumptionTable}
+			{:else if canManageFuelOperations}
 				<div class="operation-grid">
 					{#if canManageRob}
 						<form
@@ -975,7 +983,7 @@
 				</div>
 			{:else}
 				<div class="empty-state">
-					This account does not have permission to manage ROB, transactions, or VDOR imports.
+					This feature is locked.
 				</div>
 			{/if}
 		</article>

@@ -1878,13 +1878,6 @@
 		</section>
 		{/if}
 	</section>
-
-	{#if traceData && !loading}
-		<details class="raw-box">
-			<summary>Raw Trace Response</summary>
-			<pre>{JSON.stringify(traceData, null, 2)}</pre>
-		</details>
-	{/if}
 </section>
 
 <style>

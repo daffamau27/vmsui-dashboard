@@ -572,6 +572,27 @@
     dayAfter: dashboardData?.oceanCurrent?.day_after || null
   });
 
+  let environmentForecastDays = $derived([
+    {
+      key: "today",
+      label: weatherSummary.current?.label || oceanCurrentSummary.current?.label || "Today",
+      weather: weatherSummary.current,
+      current: oceanCurrentSummary.current
+    },
+    {
+      key: "tomorrow",
+      label: weatherSummary.tomorrow?.label || oceanCurrentSummary.tomorrow?.label || "Tomorrow",
+      weather: weatherSummary.tomorrow,
+      current: oceanCurrentSummary.tomorrow
+    },
+    {
+      key: "day-after",
+      label: weatherSummary.dayAfter?.label || oceanCurrentSummary.dayAfter?.label || "Day After",
+      weather: weatherSummary.dayAfter,
+      current: oceanCurrentSummary.dayAfter
+    }
+  ]);
+
   let speedSummary = $derived({
     topSpeed:
       dashboardData?.topSpeed !== null &&
@@ -2280,6 +2301,45 @@
     </section>
   {/if}
 
+  <section class="environment-summary combined-environment-summary">
+    <section class="table-section environment-card">
+      <div class="section-header">
+        <div>
+          <span class="section-kicker">Environment Forecast</span>
+          <h2>Weather & Ocean Current</h2>
+        </div>
+      </div>
+
+      <div class="environment-grid">
+        {#each environmentForecastDays as day}
+          <article>
+            <span>{day.label}</span>
+
+            <div class="environment-metric">
+              <small>Weather</small>
+              <strong>
+                {#if day.weather}
+                  {day.key === "today"
+                    ? `${formatNumber(day.weather.temp_c, 1)}°C`
+                    : `${formatNumber(day.weather.temp_min_c, 1)}–${formatNumber(day.weather.temp_max_c, 1)}°C`}
+                {:else}
+                  -
+                {/if}
+              </strong>
+              <em>{day.weather?.condition || "-"}</em>
+            </div>
+
+            <div class="environment-metric">
+              <small>Current</small>
+              <strong>{day.current ? `${formatNumber(day.current.speed_kph, 1)} kph` : "-"}</strong>
+              <em>{day.current?.direction_to || "-"}</em>
+            </div>
+          </article>
+        {/each}
+      </div>
+    </section>
+  </section>
+
   <section class="environment-summary">
     <section class="table-section environment-card">
       <div class="section-header">
@@ -3649,6 +3709,14 @@
     margin-top: 14px;
   }
 
+  .environment-summary:not(.combined-environment-summary) {
+    display: none;
+  }
+
+  .combined-environment-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .environment-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3663,6 +3731,27 @@
     border-radius: 10px;
     background: var(--color-surface);
     border: 1px solid #d9e2ec;
+  }
+
+  .combined-environment-summary .environment-grid article {
+    display: grid;
+    gap: 12px;
+  }
+
+  .environment-metric {
+    display: grid;
+    gap: 5px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(148, 163, 184, 0.18);
+  }
+
+  .environment-metric small {
+    margin-top: 0;
+  }
+
+  .environment-metric:first-of-type {
+    border-top: 0;
+    padding-top: 0;
   }
 
   .environment-grid span,
@@ -3689,6 +3778,13 @@
     text-transform: none;
     letter-spacing: 0;
     font-size: 11px;
+  }
+
+  .environment-grid em {
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 700;
   }
 
   .fuel-summary {

@@ -1081,12 +1081,14 @@ body .app-content .vms-map-controls .leaflet-control-scale-line::before {
 }
 
 body .app-content .vms-map-controls .vms-scale-control {
+  width: auto;
+  height: 34px;
   min-height: 34px;
-  min-width: 124px;
+  min-width: 156px;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 6px 5px 9px;
+  justify-content: center;
+  padding: 4px 10px;
   border: 1px solid rgba(255, 255, 255, 0.12) !important;
   border-radius: 12px !important;
   background: rgba(15, 23, 42, 0.82) !important;
@@ -1095,80 +1097,68 @@ body .app-content .vms-map-controls .vms-scale-control {
   backdrop-filter: blur(12px);
 }
 
-body .app-content .vms-map-controls .vms-scale-control__bar {
-  min-width: 36px;
-  max-width: 112px;
-  display: inline-flex;
-  align-items: center;
-  padding-bottom: 3px;
-  border-bottom: 2px solid rgba(147, 197, 253, 0.95);
+body .app-content .vms-map-controls .vms-scale-control__ruler {
+  position: relative;
+  width: 132px;
+  min-width: 76px;
+  height: 26px;
   transition: width 0.16s ease;
 }
 
+body .app-content .vms-map-controls .vms-scale-control__bar {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  display: block;
+  min-width: 36px;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.92);
+  box-shadow: 0 0 9px rgba(255, 255, 255, 0.18);
+  transform: translateY(-50%);
+}
+
+body .app-content .vms-map-controls .vms-scale-control__tick {
+  position: absolute;
+  width: 2px;
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.95);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.16);
+  transition: left 0.16s ease;
+}
+
+body .app-content .vms-map-controls .vms-scale-control__tick--metric {
+  bottom: 0;
+  transform: translateX(-1px);
+}
+
+body .app-content .vms-map-controls .vms-scale-control__tick--nautical {
+  top: 0;
+  transform: translateX(-1px);
+}
+
 body .app-content .vms-map-controls .vms-scale-control__label {
+  position: absolute;
+  transform: translateX(-50%);
   white-space: nowrap;
   color: #eaf2ff;
   font-family: inherit;
-  font-size: 10px;
-  font-weight: 800;
+  font-size: 9px;
+  font-weight: 700;
   line-height: 1;
+  min-width: 46px;
+  text-align: center;
+  text-shadow: 0 1px 8px rgba(15, 23, 42, 0.7);
 }
 
-body .app-content .vms-map-controls .vms-scale-control__unit {
-  width: 46px;
-  height: 23px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgba(96, 165, 250, 0.38);
-  border-radius: 8px;
-  background: rgba(37, 99, 235, 0.18);
-  color: #bfdbfe;
-  font-family: inherit;
-  font-size: 8.5px;
-  font-weight: 900;
-  line-height: 1;
-  cursor: pointer;
-  outline: none;
-  padding: 0 17px 0 7px;
-  appearance: none;
-  background-image:
-    linear-gradient(45deg, transparent 50%, #bfdbfe 50%),
-    linear-gradient(135deg, #bfdbfe 50%, transparent 50%);
-  background-position:
-    calc(100% - 10px) 9px,
-    calc(100% - 6px) 9px;
-  background-size: 4px 4px, 4px 4px;
-  background-repeat: no-repeat;
-  transition:
-    background 0.16s ease,
-    border-color 0.16s ease,
-    color 0.16s ease,
-    transform 0.16s ease;
+body .app-content .vms-map-controls .vms-scale-control__label--metric {
+  top: 0;
 }
 
-body .app-content .vms-map-controls .vms-scale-control__unit:hover {
-  border-color: rgba(147, 197, 253, 0.72);
-  background: rgba(37, 99, 235, 0.34);
-  background-image:
-    linear-gradient(45deg, transparent 50%, #ffffff 50%),
-    linear-gradient(135deg, #ffffff 50%, transparent 50%);
-  background-position:
-    calc(100% - 10px) 9px,
-    calc(100% - 6px) 9px;
-  background-size: 4px 4px, 4px 4px;
-  background-repeat: no-repeat;
-  color: #ffffff;
-}
-
-body .app-content .vms-map-controls .vms-scale-control__unit:focus-visible {
-  border-color: rgba(147, 197, 253, 0.86);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.24);
-}
-
-body .app-content .vms-map-controls .vms-scale-control__unit option {
-  background: #111827;
-  color: #f8fafc;
+body .app-content .vms-map-controls .vms-scale-control__label--nautical {
+  bottom: 0;
 }
 
 /* Keep native select menus readable across all dark dashboard pages. */

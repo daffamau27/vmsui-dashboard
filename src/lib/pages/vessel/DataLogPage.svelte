@@ -18,7 +18,6 @@
 	let timezoneOffset = $state('+07:00');
 
 	let { active = false } = $props();
-	let loadedKeys = $state({});
 
 	let currentUser = $state(null);
 	let currentUserLoading = $state(false);
@@ -726,26 +725,6 @@
 		loadCurrentUser();
 	});
 
-	$effect(() => {
-		if (!active) return;
-		if (!$selectedVesselId) return;
-		if (!startDateTime || !endDateTime) return;
-
-		if (!permissionReady) {
-			if (!currentUserLoading) loadCurrentUser();
-			return;
-		}
-
-		const key = `${$selectedVesselId}|${startDateTime}|${endDateTime}|${timezoneMode}|${timezoneOffset}`;
-		if (loadedKeys[key]) return;
-
-		loadedKeys = {
-			...loadedKeys,
-			[key]: true
-		};
-
-		loadDataLog();
-	});
 </script>
 
 <section class="data-log-page">
@@ -954,13 +933,6 @@
 				<div class="empty-box">Data log is not available for the selected time range.</div>
 			{/if}
 		</section>
-	{/if}
-
-	{#if hasRawData && !loading}
-		<details class="raw-box">
-			<summary>Raw Data Log Response</summary>
-			<pre>{JSON.stringify(logData, null, 2)}</pre>
-		</details>
 	{/if}
 </section>
 

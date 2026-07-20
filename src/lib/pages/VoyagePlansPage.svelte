@@ -113,9 +113,15 @@
 	let routeLine;
 	let selectedPointIndex = 0;
 	let routeMarkerDragging = false;
-	let routeMapScaleUnit = 'metric';
-	let routeMapScaleLabel = 'Bar = -';
-	let routeMapScaleWidth = 80;
+	let routeMapScale = {
+		metricLabel: '- km',
+		nauticalLabel: '- NM',
+		totalWidth: 86,
+		metricStart: 0,
+		metricLabelLeft: 43,
+		nauticalStart: 12,
+		nauticalLabelLeft: 49
+	};
 	let showPlanMapView = false;
 	let planViewMapContainer;
 	let planViewMap;
@@ -470,14 +476,7 @@
 
 	const INDONESIA_CENTER = [-2.5489, 118.0149];
 	const INDONESIA_ZOOM = 5;
-	const ROUTE_SCALE_STORAGE_KEY = 'vms-map-scale-unit';
-	const ROUTE_SCALE_UNITS = ['metric', 'nautical', 'imperial'];
-	const ROUTE_SCALE_UNIT_LABELS = {
-		metric: 'KM',
-		nautical: 'NM',
-		imperial: 'MI'
-	};
-	const ROUTE_SCALE_MAX_WIDTH = 112;
+	const ROUTE_SCALE_MAX_WIDTH = 132;
 
 	function hasCoordinateValue(value) {
 		return value !== '' && value !== null && value !== undefined && String(value).trim() !== '';
@@ -514,31 +513,6 @@
 			}));
 	}
 
-	function initializeRouteMapScaleUnit() {
-		if (!browser) return;
-
-		try {
-			const stored = window.localStorage?.getItem(ROUTE_SCALE_STORAGE_KEY);
-			if (ROUTE_SCALE_UNITS.includes(stored)) {
-				routeMapScaleUnit = stored;
-			}
-		} catch {
-			// Storage access is optional; keep the default metric unit.
-		}
-	}
-
-	function setRouteMapScaleUnit(unit) {
-		routeMapScaleUnit = ROUTE_SCALE_UNITS.includes(unit) ? unit : 'metric';
-
-		try {
-			window.localStorage?.setItem(ROUTE_SCALE_STORAGE_KEY, routeMapScaleUnit);
-		} catch {
-			// Ignore localStorage errors.
-		}
-
-		updateRouteMapScale();
-	}
-
 	function zoomRouteMap(direction) {
 		if (!routeMap) return;
 
@@ -551,8 +525,15 @@
 
 	function updateRouteMapScale() {
 		if (!routeMap?._loaded) {
-			routeMapScaleLabel = 'Bar = -';
-			routeMapScaleWidth = Math.round(ROUTE_SCALE_MAX_WIDTH * 0.72);
+			routeMapScale = {
+				metricLabel: '- km',
+				nauticalLabel: '- NM',
+				totalWidth: Math.round(ROUTE_SCALE_MAX_WIDTH * 0.72),
+				metricStart: 0,
+				metricLabelLeft: Math.round(ROUTE_SCALE_MAX_WIDTH * 0.36),
+				nauticalStart: Math.round(ROUTE_SCALE_MAX_WIDTH * 0.1),
+				nauticalLabelLeft: Math.round(ROUTE_SCALE_MAX_WIDTH * 0.41)
+			};
 			return;
 		}
 
@@ -560,47 +541,50 @@
 		if (!size?.x || !size?.y) return;
 
 		const y = size.y / 2;
+		const maxWidth = getRouteResponsiveScaleWidth(ROUTE_SCALE_MAX_WIDTH, size.x);
 		const maxMeters =
 			routeMap.distance(
 				routeMap.containerPointToLatLng([0, y]),
-				routeMap.containerPointToLatLng([ROUTE_SCALE_MAX_WIDTH, y])
+				routeMap.containerPointToLatLng([maxWidth, y])
 			) || 0;
-		const scale = getRouteScaleForUnit(maxMeters, routeMapScaleUnit, ROUTE_SCALE_MAX_WIDTH);
 
-		routeMapScaleLabel = scale.label;
-		routeMapScaleWidth = scale.width;
+		routeMapScale = getRouteScale(maxMeters, maxWidth);
 	}
 
-	function getRouteScaleForUnit(maxMeters, unit, maxWidth) {
+	function getRouteScale(maxMeters, maxWidth) {
 		if (!Number.isFinite(maxMeters) || maxMeters <= 0) {
-			return { label: 'Bar = -', width: Math.round(maxWidth * 0.72) };
+			return {
+				metricLabel: '- km',
+				nauticalLabel: '- NM',
+				width: Math.round(maxWidth * 0.72)
+			};
 		}
 
-		const meters = getRouteRoundScaleNumber(maxMeters);
-		const width = getRouteScaleWidth(meters / maxMeters, maxWidth);
+		const maxKm = maxMeters / 1000;
+		const km = getRouteRoundScaleNumber(maxKm);
+		const metricWidth = getRouteScaleWidth(km / maxKm, maxWidth);
+
+		const maxNauticalMiles = maxMeters / 1852;
+		const nauticalMiles = getRouteRoundScaleNumber(maxNauticalMiles);
+		const nauticalWidth = getRouteScaleWidth(nauticalMiles / maxNauticalMiles, maxWidth);
+		const totalWidth = Math.max(metricWidth, nauticalWidth);
+		const metricStart = Math.max(0, totalWidth - metricWidth);
+		const nauticalStart = Math.max(0, totalWidth - nauticalWidth);
 
 		return {
-			label: getRouteScaleLabel(meters, unit),
-			width
+			metricLabel: `${formatRouteScaleNumber(km)} km`,
+			nauticalLabel: `${formatRouteScaleNumber(nauticalMiles)} NM`,
+			totalWidth,
+			metricStart,
+			metricLabelLeft: metricStart + metricWidth / 2,
+			nauticalStart,
+			nauticalLabelLeft: nauticalStart + nauticalWidth / 2
 		};
 	}
 
-	function getRouteScaleLabel(meters, unit) {
-		if (!Number.isFinite(meters) || meters <= 0) return 'Bar = -';
-
-		if (unit === 'nautical') {
-			return `Bar = ${formatRouteConvertedScaleNumber(meters / 1852)} NM`;
-		}
-
-		if (unit === 'imperial') {
-			return `Bar = ${formatRouteConvertedScaleNumber(meters / 1609.344)} mi`;
-		}
-
-		if (meters >= 1000) {
-			return `Bar = ${formatRouteScaleNumber(meters / 1000)} km`;
-		}
-
-		return `Bar = ${formatRouteScaleNumber(meters)} m`;
+	function getRouteResponsiveScaleWidth(maxWidth, mapWidth) {
+		if (!Number.isFinite(mapWidth) || mapWidth <= 0) return maxWidth;
+		return Math.max(76, Math.min(maxWidth, Math.round(mapWidth * 0.28)));
 	}
 
 	function getRouteScaleWidth(ratio, maxWidth) {
@@ -622,15 +606,6 @@
 		if (value >= 100 || Number.isInteger(value)) return String(Math.round(value));
 		if (value >= 10) return value.toFixed(1).replace(/\.0$/, '');
 		return value.toFixed(2).replace(/\.?0+$/, '');
-	}
-
-	function formatRouteConvertedScaleNumber(value) {
-		if (!Number.isFinite(value)) return '-';
-		if (value >= 1000) return String(Math.round(value));
-		if (value >= 100) return value.toFixed(1).replace(/\.0$/, '');
-		if (value >= 10) return value.toFixed(2).replace(/\.?0+$/, '');
-		if (value >= 1) return value.toFixed(3).replace(/\.?0+$/, '');
-		return value.toFixed(6).replace(/\.?0+$/, '');
 	}
 
 	async function ensureLeaflet() {
@@ -1393,7 +1368,6 @@
 		let cleanupVesselTransferMode = () => {};
 
 		if (browser) {
-			initializeRouteMapScaleUnit();
 			window.addEventListener('keydown', handleRouteEditorKeydown);
 			document.addEventListener('fullscreenchange', handleRouteMapFullscreenChange);
 			document.addEventListener('webkitfullscreenchange', handleRouteMapFullscreenChange);
@@ -3005,20 +2979,37 @@
 									</button>
 								</div>
 
-								<div class="route-map-scale-control">
-									<div class="route-map-scale-bar" style={`width: ${routeMapScaleWidth}px;`}>
-										<span>{routeMapScaleLabel}</span>
-									</div>
-									<select
-										aria-label="Change scale unit"
-										title="Change scale unit"
-										bind:value={routeMapScaleUnit}
-										on:change={(event) => setRouteMapScaleUnit(event.currentTarget.value)}
+								<div class="route-map-scale-control" aria-label="Map scale">
+									<div
+										class="route-map-scale-ruler"
+										style={`width: ${routeMapScale.totalWidth}px;`}
 									>
-										{#each ROUTE_SCALE_UNITS as unit}
-											<option value={unit}>{ROUTE_SCALE_UNIT_LABELS[unit]}</option>
-										{/each}
-									</select>
+										<span
+											class="route-map-scale-label metric"
+											style={`left: ${routeMapScale.metricLabelLeft}px;`}
+										>
+											{routeMapScale.metricLabel}
+										</span>
+										<span
+											class="route-map-scale-bar"
+											aria-label={`${routeMapScale.metricLabel} / ${routeMapScale.nauticalLabel}`}
+										>
+											<span
+												class="route-map-scale-tick metric"
+												style={`left: ${routeMapScale.metricStart}px;`}
+											></span>
+											<span
+												class="route-map-scale-tick nautical"
+												style={`left: ${routeMapScale.nauticalStart}px;`}
+											></span>
+										</span>
+										<span
+											class="route-map-scale-label nautical"
+											style={`left: ${routeMapScale.nauticalLabelLeft}px;`}
+										>
+											{routeMapScale.nauticalLabel}
+										</span>
+									</div>
 								</div>
 							</div>
 
@@ -5717,12 +5708,13 @@
 	}
 
 	.route-map-scale-control {
+		height: 34px;
 		min-height: 34px;
-		min-width: 124px;
+		min-width: 156px;
 		display: inline-flex;
 		align-items: center;
-		gap: 8px;
-		padding: 5px 6px 5px 9px;
+		justify-content: center;
+		padding: 4px 10px;
 		border: 1px solid rgba(255, 255, 255, 0.12);
 		border-radius: 12px;
 		background: rgba(15, 23, 42, 0.82);
@@ -5731,59 +5723,66 @@
 		backdrop-filter: blur(12px);
 	}
 
-	.route-map-scale-bar {
-		min-width: 36px;
-		max-width: 112px;
-		display: inline-flex;
-		align-items: center;
-		padding-bottom: 3px;
-		border-bottom: 2px solid rgba(147, 197, 253, 0.95);
+	.route-map-scale-ruler {
+		position: relative;
+		width: 132px;
+		min-width: 76px;
+		height: 26px;
 		transition: width 0.16s ease;
 	}
 
-	.route-map-scale-bar span {
+	.route-map-scale-bar {
+		position: absolute;
+		left: 0;
+		top: 50%;
+		width: 100%;
+		display: block;
+		min-width: 36px;
+		height: 2px;
+		border-radius: 999px;
+		background: rgba(226, 232, 240, 0.92);
+		box-shadow: 0 0 9px rgba(255, 255, 255, 0.18);
+		transform: translateY(-50%);
+	}
+
+	.route-map-scale-tick {
+		position: absolute;
+		width: 2px;
+		height: 9px;
+		border-radius: 999px;
+		background: rgba(226, 232, 240, 0.95);
+		box-shadow: 0 0 8px rgba(255, 255, 255, 0.16);
+		transition: left 0.16s ease;
+	}
+
+	.route-map-scale-tick.metric {
+		bottom: 0;
+		transform: translateX(-1px);
+	}
+
+	.route-map-scale-tick.nautical {
+		top: 0;
+		transform: translateX(-1px);
+	}
+
+	.route-map-scale-label {
+		position: absolute;
+		transform: translateX(-50%);
+		min-width: 46px;
 		white-space: nowrap;
 		color: #eaf2ff;
-		font-size: 10px;
-		font-weight: 800;
+		font-size: 9px;
+		font-weight: 700;
 		line-height: 1;
+		text-shadow: 0 1px 8px rgba(15, 23, 42, 0.7);
 	}
 
-	.route-map-scale-control select {
-		width: 45px;
-		height: 26px;
-		min-height: 26px;
-		padding: 0 7px;
-		border: 1px solid rgba(255, 255, 255, 0.14);
-		border-radius: 10px;
-		background:
-			linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
-			rgba(30, 41, 59, 0.92);
-		color: #e5edff;
-		font-size: 11px;
-		font-weight: 800;
-		line-height: 1;
-		outline: 0;
-		cursor: pointer;
-		appearance: none;
-		text-align: center;
-		text-align-last: center;
+	.route-map-scale-label.metric {
+		top: 0;
 	}
 
-	.route-map-scale-control select:hover {
-		border-color: rgba(147, 197, 253, 0.42);
-		background:
-			linear-gradient(180deg, rgba(59, 130, 246, 0.18), rgba(255, 255, 255, 0.02)),
-			rgba(30, 41, 59, 0.95);
-	}
-
-	.route-map-scale-control select:focus-visible {
-		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28);
-	}
-
-	.route-map-scale-control select option {
-		background: #0f172a;
-		color: #eaf2ff;
+	.route-map-scale-label.nautical {
+		bottom: 0;
 	}
 
 	.route-map-fullscreen-btn {

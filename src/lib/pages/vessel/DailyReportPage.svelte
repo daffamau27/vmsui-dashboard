@@ -16,7 +16,12 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
 	import { getFleetAssets } from '$lib/api/fleetApi.js';
-	import { addMapZonesToLeafletMap, normalizeMapZonesFromAssets } from '$lib/utils/mapZones.js';
+	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
+	import {
+		addMapZonesToLeafletMap,
+		isZoneAsset,
+		normalizeMapZonesFromAssets
+	} from '$lib/utils/mapZones.js';
 	import {
 		createCopyableCoordinateHtml,
 		handleCoordinateCopyClick
@@ -33,7 +38,8 @@
 	let vesselEnginesLoading = $state(false);
 	let vesselEnginesError = $state('');
 	let loadedEngineDetailVesselId = $state(null);
-	let mapZones = $state([]);
+	/** @type {any[]} */
+	let mapAssetRows = $state([]);
 
 	let reportDate = $state('');
 	let timezoneMode = $state('auto');
@@ -54,6 +60,7 @@
 		return true;
 	}
 
+	/** @type {any} */
 	let currentUser = $state(null);
 	let currentUserLoading = $state(false);
 	let currentUserError = $state('');
@@ -189,7 +196,7 @@
 	}
 
 	let { active = false } = $props();
-	let loadedKeys = $state({});
+
 	function pad(value) {
 		return String(value).padStart(2, '0');
 	}
@@ -221,6 +228,15 @@
 		if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '-';
 
 		return `${formatNumber(lat, 6)}, ${formatNumber(lng, 6)}`;
+	}
+
+	function escapeHtml(value) {
+		return String(value ?? '')
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&#039;');
 	}
 
 	function formatHour(value) {
@@ -948,7 +964,7 @@
 		const number = Number(value);
 		if (!Number.isFinite(number)) return '-';
 
-		return formatNumber(number, 2);
+		return `${formatNumber(number, 2)} kn`;
 	}
 
 	function formatTimeDot(value) {
@@ -1784,23 +1800,148 @@
 		if (Array.isArray(value)) {
 			return {
 				points: value,
-				zones: []
+				zones: [],
+				assets: []
 			};
 		}
 
 		return {
 			points: Array.isArray(value?.points) ? value.points : [],
-			zones: Array.isArray(value?.zones) ? value.zones : []
+			zones: Array.isArray(value?.zones) ? value.zones : [],
+			assets: Array.isArray(value?.assets) ? value.assets : []
 		};
 	}
 
+	/**
+	 * @param {any} asset
+	 * @returns {string[]}
+	 */
+	function getAssetIdentityKeys(asset = {}) {
+		return [
+			asset?.id,
+			asset?.assetId,
+			asset?.asset_id,
+			asset?.thingsboardId,
+			asset?.thingsboardName,
+			asset?.assetName,
+			asset?.name,
+			asset?.raw?.id,
+			asset?.raw?.assetId,
+			asset?.raw?.asset_id,
+			asset?.raw?.thingsboardName
+		]
+			.filter((value) => value !== null && value !== undefined && value !== '')
+			.map((value) => String(value).trim().toLowerCase());
+	}
+
+	/**
+	 * @param {any[]} assets
+	 * @param {any} user
+	 * @returns {any[]}
+	 */
+	function getPermittedMapAssets(assets = [], user = null) {
+		const assetAccess = user?.assetAccess || {};
+		const mode = String(assetAccess?.mode || '').toLowerCase();
+		const rows = Array.isArray(assets) ? assets : [];
+
+		if (mode === 'all') return rows;
+
+		const details = Array.isArray(assetAccess?.details)
+			? assetAccess.details
+			: Array.isArray(assetAccess?.assets)
+				? assetAccess.assets
+				: [];
+
+		if (mode !== 'selected' || !details.length) return [];
+
+		const permittedKeys = new Set(details.flatMap(getAssetIdentityKeys));
+		const matchedSourceKeys = new Set();
+
+		const matchedRows = rows.filter((asset) => {
+			const keys = getAssetIdentityKeys(asset);
+			const allowed = keys.some((key) => permittedKeys.has(key));
+
+			if (allowed) {
+				keys.forEach((key) => matchedSourceKeys.add(key));
+			}
+
+			return allowed;
+		});
+
+		const fallbackDetails = details.filter((detail) => {
+			const keys = getAssetIdentityKeys(detail);
+			return keys.length && !keys.some((key) => matchedSourceKeys.has(key));
+		});
+
+		return [...matchedRows, ...fallbackDetails];
+	}
+
+	/**
+	 * @param {any} asset
+	 * @returns {any | null}
+	 */
+	function normalizeTripAsset(asset = {}) {
+		if (isZoneAsset(asset)) return null;
+
+		const latitude = Number(asset?.latitude ?? asset?.lat);
+		const longitude = Number(asset?.longitude ?? asset?.lng ?? asset?.lon);
+
+		if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+		if (latitude === 0 && longitude === 0) return null;
+
+		const id = asset?.id ?? asset?.assetId ?? asset?.asset_id ?? `${latitude},${longitude}`;
+		const assetName =
+			asset?.assetName || asset?.name || asset?.thingsboardName || asset?.assetId || `Asset ${id}`;
+
+		return {
+			...asset,
+			id,
+			assetId: asset?.assetId ?? asset?.asset_id ?? id,
+			assetName,
+			name: assetName,
+			assetType: getAssetTypeValue(asset),
+			latitude,
+			longitude
+		};
+	}
+
+	/**
+	 * @param {any[]} assets
+	 * @returns {{ key: string; label: string; icon: string }[]}
+	 */
+	function getTripAssetLegendTypes(assets = []) {
+		const typeMap = new Map();
+
+		(Array.isArray(assets) ? assets : []).forEach((asset) => {
+			const key = String(getAssetTypeValue(asset) || 'asset').trim().toLowerCase() || 'asset';
+
+			if (typeMap.has(key)) return;
+
+			typeMap.set(key, {
+				key,
+				label: getAssetTypeLabel(asset),
+				icon: getAssetIconUrl(asset)
+			});
+		});
+
+		return [...typeMap.values()];
+	}
+
 	function tripLeafletMap(node, payload = { points: [], zones: [] }) {
+		/** @type {any} */
 		let map = null;
+		/** @type {any} */
 		let leaflet = null;
+		/** @type {any} */
 		let routeLayer = null;
+		/** @type {any} */
 		let startMarker = null;
+		/** @type {any} */
 		let endMarker = null;
+		/** @type {any} */
 		let zoneLayer = null;
+		/** @type {any} */
+		let assetLayer = null;
 		let disposed = false;
 
 		node.addEventListener('click', handleCoordinateCopyClick, true);
@@ -1817,11 +1958,59 @@
 			});
 		}
 
+		/** @param {any} asset */
+		function createAssetDivIcon(asset) {
+			if (!leaflet) return null;
+
+			const typeLabel = getAssetTypeLabel(asset);
+
+			return leaflet.divIcon({
+				className: `trip-asset-marker asset-type-${String(typeLabel).toLowerCase()}`,
+				html: `
+					<img
+						src="${getAssetIconUrl(asset)}"
+						alt="${escapeHtml(typeLabel)} asset"
+						title="${escapeHtml(asset.assetName || asset.name || typeLabel)}"
+					/>
+				`,
+				iconSize: [30, 30],
+				iconAnchor: [15, 15],
+				popupAnchor: [0, -16]
+			});
+		}
+
+		/** @param {any} asset */
+		function createAssetPopupHtml(asset) {
+			const typeLabel = getAssetTypeLabel(asset);
+			const coordinatePair = formatCoordinatePair(asset.latitude, asset.longitude);
+
+			return `
+				<div class="trip-asset-popup">
+					<div class="trip-asset-popup-head">
+						<img src="${getAssetIconUrl(asset)}" alt="" />
+						<div>
+							<span>${escapeHtml(typeLabel)}</span>
+							<strong>${escapeHtml(asset.assetName || asset.name || 'Asset')}</strong>
+						</div>
+					</div>
+					<div class="trip-map-popup-row">
+						<span>Coordinate</span>
+						${createCopyableCoordinateHtml(coordinatePair, 'asset coordinate')}
+					</div>
+				</div>
+			`;
+		}
+
 		async function render(nextPayload = { points: [], zones: [] }) {
 			if (disposed) return;
 
-			const { points: nextPoints, zones: nextZones } = getTripMapPayload(nextPayload);
+			const {
+				points: nextPoints,
+				zones: nextZones,
+				assets: nextAssets
+			} = getTripMapPayload(nextPayload);
 			const validPoints = Array.isArray(nextPoints) ? nextPoints : [];
+			const validAssets = Array.isArray(nextAssets) ? nextAssets : [];
 
 			if (!leaflet) {
 				const module = await import('leaflet');
@@ -1853,6 +2042,29 @@
 			zoneLayer = addMapZonesToLeafletMap(leaflet, map, nextZones, {
 				paneName: 'dailyTripZonePane',
 				zIndex: 355
+			});
+
+			if (assetLayer) {
+				assetLayer.clearLayers();
+				assetLayer.remove();
+				assetLayer = null;
+			}
+
+			assetLayer = leaflet.layerGroup().addTo(map);
+
+			validAssets.forEach((asset) => {
+				leaflet
+					.marker([asset.latitude, asset.longitude], {
+						icon: createAssetDivIcon(asset),
+						zIndexOffset: 260
+					})
+					.bindPopup(createAssetPopupHtml(asset), {
+						closeButton: true,
+						autoPan: true,
+						maxWidth: 260,
+						className: 'trip-leaflet-popup trip-asset-leaflet-popup'
+					})
+					.addTo(assetLayer);
 			});
 
 			if (routeLayer) {
@@ -1953,6 +2165,12 @@
 					zoneLayer = null;
 				}
 
+				if (assetLayer) {
+					assetLayer.clearLayers();
+					assetLayer.remove();
+					assetLayer = null;
+				}
+
 				if (map) {
 					map.remove();
 					map = null;
@@ -1962,6 +2180,10 @@
 	}
 
 	let tripMapPoints = $derived(getTripMapPoints(normalizedReport));
+	let permittedMapAssets = $derived(getPermittedMapAssets(mapAssetRows, currentUser));
+	let mapZones = $derived(normalizeMapZonesFromAssets(permittedMapAssets));
+	let tripMapAssets = $derived(permittedMapAssets.map(normalizeTripAsset).filter(Boolean));
+	let tripAssetLegendTypes = $derived(getTripAssetLegendTypes(tripMapAssets));
 
 	let vesselName = $derived(
 		$selectedVesselInfo?.name ||
@@ -2597,7 +2819,8 @@
 					timezoneMode,
 					timezoneOffset
 				}),
-				getEngineCurvesForVessel($selectedVesselId)
+				getEngineCurvesForVessel($selectedVesselId),
+				mapAssetRows.length ? Promise.resolve(mapAssetRows) : loadMapAssets()
 			]);
 
 			reportData = result;
@@ -2683,19 +2906,18 @@
 		}
 	}
 
-	async function loadMapZones() {
+	async function loadMapAssets() {
 		try {
 			const assets = await getFleetAssets();
-			mapZones = normalizeMapZonesFromAssets(assets);
+			mapAssetRows = Array.isArray(assets) ? assets : [];
 		} catch (err) {
-			console.error('[DAILY_MAP_ZONES_ERROR]', err);
-			mapZones = [];
+			console.error('[DAILY_MAP_ASSETS_ERROR]', err);
+			mapAssetRows = [];
 		}
 	}
 
 	onMount(() => {
 		reportDate = todayDate();
-		loadMapZones();
 	});
 
 	$effect(() => {
@@ -2715,22 +2937,6 @@
 		loadCurrentUser();
 	});
 
-	$effect(() => {
-		if (!active) return;
-		if (!$selectedVesselId) return;
-		if (!reportDate) return;
-
-		const key = `${$selectedVesselId}|${reportDate}|${timezoneMode}|${timezoneOffset}`;
-
-		if (loadedKeys[key]) return;
-
-		loadedKeys = {
-			...loadedKeys,
-			[key]: true
-		};
-
-		loadDailyReport();
-	});
 </script>
 
 <section class="daily-page">
@@ -2922,12 +3128,16 @@
 							{#if active}
 								<div
 									class="trip-leaflet-map"
-									use:tripLeafletMap={{ points: tripMapPoints, zones: mapZones }}
+									use:tripLeafletMap={{
+										points: tripMapPoints,
+										zones: mapZones,
+										assets: tripMapAssets
+									}}
 								></div>
 							{/if}
 						</div>
 
-						{#if mapZones.length}
+						{#if mapZones.length || tripAssetLegendTypes.length}
 							<div class="trip-zone-legend" aria-label="Zone legend">
 								{#each mapZones as zone}
 									<span>
@@ -2936,6 +3146,13 @@
 											aria-hidden="true"
 										></i>
 										{zone.name}
+									</span>
+								{/each}
+
+								{#each tripAssetLegendTypes as assetType}
+									<span class="trip-asset-legend-item">
+										<img src={assetType.icon} alt={`${assetType.label} icon`} />
+										{assetType.label}
 									</span>
 								{/each}
 							</div>
@@ -3601,13 +3818,6 @@
 			{/if}
 		</section>
 	{/if}
-
-		{#if hasRawData}
-			<details class="raw-box">
-				<summary>Raw Daily Report Response</summary>
-				<pre>{JSON.stringify(reportData, null, 2)}</pre>
-			</details>
-		{/if}
 	{/if}
 </section>
 
@@ -3913,6 +4123,17 @@
 		flex: 0 0 auto;
 	}
 
+	.trip-zone-legend img {
+		width: 18px;
+		height: 18px;
+		object-fit: contain;
+		flex: 0 0 auto;
+	}
+
+	.trip-asset-legend-item {
+		background: rgba(15, 23, 42, 0.74) !important;
+	}
+
 	.trip-leaflet-map :global(.leaflet-container) {
 		width: 100%;
 		height: 100%;
@@ -3991,6 +4212,23 @@
 		background: #ef4444;
 	}
 
+	.trip-leaflet-map :global(.trip-asset-marker) {
+		width: 30px;
+		height: 30px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: transparent;
+		border: 0;
+	}
+
+	.trip-leaflet-map :global(.trip-asset-marker img) {
+		width: 30px;
+		height: 30px;
+		object-fit: contain;
+		filter: drop-shadow(0 6px 8px rgba(2, 6, 23, 0.45));
+	}
+
 	.trip-leaflet-map :global(.trip-leaflet-popup .leaflet-popup-content-wrapper) {
 		background: #0f172a;
 		color: #f8fafc;
@@ -4035,6 +4273,49 @@
 		font-weight: 800;
 		line-height: 1.2;
 		border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+	}
+
+	.trip-leaflet-map :global(.trip-asset-popup) {
+		background: #0f172a;
+		color: #f8fafc;
+	}
+
+	.trip-leaflet-map :global(.trip-asset-popup-head) {
+		display: grid;
+		grid-template-columns: 34px minmax(0, 1fr);
+		align-items: center;
+		gap: 10px;
+		padding: 10px 36px 10px 12px;
+		background:
+			linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(37, 99, 235, 0.05)),
+			#111827;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+	}
+
+	.trip-leaflet-map :global(.trip-asset-popup-head img) {
+		width: 30px;
+		height: 30px;
+		object-fit: contain;
+	}
+
+	.trip-leaflet-map :global(.trip-asset-popup-head span) {
+		display: block;
+		color: #60a5fa;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+
+	.trip-leaflet-map :global(.trip-asset-popup-head strong) {
+		display: block;
+		color: #f8fafc;
+		font-size: 13px;
+		font-weight: 800;
+		line-height: 1.2;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.trip-leaflet-map :global(.trip-map-popup-row) {

@@ -21,9 +21,6 @@
 
 	let { active = false } = $props();
 
-	let loadedKeys = $state({});
-	let lastLoadedVesselId = $state(null);
-
 	function pad(value) {
 		return String(value).padStart(2, '0');
 	}
@@ -448,35 +445,6 @@
 		endDateTime = toLocalInputValue(end);
 	});
 
-	$effect(() => {
-		const vesselId = $selectedVesselId;
-
-		if (!vesselId) return;
-		if (vesselId === lastLoadedVesselId) return;
-
-		lastLoadedVesselId = vesselId;
-
-		if (startDateTime && endDateTime) {
-			loadPeriodicalReport();
-		}
-	});
-
-	$effect(() => {
-		if (!active) return;
-		if (!$selectedVesselId) return;
-		if (!startDateTime || !endDateTime) return;
-
-		const key = `${$selectedVesselId}|${startDateTime}|${endDateTime}|${timezoneMode}|${timezoneOffset}`;
-
-		if (loadedKeys[key]) return;
-
-		loadedKeys = {
-			...loadedKeys,
-			[key]: true
-		};
-
-		loadPeriodicalReport();
-	});
 </script>
 
 <section class="periodical-page">
@@ -729,13 +697,6 @@
 				{/if}
 			</div>
 		</section>
-	{/if}
-
-	{#if hasRawData}
-		<details class="raw-box">
-			<summary>Raw Periodical Report Response</summary>
-			<pre>{JSON.stringify(reportData, null, 2)}</pre>
-		</details>
 	{/if}
 {/if}
 </section>

@@ -11,10 +11,9 @@ export function addLeafletZoomAndScale(leaflet, map, options = {}) {
 		zoomOutTitle: options.zoomOutTitle || 'Zoom out'
 	});
 
-	const scaleControl = createSwitchableScaleControl(leaflet, {
+	const scaleControl = createDualScaleControl(leaflet, {
 		position,
-		maxWidth: options.maxWidth || 112,
-		defaultUnit: options.defaultUnit || 'metric'
+		maxWidth: options.maxWidth || 132
 	});
 
 	zoomControl.addTo(map);
@@ -23,15 +22,7 @@ export function addLeafletZoomAndScale(leaflet, map, options = {}) {
 	return { zoomControl, scaleControl };
 }
 
-const SCALE_UNITS = ['metric', 'nautical', 'imperial'];
-const SCALE_UNIT_LABELS = {
-	metric: 'KM',
-	nautical: 'NM',
-	imperial: 'MI'
-};
-const SCALE_UNIT_STORAGE_KEY = 'vms-map-scale-unit';
-
-function createSwitchableScaleControl(leaflet, options = {}) {
+function createDualScaleControl(leaflet, options = {}) {
 	return new (leaflet.Control.extend({
 		options: {
 			position: options.position || 'topleft'
@@ -39,58 +30,42 @@ function createSwitchableScaleControl(leaflet, options = {}) {
 
 		onAdd(map) {
 			this._map = map;
-			this._maxWidth = options.maxWidth || 112;
-			this._unit = getInitialScaleUnit(options.defaultUnit || 'metric');
+			this._maxWidth = options.maxWidth || 132;
 
-			const container = leaflet.DomUtil.create('div', 'leaflet-control vms-scale-control');
-			const bar = leaflet.DomUtil.create('div', 'vms-scale-control__bar', container);
-			const label = leaflet.DomUtil.create('span', 'vms-scale-control__label', bar);
-			const unitSelect = leaflet.DomUtil.create('select', 'vms-scale-control__unit', container);
-			unitSelect.title = 'Change scale unit';
-			unitSelect.setAttribute('aria-label', 'Change scale unit');
-			unitSelect.innerHTML = `
-				<option value="metric">KM</option>
-				<option value="nautical">NM</option>
-				<option value="imperial">MI</option>
-			`;
-			unitSelect.value = this._unit;
+			const container = leaflet.DomUtil.create(
+				'div',
+				'leaflet-control vms-scale-control vms-dual-scale-control'
+			);
+			const scale = createSharedScale(leaflet, container);
 
 			this._container = container;
-			this._bar = bar;
-			this._label = label;
-			this._unitSelect = unitSelect;
+			this._scale = scale;
 
 			leaflet.DomEvent.disableClickPropagation(container);
 			leaflet.DomEvent.disableScrollPropagation(container);
-			leaflet.DomEvent.on(unitSelect, 'change', this._handleUnitChange, this);
 
-			map.on('load moveend zoomend resize', this._update, this);
+			map.on('load move zoom moveend zoomend resize', this._update, this);
 			this._update();
 
 			return container;
 		},
 
 		onRemove(map) {
-			map.off('load moveend zoomend resize', this._update, this);
-			if (this._unitSelect) {
-				leaflet.DomEvent.off(this._unitSelect, 'change', this._handleUnitChange, this);
-			}
-		},
-
-		_handleUnitChange(event) {
-			leaflet.DomEvent.stop(event);
-			const nextUnit = event?.target?.value;
-			this._unit = SCALE_UNITS.includes(nextUnit) ? nextUnit : 'metric';
-			saveScaleUnit(this._unit);
-			this._update();
+			map.off('load move zoom moveend zoomend resize', this._update, this);
 		},
 
 		_update() {
-			if (!this._map || !this._label || !this._bar || !this._unitSelect) return;
+			if (!this._map || !this._scale) return;
 			if (!this._map._loaded) {
-				this._label.textContent = 'Bar = -';
-				this._bar.style.width = `${Math.round(this._maxWidth * 0.72)}px`;
-				this._unitSelect.value = this._unit;
+				setSharedScale(this._scale, {
+					metricLabel: '- km',
+					nauticalLabel: '- NM',
+					totalWidth: Math.round(this._maxWidth * 0.72),
+					metricStart: 0,
+					metricLabelLeft: Math.round(this._maxWidth * 0.36),
+					nauticalStart: Math.round(this._maxWidth * 0.1),
+					nauticalLabelLeft: Math.round(this._maxWidth * 0.41)
+				});
 				return;
 			}
 
@@ -98,62 +73,105 @@ function createSwitchableScaleControl(leaflet, options = {}) {
 			if (!size?.x || !size?.y) return;
 
 			const y = size.y / 2;
+			const maxWidth = getResponsiveMaxWidth(this._maxWidth, size.x);
 			const maxMeters =
 				this._map.distance(
 					this._map.containerPointToLatLng([0, y]),
-					this._map.containerPointToLatLng([this._maxWidth, y])
+					this._map.containerPointToLatLng([maxWidth, y])
 				) || 0;
 
-			const scale = getScaleForUnit(maxMeters, this._unit, this._maxWidth);
-			this._label.textContent = scale.label;
-			this._bar.style.width = `${scale.width}px`;
-			this._unitSelect.value = this._unit;
+			setSharedScale(this._scale, getSharedScale(maxMeters, maxWidth));
 		}
 	}))(options);
 }
 
-function getInitialScaleUnit(defaultUnit) {
-	try {
-		const stored = window?.localStorage?.getItem(SCALE_UNIT_STORAGE_KEY);
-		if (SCALE_UNITS.includes(stored)) return stored;
-	} catch {
-		// Ignore storage access errors; fallback is enough.
-	}
+function createSharedScale(leaflet, container) {
+	const ruler = leaflet.DomUtil.create('div', 'vms-scale-control__ruler', container);
+	const metricLabel = leaflet.DomUtil.create(
+		'span',
+		'vms-scale-control__label vms-scale-control__label--metric',
+		ruler
+	);
+	const bar = leaflet.DomUtil.create('span', 'vms-scale-control__bar', ruler);
+	const metricTick = leaflet.DomUtil.create(
+		'span',
+		'vms-scale-control__tick vms-scale-control__tick--metric',
+		bar
+	);
+	const nauticalTick = leaflet.DomUtil.create(
+		'span',
+		'vms-scale-control__tick vms-scale-control__tick--nautical',
+		bar
+	);
+	const nauticalLabel = leaflet.DomUtil.create(
+		'span',
+		'vms-scale-control__label vms-scale-control__label--nautical',
+		ruler
+	);
 
-	return SCALE_UNITS.includes(defaultUnit) ? defaultUnit : 'metric';
+	return { ruler, bar, metricLabel, metricTick, nauticalLabel, nauticalTick };
 }
 
-function saveScaleUnit(unit) {
-	try {
-		window?.localStorage?.setItem(SCALE_UNIT_STORAGE_KEY, unit);
-	} catch {
-		// Ignore storage access errors.
+function setSharedScale(scaleElement, scale) {
+	if (
+		!scaleElement?.ruler ||
+		!scaleElement?.bar ||
+		!scaleElement?.metricLabel ||
+		!scaleElement?.metricTick ||
+		!scaleElement?.nauticalLabel ||
+		!scaleElement?.nauticalTick
+	) {
+		return;
 	}
+
+	scaleElement.ruler.style.width = `${scale.totalWidth}px`;
+	scaleElement.metricLabel.textContent = scale.metricLabel;
+	scaleElement.nauticalLabel.textContent = scale.nauticalLabel;
+	scaleElement.metricLabel.style.left = `${scale.metricLabelLeft}px`;
+	scaleElement.nauticalLabel.style.left = `${scale.nauticalLabelLeft}px`;
+	scaleElement.metricTick.style.left = `${scale.metricStart}px`;
+	scaleElement.nauticalTick.style.left = `${scale.nauticalStart}px`;
+	scaleElement.bar.setAttribute('aria-label', `${scale.metricLabel} / ${scale.nauticalLabel}`);
 }
 
-function getScaleForUnit(maxMeters, unit, maxWidth) {
+function getResponsiveMaxWidth(maxWidth, mapWidth) {
+	if (!Number.isFinite(mapWidth) || mapWidth <= 0) return maxWidth;
+	return Math.max(76, Math.min(maxWidth, Math.round(mapWidth * 0.28)));
+}
+
+function getSharedScale(maxMeters, maxWidth) {
 	if (!Number.isFinite(maxMeters) || maxMeters <= 0) {
-		return { label: 'Bar = -', width: Math.round(maxWidth * 0.72) };
+		return {
+			metricLabel: '- km',
+			nauticalLabel: '- NM',
+			totalWidth: Math.round(maxWidth * 0.72),
+			metricStart: 0,
+			metricLabelLeft: Math.round(maxWidth * 0.36),
+			nauticalStart: Math.round(maxWidth * 0.1),
+			nauticalLabelLeft: Math.round(maxWidth * 0.41)
+		};
 	}
+
+	const maxKm = maxMeters / 1000;
+	const km = getRoundNumber(maxKm);
+	const metricWidth = getScaleWidth(km / maxKm, maxWidth);
+
+	const maxNauticalMiles = maxMeters / 1852;
+	const nauticalMiles = getRoundNumber(maxNauticalMiles);
+	const nauticalWidth = getScaleWidth(nauticalMiles / maxNauticalMiles, maxWidth);
+	const totalWidth = Math.max(metricWidth, nauticalWidth);
+	const metricStart = Math.max(0, totalWidth - metricWidth);
+	const nauticalStart = Math.max(0, totalWidth - nauticalWidth);
 
 	return {
-		label: getScaleLabel(maxMeters, unit),
-		width: maxWidth
+		metricLabel: `${formatScaleNumber(km)} km`,
+		nauticalLabel: `${formatScaleNumber(nauticalMiles)} NM`,
+		totalWidth,
+		metricStart,
+		metricLabelLeft: metricStart + metricWidth / 2,
+		nauticalStart,
+		nauticalLabelLeft: nauticalStart + nauticalWidth / 2
 	};
-}
-
-function getScaleLabel(meters, unit) {
-	if (!Number.isFinite(meters) || meters <= 0) return 'Bar = -';
-
-	if (unit === 'nautical') {
-		return `Bar = ${formatConvertedScaleNumber(meters / 1852)} NM`;
-	}
-
-	if (unit === 'imperial') {
-		return `Bar = ${formatConvertedScaleNumber(meters / 1609.344)} mi`;
-	}
-
-	return `Bar = ${formatConvertedScaleNumber(meters / 1000)} km`;
 }
 
 function getScaleWidth(ratio, maxWidth) {
@@ -175,13 +193,4 @@ function formatScaleNumber(value) {
 	if (value >= 100 || Number.isInteger(value)) return String(Math.round(value));
 	if (value >= 10) return value.toFixed(1).replace(/\.0$/, '');
 	return value.toFixed(2).replace(/\.?0+$/, '');
-}
-
-function formatConvertedScaleNumber(value) {
-	if (!Number.isFinite(value)) return '-';
-	if (value >= 1000) return String(Math.round(value));
-	if (value >= 100) return value.toFixed(1).replace(/\.0$/, '');
-	if (value >= 10) return value.toFixed(2).replace(/\.?0+$/, '');
-	if (value >= 1) return value.toFixed(3).replace(/\.?0+$/, '');
-	return value.toFixed(6).replace(/\.?0+$/, '');
 }

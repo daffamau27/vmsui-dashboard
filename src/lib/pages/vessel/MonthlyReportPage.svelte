@@ -72,19 +72,6 @@
 
 	let { active = false } = $props();
 
-	let loadedKeys = $state({});
-	let lastLoadedVesselId = $state(null);
-
-	$effect(() => {
-		const vesselId = $selectedVesselId;
-
-		if (!vesselId) return;
-		if (vesselId === lastLoadedVesselId) return;
-
-		lastLoadedVesselId = vesselId;
-		loadMonthlyReport();
-	});
-
 	function pad(value) {
 		return String(value).padStart(2, '0');
 	}
@@ -1018,22 +1005,6 @@
 		loadCurrentUser();
 	});
 
-	$effect(() => {
-		if (!active) return;
-		if (!$selectedVesselId) return;
-		if (!reportMonth) return;
-
-		const key = `${$selectedVesselId}|${reportMonth}|${startDate}|${endDate}|${timezoneMode}|${timezoneOffset}`;
-
-		if (loadedKeys[key]) return;
-
-		loadedKeys = {
-			...loadedKeys,
-			[key]: true
-		};
-
-		loadMonthlyReport();
-	});
 </script>
 
 <section class="monthly-page">
@@ -1289,13 +1260,6 @@
 			<div class="empty-box">Monthly report by date is not available yet.</div>
 		{/if}
 	</section>
-
-		{#if hasRawData}
-			<details class="raw-box">
-				<summary>Raw Monthly Report Response</summary>
-				<pre>{JSON.stringify(reportData, null, 2)}</pre>
-			</details>
-		{/if}
 	{/if}
 </section>
 

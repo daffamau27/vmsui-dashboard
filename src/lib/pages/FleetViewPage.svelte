@@ -64,7 +64,12 @@
 
 	let isSidebarOpen = $state(true);
 	let mapStageContainer;
+	let sidebarToggleButton;
+	let mapLegendElement;
 	let isFleetFullscreen = $state(false);
+	let sidebarToggleOverlapsLegend = $state(false);
+	let sidebarToggleSafeTop = $state(0);
+	let sidebarToggleOverlapFrame = null;
 
 	let mapContainer;
 	let vesselListContainer;
@@ -426,7 +431,7 @@
 
 		if (rpm === null || rpm === undefined || rpm === '') return '-';
 
-		return `${rpm} RPM`;
+		return `${rpm}`;
 	}
 
 	function formatMissingValue(value, suffix = '') {
@@ -2658,6 +2663,51 @@
 		}
 	}
 
+	function doRectsOverlap(rectA, rectB, padding = 0) {
+		if (!rectA || !rectB) return false;
+
+		return !(
+			rectA.right + padding < rectB.left ||
+			rectA.left - padding > rectB.right ||
+			rectA.bottom + padding < rectB.top ||
+			rectA.top - padding > rectB.bottom
+		);
+	}
+
+	function updateSidebarToggleLegendOverlap() {
+		if (!browser) return;
+
+		if (sidebarToggleOverlapFrame) {
+			cancelAnimationFrame(sidebarToggleOverlapFrame);
+		}
+
+		sidebarToggleOverlapFrame = requestAnimationFrame(() => {
+			sidebarToggleOverlapFrame = null;
+
+			if (!isMapLegendOpen || !sidebarToggleButton || !mapLegendElement) {
+				sidebarToggleOverlapsLegend = false;
+				sidebarToggleSafeTop = 0;
+				return;
+			}
+
+			const toggleRect = sidebarToggleButton.getBoundingClientRect();
+			const legendRect = mapLegendElement.getBoundingClientRect();
+			const overlaps = doRectsOverlap(toggleRect, legendRect, 6);
+
+			sidebarToggleOverlapsLegend = overlaps;
+
+			if (!overlaps) {
+				sidebarToggleSafeTop = 0;
+				return;
+			}
+
+			sidebarToggleSafeTop = Math.max(
+				50,
+				Math.round(legendRect.top - toggleRect.height / 2 - 10)
+			);
+		});
+	}
+
 	onMount(async () => {
 		if (!browser) return;
 
@@ -2665,6 +2715,7 @@
 		isSidebarOpen = window.innerWidth > 760;
 
 		window.addEventListener('mobile-panel-open', handleMobilePanelOpen);
+		window.addEventListener('resize', updateSidebarToggleLegendOverlap);
 		document.addEventListener('fullscreenchange', handleFleetFullscreenChange);
 		document.addEventListener('webkitfullscreenchange', handleFleetFullscreenChange);
 		document.addEventListener('mozfullscreenchange', handleFleetFullscreenChange);
@@ -2691,13 +2742,29 @@
 
 		if (browser) {
 			window.removeEventListener('mobile-panel-open', handleMobilePanelOpen);
+			window.removeEventListener('resize', updateSidebarToggleLegendOverlap);
 			document.removeEventListener('fullscreenchange', handleFleetFullscreenChange);
 			document.removeEventListener('webkitfullscreenchange', handleFleetFullscreenChange);
 			document.removeEventListener('mozfullscreenchange', handleFleetFullscreenChange);
 			document.removeEventListener('MSFullscreenChange', handleFleetFullscreenChange);
 		}
 
+		if (sidebarToggleOverlapFrame) {
+			cancelAnimationFrame(sidebarToggleOverlapFrame);
+			sidebarToggleOverlapFrame = null;
+		}
+
 		destroyFleetMap();
+	});
+
+	$effect(() => {
+		isMapLegendOpen;
+		isSidebarOpen;
+		isFleetFullscreen;
+
+		if (!browser || !isFleetMounted) return;
+
+		tick().then(updateSidebarToggleLegendOverlap);
 	});
 
 	$effect(() => {
@@ -2807,7 +2874,10 @@
 	<button
 		type="button"
 		class:sidebar-open-toggle={isSidebarOpen}
+		class:legend-overlap-toggle={sidebarToggleOverlapsLegend}
 		class="sidebar-toggle-btn"
+		style={sidebarToggleOverlapsLegend ? `--sidebar-toggle-safe-top: ${sidebarToggleSafeTop}px;` : ''}
+		bind:this={sidebarToggleButton}
 		aria-expanded={isSidebarOpen}
 		aria-label={isSidebarOpen ? 'Close vessel sidebar' : 'Open vessel sidebar'}
 		title={isSidebarOpen ? 'Hide vessels' : 'Show vessels'}
@@ -3346,7 +3416,7 @@
 					</aside>
 				{/if}
 
-				<div class:legend-collapsed={!isMapLegendOpen} class="map-legend">
+				<div class:legend-collapsed={!isMapLegendOpen} class="map-legend" bind:this={mapLegendElement}>
 					<div class="legend-header">
 						<div>
 							<span class="legend-title">Map Legend</span>
@@ -3503,6 +3573,17 @@
 		--fleet-sidebar-width: 280px;
 		--fleet-gap: 5px;
 		--fleet-main-sidebar-offset: 0px;
+		--fleet-map-glass-bg:
+			linear-gradient(180deg, rgba(15, 23, 42, 0.52), rgba(15, 23, 42, 0.38)),
+			rgba(15, 23, 42, 0.34);
+		--fleet-map-glass-bg-collapsed:
+			linear-gradient(180deg, rgba(15, 23, 42, 0.48), rgba(15, 23, 42, 0.34)),
+			rgba(15, 23, 42, 0.3);
+		--fleet-map-glass-border: rgba(147, 197, 253, 0.14);
+		--fleet-map-glass-shadow:
+			0 18px 40px rgba(15, 23, 42, 0.12),
+			inset 0 1px 0 rgba(255, 255, 255, 0.045);
+		--fleet-map-glass-blur: blur(8px) saturate(1.04);
 		position: relative;
 		height: 100%;
 		min-height: 0;
@@ -4200,7 +4281,7 @@
 	.sidebar-toggle-btn {
 		position: absolute;
 		top: 50%;
-		left: calc(var(--fleet-main-sidebar-offset) - 5px);
+		left: calc(var(--fleet-main-sidebar-offset) + 6px);
 		z-index: 950;
 		width: 32px;
 		min-height: 92px;
@@ -4212,20 +4293,21 @@
 		border: 1px solid rgba(147, 197, 253, 0.42);
 		border-radius: 14px;
 		background:
-			linear-gradient(180deg, rgba(30, 64, 175, 0.28), rgba(15, 23, 42, 0.08)),
-			rgba(15, 23, 42, 0.9);
+			linear-gradient(180deg, rgba(30, 64, 175, 0.18), rgba(15, 23, 42, 0.04)),
+			rgba(15, 23, 42, 0.46);
 		color: #dbeafe;
 		padding: 8px 5px;
 		font-size: 0;
 		font-weight: 800;
 		box-shadow:
-			0 12px 28px rgba(15, 23, 42, 0.22),
-			inset 0 1px 0 rgba(255, 255, 255, 0.08);
-		backdrop-filter: blur(12px) saturate(1.15);
+			0 10px 22px rgba(15, 23, 42, 0.12),
+			inset 0 1px 0 rgba(255, 255, 255, 0.045);
+		backdrop-filter: blur(8px) saturate(1.04);
 		cursor: pointer;
 		transform: translateY(-50%);
 		transition:
 			left 0.22s ease,
+			top 0.22s ease,
 			background 0.18s ease,
 			border-color 0.18s ease,
 			box-shadow 0.18s ease,
@@ -4244,8 +4326,8 @@
 		display: grid;
 		place-items: center;
 		border-radius: 999px;
-		background: rgba(37, 99, 235, 0.55);
-		border: 1px solid rgba(191, 219, 254, 0.28);
+		background: rgba(37, 99, 235, 0.38);
+		border: 1px solid rgba(191, 219, 254, 0.2);
 		font-size: 0;
 		font-weight: 900;
 		box-shadow: 0 6px 14px rgba(37, 99, 235, 0.22);
@@ -4265,6 +4347,11 @@
 
 	.sidebar-toggle-btn.sidebar-open-toggle {
 		left: calc(var(--fleet-main-sidebar-offset) + 10px + var(--fleet-sidebar-width));
+	}
+
+	.sidebar-toggle-btn.legend-overlap-toggle {
+		top: var(--sidebar-toggle-safe-top, 50%);
+		transform: translateY(-50%);
 	}
 
 	.sidebar-toggle-btn span:first-of-type::before {
@@ -4289,12 +4376,16 @@
 	.sidebar-toggle-btn:hover {
 		border-color: rgba(147, 197, 253, 0.8);
 		background:
-			linear-gradient(180deg, rgba(37, 99, 235, 0.36), rgba(15, 23, 42, 0.12)),
-			rgba(15, 23, 42, 0.96);
+			linear-gradient(180deg, rgba(37, 99, 235, 0.24), rgba(15, 23, 42, 0.08)),
+			rgba(15, 23, 42, 0.68);
 		box-shadow:
-			0 16px 34px rgba(15, 23, 42, 0.28),
-			0 0 0 4px rgba(37, 99, 235, 0.09),
-			inset 0 1px 0 rgba(255, 255, 255, 0.1);
+			0 14px 28px rgba(15, 23, 42, 0.18),
+			0 0 0 4px rgba(37, 99, 235, 0.07),
+			inset 0 1px 0 rgba(255, 255, 255, 0.07);
+		transform: translateY(-50%) translateX(1px);
+	}
+
+	.sidebar-toggle-btn.legend-overlap-toggle:hover {
 		transform: translateY(-50%) translateX(1px);
 	}
 
@@ -5077,8 +5168,8 @@
 	}
 
 	:global(.fleet-page .vms-map-controls .leaflet-top.leaflet-left) {
-		left: calc(var(--fleet-main-sidebar-offset) + 12px);
-		top: 12px;
+		left: calc(var(--fleet-main-sidebar-offset) + 32px);
+		top: -5px;
 		padding: 0;
 		z-index: 910;
 		transition:
@@ -5088,6 +5179,48 @@
 
 	:global(.fleet-page .fleet-layout:not(.sidebar-collapsed) .vms-map-controls .leaflet-top.leaflet-left) {
 		left: calc(var(--fleet-main-sidebar-offset) + var(--fleet-sidebar-width) + 16px);
+		top: 12px;
+	}
+
+	:global(.fleet-page .vms-map-controls .leaflet-top.leaflet-left .leaflet-control) {
+		margin-top: 0;
+		margin-left: 0;
+	}
+
+	:global(.fleet-page .vms-map-controls .leaflet-control-zoom) {
+		height: 28px;
+		display: inline-flex;
+		overflow: hidden;
+		border-radius: 10px;
+		vertical-align: top;
+	}
+
+	:global(.fleet-page .vms-map-controls .leaflet-control-zoom a) {
+		width: 28px;
+		height: 28px;
+		line-height: 26px;
+		font-size: 16px;
+	}
+
+	:global(.fleet-page .vms-map-controls .vms-scale-control) {
+		height: 28px;
+		min-height: 28px;
+		min-width: 140px;
+		padding: 3px 8px;
+		margin-left: 8px;
+		vertical-align: top;
+	}
+
+	:global(.fleet-page .vms-map-controls .vms-scale-control__ruler) {
+		height: 22px;
+	}
+
+	:global(.fleet-page .vms-map-controls .vms-scale-control__tick) {
+		height: 7px;
+	}
+
+	:global(.fleet-page .vms-map-controls .vms-scale-control__label) {
+		font-size: 8px;
 	}
 
 	.map-legend {
@@ -5104,14 +5237,10 @@
 		overflow: hidden;
 		padding: 11px;
 		border-radius: 14px;
-		background:
-			linear-gradient(180deg, rgba(15, 23, 42, 0.52), rgba(15, 23, 42, 0.38)),
-			rgba(15, 23, 42, 0.34);
-		border: 1px solid rgba(147, 197, 253, 0.14);
-		box-shadow:
-			0 18px 40px rgba(15, 23, 42, 0.12),
-			inset 0 1px 0 rgba(255, 255, 255, 0.045);
-		backdrop-filter: blur(8px) saturate(1.04);
+		background: var(--fleet-map-glass-bg);
+		border: 1px solid var(--fleet-map-glass-border);
+		box-shadow: var(--fleet-map-glass-shadow);
+		backdrop-filter: var(--fleet-map-glass-blur);
 		z-index: 980;
 		transition:
 			left 0.22s ease,
@@ -5124,20 +5253,14 @@
 	}
 
 	:global(body .app-content .fleet-page .map-legend) {
-		background:
-			linear-gradient(180deg, rgba(15, 23, 42, 0.52), rgba(15, 23, 42, 0.38)),
-			rgba(15, 23, 42, 0.34) !important;
-		border-color: rgba(147, 197, 253, 0.14) !important;
-		box-shadow:
-			0 18px 40px rgba(15, 23, 42, 0.12),
-			inset 0 1px 0 rgba(255, 255, 255, 0.045) !important;
-		backdrop-filter: blur(8px) saturate(1.04) !important;
+		background: var(--fleet-map-glass-bg) !important;
+		border-color: var(--fleet-map-glass-border) !important;
+		box-shadow: var(--fleet-map-glass-shadow) !important;
+		backdrop-filter: var(--fleet-map-glass-blur) !important;
 	}
 
 	:global(body .app-content .fleet-page .map-legend.legend-collapsed) {
-		background:
-			linear-gradient(180deg, rgba(15, 23, 42, 0.48), rgba(15, 23, 42, 0.34)),
-			rgba(15, 23, 42, 0.3) !important;
+		background: var(--fleet-map-glass-bg-collapsed) !important;
 	}
 
 	:global(body .app-content .fleet-page .map-legend .legend-body),
@@ -5148,6 +5271,38 @@
 		background: transparent !important;
 		border-color: transparent !important;
 		box-shadow: none !important;
+	}
+
+	:global(body .app-content .fleet-page .fleet-leaflet-popup .leaflet-popup-content-wrapper),
+	:global(body .app-content .fleet-page .vessel-detail-panel) {
+		background: var(--fleet-map-glass-bg) !important;
+		border-color: var(--fleet-map-glass-border) !important;
+		box-shadow: var(--fleet-map-glass-shadow) !important;
+		backdrop-filter: var(--fleet-map-glass-blur) !important;
+	}
+
+	:global(body .app-content .fleet-page .fleet-popup),
+	:global(body .app-content .fleet-page .fleet-popup-hero),
+	:global(body .app-content .fleet-page .detail-panel-header) {
+		background: transparent !important;
+	}
+
+	:global(body .app-content .fleet-page .vessel-detail-panel .detail-section) {
+		background: rgba(15, 23, 42, 0.16) !important;
+		border-color: rgba(147, 197, 253, 0.1) !important;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025) !important;
+	}
+
+	:global(body .app-content .fleet-page .vessel-detail-panel .detail-item) {
+		background: rgba(15, 23, 42, 0.12) !important;
+		border-color: rgba(147, 197, 253, 0.085) !important;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.018) !important;
+	}
+
+	:global(body .app-content .fleet-page .vessel-detail-panel .simple-row) {
+		background: rgba(15, 23, 42, 0.1) !important;
+		border-color: rgba(147, 197, 253, 0.075) !important;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.014) !important;
 	}
 
 	.fleet-layout:not(.sidebar-collapsed) .map-legend {
@@ -5162,9 +5317,7 @@
 		width: auto;
 		min-width: 0;
 		padding: 8px 9px;
-		background:
-			linear-gradient(180deg, rgba(15, 23, 42, 0.48), rgba(15, 23, 42, 0.34)),
-			rgba(15, 23, 42, 0.3);
+		background: var(--fleet-map-glass-bg-collapsed);
 	}
 
 	.legend-header {
@@ -5304,12 +5457,9 @@
 		place-items: center;
 		flex: 0 0 auto;
 		border-radius: 12px;
-		background: rgba(34, 197, 94, 0.12);
+		background: transparent;
 		border: 0;
-		box-shadow:
-			inset 0 0 0 1px rgba(34, 197, 94, 0.22),
-			0 0 0 4px rgba(34, 197, 94, 0.1),
-			0 8px 16px rgba(15, 23, 42, 0.18);
+		box-shadow: none;
 	}
 
 	.legend-vessel-marker::before {
@@ -5322,16 +5472,14 @@
 		background-position: center;
 		transform: scaleX(1.16);
 		filter:
-			drop-shadow(0 0 4px rgba(255, 255, 255, 0.92))
+			saturate(1.12)
+			brightness(1.04)
 			drop-shadow(0 5px 8px rgba(15, 23, 42, 0.28));
 	}
 
 	.legend-vessel-marker.offline {
-		background: rgba(100, 116, 139, 0.14);
-		box-shadow:
-			inset 0 0 0 1px rgba(148, 163, 184, 0.18),
-			0 0 0 4px rgba(100, 116, 139, 0.1),
-			0 8px 16px rgba(15, 23, 42, 0.22);
+		background: transparent;
+		box-shadow: none;
 	}
 
 	.legend-vessel-marker.offline::before {
@@ -5531,19 +5679,7 @@
 	}
 
 	:global(.vessel-leaflet-icon::before) {
-		content: '';
-		position: absolute;
-		left: 50%;
-		top: 50%;
-		z-index: 0;
-		width: 34px;
-		height: 34px;
-		border-radius: 999px;
-		transform: translate(-50%, -50%);
-		background: rgba(34, 197, 94, 0.18);
-		box-shadow:
-			0 0 0 8px rgba(34, 197, 94, 0.12),
-			0 0 18px rgba(34, 197, 94, 0.44);
+		display: none;
 	}
 
 	:global(.fleet-vessel-marker-icon) {
@@ -5556,7 +5692,8 @@
 		margin: 0;
 		transform-origin: center center;
 		filter:
-			drop-shadow(0 0 4px rgba(255, 255, 255, 0.95))
+			saturate(1.12)
+			brightness(1.04)
 			drop-shadow(0 7px 13px rgba(15, 23, 42, 0.32));
 		transition:
 			filter 0.18s ease,
@@ -5567,18 +5704,15 @@
 		width: 100%;
 		margin: 0;
 		filter:
+			saturate(1.16)
+			brightness(1.08)
 			drop-shadow(0 0 5px rgba(59, 130, 246, 0.98))
 			drop-shadow(0 0 12px rgba(37, 99, 235, 0.62))
 			drop-shadow(0 10px 18px rgba(15, 23, 42, 0.3));
 	}
 
 	:global(.vessel-leaflet-icon.selected::before) {
-		width: 40px;
-		height: 40px;
-		background: rgba(59, 130, 246, 0.2);
-		box-shadow:
-			0 0 0 9px rgba(59, 130, 246, 0.14),
-			0 0 22px rgba(37, 99, 235, 0.54);
+		display: none;
 	}
 
 	:global(.vessel-leaflet-icon.offline .fleet-vessel-marker-icon) {
@@ -5591,19 +5725,16 @@
 	}
 
 	:global(.vessel-leaflet-icon.offline::before) {
-		background: rgba(239, 68, 68, 0.17);
-		box-shadow:
-			0 0 0 8px rgba(239, 68, 68, 0.11),
-			0 0 18px rgba(239, 68, 68, 0.4);
+		display: none;
 	}
 
 	:global(.vessel-leaflet-icon.offline.selected .fleet-vessel-marker-icon) {
 		opacity: 0.82;
 		filter:
-			grayscale(0.7)
-			brightness(0.82)
-			drop-shadow(0 0 5px rgba(248, 113, 113, 0.88))
-			drop-shadow(0 0 12px rgba(239, 68, 68, 0.5))
+			grayscale(1)
+			brightness(0.88)
+			drop-shadow(0 0 5px rgba(59, 130, 246, 0.72))
+			drop-shadow(0 0 12px rgba(37, 99, 235, 0.42))
 			drop-shadow(0 10px 18px rgba(15, 23, 42, 0.3));
 	}
 
@@ -6159,13 +6290,11 @@
 	   ========================= */
 
 	:global(.fleet-leaflet-popup .leaflet-popup-content-wrapper) {
-		border: 1px solid rgba(59, 130, 246, 0.24);
+		border: 1px solid var(--fleet-map-glass-border);
 		border-radius: 16px;
-		background: rgba(10, 14, 26, 0.96);
-		box-shadow:
-			0 24px 60px rgba(0, 0, 0, 0.48),
-			0 0 0 1px rgba(255, 255, 255, 0.04);
-		backdrop-filter: blur(18px) saturate(1.3);
+		background: var(--fleet-map-glass-bg);
+		box-shadow: var(--fleet-map-glass-shadow);
+		backdrop-filter: var(--fleet-map-glass-blur);
 	}
 
 	:global(.fleet-leaflet-popup .leaflet-popup-content) {
@@ -6174,8 +6303,8 @@
 
 	:global(.fleet-leaflet-popup .leaflet-popup-tip) {
 		border: none;
-		background: #0a0e1a;
-		box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.25);
+		background: rgba(15, 23, 42, 0.42);
+		box-shadow: 4px 4px 12px rgba(15, 23, 42, 0.12);
 	}
 
 	:global(.fleet-leaflet-popup .leaflet-popup-close-button) {
@@ -6202,10 +6331,7 @@
 		width: 100%;
 		max-width: 100%;
 		box-sizing: border-box;
-		background:
-			radial-gradient(circle at 5% 0%, rgba(59, 130, 246, 0.16), transparent 36%),
-			linear-gradient(180deg, rgba(30, 41, 59, 0.25), rgba(10, 14, 26, 0)),
-			#0a0e1a;
+		background: transparent;
 	}
 
 	:global(.fleet-popup-hero) {
@@ -6437,13 +6563,11 @@
 		width: 360px;
 		max-width: calc(100% - 28px);
 		max-height: none;
-		border: 1px solid rgba(59, 130, 246, 0.2);
+		border: 1px solid var(--fleet-map-glass-border);
 		border-radius: 16px;
-		background: rgba(10, 14, 26, 0.94);
-		box-shadow:
-			0 24px 64px rgba(0, 0, 0, 0.5),
-			0 0 0 1px rgba(255, 255, 255, 0.035);
-		backdrop-filter: blur(22px) saturate(1.35);
+		background: var(--fleet-map-glass-bg);
+		box-shadow: var(--fleet-map-glass-shadow);
+		backdrop-filter: var(--fleet-map-glass-blur);
 		animation: detailPanelIn 220ms var(--ease-spring);
 	}
 
@@ -6651,20 +6775,21 @@
 
 	.detail-panel-body {
 		padding: 8px;
-		background: rgba(5, 9, 18, 0.32);
+		background: rgba(5, 9, 18, 0.12);
 	}
 
 	.detail-section {
 		margin-bottom: 7px;
 		padding: 10px;
-		border: 1px solid rgba(255, 255, 255, 0.07);
+		border: 1px solid rgba(147, 197, 253, 0.1);
 		border-radius: 14px;
-		background: rgba(255, 255, 255, 0.025);
+		background: rgba(15, 23, 42, 0.16);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
 	}
 
 	.detail-section:last-child {
 		margin-bottom: 0;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+		border-bottom: 1px solid rgba(147, 197, 253, 0.1);
 	}
 
 	.detail-section-heading {
@@ -6954,9 +7079,10 @@
 
 	.detail-item {
 		padding: 7px 8px;
-		border: 1px solid rgba(255, 255, 255, 0.06);
+		border: 1px solid rgba(147, 197, 253, 0.085);
 		border-radius: 10px;
-		background: rgba(255, 255, 255, 0.025);
+		background: rgba(15, 23, 42, 0.12);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.018);
 	}
 
 	.detail-item span {
@@ -6973,11 +7099,11 @@
 	}
 
 	.connection-time-item.latest-connected {
-		border-color: rgba(34, 197, 94, 0.42);
+		border-color: rgba(34, 197, 94, 0.34);
 		background:
-			linear-gradient(145deg, rgba(34, 197, 94, 0.16), rgba(34, 197, 94, 0.045)),
-			rgba(255, 255, 255, 0.025);
-		box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.86);
+			linear-gradient(145deg, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0.025)),
+			rgba(15, 23, 42, 0.12);
+		box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.72);
 	}
 
 	.connection-time-item.latest-connected span,
@@ -6986,11 +7112,11 @@
 	}
 
 	.connection-time-item.latest-disconnected {
-		border-color: rgba(248, 113, 113, 0.44);
+		border-color: rgba(248, 113, 113, 0.34);
 		background:
-			linear-gradient(145deg, rgba(239, 68, 68, 0.16), rgba(239, 68, 68, 0.045)),
-			rgba(255, 255, 255, 0.025);
-		box-shadow: inset 3px 0 0 rgba(239, 68, 68, 0.88);
+			linear-gradient(145deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.025)),
+			rgba(15, 23, 42, 0.12);
+		box-shadow: inset 3px 0 0 rgba(239, 68, 68, 0.72);
 	}
 
 	.connection-time-item.latest-disconnected span,
@@ -7012,9 +7138,10 @@
 		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: center;
 		padding: 6px 8px;
-		border: 1px solid rgba(255, 255, 255, 0.055);
+		border: 1px solid rgba(147, 197, 253, 0.075);
 		border-radius: 9px;
-		background: rgba(255, 255, 255, 0.025);
+		background: rgba(15, 23, 42, 0.1);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.014);
 		font-size: 9px;
 	}
 
@@ -7171,6 +7298,11 @@
 				calc(var(--fleet-main-sidebar-offset) + 274px),
 				calc(100vw - 50px)
 			);
+		}
+
+		.sidebar-toggle-btn.legend-overlap-toggle {
+			top: 50%;
+			transform: translateY(-50%);
 		}
 
 		.sidebar-toggle-btn span {

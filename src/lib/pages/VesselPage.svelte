@@ -740,7 +740,6 @@
 			>
 				<span class="vessel-selector-icon" aria-hidden="true">🚢</span>
 				<span class="selector-copy">
-					<small>Active vessel</small>
 					<strong>{selectedVessel}</strong>
 				</span>
 				<span>▾</span>
@@ -1590,7 +1589,7 @@
 	.selector-copy strong {
 		overflow: hidden;
 		color: var(--text-primary);
-		font-size: 11px;
+		font-size: 15px;
 		font-weight: 900;
 		line-height: 1.25;
 		text-overflow: ellipsis;

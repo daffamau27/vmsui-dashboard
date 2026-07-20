@@ -2941,17 +2941,19 @@
 							</p>
 						</div>
 
-						{#if selectedUser && mode === 'edit'}
-							<button
-								type="button"
-								class:danger-button={!selectedUser.deletedAt}
-								class:activate-button={selectedUser.deletedAt}
-								on:click={() => toggleUserStatus(selectedUser)}
-								disabled={actionLoadingId === selectedUser.id}
-							>
-								{selectedUser.deletedAt ? 'Activate' : 'Deactivate'}
-							</button>
-						{/if}
+						<div class="editor-toolbar-actions">
+							{#if selectedUser && mode === 'edit'}
+								<button
+									type="button"
+									class:danger-button={!selectedUser.deletedAt}
+									class:activate-button={selectedUser.deletedAt}
+									on:click={() => toggleUserStatus(selectedUser)}
+									disabled={actionLoadingId === selectedUser.id}
+								>
+									{selectedUser.deletedAt ? 'Activate' : 'Deactivate'}
+								</button>
+							{/if}
+						</div>
 					</div>
 
 					{#if selectedUserLoading}
@@ -6257,6 +6259,7 @@
 		margin-top: 14px;
 	}
 
+	.editor-toolbar-actions,
 	.vessel-toolbar-actions,
 	.company-registry-head,
 	.company-actions {
@@ -6266,6 +6269,7 @@
 		flex-wrap: wrap;
 	}
 
+	.editor-toolbar-actions,
 	.vessel-toolbar-actions {
 		justify-content: flex-end;
 	}
