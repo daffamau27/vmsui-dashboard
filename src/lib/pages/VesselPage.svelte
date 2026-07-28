@@ -134,6 +134,10 @@
 		$selectedVesselInfo?.vesselName || $selectedVesselInfo?.name || 'Select Vessel'
 	);
 
+	let vesselPageKey = $derived(
+		String($selectedVesselId || getVesselId($selectedVesselInfo) || 'no-vessel')
+	);
+
 	let latestStatusInterval = null;
 	let latestStatusRequestId = 0;
 	let todayDataReceivedRequestId = 0;
@@ -463,6 +467,29 @@
 		}, 30000);
 	}
 
+	function resetVesselScopedUiState() {
+		pageStatusMap = {};
+		todayDataReceived = '-';
+		todayDataReceivedStats = { received: '-', total: 1440 };
+		latestVesselStatus = {
+			queue: '-',
+			sdcard: '-',
+			sdCardAvailable: false,
+			sdCardUsed: '-',
+			sdCardCapacity: '-',
+			online: false
+		};
+
+		latestStatusRequestId += 1;
+		todayDataReceivedRequestId += 1;
+
+		const activeKey = $activeVesselMenu;
+		mountedPages = {
+			dashboard: true,
+			...(activeKey && activeKey !== 'dashboard' ? { [activeKey]: true } : {})
+		};
+	}
+
 	function isPageActive(key) {
 		return active && $activeVesselMenu === key;
 	}
@@ -538,6 +565,7 @@
 		if (String(vesselId) === String(lastLatestStatusVesselId)) return;
 
 		lastLatestStatusVesselId = vesselId;
+		resetVesselScopedUiState();
 		startLatestStatusPolling(vesselId);
 	});
 
@@ -588,12 +616,10 @@
 				const selected = found || vessels[0];
 
 				setSelectedVessel(selected);
-				startLatestStatusPolling(getVesselId(selected));
 			} else if (vessels.length) {
 				const selected = vessels[0];
 
 				setSelectedVessel(selected);
-				startLatestStatusPolling(getVesselId(selected));
 			}
 		} catch (err) {
 			console.error('[VESSEL_PAGE][LOAD_VESSELS][ERROR]', err);
@@ -617,8 +643,6 @@
 		vesselSearch = '';
 
 		console.log('[VESSEL_PAGE][VESSEL_SELECTED]', vessel);
-
-		startLatestStatusPolling(getVesselId(vessel));
 	}
 
 	onMount(() => {
@@ -814,53 +838,55 @@
 				</div>
 			</section>
 		{:else}
-			{#if shouldMountPage('dashboard') && isPageAllowed('dashboard')}
-				<section class="vessel-page" class:active-vessel-page={isPageActive('dashboard')}>
-					<VesselDashboardPage active={isPageActive('dashboard')} />
-				</section>
-			{/if}
+			{#key vesselPageKey}
+				{#if shouldMountPage('dashboard') && isPageAllowed('dashboard')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('dashboard')}>
+						<VesselDashboardPage active={isPageActive('dashboard')} />
+					</section>
+				{/if}
 
-			{#if shouldMountPage('daily-report') && isPageAllowed('daily-report')}
-				<section class="vessel-page" class:active-vessel-page={isPageActive('daily-report')}>
-					<DailyReportPage active={isPageActive('daily-report')} />
-				</section>
-			{/if}
+				{#if shouldMountPage('daily-report') && isPageAllowed('daily-report')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('daily-report')}>
+						<DailyReportPage active={isPageActive('daily-report')} />
+					</section>
+				{/if}
 
-			{#if shouldMountPage('monthly-report') && isPageAllowed('monthly-report')}
-				<section class="vessel-page" class:active-vessel-page={isPageActive('monthly-report')}>
-					<MonthlyReportPage active={isPageActive('monthly-report')} />
-				</section>
-			{/if}
+				{#if shouldMountPage('monthly-report') && isPageAllowed('monthly-report')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('monthly-report')}>
+						<MonthlyReportPage active={isPageActive('monthly-report')} />
+					</section>
+				{/if}
 
-			{#if shouldMountPage('periodical-report') && isPageAllowed('periodical-report')}
-				<section class="vessel-page" class:active-vessel-page={isPageActive('periodical-report')}>
-					<PeriodicalReportPage active={isPageActive('periodical-report')} />
-				</section>
-			{/if}
+				{#if shouldMountPage('periodical-report') && isPageAllowed('periodical-report')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('periodical-report')}>
+						<PeriodicalReportPage active={isPageActive('periodical-report')} />
+					</section>
+				{/if}
 
-			{#if shouldMountPage('voyage-plan') && isPageAllowed('voyage-plan')}
-				<section class="vessel-page" class:active-vessel-page={isPageActive('voyage-plan')}>
-					<VoyagePlanPage active={isPageActive('voyage-plan')} />
-				</section>
-			{/if}
+				{#if shouldMountPage('voyage-plan') && isPageAllowed('voyage-plan')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('voyage-plan')}>
+						<VoyagePlanPage active={isPageActive('voyage-plan')} />
+					</section>
+				{/if}
 
-			{#if shouldMountPage('trace') && isPageAllowed('trace')}
-				<section class="vessel-page" class:active-vessel-page={isPageActive('trace')}>
-					<TracePage active={isPageActive('trace')} />
-				</section>
-			{/if}
+				{#if shouldMountPage('trace') && isPageAllowed('trace')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('trace')}>
+						<TracePage active={isPageActive('trace')} />
+					</section>
+				{/if}
 
-			{#if shouldMountPage('data-log') && isPageAllowed('data-log')}
-				<section class="vessel-page" class:active-vessel-page={isPageActive('data-log')}>
-					<DataLogPage active={isPageActive('data-log')} />
-				</section>
-			{/if}
+				{#if shouldMountPage('data-log') && isPageAllowed('data-log')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('data-log')}>
+						<DataLogPage active={isPageActive('data-log')} />
+					</section>
+				{/if}
 
-			{#if shouldMountPage('fuel-management') && isPageAllowed('fuel-management')}
-				<section class="vessel-page" class:active-vessel-page={isPageActive('fuel-management')}>
-					<FuelManagementPage active={isPageActive('fuel-management')} />
-				</section>
-			{/if}
+				{#if shouldMountPage('fuel-management') && isPageAllowed('fuel-management')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('fuel-management')}>
+						<FuelManagementPage active={isPageActive('fuel-management')} />
+					</section>
+				{/if}
+			{/key}
 		{/if}
 	</main>
 </section>

@@ -1,27 +1,44 @@
 <script>
 	import { onMount } from 'svelte';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
-	import { getDataLogData, getDataLogExcelUrl } from '$lib/api/dataLogApi.js';
+	import {
+		getAvailableDataLogColumns,
+		getDataLogData,
+		getDataLogExcelUrl
+	} from '$lib/api/dataLogApi.js';
 
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import { downloadApiFile, apiRequest } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 
 	let loading = $state(false);
+	let loadingMore = $state(false);
 	let exporting = $state(false);
 	let error = $state('');
 	let logData = $state(null);
+	let loadedRows = $state([]);
+	let dataLogPagination = $state(null);
+	let dataLogPage = $state(1);
+	let dataLogRequestId = 0;
+	const DATA_LOG_PAGE_SIZE = 100;
 
 	let startDateTime = $state('');
 	let endDateTime = $state('');
 	let timezoneMode = $state('auto');
 	let timezoneOffset = $state('+07:00');
+	let activeTimePreset = $state('');
+	let hasLoadedDateRange = $state(false);
 
 	let { active = false } = $props();
 
 	let currentUser = $state(null);
 	let currentUserLoading = $state(false);
 	let currentUserError = $state('');
+	let availableColumnsData = $state(null);
+	let availableColumnsLoading = $state(false);
+	let availableColumnsError = $state('');
+	let availableColumnsVesselId = $state(null);
 
 	async function loadCurrentUser() {
 		if (currentUser || currentUserLoading) return currentUser;
@@ -81,6 +98,7 @@
 	let canViewFuelEmsExternal = $derived(hasPermission('view_fuel_ems_external'));
 	let canViewFuelEngineMaker = $derived(hasPermission('view_fuel_engine_maker'));
 	let canManageDataLogOverride = $derived(hasPermission('manage_data_log_override'));
+	let canViewDataLogAvailableColumns = $derived(hasPermission('view_data_log_available_columns'));
 
 	let overrideDownloadingTemplate = $state(false);
 	let overrideImporting = $state(false);
@@ -207,6 +225,36 @@
 		return Array.isArray(columns) ? columns.filter(isDisplayColumn) : [];
 	}
 
+	function getPayloadRows(payload = {}) {
+		return pickArray(
+			payload?.details,
+			payload?.rows,
+			payload?.logs,
+			payload?.items,
+			payload?.data,
+			payload?.table,
+			Array.isArray(payload) ? payload : []
+		);
+	}
+
+	function getPayloadColumns(payload = {}) {
+		if (Array.isArray(payload?.available_columns)) return payload.available_columns;
+		if (Array.isArray(payload?.columns)) return payload.columns;
+		if (Array.isArray(payload?.visible_columns)) return payload.visible_columns;
+
+		const rows = getPayloadRows(payload);
+		const keys = new Set();
+
+		for (const row of rows.slice(0, 25)) {
+			Object.keys(row || {}).forEach((key) => keys.add(key));
+		}
+
+		const preferred = selectedColumns.filter((key) => keys.has(key));
+		const extras = [...keys].filter((key) => !preferred.includes(key));
+
+		return [...preferred, ...extras];
+	}
+
 	let selectedColumns = $state([
 		'timestamp',
 		'latitude',
@@ -234,15 +282,31 @@
 
 	let apiAvailableColumns = $derived(
 		filterDisplayColumns(
-			Array.isArray(normalizedData?.available_columns) ? normalizedData.available_columns : []
+			Array.isArray(availableColumnsData?.available_columns)
+				? availableColumnsData.available_columns
+				: Array.isArray(normalizedData?.available_columns)
+					? normalizedData.available_columns
+					: []
 		)
 	);
 
+	let responseColumns = $derived(filterDisplayColumns(getPayloadColumns(normalizedData)));
+
 	let visibleColumns = $derived(
-		apiAvailableColumns.length ? apiAvailableColumns : filterDisplayColumns(selectedColumns)
+		responseColumns.length
+			? responseColumns
+			: apiAvailableColumns.length
+				? apiAvailableColumns
+				: filterDisplayColumns(selectedColumns)
 	);
 
-	let displaySelectedColumns = $derived(filterDisplayColumns(selectedColumns));
+	let displaySelectedColumns = $derived(
+		filterDisplayColumns(selectedColumns).filter((column) => visibleColumns.includes(column)).length
+			? filterDisplayColumns(selectedColumns).filter((column) => visibleColumns.includes(column))
+			: responseColumns.length
+				? responseColumns
+				: visibleColumns
+	);
 
 	function parseRowTimestamp(row) {
 		const value = row?.timestamp_utc || row?.timestamp || row?.ts || row?.time || row?.datetime;
@@ -274,6 +338,65 @@
 		)}:${pad(date.getMinutes())}`;
 	}
 
+	const TIME_PRESETS = [
+		{ id: 'today', label: 'Today' },
+		{ id: 'yesterday', label: 'Yesterday' },
+		{ id: 'two-days-before', label: '2 Days Before' },
+		{ id: 'last-7-days', label: 'Last 7 Days' },
+		{ id: 'last-30-days', label: 'Last 30 Days' }
+	];
+
+	function startOfLocalDay(date) {
+		return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+	}
+
+	function endOfLocalDay(date) {
+		return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 0, 0);
+	}
+
+	function addLocalDays(date, amount) {
+		const nextDate = new Date(date);
+		nextDate.setDate(nextDate.getDate() + amount);
+		return nextDate;
+	}
+
+	function applyTimePreset(presetId) {
+		const now = new Date();
+		let start = null;
+		let end = null;
+
+		if (presetId === 'today') {
+			start = startOfLocalDay(now);
+			end = startOfLocalDay(addLocalDays(now, 1));
+		} else if (presetId === 'yesterday') {
+			const yesterday = addLocalDays(now, -1);
+			start = startOfLocalDay(yesterday);
+			end = startOfLocalDay(now);
+		} else if (presetId === 'two-days-before') {
+			const twoDaysBefore = addLocalDays(now, -2);
+			start = startOfLocalDay(twoDaysBefore);
+			end = startOfLocalDay(addLocalDays(now, -1));
+		} else if (presetId === 'last-7-days') {
+			end = startOfLocalDay(now);
+			start = startOfLocalDay(addLocalDays(now, -7));
+		} else if (presetId === 'last-30-days') {
+			end = startOfLocalDay(now);
+			start = startOfLocalDay(addLocalDays(now, -30));
+		}
+
+		if (!start || !end) return;
+
+		activeTimePreset = presetId;
+		startDateTime = toLocalInputValue(start);
+		endDateTime = toLocalInputValue(end);
+		hasLoadedDateRange = false;
+	}
+
+	function clearActiveTimePreset() {
+		activeTimePreset = '';
+		hasLoadedDateRange = false;
+	}
+
 	function toApiDateTime(value) {
 		if (!value) return '';
 
@@ -290,7 +413,25 @@
 		if (value === undefined || value === null || value === '') return '-';
 
 		if (typeof value === 'number') {
+			if (Number.isNaN(value)) return 'nan';
+			if (!Number.isFinite(value)) return String(value);
 			return Number.isInteger(value) ? String(value) : value.toFixed(2);
+		}
+
+		if (typeof value === 'string') {
+			const trimmed = value.trim();
+			const normalized = trimmed.toLowerCase();
+
+			if (
+				normalized === 'null' ||
+				normalized === 'undefined' ||
+				normalized === 'infinity' ||
+				normalized === '-infinity'
+			) {
+				return '-';
+			}
+
+			return trimmed || '-';
 		}
 
 		if (typeof value === 'boolean') {
@@ -298,6 +439,26 @@
 		}
 
 		return value;
+	}
+
+	function normalizeLookupKey(key) {
+		return String(key || '')
+			.trim()
+			.toLowerCase()
+			.replace(/[^a-z0-9]/g, '');
+	}
+
+	function getRowColumnValue(row, column) {
+		if (!row || !column) return undefined;
+
+		if (Object.prototype.hasOwnProperty.call(row, column)) {
+			return row[column];
+		}
+
+		const wantedKey = normalizeLookupKey(column);
+		const matchedKey = Object.keys(row).find((key) => normalizeLookupKey(key) === wantedKey);
+
+		return matchedKey ? row[matchedKey] : undefined;
 	}
 
 	function formatCellValue(value, column) {
@@ -411,34 +572,82 @@
 
 	let normalizedData = $derived(logData?.data || logData || {});
 
-	let dataRows = $derived(
-		pickArray(
-			normalizedData?.details,
-			normalizedData?.rows,
-			normalizedData?.logs,
-			normalizedData?.items,
-			normalizedData?.data,
-			normalizedData?.table,
-			Array.isArray(normalizedData) ? normalizedData : []
-		)
-			.slice()
-			.sort((a, b) => parseRowTimestamp(b) - parseRowTimestamp(a))
+	let dataRows = $derived(loadedRows);
+
+	let hasNextDataLogPage = $derived(
+		Boolean(dataLogPagination?.hasNext) ||
+			(Number(dataLogPagination?.page || dataLogPage) <
+				Number(dataLogPagination?.totalPages || dataLogPage))
 	);
 
 	let hasRawData = $derived(Boolean(logData));
+	let shouldShowDateRangeOverlay = $derived(
+		!hasLoadedDateRange || !startDateTime || !endDateTime
+	);
 
-	async function loadDataLog() {
+	async function loadAvailableColumns() {
+		if (!$selectedVesselId || !canViewDataLogAvailableColumns || availableColumnsLoading) {
+			return availableColumnsData;
+		}
+
+		if (availableColumnsData && availableColumnsVesselId === $selectedVesselId) {
+			return availableColumnsData;
+		}
+
+		availableColumnsLoading = true;
+		availableColumnsError = '';
+
+		try {
+			const result = await getAvailableDataLogColumns({
+				vesselId: $selectedVesselId
+			});
+
+			const payload = result?.data || result || {};
+			availableColumnsData = payload;
+			availableColumnsVesselId = $selectedVesselId;
+
+			const columns = filterDisplayColumns(payload?.available_columns || []);
+			if (columns.length) {
+				selectedColumns = columns;
+			}
+
+			return payload;
+		} catch (err) {
+			console.error('[DATA_LOG_AVAILABLE_COLUMNS_ERROR]', err);
+			availableColumnsError = err?.message || 'Failed to load available data log columns.';
+			availableColumnsData = null;
+			return null;
+		} finally {
+			availableColumnsLoading = false;
+		}
+	}
+
+	async function loadDataLog({ page = 1, append = false } = {}) {
 		if (!$selectedVesselId) {
 			error = 'No vessel has been selected from Fleet View.';
 			logData = null;
+			loadedRows = [];
+			dataLogPagination = null;
+			hasLoadedDateRange = false;
 			return;
 		}
 
 		await loadCurrentUser();
+		await loadAvailableColumns();
 
-		const requestedColumns = filterDisplayColumns(selectedColumns);
+		const requestId = ++dataLogRequestId;
 
-		loading = true;
+		if (append) {
+			if (loading || loadingMore || !hasNextDataLogPage) return;
+			loadingMore = true;
+		} else {
+			loading = true;
+			loadedRows = [];
+			logData = null;
+			dataLogPagination = null;
+			dataLogPage = 1;
+		}
+
 		error = '';
 
 		try {
@@ -448,33 +657,82 @@
 				end: toApiDateTime(endDateTime),
 				timezoneMode,
 				timezoneOffset,
-				columns: requestedColumns.join(',')
+				columns: '',
+				page,
+				pageSize: DATA_LOG_PAGE_SIZE
 			});
 
-			logData = result;
+			if (requestId !== dataLogRequestId) return;
 
 			const payload = result?.data || result || {};
+			const rows = getPayloadRows(payload);
+			const nextRows = append ? [...loadedRows, ...rows] : rows;
+			const pagination = payload?.pagination || {
+				page,
+				pageSize: DATA_LOG_PAGE_SIZE,
+				totalItems: nextRows.length,
+				totalPages: page,
+				hasNext: false,
+				hasPrevious: page > 1
+			};
 			const stats = payload?.stats || {};
+
+			loadedRows = nextRows;
+			dataLogPagination = pagination;
+			dataLogPage = Number(pagination?.page || page);
+			if (!append) {
+				hasLoadedDateRange = true;
+			}
+			logData = {
+				...payload,
+				details: nextRows,
+				pagination
+			};
 
 			setPageStatus({
 				pageKey: 'data-log',
 				dataReceived:
 					stats?.received_slots !== undefined && stats?.total_slots !== undefined
 						? `${stats.received_slots} of ${stats.total_slots} (${stats.percentage ?? '-'}%)`
-						: `${payload?.details?.length ?? 0} rows`,
+						: `${nextRows.length} of ${pagination?.totalItems ?? nextRows.length} rows`,
 				sourcePage: 'Data Log'
 			});
 
-			if (Array.isArray(payload.available_columns) && payload.available_columns.length) {
+			const payloadColumns = filterDisplayColumns(getPayloadColumns(payload));
+			if (payloadColumns.length && !append) {
+				selectedColumns = payloadColumns;
+			} else if (Array.isArray(payload.available_columns) && payload.available_columns.length) {
 				selectedColumns = filterDisplayColumns(payload.available_columns);
 			}
 			console.log('[DATA_LOG_DATA]', result);
 		} catch (err) {
 			console.error('[DATA_LOG_ERROR]', err);
 			error = err?.message || 'Failed to load data log.';
-			logData = null;
+			if (!append) {
+				logData = null;
+				loadedRows = [];
+				dataLogPagination = null;
+				hasLoadedDateRange = false;
+			}
 		} finally {
 			loading = false;
+			loadingMore = false;
+		}
+	}
+
+	function loadMoreDataLog() {
+		if (!hasNextDataLogPage || loading || loadingMore) return;
+		loadDataLog({ page: dataLogPage + 1, append: true });
+	}
+
+	function handleDataLogTableScroll(event) {
+		const element = event?.currentTarget;
+		if (!element || !hasNextDataLogPage || loading || loadingMore) return;
+
+		const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+
+		if (distanceFromBottom < 320) {
+			loadMoreDataLog();
 		}
 	}
 
@@ -498,7 +756,7 @@
 				end: toApiDateTime(endDateTime),
 				timezoneMode,
 				timezoneOffset,
-				columns: requestedColumns.join(',')
+				columns: canViewDataLogAvailableColumns ? requestedColumns.join(',') : ''
 			});
 
 			const safeVesselName = String(vesselName || 'vessel')
@@ -741,40 +999,75 @@
 	<section class="filter-card">
 		<label>
 			<span>Start</span>
-			<input type="datetime-local" bind:value={startDateTime} />
+			<input
+				type="datetime-local"
+				bind:value={startDateTime}
+				oninput={clearActiveTimePreset}
+			/>
 		</label>
 
 		<label>
 			<span>End</span>
-			<input type="datetime-local" bind:value={endDateTime} />
+			<input type="datetime-local" bind:value={endDateTime} oninput={clearActiveTimePreset} />
 		</label>
 
 		<label>
 			<span>Timezone Mode</span>
-			<select bind:value={timezoneMode}>
-				<option value="auto">Auto</option>
-				<option value="manual">Manual</option>
+			<select bind:value={timezoneMode} onchange={() => (hasLoadedDateRange = false)}>
+				{#each TIMEZONE_MODE_OPTIONS as option}
+					<option value={option.value}>{option.label}</option>
+				{/each}
 			</select>
 		</label>
 
 		{#if timezoneMode === 'manual'}
 			<label>
 				<span>Timezone Offset</span>
-				<input type="text" bind:value={timezoneOffset} placeholder="+07:00" />
+				<select bind:value={timezoneOffset} onchange={() => (hasLoadedDateRange = false)}>
+					{#each TIMEZONE_OFFSET_OPTIONS as option}
+						<option value={option.value}>{option.label}</option>
+					{/each}
+				</select>
 			</label>
 		{/if}
 
 		<div class="filter-actions">
-			<button type="button" class="primary-btn" onclick={loadDataLog} disabled={loading}>
+			<button
+				type="button"
+				class="primary-btn"
+				onclick={() => loadDataLog()}
+				disabled={loading || loadingMore || !startDateTime || !endDateTime}
+			>
 				{loading ? 'Loading...' : 'Load Data'}
 			</button>
 
-			<button type="button" class="export-btn" onclick={handleExportExcel} disabled={exporting}>
+			<button
+				type="button"
+				class="export-btn"
+				onclick={handleExportExcel}
+				disabled={exporting || loading || shouldShowDateRangeOverlay}
+			>
 				{exporting ? 'Exporting...' : 'Export Excel'}
 			</button>
 		</div>
+
+		<div class="time-preset-row" aria-label="Data log time presets">
+			<span>Preset</span>
+			<div class="time-preset-list">
+				{#each TIME_PRESETS as preset}
+					<button
+						type="button"
+						class:active={activeTimePreset === preset.id}
+						onclick={() => applyTimePreset(preset.id)}
+					>
+						{preset.label}
+					</button>
+				{/each}
+			</div>
+		</div>
 	</section>
 
+	<div class="date-range-result-area" class:is-locked={shouldShowDateRangeOverlay}>
 	{#if canManageDataLogOverride}
 		<section class="override-card">
 			<div class="override-header">
@@ -854,14 +1147,21 @@
 			</div>
 
 			<div class="column-actions">
+				{#if availableColumnsLoading}
+					<span class="column-loading">Loading columns...</span>
+				{/if}
 				<button type="button" onclick={selectAllColumns}>Select All</button>
 				<button type="button" onclick={clearColumns}>Basic</button>
 			</div>
 		</div>
 
+		{#if availableColumnsError}
+			<div class="column-warning">{availableColumnsError}</div>
+		{/if}
+
 		<div class="column-grid">
 			{#each visibleColumns as column}
-				<label class="column-item">
+				<label class="column-item" class:is-checked={selectedColumns.includes(column)}>
 					<input
 						type="checkbox"
 						checked={selectedColumns.includes(column)}
@@ -885,7 +1185,7 @@
 		<div class="status-box error-box">{currentUserError}</div>
 	{/if}
 
-	{#if loading}
+	{#if loading && !dataRows.length}
 		<LoadingSkeleton
 			label="Loading telemetry log"
 			variant="data-log"
@@ -900,11 +1200,17 @@
 					<h2>1-Minute Data Log</h2>
 				</div>
 
-				<strong>{dataRows.length} rows</strong>
+				<strong>
+					{dataRows.length}
+					{#if dataLogPagination?.totalItems}
+						/ {dataLogPagination.totalItems}
+					{/if}
+					rows
+				</strong>
 			</div>
 
 			{#if dataRows.length}
-				<div class="data-log-table-wrapper">
+				<div class="data-log-table-wrapper" onscroll={handleDataLogTableScroll}>
 					<table class="data-log-table">
 						<thead>
 							<tr>
@@ -921,7 +1227,7 @@
 								<tr>
 									{#each displaySelectedColumns as column}
 										<td class:sticky-col={column === 'timestamp'}>
-											{formatCellValue(row?.[column], column)}
+											{formatCellValue(getRowColumnValue(row, column), column)}
 										</td>
 									{/each}
 								</tr>
@@ -929,11 +1235,53 @@
 						</tbody>
 					</table>
 				</div>
+
+				<div class="lazy-load-footer">
+					<div>
+						Page {dataLogPagination?.page || dataLogPage}
+						{#if dataLogPagination?.totalPages}
+							of {dataLogPagination.totalPages}
+						{/if}
+						{#if loadingMore}
+							<span>• Loading next page...</span>
+						{:else if hasNextDataLogPage}
+							<span>• Scroll down to load more</span>
+						{:else}
+							<span>• All loaded</span>
+						{/if}
+					</div>
+
+					{#if hasNextDataLogPage}
+						<button
+							type="button"
+							class="load-more-btn"
+							onclick={loadMoreDataLog}
+							disabled={loadingMore || loading}
+						>
+							{loadingMore ? 'Loading...' : 'Load more'}
+						</button>
+					{/if}
+				</div>
 			{:else}
 				<div class="empty-box">Data log is not available for the selected time range.</div>
 			{/if}
 		</section>
 	{/if}
+
+		{#if shouldShowDateRangeOverlay}
+			<div class="date-range-overlay">
+				<div class="date-range-overlay-card">
+					<div class="date-range-overlay-icon">!</div>
+					<span class="section-kicker">Waiting for date range</span>
+					<h2>Choose a date range first</h2>
+					<p>
+						Set the Start and End time in the filter above, then click <strong>Load Data</strong>
+						to display the telemetry log.
+					</p>
+				</div>
+			</div>
+		{/if}
+	</div>
 </section>
 
 <style>
@@ -1191,6 +1539,133 @@
 		flex-wrap: wrap;
 	}
 
+	.time-preset-row {
+		flex: 1 1 100%;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-top: -2px;
+		min-width: 0;
+	}
+
+	.time-preset-row > span {
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 900;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.time-preset-list {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-wrap: wrap;
+		min-width: 0;
+	}
+
+	.time-preset-list button {
+		height: 26px;
+		border: 1px solid rgba(148, 163, 184, 0.34);
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.48);
+		padding: 0 10px;
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 850;
+		cursor: pointer;
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease,
+			color 0.16s ease,
+			transform 0.16s ease;
+	}
+
+	.time-preset-list button:hover,
+	.time-preset-list button.active {
+		border-color: rgba(96, 165, 250, 0.78);
+		background: rgba(37, 99, 235, 0.26);
+		color: #bfdbfe;
+	}
+
+	.time-preset-list button:active {
+		transform: translateY(1px);
+	}
+
+	.date-range-result-area {
+		position: relative;
+		min-height: 430px;
+		margin-top: 12px;
+	}
+
+	.date-range-result-area.is-locked > :not(.date-range-overlay) {
+		pointer-events: none;
+		user-select: none;
+		filter: blur(1px);
+		opacity: 0.34;
+	}
+
+	.date-range-overlay {
+		position: absolute;
+		inset: 0;
+		z-index: 8;
+		display: grid;
+		place-items: start center;
+		padding: 42px 16px 16px;
+		border-radius: 16px;
+		background:
+			linear-gradient(180deg, rgba(10, 14, 26, 0.62), rgba(10, 14, 26, 0.82)),
+			rgba(10, 14, 26, 0.46);
+		backdrop-filter: blur(7px);
+	}
+
+	.date-range-overlay-card {
+		width: min(520px, 100%);
+		padding: 22px 22px 20px;
+		border: 1px solid rgba(96, 165, 250, 0.24);
+		border-radius: 20px;
+		background:
+			linear-gradient(145deg, rgba(30, 41, 59, 0.94), rgba(15, 23, 42, 0.96)),
+			var(--color-surface);
+		box-shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
+		text-align: center;
+	}
+
+	.date-range-overlay-icon {
+		width: 42px;
+		height: 42px;
+		margin: 0 auto 12px;
+		display: grid;
+		place-items: center;
+		border: 1px solid rgba(96, 165, 250, 0.36);
+		border-radius: 14px;
+		background: rgba(37, 99, 235, 0.18);
+		color: #bfdbfe;
+		font-size: 22px;
+		font-weight: 900;
+	}
+
+	.date-range-overlay-card h2 {
+		margin: 8px 0 8px;
+		color: var(--text-primary);
+		font-size: 20px;
+		line-height: 1.2;
+		font-weight: 900;
+	}
+
+	.date-range-overlay-card p {
+		margin: 0;
+		color: #a9b8d0;
+		font-size: 13px;
+		font-weight: 700;
+		line-height: 1.6;
+	}
+
+	.date-range-overlay-card strong {
+		color: #dbeafe;
+		font-weight: 900;
+	}
+
 	.primary-btn,
 	.export-btn {
 		height: 32px;
@@ -1243,7 +1718,16 @@
 
 	.column-actions {
 		display: flex;
+		align-items: center;
 		gap: 8px;
+	}
+
+	.column-loading {
+		color: var(--text-muted);
+		font-size: 10px;
+		font-weight: 800;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
 	}
 
 	.column-actions button {
@@ -1257,6 +1741,17 @@
 		cursor: pointer;
 	}
 
+	.column-warning {
+		margin: 10px 12px 0;
+		padding: 9px 10px;
+		border: 1px solid rgba(251, 191, 36, 0.28);
+		border-radius: 12px;
+		background: rgba(251, 191, 36, 0.08);
+		color: #facc15;
+		font-size: 11px;
+		font-weight: 800;
+	}
+
 	.column-grid {
 		padding: 12px;
 		display: grid;
@@ -1267,14 +1762,96 @@
 	.column-item {
 		min-height: 30px;
 		padding: 6px 8px;
-		border: 1px solid #e2e8f0;
-		background: var(--color-elevated);
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		border-radius: 10px;
+		background: rgba(15, 23, 42, 0.26);
 		display: flex;
 		align-items: center;
 		gap: 7px;
 		font-size: 11px;
 		font-weight: 800;
 		color: var(--text-secondary);
+		cursor: pointer;
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease,
+			box-shadow 0.16s ease,
+			color 0.16s ease;
+	}
+
+	.column-item:hover {
+		border-color: rgba(147, 197, 253, 0.36);
+		background: rgba(30, 41, 59, 0.58);
+		color: #dbeafe;
+	}
+
+	.column-item.is-checked {
+		border-color: rgba(96, 165, 250, 0.74);
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.24), rgba(14, 165, 233, 0.12)),
+			rgba(15, 23, 42, 0.38);
+		box-shadow:
+			inset 0 0 0 1px rgba(147, 197, 253, 0.12),
+			0 0 0 1px rgba(37, 99, 235, 0.16);
+		color: #f8fafc;
+	}
+
+	.column-item input[type='checkbox'] {
+		position: relative;
+		width: 18px;
+		min-width: 18px;
+		height: 18px;
+		min-height: 18px;
+		margin: 0;
+		padding: 0;
+		display: inline-grid;
+		place-items: center;
+		flex: 0 0 auto;
+		border: 2px solid rgba(148, 163, 184, 0.62);
+		border-radius: 6px;
+		background: rgba(15, 23, 42, 0.72);
+		box-shadow:
+			inset 0 1px 0 rgba(255, 255, 255, 0.06),
+			0 0 0 1px rgba(15, 23, 42, 0.2);
+		appearance: none;
+		-webkit-appearance: none;
+		cursor: pointer;
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease,
+			box-shadow 0.16s ease,
+			transform 0.16s ease;
+	}
+
+	.column-item input[type='checkbox']::after {
+		content: '';
+		width: 8px;
+		height: 4px;
+		border-left: 2px solid #ffffff;
+		border-bottom: 2px solid #ffffff;
+		opacity: 0;
+		transform: rotate(-45deg) scale(0.72);
+		transition:
+			opacity 0.14s ease,
+			transform 0.14s ease;
+	}
+
+	.column-item input[type='checkbox']:checked {
+		border-color: rgba(147, 197, 253, 0.98);
+		background: linear-gradient(135deg, #2563eb, #06b6d4);
+		box-shadow:
+			0 0 0 4px rgba(37, 99, 235, 0.18),
+			inset 0 1px 0 rgba(255, 255, 255, 0.24);
+	}
+
+	.column-item input[type='checkbox']:checked::after {
+		opacity: 1;
+		transform: rotate(-45deg) scale(1);
+	}
+
+	.column-item input[type='checkbox']:focus-visible {
+		outline: 2px solid rgba(147, 197, 253, 0.9);
+		outline-offset: 3px;
 	}
 
 	.status-box {
@@ -1395,6 +1972,41 @@
 		font-weight: 800;
 	}
 
+	.lazy-load-footer {
+		min-height: 42px;
+		padding: 8px 12px;
+		border-top: 1px solid rgba(148, 163, 184, 0.18);
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		background: rgba(15, 23, 42, 0.38);
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 800;
+	}
+
+	.lazy-load-footer span {
+		color: var(--text-muted);
+	}
+
+	.load-more-btn {
+		height: 28px;
+		padding: 0 12px;
+		border: 1px solid rgba(96, 165, 250, 0.55);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.2);
+		color: #bfdbfe;
+		font-size: 11px;
+		font-weight: 900;
+		cursor: pointer;
+	}
+
+	.load-more-btn:disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
+	}
+
 	.raw-box {
 		margin-top: 12px;
 		padding: 12px 14px;
@@ -1440,6 +2052,16 @@
 		}
 
 		.filter-actions {
+			width: 100%;
+		}
+
+		.time-preset-row {
+			align-items: flex-start;
+			flex-direction: column;
+			width: 100%;
+		}
+
+		.time-preset-list {
 			width: 100%;
 		}
 

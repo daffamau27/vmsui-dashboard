@@ -8,6 +8,7 @@
 	import { downloadApiFile } from '$lib/api/authApi.js';
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 
 	let loading = $state(false);
 	let exporting = $state(false);
@@ -18,8 +19,12 @@
 	let endDateTime = $state('');
 	let timezoneMode = $state('auto');
 	let timezoneOffset = $state('+07:00');
+	let hasLoadedDateRange = $state(false);
 
 	let { active = false } = $props();
+	let shouldShowDateRangeOverlay = $derived(
+		!hasLoadedDateRange || !startDateTime || !endDateTime
+	);
 
 	function pad(value) {
 		return String(value).padStart(2, '0');
@@ -29,6 +34,10 @@
 		return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
 			date.getHours()
 		)}:${pad(date.getMinutes())}`;
+	}
+
+	function markDateFilterDirty() {
+		hasLoadedDateRange = false;
 	}
 
 	function toApiDateTime(value) {
@@ -343,12 +352,14 @@
 		if (!$selectedVesselId) {
 			error = 'No vessel has been selected from Fleet View.';
 			reportData = null;
+			hasLoadedDateRange = false;
 			return;
 		}
 
 		if (!startDateTime || !endDateTime) {
 			error = 'Start and End are required.';
 			reportData = null;
+			hasLoadedDateRange = false;
 			return;
 		}
 
@@ -365,6 +376,7 @@
 			});
 
 			reportData = result;
+			hasLoadedDateRange = true;
 
 			const payload = result?.data || result || {};
 			const stats = payload?.data_received_stats || payload?.dataReceivedStats || {};
@@ -385,6 +397,7 @@
 			console.error('[PERIODICAL_REPORT_ERROR]', err);
 			error = err?.message || 'Failed to load the periodical report.';
 			reportData = null;
+			hasLoadedDateRange = false;
 		} finally {
 			loading = false;
 		}
@@ -462,40 +475,46 @@
 	<section class="filter-card">
 		<label>
 			<span>Start</span>
-			<input type="datetime-local" bind:value={startDateTime} />
+			<input type="datetime-local" bind:value={startDateTime} oninput={markDateFilterDirty} />
 		</label>
 
 		<label>
 			<span>End</span>
-			<input type="datetime-local" bind:value={endDateTime} />
+			<input type="datetime-local" bind:value={endDateTime} oninput={markDateFilterDirty} />
 		</label>
 
 		<label>
 			<span>Timezone Mode</span>
-			<select bind:value={timezoneMode}>
-				<option value="auto">Auto</option>
-				<option value="manual">Manual</option>
+			<select bind:value={timezoneMode} onchange={markDateFilterDirty}>
+				{#each TIMEZONE_MODE_OPTIONS as option}
+					<option value={option.value}>{option.label}</option>
+				{/each}
 			</select>
 		</label>
 
 		{#if timezoneMode === 'manual'}
 			<label>
 				<span>Timezone Offset</span>
-				<input type="text" bind:value={timezoneOffset} placeholder="+07:00" />
+				<select bind:value={timezoneOffset} onchange={markDateFilterDirty}>
+					{#each TIMEZONE_OFFSET_OPTIONS as option}
+						<option value={option.value}>{option.label}</option>
+					{/each}
+				</select>
 			</label>
 		{/if}
 
 		<div class="filter-actions">
-			<button type="button" class="primary-btn" onclick={loadPeriodicalReport} disabled={loading}>
+			<button type="button" class="primary-btn" onclick={loadPeriodicalReport} disabled={loading || !startDateTime || !endDateTime}>
 				{loading ? 'Loading...' : 'Load Data'}
 			</button>
 
-			<button type="button" class="export-btn" onclick={handleExportExcel} disabled={exporting}>
+			<button type="button" class="export-btn" onclick={handleExportExcel} disabled={exporting || shouldShowDateRangeOverlay}>
 				{exporting ? 'Exporting...' : 'Export Excel'}
 			</button>
 		</div>
 	</section>
 
+	<div class="load-required-area" class:is-locked={shouldShowDateRangeOverlay}>
 	{#if error}
 		<div class="status-box error-box">
 			{error}
@@ -699,6 +718,20 @@
 		</section>
 	{/if}
 {/if}
+		{#if shouldShowDateRangeOverlay}
+			<div class="load-required-overlay">
+				<div class="load-required-card">
+					<div class="load-required-icon">!</div>
+					<span class="section-kicker">Waiting for date range</span>
+					<h2>Choose a period range first</h2>
+					<p>
+						Select Start, End, and timezone above, then click <strong>Load Data</strong>
+						to display the periodical report.
+					</p>
+				</div>
+			</div>
+		{/if}
+	</div>
 </section>
 
 <style>

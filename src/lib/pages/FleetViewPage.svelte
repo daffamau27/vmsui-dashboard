@@ -434,6 +434,32 @@
 		return `${rpm}`;
 	}
 
+	function getEngineDisplayName(engine = {}) {
+		return engine?.engineName || engine?.name || engine?.engineKeyThingsboard || engine?.key || '-';
+	}
+
+	function getEngineSortRank(engine = {}) {
+		const name = normalizeEngineName(getEngineDisplayName(engine));
+
+		if (/^ME\b|MAIN ENGINE|\bME PORT\b|\bME STBD\b|\bME CENTER\b/.test(name)) return 0;
+		if (/^AE\b|AUX|GENSET/.test(name)) return 1;
+		return 2;
+	}
+
+	function sortVesselEngines(engines = []) {
+		if (!Array.isArray(engines)) return [];
+
+		return [...engines].sort((left, right) => {
+			const rankDiff = getEngineSortRank(left) - getEngineSortRank(right);
+			if (rankDiff !== 0) return rankDiff;
+
+			return getEngineDisplayName(left).localeCompare(getEngineDisplayName(right), undefined, {
+				numeric: true,
+				sensitivity: 'base'
+			});
+		});
+	}
+
 	function formatMissingValue(value, suffix = '') {
 		if (value === null || value === undefined || value === '' || value === '-') {
 			return '-';
@@ -523,6 +549,7 @@
 			vesselData.find((v) => String(v.id) === String(selectedVesselId)) ||
 			null
 	);
+	let sortedDetailEngines = $derived(sortVesselEngines(selectedVessel?.engines || []));
 
 	let totalMeasureMeters = $derived(getTotalMeasureDistance(measurePoints));
 
@@ -535,6 +562,43 @@
 		const number = Number(value);
 		if (!Number.isFinite(number)) return fallback;
 		return number.toFixed(digits);
+	}
+
+	function formatDmsCoordinate(value, axis = 'lat') {
+		const number = Number(value);
+		if (!Number.isFinite(number)) return '-';
+
+		const direction =
+			axis === 'lng' ? (number >= 0 ? 'E' : 'W') : number >= 0 ? 'N' : 'S';
+		let absolute = Math.abs(number);
+		let degrees = Math.floor(absolute);
+		let minutesFloat = (absolute - degrees) * 60;
+		let minutes = Math.floor(minutesFloat);
+		let seconds = Number(((minutesFloat - minutes) * 60).toFixed(2));
+
+		if (seconds >= 60) {
+			seconds = 0;
+			minutes += 1;
+		}
+
+		if (minutes >= 60) {
+			minutes = 0;
+			degrees += 1;
+		}
+
+		const paddedMinutes = String(minutes).padStart(2, '0');
+		const paddedSeconds = seconds.toFixed(2).padStart(5, '0');
+
+		return `${degrees}\u00b0 ${paddedMinutes}' ${paddedSeconds}" ${direction}`;
+	}
+
+	function formatDmsPair(latitude, longitude) {
+		const latDms = formatDmsCoordinate(latitude, 'lat');
+		const lngDms = formatDmsCoordinate(longitude, 'lng');
+
+		if (latDms === '-' || lngDms === '-') return '-';
+
+		return `${latDms} \u2022 ${lngDms}`;
 	}
 
 	function hasValidVesselCoordinate(vessel) {
@@ -669,6 +733,30 @@
 
 	function formatLastUpdatedBadge(value) {
 		return stripUtcLabel(formatLastUpdated(value));
+	}
+
+	function formatActualLastUpdated(value) {
+		if (!value || value === '-') return '-';
+
+		const cleanedValue = stripUtcLabel(formatValue(value, '-'));
+		if (!cleanedValue || cleanedValue === '-') return '-';
+
+		if (/^(just now|\d+\s+minutes?\s+ago)$/i.test(cleanedValue)) {
+			const parsedDate = parseVesselDateTime(value);
+			if (!parsedDate) return cleanedValue;
+
+			return parsedDate.toLocaleString('en-GB', {
+				day: '2-digit',
+				month: 'short',
+				year: 'numeric',
+				hour: '2-digit',
+				minute: '2-digit',
+				second: '2-digit',
+				hour12: false
+			});
+		}
+
+		return cleanedValue;
 	}
 
 	function getLatestConnectionEvent(vessel) {
@@ -1041,6 +1129,8 @@
 		const longitude = vessel.longitude ?? vessel.lng;
 		const formattedLatitude = formatNumber(latitude, 6, '-');
 		const formattedLongitude = formatNumber(longitude, 6, '-');
+		const formattedLatitudeDms = formatDmsCoordinate(latitude, 'lat');
+		const formattedLongitudeDms = formatDmsCoordinate(longitude, 'lng');
 
 		return `
       <div class="fleet-popup">
@@ -1071,21 +1161,19 @@
           <div>
             <span>Latitude</span>
             ${createCopyableCoordinateHtml(formattedLatitude, 'latitude')}
+            <small class="coordinate-dms">${formattedLatitudeDms}</small>
           </div>
           <div>
             <span>Longitude</span>
             ${createCopyableCoordinateHtml(formattedLongitude, 'longitude')}
+            <small class="coordinate-dms">${formattedLongitudeDms}</small>
           </div>
         </div>
 
         <div class="fleet-popup-meta">
           <div class="fleet-popup-row">
-            <span>Hire status</span>
-            <strong>${formatValue(vessel.hireStatus)}</strong>
-          </div>
-          <div class="fleet-popup-row">
             <span>Last updated</span>
-            <strong>${formatLastUpdatedBadge(vessel.lastUpdated)}</strong>
+            <strong>${formatActualLastUpdated(vessel.lastUpdated)}</strong>
           </div>
         </div>
 
@@ -1192,10 +1280,12 @@
         <div>
           <span>Latitude</span>
           ${createCopyableCoordinateHtml(formattedLatitude, 'asset latitude')}
+          <small class="coordinate-dms">${formatDmsCoordinate(asset.latitude, 'lat')}</small>
         </div>
         <div>
           <span>Longitude</span>
           ${createCopyableCoordinateHtml(formattedLongitude, 'asset longitude')}
+          <small class="coordinate-dms">${formatDmsCoordinate(asset.longitude, 'lng')}</small>
         </div>
       </div>
     </div>
@@ -1454,7 +1544,7 @@
 				autoPan: true,
 				autoClose: true,
 				closeOnClick: false,
-				maxWidth: 320,
+				maxWidth: 360,
 				className: 'fleet-leaflet-popup'
 			});
 
@@ -1601,7 +1691,7 @@
 			marker.bindPopup(createAssetPopupHtml(asset), {
 				closeButton: true,
 				autoPan: true,
-				maxWidth: 280,
+				maxWidth: 300,
 				className: 'asset-leaflet-popup'
 			});
 
@@ -2350,6 +2440,12 @@
 		if (fleetRefreshInProgress) return;
 
 		fleetRefreshInProgress = true;
+		const activePopupVesselId = selectedVesselId ? String(selectedVesselId) : null;
+		const shouldRestoreActivePopup = Boolean(
+			activePopupVesselId &&
+				!showDetailPanel &&
+				markers.get(activePopupVesselId)?.isPopupOpen?.()
+		);
 
 		if (!silent) {
 			fleetLoading = true;
@@ -2388,6 +2484,15 @@
 
 			if (map && L) {
 				buildMarkers();
+
+				if (shouldRestoreActivePopup) {
+					setTimeout(() => {
+						const marker = markers.get(activePopupVesselId);
+						if (marker && String(selectedVesselId) === activePopupVesselId && !showDetailPanel) {
+							marker.openPopup?.();
+						}
+					}, 0);
+				}
 			}
 		} catch (error) {
 			console.error('[FLEET_VIEW_LOAD_ERROR]', error);
@@ -3255,7 +3360,7 @@
 								<div class="detail-grid two-col">
 									<div class="detail-item detail-updated-item">
 										<span>Last Updated</span>
-										<strong>{formatLastUpdatedBadge(selectedVessel.lastUpdated)}</strong>
+										<strong>{formatActualLastUpdated(selectedVessel.lastUpdated)}</strong>
 									</div>
 
 									<div
@@ -3278,13 +3383,16 @@
 										<span>Coordinates</span>
 										<strong>
 											<CopyableCoordinate
-												value={`${formatMissingValue(selectedVessel.latitude)}, ${formatMissingValue(selectedVessel.longitude)}`}
-												display={`${formatMissingValue(selectedVessel.latitude)}, ${formatMissingValue(selectedVessel.longitude)}`}
+												value={`${formatMissingValue(selectedVessel.latitude ?? selectedVessel.lat)}, ${formatMissingValue(selectedVessel.longitude ?? selectedVessel.lng)}`}
+												display={`${formatMissingValue(selectedVessel.latitude ?? selectedVessel.lat)}, ${formatMissingValue(selectedVessel.longitude ?? selectedVessel.lng)}`}
 												label="latitude and longitude"
 												compact
 												class="coordinate-pair-copy"
 											/>
 										</strong>
+										<small class="coordinate-dms">
+											{formatDmsPair(selectedVessel.latitude ?? selectedVessel.lat, selectedVessel.longitude ?? selectedVessel.lng)}
+										</small>
 									</div>
 
 								</div>
@@ -3330,10 +3438,10 @@
 								</div>
 
 								<div class="simple-table">
-									{#if selectedVessel.engines?.length}
-										{#each selectedVessel.engines as engine}
+									{#if sortedDetailEngines.length}
+										{#each sortedDetailEngines as engine}
 											<div class="simple-row">
-												<span>{engine.engineName || engine.name || '-'}</span>
+												<span>{getEngineDisplayName(engine)}</span>
 												<strong>
 													{getLiveEngineRpm(selectedVessel, engine)}
 												</strong>
@@ -3349,7 +3457,7 @@
 								<div class="detail-section-heading">
 									<div>
 										<span class="detail-section-kicker">Environment</span>
-										<h3>Weather</h3>
+										<h3>Weather & ocean current</h3>
 									</div>
 								</div>
 
@@ -3376,18 +3484,10 @@
 								{:else}
 									<div class="empty-voyage">Weather is not available.</div>
 								{/if}
-							</section>
-
-							<section class="detail-section">
-								<div class="detail-section-heading">
-									<div>
-										<span class="detail-section-kicker">Environment</span>
-										<h3>Ocean current</h3>
-									</div>
-								</div>
+								<div class="environment-divider"></div>
 
 								{#if selectedVessel.oceanCurrent?.current}
-									<div class="simple-table">
+									<div class="simple-table ocean-current-card">
 										<div class="simple-row">
 											<span>Speed</span>
 											<strong>{selectedVessel.oceanCurrent.current.speed_kph} kph</strong>
@@ -3704,7 +3804,7 @@
 
 	:global(.asset-leaflet-popup .leaflet-popup-content) {
 		margin: 0;
-		width: 224px !important;
+		width: 258px !important;
 	}
 
 	:global(.asset-leaflet-popup .leaflet-popup-tip) {
@@ -3739,23 +3839,29 @@
 	}
 
 	:global(.asset-leaflet-popup .leaflet-popup-close-button) {
-		top: 10px !important;
-		right: 10px !important;
-		width: 26px !important;
-		height: 26px !important;
-		border: 1px solid rgba(255, 255, 255, 0.08) !important;
-		border-radius: 8px !important;
-		background: rgba(255, 255, 255, 0.055) !important;
-		color: var(--text-secondary) !important;
-		font-size: 17px !important;
-		line-height: 23px !important;
+		top: 12px !important;
+		right: 12px !important;
+		width: 28px !important;
+		height: 28px !important;
+		border: 1px solid rgba(226, 232, 240, 0.12) !important;
+		border-radius: 10px !important;
+		background: rgba(15, 23, 42, 0.72) !important;
+		color: rgba(226, 232, 240, 0.82) !important;
+		font-size: 18px !important;
+		line-height: 25px !important;
 		padding: 0 !important;
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease,
+			color 0.16s ease,
+			transform 0.16s ease !important;
 	}
 
 	:global(.asset-leaflet-popup .leaflet-popup-close-button:hover) {
 		border-color: rgba(245, 158, 11, 0.3) !important;
 		background: var(--color-warning-muted) !important;
 		color: #fbbf24 !important;
+		transform: translateY(-1px) !important;
 	}
 
 	:global(.fleet-asset-popup) {
@@ -3764,8 +3870,8 @@
 		box-sizing: border-box;
 		overflow: hidden;
 		background:
-			radial-gradient(circle at 4% 0%, rgba(245, 158, 11, 0.14), transparent 42%),
-			#0a0e1a;
+			radial-gradient(circle at 9% 8%, rgba(245, 158, 11, 0.18), transparent 34%),
+			linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(6, 10, 21, 0.98));
 	}
 
 	:global(.fleet-asset-popup-hero) {
@@ -3773,26 +3879,31 @@
 		max-width: 100%;
 		box-sizing: border-box;
 		display: grid;
-		grid-template-columns: 30px minmax(0, 1fr) auto;
-		align-items: center;
-		gap: 7px;
-		padding: 10px 38px 9px 10px;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+		grid-template-columns: 36px minmax(0, 1fr);
+		align-items: start;
+		gap: 9px;
+		padding: 12px 46px 12px 12px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 	}
 
 	:global(.fleet-asset-popup-icon) {
-		width: 30px;
-		height: 30px;
+		width: 36px;
+		height: 36px;
 		display: grid;
 		place-items: center;
-		border: 1px solid rgba(245, 158, 11, 0.26);
-		border-radius: 11px;
-		background: var(--color-warning-muted);
+		border: 1px solid rgba(245, 158, 11, 0.34);
+		border-radius: 13px;
+		background:
+			linear-gradient(145deg, rgba(245, 158, 11, 0.2), rgba(245, 158, 11, 0.06)),
+			rgba(15, 23, 42, 0.66);
+		box-shadow:
+			inset 0 1px 0 rgba(255, 255, 255, 0.08),
+			0 9px 20px rgba(245, 158, 11, 0.11);
 	}
 
 	:global(.fleet-asset-popup-icon img) {
-		width: 21px;
-		height: 21px;
+		width: 24px;
+		height: 24px;
 		object-fit: contain;
 		filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.28));
 	}
@@ -3800,25 +3911,28 @@
 	:global(.fleet-asset-popup-heading) {
 		min-width: 0;
 		display: grid;
-		gap: 2px;
+		gap: 3px;
+		padding-top: 1px;
 	}
 
 	:global(.fleet-asset-popup-eyebrow) {
 		color: #fbbf24;
-		font-size: 8px;
-		font-weight: 900;
+		font-size: 8.5px;
+		font-weight: 850;
 		letter-spacing: 0.11em;
 		text-transform: uppercase;
 	}
 
 	:global(.fleet-asset-popup-heading > strong) {
-		overflow: hidden;
 		color: var(--text-primary);
-		font-size: 11px;
-		line-height: 1.2;
-		font-weight: 900;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		font-size: 12.5px;
+		line-height: 1.18;
+		font-weight: 850;
+		display: -webkit-box;
+		overflow: hidden;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		word-break: break-word;
 	}
 
 	:global(.fleet-asset-popup-heading > small) {
@@ -3831,14 +3945,21 @@
 	}
 
 	:global(.fleet-asset-popup-badge) {
-		padding: 3px 6px;
-		border: 1px solid rgba(245, 158, 11, 0.24);
+		position: absolute;
+		top: 14px;
+		right: 48px;
+		max-width: 64px;
+		padding: 3px 7px;
+		border: 1px solid rgba(245, 158, 11, 0.32);
 		border-radius: 999px;
-		background: var(--color-warning-muted);
+		background: rgba(245, 158, 11, 0.1);
 		color: #fbbf24;
 		font-size: 7.5px;
-		font-weight: 900;
+		font-weight: 850;
 		letter-spacing: 0.08em;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	:global(.asset-popup-location) {
@@ -3871,35 +3992,95 @@
 		box-sizing: border-box;
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 6px;
-		padding: 9px 10px 10px;
+		gap: 8px;
+		padding: 10px 12px 12px;
 	}
 
 	:global(.fleet-asset-popup-coordinates > div) {
 		min-width: 0;
-		padding: 8px;
-		border: 1px solid rgba(255, 255, 255, 0.065);
-		border-radius: 10px;
-		background: rgba(255, 255, 255, 0.03);
+		display: grid;
+		grid-template-rows: auto auto 1fr;
+		min-height: 102px;
+		padding: 10px;
+		border: 1px solid rgba(147, 197, 253, 0.16);
+		border-radius: 12px;
+		background:
+			linear-gradient(145deg, rgba(30, 41, 59, 0.68), rgba(15, 23, 42, 0.5)),
+			rgba(15, 23, 42, 0.42);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
 	}
 
 	:global(.fleet-asset-popup-coordinates span) {
 		display: block;
-		margin-bottom: 4px;
-		color: var(--text-muted);
-		font-size: 7.5px;
-		font-weight: 900;
+		margin-bottom: 6px;
+		color: rgba(191, 219, 254, 0.78);
+		font-size: 8px;
+		font-weight: 850;
+		letter-spacing: 0.08em;
 		text-transform: uppercase;
 	}
 
 	:global(.fleet-asset-popup-coordinates strong) {
-		display: block;
-		overflow: hidden;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 6px;
 		color: var(--text-primary);
-		font-size: 9px;
-		font-weight: 900;
+		font-size: 12px;
+		font-weight: 850;
+		line-height: 1.18;
+		white-space: normal;
+		word-break: break-word;
+	}
+
+	:global(.fleet-asset-popup-coordinates .coordinate-copy-inline) {
+		display: flex;
+		width: 100%;
+		min-width: 0;
+		align-items: center;
+		justify-content: space-between;
+		gap: 7px;
+	}
+
+	:global(.fleet-asset-popup-coordinates .coordinate-copy-inline strong) {
+		min-width: 0;
+		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	:global(.fleet-asset-popup-coordinates .coordinate-copy-button) {
+		width: 24px;
+		height: 24px;
+		min-width: 24px;
+		border: 1px solid rgba(96, 165, 250, 0.34);
+		border-radius: 8px;
+		background: rgba(37, 99, 235, 0.22);
+		color: rgba(191, 219, 254, 0.96);
+		font-size: 12px;
+		line-height: 1;
+		display: inline-grid;
+		place-items: center;
+	}
+
+	:global(.fleet-asset-popup-coordinates .coordinate-copy-button:hover) {
+		border-color: rgba(147, 197, 253, 0.58);
+		background: rgba(37, 99, 235, 0.34);
+		color: #fff;
+	}
+
+	:global(.fleet-popup-coordinates .coordinate-dms),
+	:global(.fleet-asset-popup-coordinates .coordinate-dms),
+	.coordinate-dms {
+		display: block;
+		margin-top: 4px;
+		color: rgba(147, 197, 253, 0.88);
+		font-size: 8px;
+		font-weight: 700;
+		line-height: 1.25;
+		letter-spacing: 0.01em;
+		text-transform: none;
+		word-break: break-word;
 	}
 
 	:global(.wind-particle-canvas) {
@@ -5299,6 +5480,28 @@
 		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.018) !important;
 	}
 
+	:global(body .app-content .fleet-page .vessel-detail-panel .connection-time-item.latest-connected) {
+		background:
+			linear-gradient(145deg, rgba(34, 197, 94, 0.38), rgba(34, 197, 94, 0.16)),
+			rgba(15, 23, 42, 0.5) !important;
+		border-color: rgba(34, 197, 94, 0.92) !important;
+		box-shadow:
+			inset 4px 0 0 rgba(34, 197, 94, 1),
+			0 0 0 1px rgba(34, 197, 94, 0.22),
+			0 12px 26px rgba(34, 197, 94, 0.16) !important;
+	}
+
+	:global(body .app-content .fleet-page .vessel-detail-panel .connection-time-item.latest-disconnected) {
+		background:
+			linear-gradient(145deg, rgba(239, 68, 68, 0.38), rgba(239, 68, 68, 0.16)),
+			rgba(15, 23, 42, 0.5) !important;
+		border-color: rgba(248, 113, 113, 0.92) !important;
+		box-shadow:
+			inset 4px 0 0 rgba(239, 68, 68, 1),
+			0 0 0 1px rgba(239, 68, 68, 0.22),
+			0 12px 26px rgba(239, 68, 68, 0.16) !important;
+	}
+
 	:global(body .app-content .fleet-page .vessel-detail-panel .simple-row) {
 		background: rgba(15, 23, 42, 0.1) !important;
 		border-color: rgba(147, 197, 253, 0.075) !important;
@@ -6058,6 +6261,23 @@
 		word-break: break-word;
 	}
 
+	.coordinates-detail-item .coordinate-dms {
+		margin-top: 4px;
+		color: rgba(203, 213, 225, 0.94);
+		font-size: 9px;
+		font-weight: 780;
+	}
+
+	.coordinates-detail-item {
+		border-color: rgba(147, 197, 253, 0.22);
+		background: rgba(15, 23, 42, 0.3);
+	}
+
+	:global(.coordinates-detail-item .coordinate-pair-copy .copyable-coordinate-value) {
+		color: rgba(248, 250, 252, 0.98);
+		font-weight: 860;
+	}
+
 	.voyage-progress-card {
 		display: flex;
 		flex-direction: column;
@@ -6298,7 +6518,7 @@
 	}
 
 	:global(.fleet-leaflet-popup .leaflet-popup-content) {
-		width: 300px !important;
+		width: 340px !important;
 	}
 
 	:global(.fleet-leaflet-popup .leaflet-popup-tip) {
@@ -6453,62 +6673,94 @@
 	:global(.fleet-popup-coordinates) {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 7px;
-		padding: 0 12px 8px;
+		gap: 8px;
+		padding: 0 12px 9px;
 	}
 
 	:global(.fleet-popup-coordinates > div) {
 		min-width: 0;
-		padding: 8px 9px;
-		border: 1px solid rgba(255, 255, 255, 0.07);
-		border-radius: 11px;
-		background: rgba(255, 255, 255, 0.028);
+		display: grid;
+		gap: 5px;
+		padding: 9px 10px;
+		border: 1px solid rgba(147, 197, 253, 0.18);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.46);
 	}
 
 	:global(.fleet-popup-coordinates span) {
 		display: block;
-		margin-bottom: 4px;
-		color: var(--text-muted);
-		font-size: 8px;
+		color: rgba(191, 219, 254, 0.88);
+		font-size: 8.5px;
 		font-weight: 900;
-		letter-spacing: 0.06em;
+		letter-spacing: 0.08em;
 		text-transform: uppercase;
+	}
+
+	:global(.fleet-popup-coordinates .coordinate-copy-inline) {
+		display: flex;
+		width: 100%;
+		min-width: 0;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
 	}
 
 	:global(.fleet-popup-coordinates strong) {
 		display: block;
 		overflow: hidden;
 		color: var(--text-primary);
-		font-size: 10px;
+		font-size: 11px;
 		font-weight: 900;
 		line-height: 1.1;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
+	:global(.fleet-popup-coordinates .coordinate-copy-button) {
+		width: 22px;
+		height: 22px;
+		min-width: 22px;
+		border-radius: 7px;
+		background: rgba(37, 99, 235, 0.18);
+	}
+
+	:global(.fleet-popup-coordinates .coordinate-dms) {
+		display: block;
+		overflow: hidden;
+		color: rgba(203, 213, 225, 0.9);
+		font-size: 10px;
+		font-weight: 800;
+		line-height: 1.2;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
 	:global(.fleet-popup-meta .fleet-popup-row) {
-		grid-template-columns: 72px minmax(0, 1fr);
-		gap: 10px;
-		padding: 6px 0;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+		grid-template-columns: 86px minmax(0, 1fr);
+		align-items: center;
+		gap: 12px;
+		padding: 8px 10px;
+		border: 1px solid rgba(147, 197, 253, 0.13);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.36);
 	}
 
 	:global(.fleet-popup-meta .fleet-popup-row:last-child) {
-		border-bottom: none;
-		background: transparent;
+		border-bottom: 1px solid rgba(147, 197, 253, 0.13);
 	}
 
 	:global(.fleet-popup-meta .fleet-popup-row span) {
-		color: var(--text-muted);
-		font-size: 8px;
-		font-weight: 800;
+		color: rgba(191, 219, 254, 0.85);
+		font-size: 8.5px;
+		font-weight: 900;
+		letter-spacing: 0.08em;
 		text-transform: uppercase;
 	}
 
 	:global(.fleet-popup-meta .fleet-popup-row strong) {
-		color: var(--text-secondary);
-		font-size: 9px;
-		font-weight: 800;
+		color: rgba(241, 245, 249, 0.96);
+		font-size: 10px;
+		font-weight: 850;
 		text-align: right;
 	}
 
@@ -7079,31 +7331,51 @@
 
 	.detail-item {
 		padding: 7px 8px;
-		border: 1px solid rgba(147, 197, 253, 0.085);
+		border: 1px solid rgba(147, 197, 253, 0.18);
 		border-radius: 10px;
-		background: rgba(15, 23, 42, 0.12);
-		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.018);
+		background: rgba(15, 23, 42, 0.28);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
 	}
 
 	.detail-item span {
-		color: var(--text-muted);
-		font-size: 8px;
-		font-weight: 800;
+		color: rgba(191, 219, 254, 0.86);
+		font-size: 8.2px;
+		font-weight: 850;
+		letter-spacing: 0.07em;
 		text-transform: uppercase;
 	}
 
 	.detail-item strong {
 		margin-top: 5px;
-		color: var(--text-primary);
-		font-size: 10px;
+		color: rgba(248, 250, 252, 0.96);
+		font-size: 10.4px;
+		font-weight: 850;
+	}
+
+	.detail-updated-item strong,
+	.connection-time-item strong {
+		color: #f8fafc;
+	}
+
+	.connection-time-item:not(.latest-connected):not(.latest-disconnected) {
+		border-color: rgba(148, 163, 184, 0.2);
+		background: rgba(15, 23, 42, 0.24);
+	}
+
+	.connection-time-item:not(.latest-connected):not(.latest-disconnected) span {
+		color: rgba(191, 219, 254, 0.74);
 	}
 
 	.connection-time-item.latest-connected {
-		border-color: rgba(34, 197, 94, 0.34);
+		position: relative;
+		border-color: rgba(34, 197, 94, 0.92);
 		background:
-			linear-gradient(145deg, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0.025)),
-			rgba(15, 23, 42, 0.12);
-		box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.72);
+			linear-gradient(145deg, rgba(34, 197, 94, 0.38), rgba(34, 197, 94, 0.16)),
+			rgba(15, 23, 42, 0.5);
+		box-shadow:
+			inset 4px 0 0 rgba(34, 197, 94, 1),
+			0 0 0 1px rgba(34, 197, 94, 0.22),
+			0 12px 26px rgba(34, 197, 94, 0.16);
 	}
 
 	.connection-time-item.latest-connected span,
@@ -7112,11 +7384,15 @@
 	}
 
 	.connection-time-item.latest-disconnected {
-		border-color: rgba(248, 113, 113, 0.34);
+		position: relative;
+		border-color: rgba(248, 113, 113, 0.92);
 		background:
-			linear-gradient(145deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.025)),
-			rgba(15, 23, 42, 0.12);
-		box-shadow: inset 3px 0 0 rgba(239, 68, 68, 0.72);
+			linear-gradient(145deg, rgba(239, 68, 68, 0.38), rgba(239, 68, 68, 0.16)),
+			rgba(15, 23, 42, 0.5);
+		box-shadow:
+			inset 4px 0 0 rgba(239, 68, 68, 1),
+			0 0 0 1px rgba(239, 68, 68, 0.22),
+			0 12px 26px rgba(239, 68, 68, 0.16);
 	}
 
 	.connection-time-item.latest-disconnected span,
@@ -7138,23 +7414,62 @@
 		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: center;
 		padding: 6px 8px;
-		border: 1px solid rgba(147, 197, 253, 0.075);
+		border: 1px solid rgba(147, 197, 253, 0.16);
 		border-radius: 9px;
-		background: rgba(15, 23, 42, 0.1);
-		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.014);
+		background: rgba(15, 23, 42, 0.24);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 		font-size: 9px;
 	}
 
+	.simple-row span {
+		color: rgba(191, 219, 254, 0.82);
+		font-weight: 780;
+	}
+
 	.simple-row strong {
-		color: var(--text-primary);
+		color: rgba(248, 250, 252, 0.96);
 	}
 
 	.weather-current {
 		margin-bottom: 0;
 		padding: 8px;
-		border: 1px solid rgba(255, 255, 255, 0.06);
+		border: 1px solid rgba(147, 197, 253, 0.16);
 		border-radius: 11px;
-		background: rgba(255, 255, 255, 0.025);
+		background: rgba(15, 23, 42, 0.24);
+	}
+
+	.weather-current span,
+	.weather-current small {
+		color: rgba(203, 213, 225, 0.9);
+	}
+
+	.weather-current strong {
+		color: rgba(248, 250, 252, 0.98);
+	}
+
+	.environment-divider {
+		height: 1px;
+		margin: 8px 0;
+		background: rgba(147, 197, 253, 0.12);
+	}
+
+	.ocean-current-card {
+		padding: 8px;
+		border: 1px solid rgba(147, 197, 253, 0.16);
+		border-radius: 11px;
+		background: rgba(15, 23, 42, 0.24);
+	}
+
+	:global(body .app-content .fleet-page .vessel-detail-panel .ocean-current-card) {
+		background: rgba(15, 23, 42, 0.24) !important;
+		border-color: rgba(147, 197, 253, 0.16) !important;
+		box-shadow: none !important;
+	}
+
+	:global(body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-row) {
+		background: transparent !important;
+		border-color: rgba(147, 197, 253, 0.12) !important;
+		box-shadow: none !important;
 	}
 
 	.weather-icon {
@@ -7602,7 +7917,7 @@
 		}
 
 		:global(.fleet-leaflet-popup .leaflet-popup-content) {
-			width: min(238px, calc(100vw - 54px)) !important;
+			width: min(286px, calc(100vw - 54px)) !important;
 		}
 
 		:global(.asset-leaflet-popup .leaflet-popup-content) {
@@ -7659,23 +7974,30 @@
 		}
 
 		:global(.fleet-popup-coordinates) {
-			gap: 5px;
+			gap: 6px;
 			padding-inline: 9px;
 		}
 
 		:global(.fleet-popup-coordinates > div) {
-			padding: 7px;
-			border-radius: 9px;
+			padding: 8px;
+			border-radius: 10px;
 		}
 
 		:global(.fleet-popup-coordinates span),
 		:global(.fleet-popup-meta .fleet-popup-row span) {
-			font-size: 7px;
+			font-size: 7.5px;
 		}
 
-		:global(.fleet-popup-coordinates strong),
+		:global(.fleet-popup-coordinates strong) {
+			font-size: 9.5px;
+		}
+
+		:global(.fleet-popup-coordinates .coordinate-dms) {
+			font-size: 8.5px;
+		}
+
 		:global(.fleet-popup-meta .fleet-popup-row strong) {
-			font-size: 8px;
+			font-size: 8.5px;
 		}
 
 		:global(.fleet-popup-meta) {
@@ -7683,7 +8005,8 @@
 		}
 
 		:global(.fleet-popup-meta .fleet-popup-row) {
-			padding: 6px 0;
+			grid-template-columns: 78px minmax(0, 1fr);
+			padding: 7px 8px;
 		}
 
 		:global(.fleet-popup-actions) {
@@ -7701,12 +8024,12 @@
 
 		:global(.fleet-asset-popup-hero) {
 			gap: 7px;
-			padding: 8px 32px 8px 8px;
+			padding: 9px 40px 9px 9px;
 		}
 
 		:global(.fleet-asset-popup-icon) {
-			width: 32px;
-			height: 32px;
+			width: 34px;
+			height: 34px;
 			border-radius: 10px;
 		}
 
@@ -7716,7 +8039,7 @@
 		}
 
 		:global(.fleet-asset-popup-heading > strong) {
-			font-size: 11px;
+			font-size: 11.5px;
 		}
 
 		:global(.fleet-asset-popup-eyebrow),
@@ -7725,13 +8048,13 @@
 		}
 
 		:global(.fleet-asset-popup-coordinates) {
-			gap: 5px;
-			padding: 8px;
+			gap: 6px;
+			padding: 8px 9px 9px;
 		}
 
 		:global(.fleet-asset-popup-coordinates > div) {
-			min-height: 44px;
-			padding: 7px;
+			min-height: 86px;
+			padding: 8px;
 			border-radius: 9px;
 		}
 
@@ -7740,7 +8063,20 @@
 		}
 
 		:global(.fleet-asset-popup-coordinates strong) {
-			font-size: 8px;
+			font-size: 10px;
+		}
+
+		:global(.fleet-asset-popup-badge) {
+			top: 11px;
+			right: 42px;
+			max-width: 54px;
+			font-size: 7px;
+		}
+
+		:global(.fleet-asset-popup-coordinates .coordinate-copy-button) {
+			width: 22px;
+			height: 22px;
+			min-width: 22px;
 		}
 
 		.vessel-detail-panel {
@@ -7857,16 +8193,22 @@
 		}
 
 		.detail-item span {
+			color: rgba(191, 219, 254, 0.86);
 			font-size: 8px;
 		}
 
 		.detail-item strong {
-			font-size: 8px;
+			color: rgba(248, 250, 252, 0.96);
+			font-size: 8.8px;
 		}
 
 		.simple-row {
 			font-size: 8px;
 			grid-template-columns: 1fr 48px;
+		}
+
+		.coordinates-detail-item .coordinate-dms {
+			font-size: 8.3px;
 		}
 
 		.weather-current {

@@ -184,13 +184,13 @@
   }
 
   .needle {
-    stroke: #333;
+    stroke: #e3e3e3;
     stroke-width: 3.2;
     stroke-linecap: round;
   }
 
   .needle-center {
-    fill: #333;
+    fill: #e3e3e3;
   }
 
   .rpm-stats {

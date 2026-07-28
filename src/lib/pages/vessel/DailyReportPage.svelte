@@ -26,6 +26,7 @@
 		createCopyableCoordinateHtml,
 		handleCoordinateCopyClick
 	} from '$lib/utils/coordinateClipboard.js';
+	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 	
 	let loading = $state(false);
 	let exporting = $state(false);
@@ -44,8 +45,10 @@
 	let reportDate = $state('');
 	let timezoneMode = $state('auto');
 	let timezoneOffset = $state('+07:00');
+	let hasLoadedDateRange = $state(false);
 
 	let zoomPluginRegistered = false;
+	let shouldShowDateRangeOverlay = $derived(!hasLoadedDateRange || !reportDate);
 
 	async function ensureChartZoomPlugin() {
 		if (zoomPluginRegistered) return true;
@@ -204,6 +207,10 @@
 	function todayDate() {
 		const date = new Date();
 		return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+	}
+
+	function markDateFilterDirty() {
+		hasLoadedDateRange = false;
 	}
 
 	function toNumber(value, fallback = 0) {
@@ -1194,11 +1201,46 @@
 		return String(status || '').toUpperCase() === 'ON';
 	}
 
+	function timeToSeconds(value) {
+		const text = String(value || '').trim();
+		const match = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+
+		if (!match) return null;
+
+		const hours = Number(match[1]);
+		const minutes = Number(match[2]);
+		const seconds = Number(match[3] || 0);
+
+		if (
+			!Number.isFinite(hours) ||
+			!Number.isFinite(minutes) ||
+			!Number.isFinite(seconds) ||
+			hours < 0 ||
+			hours > 24 ||
+			minutes < 0 ||
+			minutes > 59 ||
+			seconds < 0 ||
+			seconds > 59
+		) {
+			return null;
+		}
+
+		return hours * 3600 + minutes * 60 + seconds;
+	}
+
 	function secondsFromStatusRow(row) {
 		const seconds = Number(row?.durationSeconds ?? row?.DurationSeconds ?? 0);
 		if (Number.isFinite(seconds) && seconds > 0) return seconds;
 
-		return 0;
+		const startSeconds = timeToSeconds(row?.start ?? row?.Start);
+		const endSeconds = timeToSeconds(row?.end ?? row?.End);
+
+		if (startSeconds === null || endSeconds === null) return 0;
+
+		if (startSeconds === endSeconds) return 24 * 3600;
+		if (endSeconds > startSeconds) return endSeconds - startSeconds;
+
+		return 24 * 3600 - startSeconds + endSeconds;
 	}
 
 	function buildStatusTimelineGroups(groups = []) {
@@ -1222,6 +1264,7 @@
 						return {
 							...row,
 							durationSeconds,
+							duration: normalizeSegmentDuration(row?.duration, durationSeconds),
 							widthPercent: (durationSeconds / totalSeconds) * 100,
 							status: String(row?.status || '-').toUpperCase()
 						};
@@ -1238,6 +1281,28 @@
 				};
 			})
 			.filter(Boolean);
+	}
+
+	function normalizeEngineKey(value) {
+		return String(value || '')
+			.trim()
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, ' ');
+	}
+
+	function getTimelineGroupByEngine(groups = [], engineName) {
+		const key = normalizeEngineKey(engineName);
+
+		if (!key) return null;
+
+		return (
+			groups.find((group) => normalizeEngineKey(group?.engineName) === key) ||
+			groups.find((group) => {
+				const groupKey = normalizeEngineKey(group?.engineName);
+				return groupKey.includes(key) || key.includes(groupKey);
+			}) ||
+			null
+		);
 	}
 
 	function buildStatusTransitionLabels(segments = []) {
@@ -1319,6 +1384,16 @@
 		if (minutes > 0) return `${minutes}m ${remainingSeconds}s`;
 
 		return `${remainingSeconds}s`;
+	}
+
+	function normalizeSegmentDuration(duration, durationSeconds) {
+		const text = String(duration || '').trim();
+
+		if (text && text !== '-' && text.toLowerCase() !== 'null' && text.toLowerCase() !== 'undefined') {
+			return text;
+		}
+
+		return formatDurationSeconds(durationSeconds);
 	}
 
 	function getNumericValue(value, fallback = 0) {
@@ -2511,6 +2586,21 @@
 
 	let statusTimelineGroups = $derived(buildStatusTimelineGroups(statusHistoryGroups));
 
+	let rawClutchTimelineGroups = $derived(
+		getStatusHistoryGroups(
+			normalizedReport?.clutch_in_timeline || normalizedReport?.clutchInTimeline || {}
+		)
+	);
+
+	let clutchTimelineGroups = $derived(
+		buildStatusTimelineGroups(
+			sortByConfiguredEngines(
+				rawClutchTimelineGroups.filter((group) => isConfiguredEngine(group.engineName)),
+				(group) => group.engineName
+			)
+		)
+	);
+
 	let hasRawData = $derived(Boolean(reportData));
 
 	let visibleTotalFuelValue = $derived(
@@ -2534,6 +2624,8 @@
 	let canViewEngineEventStatusHistory = $derived(hasPermission('view_engine_event_status_history'));
 
 	let canViewEngineOnOffChart = $derived(hasPermission('view_engine_on_off_chart'));
+
+	let canViewClutchInChart = $derived(hasPermission('view_clutch_in_chart'));
 
 	let canViewFuelConsumptionTable = $derived(hasPermission('view_fuel_consumption_table'));
 
@@ -2803,10 +2895,14 @@
 		if (!$selectedVesselId) {
 			error = 'No vessel has been selected from Fleet View.';
 			reportData = null;
+			hasLoadedDateRange = false;
 			return;
 		}
 
-		if (!reportDate) return;
+		if (!reportDate) {
+			hasLoadedDateRange = false;
+			return;
+		}
 
 		loading = true;
 		error = '';
@@ -2825,6 +2921,7 @@
 
 			reportData = result;
 			engineCurveData = curveResult;
+			hasLoadedDateRange = true;
 
 			const payload = result?.data || result || {};
 			updateTopbarStatus(payload);
@@ -2836,6 +2933,7 @@
 			error = err?.message || 'Failed to load daily report.';
 			reportData = null;
 			engineCurveData = null;
+			hasLoadedDateRange = false;
 		} finally {
 			loading = false;
 		}
@@ -2951,39 +3049,45 @@
 	<section class="filter-card">
 		<label>
 			<span>Date</span>
-			<input type="date" bind:value={reportDate} />
+			<input type="date" bind:value={reportDate} onchange={markDateFilterDirty} />
 		</label>
 
 		<label>
 			<span>Timezone Mode</span>
-			<select bind:value={timezoneMode}>
-				<option value="auto">Auto</option>
-				<option value="manual">Manual</option>
+			<select bind:value={timezoneMode} onchange={markDateFilterDirty}>
+				{#each TIMEZONE_MODE_OPTIONS as option}
+					<option value={option.value}>{option.label}</option>
+				{/each}
 			</select>
 		</label>
 
 		{#if timezoneMode === 'manual'}
 			<label>
 				<span>Timezone Offset</span>
-				<input type="text" bind:value={timezoneOffset} placeholder="+07:00" />
+				<select bind:value={timezoneOffset} onchange={markDateFilterDirty}>
+					{#each TIMEZONE_OFFSET_OPTIONS as option}
+						<option value={option.value}>{option.label}</option>
+					{/each}
+				</select>
 			</label>
 		{/if}
 
 		<div class="filter-actions">
-			<button type="button" class="primary-btn" onclick={loadDailyReport} disabled={loading}>
+			<button type="button" class="primary-btn" onclick={loadDailyReport} disabled={loading || !reportDate}>
 				{loading ? 'Loading...' : 'Load Data'}
 			</button>
 
-			<button type="button" class="export-btn excel" onclick={handleExportExcel} disabled={exporting}>
+			<button type="button" class="export-btn excel" onclick={handleExportExcel} disabled={exporting || shouldShowDateRangeOverlay}>
 				{exporting ? 'Exporting...' : 'Export Excel'}
 			</button>
 
-			<button type="button" class="export-btn pdf" onclick={handleExportPdf} disabled={exportingPdf}>
+			<button type="button" class="export-btn pdf" onclick={handleExportPdf} disabled={exportingPdf || shouldShowDateRangeOverlay}>
 				{exportingPdf ? 'Exporting PDF...' : 'Export PDF'}
 			</button>
 		</div>
 	</section>
 
+	<div class="load-required-area" class:is-locked={shouldShowDateRangeOverlay}>
 	{#if error}
 		<div class="status-box error-box">{error}</div>
 	{/if}
@@ -3337,7 +3441,7 @@
 			<div class="section-header">
 				<div>
 					<span class="section-kicker">Chart</span>
-					<h2>Engine ON/OFF Timeline</h2>
+					<h2>Engine Activity Timeline</h2>
 				</div>
 
 				<strong>{statusTimelineGroups.length} engines</strong>
@@ -3357,7 +3461,11 @@
 								<span>{formatDurationSeconds(group.totalSeconds)}</span>
 							</div>
 
-							<div class="compact-timeline-area">
+							<div
+								class="compact-timeline-area"
+								class:engine-timeline-area={canViewClutchInChart &&
+									getTimelineGroupByEngine(clutchTimelineGroups, group.engineName)}
+							>
 								<div class="compact-transition-labels">
 									{#each group.transitionLabels as label}
 										<span
@@ -3391,11 +3499,50 @@
 									<span>{group.segments[group.segments.length - 1]?.end || '-'}</span>
 								</div>
 							</div>
+
+							{#each [getTimelineGroupByEngine(clutchTimelineGroups, group.engineName)] as clutchGroup}
+								{#if canViewClutchInChart && clutchGroup}
+									<div class="compact-timeline-area clutch-timeline-area">
+										<div class="compact-transition-labels">
+											{#each clutchGroup.transitionLabels as label}
+												<span
+													class="compact-transition-label clutch-transition-label"
+													style={`left: ${label.leftPercent}%;`}
+													title={`${label.time} Â· ${label.status}`}
+												>
+													{label.time}
+												</span>
+											{/each}
+										</div>
+
+										<div class="compact-timeline clutch-timeline">
+											{#each clutchGroup.segments as segment}
+												<div
+													class="compact-segment clutch-segment"
+													class:on-segment={isOnStatus(segment.status)}
+													class:off-segment={isOffStatus(segment.status)}
+													style={`width: ${segment.widthPercent}%;`}
+													title={`Clutch ${segment.status} | ${segment.start} - ${segment.end} | ${segment.duration}`}
+												>
+													{#if segment.widthPercent >= 12}
+														<span>{segment.status}</span>
+													{/if}
+												</div>
+											{/each}
+										</div>
+
+										<div class="compact-axis">
+											<span>{clutchGroup.segments[0]?.start || '-'}</span>
+											<span>{clutchGroup.segments[clutchGroup.segments.length - 1]?.end || '-'}</span>
+										</div>
+									</div>
+								{/if}
+							{/each}
 						</div>
 					{/each}
 				</div>
 			{:else}
-				<div class="empty-box">Engine ON/OFF timeline is not available yet.</div>
+				<div class="empty-box">Engine Activity timeline is not available yet.</div>
 			{/if}
 		</section>
 	{/if}
@@ -3819,6 +3966,21 @@
 		</section>
 	{/if}
 	{/if}
+
+		{#if shouldShowDateRangeOverlay}
+			<div class="load-required-overlay">
+				<div class="load-required-card">
+					<div class="load-required-icon">!</div>
+					<span class="section-kicker">Waiting for date</span>
+					<h2>Choose a date first</h2>
+					<p>
+						Select the report date and timezone above, then click <strong>Load Data</strong>
+						to display the daily report.
+					</p>
+				</div>
+			</div>
+		{/if}
+	</div>
 </section>
 
 <style>
@@ -4836,7 +4998,8 @@
 		display: grid;
 		grid-template-columns: 150px 1fr;
 		gap: 14px;
-		align-items: center;
+		align-items: start;
+		overflow: hidden;
 	}
 
 	.compact-engine-name {
@@ -4866,13 +5029,76 @@
 	.compact-timeline-area {
 		position: relative;
 		padding-top: 16px;
+		padding-left: 58px;
+		padding-right: 18px;
+	}
+
+	.clutch-timeline-area {
+		grid-column: 2;
+		margin-top: 8px;
+		padding-top: 30px;
+	}
+
+	.engine-timeline-area::before,
+	.clutch-timeline-area::before {
+		content: 'ENGINE';
+		position: absolute;
+		left: 0;
+		top: 16px;
+		width: 48px;
+		height: 24px;
+		display: grid;
+		place-items: center;
+		border: 1px solid rgba(147, 197, 253, 0.2);
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.34);
+		color: rgba(191, 219, 254, 0.95);
+		font-size: 8.5px;
+		font-weight: 900;
+		letter-spacing: 0.08em;
+	}
+
+	.clutch-timeline-area::before {
+		content: 'CLUTCH';
+		top: 30px;
+		border-color: rgba(56, 189, 248, 0.26);
+		background: rgba(14, 165, 233, 0.1);
+		color: #bae6fd;
+	}
+
+	.compact-timeline-caption {
+		position: absolute;
+		top: 0;
+		left: 58px;
+		right: 18px;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 900;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+	}
+
+	.compact-timeline-caption small {
+		padding: 2px 7px;
+		border: 1px solid rgba(147, 197, 253, 0.2);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.08);
+		color: var(--text-secondary);
+		font-size: 9px;
+		font-weight: 900;
+		letter-spacing: 0;
+		text-transform: none;
 	}
 
 	.compact-transition-labels {
 		position: absolute;
 		top: 0;
-		left: 0;
-		right: 0;
+		left: 58px;
+		right: 18px;
 		height: 14px;
 	}
 
@@ -4880,6 +5106,7 @@
 		position: absolute;
 		top: 0;
 		transform: translateX(-50%);
+		max-width: 40px;
 		padding: 1px 4px;
 		border-radius: 6px;
 		background: var(--color-surface);
@@ -4889,7 +5116,17 @@
 		font-weight: 900;
 		line-height: 1.1;
 		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: clip;
 		box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+	}
+
+	.compact-transition-label:first-child {
+		transform: translateX(0);
+	}
+
+	.compact-transition-label:last-child {
+		transform: translateX(-100%);
 	}
 
 	.compact-transition-label::after {
@@ -4968,19 +5205,63 @@
 		background: #94a3b8;
 	}
 
+	.clutch-timeline {
+		height: 20px;
+		border-color: rgba(147, 197, 253, 0.18);
+		background: rgba(15, 23, 42, 0.08);
+	}
+
+	.clutch-segment.on-segment {
+		background: #38bdf8;
+	}
+
+	.clutch-segment.off-segment {
+		background: #475569;
+	}
+
+	.clutch-segment.on-segment:hover {
+		background: #0ea5e9;
+	}
+
+	.clutch-segment.off-segment:hover {
+		background: #334155;
+	}
+
+	.clutch-transition-label {
+		border-color: rgba(56, 189, 248, 0.22);
+		color: #bae6fd;
+	}
+
 	.compact-axis {
 		margin-top: 5px;
 		display: flex;
 		justify-content: space-between;
+		gap: 12px;
 		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 800;
+	}
+
+	.compact-axis span {
+		min-width: 0;
+		max-width: 48%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.compact-axis span:last-child {
+		text-align: right;
 	}
 
 	@media (max-width: 900px) {
 		.compact-status-row {
 			grid-template-columns: 1fr;
 			gap: 8px;
+		}
+
+		.clutch-timeline-area {
+			grid-column: auto;
 		}
 
 		.compact-status-legend {

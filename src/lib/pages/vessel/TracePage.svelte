@@ -7,6 +7,7 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
 	import CctvSnapshotImage from '$lib/components/CctvSnapshotImage.svelte';
+	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 
 	let { active = false } = $props();
 
@@ -27,6 +28,11 @@
 	let endDateTime = $state('');
 	let timezoneMode = $state('auto');
 	let timezoneOffset = $state('+07:00');
+	let activeTimePreset = $state('');
+	let hasLoadedDateRange = $state(false);
+	let shouldShowDateRangeOverlay = $derived(
+		!hasLoadedDateRange || !startDateTime || !endDateTime
+	);
 
 	let cctvItems = $state([]);
 	let cctvSnapshotsError = $state('');
@@ -63,6 +69,73 @@
 
 	function pad(value) {
 		return String(value).padStart(2, '0');
+	}
+
+	const TIME_PRESETS = [
+		{ id: 'today', label: 'Today' },
+		{ id: 'yesterday', label: 'Yesterday' },
+		{ id: 'two-days-before', label: '2 Days before' },
+		{ id: 'one-week', label: 'a Week' },
+		{ id: 'two-weeks', label: '2 Weeks' }
+	];
+
+	function toDatetimeLocalValue(date) {
+		if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+
+		return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+			date.getHours()
+		)}:${pad(date.getMinutes())}`;
+	}
+
+	function startOfLocalDay(date) {
+		return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+	}
+
+	function endOfLocalDay(date) {
+		return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 0, 0);
+	}
+
+	function addLocalDays(date, amount) {
+		const nextDate = new Date(date);
+		nextDate.setDate(nextDate.getDate() + amount);
+		return nextDate;
+	}
+
+	function applyTimePreset(presetId) {
+		const now = new Date();
+		let start = null;
+		let end = null;
+
+		if (presetId === 'today') {
+			start = startOfLocalDay(now);
+			end = startOfLocalDay(addLocalDays(now, 1));
+		} else if (presetId === 'yesterday') {
+			const yesterday = addLocalDays(now, -1);
+			start = startOfLocalDay(yesterday);
+			end = startOfLocalDay(now);
+		} else if (presetId === 'two-days-before') {
+			const twoDaysBefore = addLocalDays(now, -2);
+			start = startOfLocalDay(twoDaysBefore);
+			end = startOfLocalDay(addLocalDays(now, -1));
+		} else if (presetId === 'one-week') {
+			end = startOfLocalDay(now);
+			start = startOfLocalDay(addLocalDays(now, -7));
+		} else if (presetId === 'two-weeks') {
+			end = startOfLocalDay(now);
+			start = startOfLocalDay(addLocalDays(now, -14));
+		}
+
+		if (!start || !end) return;
+
+		activeTimePreset = presetId;
+		startDateTime = toDatetimeLocalValue(start);
+		endDateTime = toDatetimeLocalValue(end);
+		hasLoadedDateRange = false;
+	}
+
+	function clearActiveTimePreset() {
+		activeTimePreset = '';
+		hasLoadedDateRange = false;
 	}
 
 	function toApiDateTime(value) {
@@ -125,7 +198,7 @@
 
 		const rawValue = String(value).trim();
 
-		if (/^\d+$/.test(rawValue)) {
+		if (/^\d+(?:\.\d+)?$/.test(rawValue)) {
 			const number = Number(rawValue);
 			return Number.isFinite(number) ? number : NaN;
 		}
@@ -1097,6 +1170,7 @@
 		if (!startDateTime || !endDateTime) {
 			error = 'Please choose a start and end time first.';
 			traceData = null;
+			hasLoadedDateRange = false;
 			activePlaybackTimestampMs = NaN;
 			cctvItems = [];
 			cctvSnapshotsTotal = 0;
@@ -1112,6 +1186,7 @@
 		if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
 			error = 'End time must be later than start time.';
 			traceData = null;
+			hasLoadedDateRange = false;
 			activePlaybackTimestampMs = NaN;
 			cctvItems = [];
 			cctvSnapshotsTotal = 0;
@@ -1124,6 +1199,7 @@
 		if (!$selectedVesselId) {
 			error = 'No vessel has been selected from Fleet View.';
 			traceData = null;
+			hasLoadedDateRange = false;
 			activePlaybackTimestampMs = NaN;
 			cctvItems = [];
 			cctvSnapshotsTotal = 0;
@@ -1177,6 +1253,7 @@
 			]);
 
 			traceData = result;
+			hasLoadedDateRange = true;
 			activeIndex = 0;
 			playbackRenderTick += 1;
 
@@ -1226,6 +1303,7 @@
 			console.error('[VESSEL_TRACE_ERROR]', err);
 			error = err?.message || 'Failed to load vessel trace.';
 			traceData = null;
+			hasLoadedDateRange = false;
 			activePlaybackTimestampMs = NaN;
 			cctvItems = [];
 			cctvSnapshotsTotal = 0;
@@ -1560,26 +1638,39 @@
 			<div class="filter-controls">
 				<label>
 					<span>Start</span>
-					<input type="datetime-local" bind:value={startDateTime} />
+					<input
+						type="datetime-local"
+						bind:value={startDateTime}
+						oninput={clearActiveTimePreset}
+					/>
 				</label>
 
 				<label>
 					<span>End</span>
-					<input type="datetime-local" bind:value={endDateTime} />
+					<input
+						type="datetime-local"
+						bind:value={endDateTime}
+						oninput={clearActiveTimePreset}
+					/>
 				</label>
 
 				<label>
 					<span>Timezone</span>
-					<select bind:value={timezoneMode}>
-						<option value="auto">Auto</option>
-						<option value="manual">Manual</option>
+					<select bind:value={timezoneMode} onchange={() => (hasLoadedDateRange = false)}>
+						{#each TIMEZONE_MODE_OPTIONS as option}
+							<option value={option.value}>{option.label}</option>
+						{/each}
 					</select>
 				</label>
 
 				{#if timezoneMode === 'manual'}
 					<label>
 						<span>Offset</span>
-						<input type="text" bind:value={timezoneOffset} placeholder="+07:00" />
+						<select bind:value={timezoneOffset} onchange={() => (hasLoadedDateRange = false)}>
+							{#each TIMEZONE_OFFSET_OPTIONS as option}
+								<option value={option.value}>{option.label}</option>
+							{/each}
+						</select>
 					</label>
 				{/if}
 
@@ -1587,8 +1678,24 @@
 					{loading ? 'Loading...' : 'Load Trace'}
 				</button>
 			</div>
+
+			<div class="time-preset-row" aria-label="Trace time presets">
+				<span>Preset</span>
+				<div class="time-preset-list">
+					{#each TIME_PRESETS as preset}
+						<button
+							type="button"
+							class:active={activeTimePreset === preset.id}
+							onclick={() => applyTimePreset(preset.id)}
+						>
+							{preset.label}
+						</button>
+					{/each}
+				</div>
+			</div>
 		</section>
 
+		<div class="load-required-area trace-load-required-area" class:is-locked={shouldShowDateRangeOverlay}>
 		{#if error}
 			<div class="status-box error-box">{error}</div>
 		{/if}
@@ -1876,7 +1983,22 @@
 				</section>
 			</section>
 		</section>
-		{/if}
+	{/if}
+
+			{#if shouldShowDateRangeOverlay}
+				<div class="load-required-overlay">
+					<div class="load-required-card">
+						<div class="load-required-icon">!</div>
+						<span class="section-kicker">Waiting for date range</span>
+						<h2>Choose a trace range first</h2>
+						<p>
+							Select Start, End, and timezone above, then click <strong>Load Trace</strong>
+							to display playback, map, and CCTV snapshots.
+						</p>
+					</div>
+				</div>
+			{/if}
+		</div>
 	</section>
 </section>
 
@@ -1994,6 +2116,61 @@
 	.filter-controls button:disabled {
 		opacity: 0.55;
 		cursor: not-allowed;
+	}
+
+	.time-preset-row {
+		grid-column: 2;
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 8px;
+		margin-top: -8px;
+		min-width: 0;
+	}
+
+	.time-preset-row > span {
+		color: var(--text-secondary);
+		font-size: 9px;
+		font-weight: 950;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.time-preset-list {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 6px;
+		flex-wrap: wrap;
+		min-width: 0;
+	}
+
+	.time-preset-list button {
+		height: 24px;
+		border: 1px solid rgba(148, 163, 184, 0.34);
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.48);
+		padding: 0 10px;
+		color: var(--text-secondary);
+		font-size: 9px;
+		font-weight: 850;
+		cursor: pointer;
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease,
+			color 0.16s ease,
+			transform 0.16s ease;
+	}
+
+	.time-preset-list button:hover,
+	.time-preset-list button.active {
+		border-color: rgba(96, 165, 250, 0.78);
+		background: rgba(37, 99, 235, 0.26);
+		color: #bfdbfe;
+	}
+
+	.time-preset-list button:active {
+		transform: translateY(1px);
 	}
 
 	.status-box {
@@ -2962,6 +3139,19 @@
 
 		.filter-controls {
 			justify-content: flex-start;
+		}
+
+		.time-preset-row {
+			grid-column: 1;
+			align-items: flex-start;
+			justify-content: flex-start;
+			flex-direction: column;
+			margin-top: -2px;
+		}
+
+		.time-preset-list {
+			justify-content: flex-start;
+			width: 100%;
 		}
 
 		.filter-controls label,

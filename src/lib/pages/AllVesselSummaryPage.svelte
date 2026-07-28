@@ -2,18 +2,12 @@
 	import { onMount } from 'svelte';
 	import { apiRequest } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 
 	const TIME_RANGE_PRESETS = [
 		{ id: 'midnight', label: '00:00 - 06:00', startTime: '00:00', endTime: '06:00' },
 		{ id: 'day', label: '06:00 - 18:00', startTime: '06:00', endTime: '18:00' },
 		{ id: 'night', label: '18:00 - 24:00', startTime: '18:00', endTime: '23:59' }
-	];
-
-	const TIMEZONE_OPTIONS = [
-		{ label: 'UTC+7', value: '+07:00' },
-		{ label: 'UTC+8', value: '+08:00' },
-		{ label: 'UTC+9', value: '+09:00' },
-		{ label: 'UTC+0', value: '+00:00' }
 	];
 
 	let devices = $state([]);
@@ -1000,19 +994,22 @@
 							<label class="request-field">
 								<span>Default UTC Mode</span>
 								<select bind:value={defaultTimezoneMode}>
-									<option value="manual">Manual</option>
-									<option value="auto">Auto</option>
-								</select>
-							</label>
-
-							<label class="request-field">
-								<span>Default UTC</span>
-								<select bind:value={defaultTimezoneOffset} disabled={defaultTimezoneMode === 'auto'}>
-									{#each TIMEZONE_OPTIONS as option}
+									{#each TIMEZONE_MODE_OPTIONS as option}
 										<option value={option.value}>{option.label}</option>
 									{/each}
 								</select>
 							</label>
+
+							{#if defaultTimezoneMode === 'manual'}
+								<label class="request-field">
+									<span>Default UTC</span>
+									<select bind:value={defaultTimezoneOffset}>
+										{#each TIMEZONE_OFFSET_OPTIONS as option}
+											<option value={option.value}>{option.label}</option>
+										{/each}
+									</select>
+								</label>
+							{/if}
 						</div>
 
 						<div class="request-presets">
@@ -1132,24 +1129,26 @@
 													onchange={(event) =>
 														setVesselTimezone(device.id, 'mode', event.currentTarget.value)}
 												>
-													<option value="manual">Manual</option>
-													<option value="auto">Auto</option>
-												</select>
-											</label>
-
-											<label class="request-field">
-												<span>UTC</span>
-												<select
-													value={getVesselTimezone(device.id).offset}
-													onchange={(event) =>
-														setVesselTimezone(device.id, 'offset', event.currentTarget.value)}
-													disabled={getVesselTimezone(device.id).mode === 'auto'}
-												>
-													{#each TIMEZONE_OPTIONS as option}
+													{#each TIMEZONE_MODE_OPTIONS as option}
 														<option value={option.value}>{option.label}</option>
 													{/each}
 												</select>
 											</label>
+
+											{#if getVesselTimezone(device.id).mode === 'manual'}
+												<label class="request-field">
+													<span>UTC</span>
+													<select
+														value={getVesselTimezone(device.id).offset}
+														onchange={(event) =>
+															setVesselTimezone(device.id, 'offset', event.currentTarget.value)}
+													>
+														{#each TIMEZONE_OFFSET_OPTIONS as option}
+															<option value={option.value}>{option.label}</option>
+														{/each}
+													</select>
+												</label>
+											{/if}
 										</div>
 									</article>
 								{/each}

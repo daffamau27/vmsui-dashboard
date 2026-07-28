@@ -4,6 +4,7 @@
 	import { cubicOut } from 'svelte/easing';
 	import { getCurrentUserApi } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 	import {
 		getPermissionCatalogApi,
 		getAllUsersApi,
@@ -31,10 +32,14 @@
 		deleteEngineCurveAdminApi,
 		toggleEngineCurveActiveAdminApi,
 		getReportingVesselsAdminApi,
+		getPeriodicalReportingVesselsAdminApi,
 		saveAutoReportConfigAdminApi,
+		savePeriodicalAutoReportConfigAdminApi,
 		getReportingAssignableUsersAdminApi,
 		downloadReportingDailyReportAdminApi,
 		sendReportingDailyReportEmailAdminApi,
+		downloadReportingPeriodicalReportAdminApi,
+		sendReportingPeriodicalReportEmailAdminApi,
 		getAutoReportAuditLogsAdminApi,
 		exportAutoReportAuditLogsCsvAdminApi,
 		getTelegramGroupsAdminApi,
@@ -85,6 +90,12 @@
 	let selectedVessel = null;
 	let vesselMode = 'create';
 	let searchVessel = '';
+	const FUEL_CONSUMPTION_SOURCE_OPTIONS = [
+		{ value: 'fm', label: 'FM' },
+		{ value: 'ecu', label: 'ECU' },
+		{ value: 'ems_internal', label: 'VMS' },
+		{ value: 'ems_external', label: 'EMS' }
+	];
 
 	let cctvSelectedVessel = null;
 	let cctvConfigLoading = false;
@@ -137,6 +148,7 @@
 		totalPages: 1
 	};
 	let reportingContentSearch = '';
+	let reportingMode = 'daily';
 
 	let globalAuditLogs = [];
 	let globalAuditPagination = {
@@ -247,6 +259,7 @@
 		'view_engine_runtime_table',
 		'view_engine_event_status_history',
 		'view_engine_on_off_chart',
+		'view_clutch_in_chart',
 		'view_fuel_consumption_table',
 		'view_fuel_fod',
 		'view_fuel_ecu',
@@ -268,6 +281,7 @@
 		view_engine_runtime_table: 'Engine Runtime Table',
 		view_engine_event_status_history: 'Engine Event Status History',
 		view_engine_on_off_chart: 'Engine On/Off Chart',
+		view_clutch_in_chart: 'Clutch In Chart',
 		view_fuel_consumption_table: 'Fuel Consumption Table',
 		view_fuel_fod: 'FOD Fuel',
 		view_fuel_ecu: 'ECU Fuel',
@@ -285,9 +299,59 @@
 		view_high_rpm_low_speed_table: 'High RPM Low Speed Table'
 	};
 
+	const PERMISSION_EFFECT_HINTS = {
+		access_dashboard: 'Shows the Vessel Dashboard menu and dashboard page.',
+		access_daily_report: 'Shows the Daily Report menu and daily report page.',
+		access_monthly_report: 'Shows the Monthly Report menu and monthly report page.',
+		access_periodical_report: 'Shows the Periodical Report menu and periodical report page.',
+		access_trace: 'Shows the Trace menu and trace playback page.',
+		access_data_log: 'Shows the Data Log menu, date filters, column picker, table, and export action.',
+		access_fuel_management: 'Shows the Fuel Management menu and fuel operation page.',
+		access_fleet_view: 'Shows the Fleet View sidebar menu and fleet monitoring map.',
+		access_all_vessel_summary: 'Shows the All Vessel Summary sidebar menu and summary page.',
+		access_voyage_plan_fleet: 'Shows the Voyage Plan Fleet sidebar menu and fleet plan management page.',
+		access_alarm: 'Shows the Alarm sidebar menu and alarm page.',
+		view_voyage_plan_vessel: 'Shows the vessel Voyage Plan menu and active voyage plan map.',
+
+		view_daily_path_map: 'Shows vessel map, route preview, position panels, and daily trip map.',
+		view_engine_runtime_table: 'Shows engine runtime table in Daily Report and reporting content.',
+		view_engine_event_status_history: 'Shows engine status history runtime in Daily Report and reporting content.',
+		view_engine_on_off_chart: 'Shows engine activity compact timeline in Daily Report.',
+		view_clutch_in_chart: 'Shows clutch activity compact timeline under the engine activity chart.',
+		view_engine_rpm_stats_table: 'Shows Engine RPM Stats in Dashboard, Daily Report, and reporting content.',
+		view_speed_stats_table: 'Shows Speed Stats in Dashboard, Daily Report, and reporting content.',
+		view_travel_distance_table: 'Shows Travel Distance summary in Dashboard, Daily Report, and reporting content.',
+		view_fuel_consumption_table: 'Shows Fuel Consumption section/table in Dashboard, Daily Report, and reports.',
+		view_rpm_vs_fuel_chart: 'Shows RPM vs Fuel chart in Daily Report and report output.',
+		view_liter_per_nautical_mile_table: 'Shows Liter per Nautical Mile metric/table in Daily Report.',
+		view_high_rpm_outside_safety_zone_table:
+			'Shows High RPM Outside Safety Zone table in Daily Report.',
+		view_high_rpm_low_speed_table: 'Shows High RPM Low Speed table in Daily Report.',
+
+		view_fuel_fod: 'Shows FOD fuel fields in Dashboard, Daily Report, Data Log, and exports.',
+		view_fuel_ecu: 'Shows ECU fuel fields in Dashboard, Daily Report, Data Log, and exports.',
+		view_fuel_fms: 'Shows FMS fuel fields in Dashboard, Daily Report, Data Log, and exports.',
+		view_fuel_ems_internal: 'Shows VMS fuel fields in Dashboard, Daily Report, Data Log, and exports.',
+		view_fuel_ems_external: 'Shows EMS fuel fields in Dashboard, Daily Report, Data Log, and exports.',
+		view_fuel_engine_maker:
+			'Shows Engine Maker fuel fields in Dashboard, Daily Report, Data Log, and exports.',
+
+		manage_data_log_override:
+			'Enables Data Log Override: download template, import Excel override, and delete override imports.',
+		manage_fuel_rob: 'Enables ROB editing in Fuel Management fuel operation.',
+		manage_fuel_transactions: 'Enables fuel transaction add/edit/delete actions in Fuel Management.',
+		import_fuel_vdor: 'Enables VDOR Excel template/download/import actions in Fuel Management.',
+		manage_voyage_plan_fleet:
+			'Enables create/edit/delete/import actions for Voyage Plan Fleet when the plan is editable.',
+		assign_voyage_plan_fleet: 'Enables assigning voyage plans to allowed vessels.',
+		manage_cctv_config: 'Enables CCTV Config tab actions in Administrator page.'
+	};
+
 	let autoReportForm = {
 		isEnabled: false,
 		sendTime: '08:00',
+		periodicalStartDate: new Date().toISOString().slice(0, 10),
+		periodicalIntervalDays: 7,
 		timezoneMode: 'auto',
 		timezoneOffset: '+07:00',
 		reportSections: [],
@@ -297,6 +361,9 @@
 	};
 
 	let manualReportDate = new Date().toISOString().slice(0, 10);
+	let manualPeriodicalStart = `${new Date().toISOString().slice(0, 10)}T00:00`;
+	let manualPeriodicalEnd = `${new Date().toISOString().slice(0, 10)}T23:59`;
+	let manualPeriodicalFormat = 'excel';
 
 	let engineHealthForm = {
 		isEnabled: false,
@@ -396,6 +463,26 @@
 		return isOnHire ? 'On Hire' : 'Off Hire';
 	}
 
+	function getFuelConsumptionSourceValue(vesselOrValue) {
+		const raw =
+			typeof vesselOrValue === 'string'
+				? vesselOrValue
+				: vesselOrValue?.fuelConsumptionSource ??
+					vesselOrValue?.fuel_consumption_source ??
+					vesselOrValue?.fuelConsSource ??
+					vesselOrValue?.fuel_cons_source ??
+					'fm';
+		const normalized = String(raw || 'fm').trim().toLowerCase();
+		const allowedValues = new Set(FUEL_CONSUMPTION_SOURCE_OPTIONS.map((option) => option.value));
+
+		return allowedValues.has(normalized) ? normalized : 'fm';
+	}
+
+	function getFuelConsumptionSourceLabel(vesselOrValue) {
+		const value = getFuelConsumptionSourceValue(vesselOrValue);
+		return FUEL_CONSUMPTION_SOURCE_OPTIONS.find((option) => option.value === value)?.label || value.toUpperCase();
+	}
+
 	function getCompanyDisplayName(company) {
 		return company?.name || company?.companyName || `Company ${company?.id || '-'}`;
 	}
@@ -420,7 +507,7 @@
 
 	function getVesselCompanyLabel(vessel) {
 		const companyId = vessel?.companyId ?? vessel?.company_id;
-		const company = getCompanyById(companyId);
+		const company = vessel?.company || getCompanyById(companyId);
 
 		if (company) return `${getCompanyDisplayName(company)} • ID ${company.id}`;
 		if (companyId) return `Company ID ${companyId}`;
@@ -663,7 +750,10 @@
 		reportingVesselsLoading = true;
 
 		try {
-			reportingVessels = await getReportingVesselsAdminApi(reportingFilters);
+			reportingVessels =
+				reportingMode === 'periodical'
+					? await getPeriodicalReportingVesselsAdminApi(reportingFilters)
+					: await getReportingVesselsAdminApi(reportingFilters);
 
 			if (selectedReportingVessel?.id) {
 				const refreshed = reportingVessels.find(
@@ -677,6 +767,17 @@
 		} finally {
 			reportingVesselsLoading = false;
 		}
+	}
+
+	function setReportingMode(mode) {
+		if (!['daily', 'periodical'].includes(mode) || reportingMode === mode) return;
+
+		reportingMode = mode;
+		selectedReportingVessel = null;
+		reportingAssignableUsers = [];
+		reportingAssignableSearch = '';
+		clearAlert();
+		loadReportingVessels();
 	}
 
 	async function loadReportingAssignableUsers(vesselId, page = 1) {
@@ -787,13 +888,36 @@
 
 		const autoReport = getAutoReportConfig(vessel);
 		const recipients = autoReport?.recipients || {};
+		const schedule = autoReport?.schedule || {};
 		const engineHealth = getEngineHealthConfig(vessel);
 
 		autoReportForm = {
 			isEnabled: Boolean(autoReport.is_enabled ?? autoReport.isEnabled),
-			sendTime: autoReport.send_time || autoReport.sendTime || '08:00',
-			timezoneMode: autoReport.timezone_mode || autoReport.timezoneMode || 'auto',
-			timezoneOffset: autoReport.timezone_offset || autoReport.timezoneOffset || '+07:00',
+			sendTime: schedule.time || autoReport.send_time || autoReport.sendTime || '08:00',
+			periodicalStartDate:
+				schedule.start_date ||
+				schedule.startDate ||
+				autoReport.start_date ||
+				autoReport.startDate ||
+				new Date().toISOString().slice(0, 10),
+			periodicalIntervalDays:
+				schedule.interval_days ??
+				schedule.intervalDays ??
+				autoReport.interval_days ??
+				autoReport.intervalDays ??
+				7,
+			timezoneMode:
+				schedule.timezone_mode ||
+				schedule.timezoneMode ||
+				autoReport.timezone_mode ||
+				autoReport.timezoneMode ||
+				'auto',
+			timezoneOffset:
+				schedule.timezone_offset ||
+				schedule.timezoneOffset ||
+				autoReport.timezone_offset ||
+				autoReport.timezoneOffset ||
+				'+07:00',
 			reportSections: normalizeReportSections(autoReport),
 			picEmails: normalizeEmailList(recipients.pic),
 			ccEmails: normalizeEmailList(recipients.cc),
@@ -821,7 +945,8 @@
 	}
 
 	function buildAutoReportPayload() {
-		return {
+		const timezoneMode = autoReportForm.timezoneMode || 'auto';
+		const payload = {
 			isEnabled: Boolean(autoReportForm.isEnabled),
 			sendTime: autoReportForm.sendTime || '08:00',
 			recipients: {
@@ -832,9 +957,38 @@
 			reportContent: {
 				sections: [...new Set((autoReportForm.reportSections || []).map(String).filter(Boolean))]
 			},
-			timezoneMode: autoReportForm.timezoneMode || 'auto',
-			timezoneOffset: autoReportForm.timezoneOffset || '+07:00'
+			timezoneMode
 		};
+
+		if (timezoneMode === 'manual') {
+			payload.timezoneOffset = autoReportForm.timezoneOffset || '+07:00';
+		}
+
+		return payload;
+	}
+
+	function buildPeriodicalAutoReportPayload() {
+		const timezoneMode = autoReportForm.timezoneMode || 'auto';
+		const payload = {
+			isEnabled: Boolean(autoReportForm.isEnabled),
+			recipients: {
+				pic: normalizeEmailList(autoReportForm.picEmails),
+				cc: normalizeEmailList(autoReportForm.ccEmails),
+				bcc: normalizeEmailList(autoReportForm.bccEmails)
+			},
+			schedule: {
+				startDate: autoReportForm.periodicalStartDate,
+				intervalDays: Number(autoReportForm.periodicalIntervalDays || 0),
+				time: autoReportForm.sendTime || '08:00',
+				timezoneMode
+			}
+		};
+
+		if (timezoneMode === 'manual') {
+			payload.schedule.timezoneOffset = autoReportForm.timezoneOffset || '+07:00';
+		}
+
+		return payload;
 	}
 
 	function validateAutoReportPayload(payload) {
@@ -846,12 +1000,46 @@
 			return 'Timezone mode must be auto or manual.';
 		}
 
-		if (!/^[+-](0\d|1[0-4]):[0-5]\d$/.test(payload.timezoneOffset || '')) {
+		if (
+			payload.timezoneMode === 'manual' &&
+			!/^[+-](0\d|1[0-4]):[0-5]\d$/.test(payload.timezoneOffset || '')
+		) {
 			return 'Timezone offset must use the format +07:00, -03:00, up to +14:00.';
 		}
 
 		if (payload.isEnabled && payload.recipients.pic.length === 0) {
 			return 'At least 1 PIC recipient is required when auto-report is enabled.';
+		}
+
+		return null;
+	}
+
+	function validatePeriodicalAutoReportPayload(payload) {
+		if (!payload.schedule.startDate) {
+			return 'Periodical report start date is required.';
+		}
+
+		if (!Number.isInteger(payload.schedule.intervalDays) || payload.schedule.intervalDays < 1) {
+			return 'Interval days must be at least 1 day.';
+		}
+
+		if (!/^\d{2}:\d{2}$/.test(payload.schedule.time || '')) {
+			return 'Schedule time format must be HH:mm, for example 08:00.';
+		}
+
+		if (!['auto', 'manual'].includes(payload.schedule.timezoneMode)) {
+			return 'Timezone mode must be auto or manual.';
+		}
+
+		if (
+			payload.schedule.timezoneMode === 'manual' &&
+			!/^[+-](0\d|1[0-4]):[0-5]\d$/.test(payload.schedule.timezoneOffset || '')
+		) {
+			return 'Timezone offset must use the format +07:00, -03:00, up to +14:00.';
+		}
+
+		if (payload.isEnabled && payload.recipients.pic.length === 0) {
+			return 'At least 1 PIC recipient is required when periodical auto-report is enabled.';
 		}
 
 		return null;
@@ -863,8 +1051,11 @@
 			return;
 		}
 
-		const payload = buildAutoReportPayload();
-		const errorMessage = validateAutoReportPayload(payload);
+		const isPeriodicalMode = reportingMode === 'periodical';
+		const payload = isPeriodicalMode ? buildPeriodicalAutoReportPayload() : buildAutoReportPayload();
+		const errorMessage = isPeriodicalMode
+			? validatePeriodicalAutoReportPayload(payload)
+			: validateAutoReportPayload(payload);
 
 		if (errorMessage) {
 			showAlert('error', errorMessage);
@@ -875,10 +1066,17 @@
 		clearAlert();
 
 		try {
-			const response = await saveAutoReportConfigAdminApi(selectedReportingVessel.id, payload);
+			const response = isPeriodicalMode
+				? await savePeriodicalAutoReportConfigAdminApi(selectedReportingVessel.id, payload)
+				: await saveAutoReportConfigAdminApi(selectedReportingVessel.id, payload);
 			const savedConfig = unwrapApiData(response);
 
-			showAlert('success', 'Auto-report configuration saved successfully.');
+			showAlert(
+				'success',
+				isPeriodicalMode
+					? 'Periodical auto-report configuration saved successfully.'
+					: 'Auto-report configuration saved successfully.'
+			);
 
 			selectedReportingVessel = {
 				...selectedReportingVessel,
@@ -886,11 +1084,20 @@
 					...(selectedReportingVessel.auto_report || {}),
 					...savedConfig,
 					is_enabled: savedConfig?.isEnabled ?? payload.isEnabled,
-					send_time: savedConfig?.sendTime ?? payload.sendTime,
-					timezone_mode: savedConfig?.timezoneMode ?? payload.timezoneMode,
-					timezone_offset: savedConfig?.timezoneOffset ?? payload.timezoneOffset,
+					send_time: isPeriodicalMode
+						? savedConfig?.schedule?.time ?? payload.schedule?.time
+						: savedConfig?.sendTime ?? payload.sendTime,
+					timezone_mode: isPeriodicalMode
+						? savedConfig?.schedule?.timezoneMode ?? payload.schedule?.timezoneMode
+						: savedConfig?.timezoneMode ?? payload.timezoneMode,
+					timezone_offset: isPeriodicalMode
+						? savedConfig?.schedule?.timezoneOffset ??
+							payload.schedule?.timezoneOffset ??
+							autoReportForm.timezoneOffset
+						: savedConfig?.timezoneOffset ?? payload.timezoneOffset ?? autoReportForm.timezoneOffset,
 					recipients: savedConfig?.recipients ?? payload.recipients,
-					report_content: savedConfig?.report_content ?? savedConfig?.reportContent ?? payload.reportContent
+					report_content: savedConfig?.report_content ?? savedConfig?.reportContent ?? payload.reportContent,
+					schedule: isPeriodicalMode ? savedConfig?.schedule ?? payload.schedule : savedConfig?.schedule
 				}
 			};
 
@@ -980,6 +1187,100 @@
 			showAlert('success', 'Daily report sent by email successfully.');
 		} catch (error) {
 			showAlert('error', error.message || 'Failed to send daily report email.');
+		} finally {
+			reportingActionLoadingId = null;
+		}
+	}
+
+	function toApiDateTime(value) {
+		if (!value) return '';
+
+		const text = String(value).trim();
+		if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)) return text;
+		if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(text)) {
+			return `${text.replace('T', ' ')}:00`;
+		}
+		if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(text)) {
+			return text.replace('T', ' ');
+		}
+
+		return text;
+	}
+
+	function getManualPeriodicalPayload() {
+		return {
+			start: toApiDateTime(manualPeriodicalStart),
+			end: toApiDateTime(manualPeriodicalEnd),
+			timezoneMode: autoReportForm.timezoneMode || 'auto',
+			timezoneOffset: autoReportForm.timezoneOffset || '+07:00'
+		};
+	}
+
+	function validateManualPeriodicalPayload(payload) {
+		if (!payload.start || !payload.end) {
+			return 'Start and end range are required.';
+		}
+
+		if (new Date(payload.start.replace(' ', 'T')).getTime() > new Date(payload.end.replace(' ', 'T')).getTime()) {
+			return 'Start range must be earlier than end range.';
+		}
+
+		return null;
+	}
+
+	async function downloadManualPeriodicalReport() {
+		if (!selectedReportingVessel?.id) {
+			showAlert('error', 'Please select a vessel first.');
+			return;
+		}
+
+		const payload = getManualPeriodicalPayload();
+		const errorMessage = validateManualPeriodicalPayload(payload);
+
+		if (errorMessage) {
+			showAlert('error', errorMessage);
+			return;
+		}
+
+		reportingActionLoadingId = `periodical-download-${selectedReportingVessel.id}`;
+		clearAlert();
+
+		try {
+			await downloadReportingPeriodicalReportAdminApi(selectedReportingVessel.id, {
+				...payload,
+				format: manualPeriodicalFormat
+			});
+
+			showAlert('success', 'Periodical report downloaded successfully.');
+		} catch (error) {
+			showAlert('error', error.message || 'Failed to download periodical report.');
+		} finally {
+			reportingActionLoadingId = null;
+		}
+	}
+
+	async function sendManualPeriodicalReportEmail() {
+		if (!selectedReportingVessel?.id) {
+			showAlert('error', 'Please select a vessel first.');
+			return;
+		}
+
+		const payload = getManualPeriodicalPayload();
+		const errorMessage = validateManualPeriodicalPayload(payload);
+
+		if (errorMessage) {
+			showAlert('error', errorMessage);
+			return;
+		}
+
+		reportingActionLoadingId = `periodical-send-${selectedReportingVessel.id}`;
+		clearAlert();
+
+		try {
+			await sendReportingPeriodicalReportEmailAdminApi(selectedReportingVessel.id, payload);
+			showAlert('success', 'Periodical report sent by email successfully.');
+		} catch (error) {
+			showAlert('error', error.message || 'Failed to send periodical report email.');
 		} finally {
 			reportingActionLoadingId = null;
 		}
@@ -1320,6 +1621,7 @@
 			deviceId: '',
 			vesselName: '',
 			companyId: '',
+			fuelConsumptionSource: 'fm',
 			hireStatus: 'false'
 		};
 	}
@@ -1337,6 +1639,8 @@
 			vessel?.id ? String(vessel.id) : '',
 			vessel?.deviceId,
 			vessel?.vesselName,
+			getFuelConsumptionSourceLabel(vessel),
+			getFuelConsumptionSourceValue(vessel),
 			vessel?.companyId ? String(vessel.companyId) : '',
 			company?.name,
 			getCompanyThingsboardId(company),
@@ -1898,6 +2202,7 @@
 			deviceId: vessel?.deviceId || '',
 			vesselName: vessel?.vesselName || '',
 			companyId: vessel?.companyId ?? '',
+			fuelConsumptionSource: getFuelConsumptionSourceValue(vessel),
 			hireStatus: getVesselHireValue(vessel)
 		};
 
@@ -1922,7 +2227,8 @@
 		return {
 			deviceId: vesselForm.deviceId.trim(),
 			vesselName: vesselForm.vesselName.trim(),
-			companyId: companyIdText ? Number(companyIdText) : null
+			companyId: companyIdText ? Number(companyIdText) : null,
+			fuelConsumptionSource: getFuelConsumptionSourceValue(vesselForm.fuelConsumptionSource)
 		};
 	}
 
@@ -2345,6 +2651,47 @@
 			.replace(/\b\w/g, (char) => char.toUpperCase());
 	}
 
+	function getPermissionEffect(permission = {}) {
+		const key = String(permission?.key || permission?.permissionKey || '').trim();
+		const moduleLabel = permission?.moduleLabel || prettify(permission?.moduleKey || '');
+		const category = String(permission?.category || '').trim();
+		const tableLabel = permission?.tableLabel || permission?.columnLabel || '';
+
+		if (PERMISSION_EFFECT_HINTS[key]) return PERMISSION_EFFECT_HINTS[key];
+
+		if (REPORT_CONTENT_PERMISSION_KEYS.includes(key) || category === 'report_content') {
+			return `Affects report content visibility${tableLabel ? ` in ${tableLabel}` : ''}.`;
+		}
+
+		if (key.startsWith('access_')) {
+			return `Shows or opens the ${moduleLabel || prettify(key.replace(/^access_/, ''))} feature/page.`;
+		}
+
+		if (key.startsWith('view_')) {
+			return `Shows related data, cards, tables, or charts in ${moduleLabel || 'the selected module'}.`;
+		}
+
+		if (key.startsWith('manage_')) {
+			return `Enables create, update, delete, or configuration actions in ${moduleLabel || 'the selected module'}.`;
+		}
+
+		if (key.startsWith('import_')) {
+			return `Enables Excel/file import actions in ${moduleLabel || 'the selected module'}.`;
+		}
+
+		if (key.startsWith('export_')) {
+			return `Enables export/download actions in ${moduleLabel || 'the selected module'}.`;
+		}
+
+		if (key.startsWith('assign_')) {
+			return `Enables assignment actions in ${moduleLabel || 'the selected module'}.`;
+		}
+
+		return moduleLabel
+			? `Affects access and actions inside ${moduleLabel}.`
+			: 'Affects the related page, section, or action that uses this permission key.';
+	}
+
 	function parseIds(value) {
 		return String(value || '')
 			.split(/[\s,;]+/)
@@ -2388,6 +2735,7 @@
 			permission?.key,
 			permission?.label,
 			permission?.description,
+			getPermissionEffect(permission),
 			permission?.moduleLabel,
 			permission?.moduleKey,
 			permission?.category,
@@ -3163,6 +3511,10 @@
 															<strong>{permission.label || permission.key}</strong>
 															<code>{permission.key}</code>
 															<small>{permission.description || '-'}</small>
+															<small class="permission-effect">
+																<b>Affects</b>
+																{getPermissionEffect(permission)}
+															</small>
 														</span>
 
 														<em>{permission.category}</em>
@@ -3231,6 +3583,9 @@
 
 									<div class="vessel-row-meta">
 										<em>{getVesselCompanyLabel(vessel)}</em>
+										<span class="fuel-source-pill">
+											{getFuelConsumptionSourceLabel(vessel)}
+										</span>
 										<span
 											class:on-hire={getVesselHireStatus(vessel)}
 											class:off-hire={!getVesselHireStatus(vessel)}
@@ -3298,16 +3653,13 @@
 							</label>
 
 							<label>
-								<span>Company</span>
-								<select bind:value={vesselForm.companyId} disabled={companiesLoading}>
-									<option value="">No Company</option>
-									{#each companies as company}
-										<option value={String(company.id)}>
-											{getCompanyDisplayName(company)} — ID {company.id}
-										</option>
+								<span>Fuel Cons Source</span>
+								<select bind:value={vesselForm.fuelConsumptionSource}>
+									{#each FUEL_CONSUMPTION_SOURCE_OPTIONS as option}
+										<option value={option.value}>{option.label}</option>
 									{/each}
 								</select>
-								<small class="field-help">Load the company list from GET /companies.</small>
+								<small class="field-help">Saved as <code>fuelConsumptionSource</code> on <code>/vessels</code>.</small>
 							</label>
 
 							<label>
@@ -3353,70 +3705,7 @@
 										: 'Save Vessel'}
 							</button>
 						</div>
-					</div>
-
-					<section class="company-registry-card">
-						<div class="company-registry-head">
-							<div>
-								<h3>Company Registry</h3>
-								<p>{filteredCompanies.length} of {companies.length} local companies</p>
-							</div>
-
-							<div class="company-actions">
-								<button
-									type="button"
-									class="ghost-button small"
-									on:click={loadCompanies}
-									disabled={companiesLoading}
-								>
-									Refresh
-								</button>
-
-								<button
-									type="button"
-									class="primary-button small"
-									on:click={syncCompanies}
-									disabled={companiesSyncing}
-								>
-									{companiesSyncing ? 'Syncing...' : 'Sync Companies'}
-								</button>
-							</div>
-						</div>
-
-						<input
-							class="search-input"
-							type="search"
-							bind:value={searchCompany}
-							placeholder="Search company name or ThingsBoard ID..."
-						/>
-
-						{#if companiesLoading}
-							<LoadingSkeleton label="Loading companies" variant="admin-compact-list" rows={4} />
-						{:else if filteredCompanies.length === 0}
-							<div class="empty-box">Company not found.</div>
-						{:else}
-							<div class="company-list">
-								{#each filteredCompanies as company}
-									<article class="company-row">
-										<div>
-											<strong>{getCompanyDisplayName(company)}</strong>
-											<span>ID {company.id}</span>
-											<small>{getCompanyThingsboardId(company)}</small>
-										</div>
-
-										<button
-											type="button"
-											class="danger-button small"
-											on:click={() => deleteCompany(company)}
-											disabled={companyActionLoadingId === company.id}
-										>
-											{companyActionLoadingId === company.id ? 'Deleting...' : 'Delete'}
-										</button>
-									</article>
-								{/each}
-							</div>
-						{/if}
-					</section>
+					</div>letakk
 
 					{#if selectedVessel?.engines?.length}
 						<section class="engine-preview-card">
@@ -3800,7 +4089,7 @@
 					<div class="panel-title-row">
 						<div>
 							<h2>Reporting Vessels</h2>
-							<p>{reportingVessels.length} vessel</p>
+							<p>{reportingMode === 'periodical' ? 'Periodical auto-report' : 'Daily auto-report'} of {reportingVessels.length} vessel</p>
 						</div>
 
 						{#if reportingVesselsLoading}
@@ -3809,6 +4098,23 @@
 					</div>
 
 					<div class="reporting-filter-box">
+						<div class="reporting-mode-switch">
+							<button
+								type="button"
+								class:active-mode={reportingMode === 'daily'}
+								on:click={() => setReportingMode('daily')}
+							>
+								Daily
+							</button>
+							<button
+								type="button"
+								class:active-mode={reportingMode === 'periodical'}
+								on:click={() => setReportingMode('periodical')}
+							>
+								Periodical
+							</button>
+						</div>
+
 						<input
 							type="search"
 							bind:value={reportingFilters.search}
@@ -3852,7 +4158,13 @@
 									</div>
 
 									<em class:active-reporting={isAutoReportEnabled(vessel)}>
-										{isAutoReportEnabled(vessel) ? 'Auto On' : 'Auto Off'}
+										{isAutoReportEnabled(vessel)
+											? reportingMode === 'periodical'
+												? 'Periodical On'
+												: 'Auto On'
+											: reportingMode === 'periodical'
+												? 'Periodical Off'
+												: 'Auto Off'}
 									</em>
 								</button>
 							{/each}
@@ -3865,7 +4177,8 @@
 						<section class="reporting-empty-card">
 							<h2>Select Vessel</h2>
 							<p>
-								Select a vessel on the left to configure auto-report and manual daily report.
+								Select a vessel on the left to configure
+								{reportingMode === 'periodical' ? 'periodical auto-report' : 'auto-report and manual daily report'}.
 							</p>
 						</section>
 					{:else}
@@ -3882,8 +4195,12 @@
 						<section class="reporting-section-card">
 							<div class="reporting-section-head">
 								<div>
-									<h3>Auto Daily Report Email</h3>
-									<p>Configure recipients, send time, timezone, and auto-report status.</p>
+									<h3>{reportingMode === 'periodical' ? 'Auto Periodical Report Email' : 'Auto Daily Report Email'}</h3>
+									<p>
+										{reportingMode === 'periodical'
+											? 'Configure periodical schedule, recipients, timezone, and auto-report status.'
+											: 'Configure recipients, send time, timezone, and auto-report status.'}
+									</p>
 								</div>
 
 								<label class="switch-line">
@@ -3893,88 +4210,110 @@
 							</div>
 
 							<div class="form-grid reporting-form-grid">
+								{#if reportingMode === 'periodical'}
+									<label>
+										<span>Start Date</span>
+										<input type="date" bind:value={autoReportForm.periodicalStartDate} />
+									</label>
+
+									<label>
+										<span>Interval Days</span>
+										<input
+											type="number"
+											min="1"
+											step="1"
+											bind:value={autoReportForm.periodicalIntervalDays}
+										/>
+									</label>
+								{/if}
+
 								<label>
-									<span>Send Time</span>
+									<span>{reportingMode === 'periodical' ? 'Schedule Time' : 'Send Time'}</span>
 									<input type="time" bind:value={autoReportForm.sendTime} />
 								</label>
 
 								<label>
 									<span>Timezone Mode</span>
 									<select bind:value={autoReportForm.timezoneMode}>
-										<option value="auto">Auto</option>
-										<option value="manual">Manual</option>
+										{#each TIMEZONE_MODE_OPTIONS as option}
+											<option value={option.value}>{option.label}</option>
+										{/each}
 									</select>
 								</label>
 
-								<label>
-									<span>Timezone Offset</span>
-									<input
-										type="text"
-										bind:value={autoReportForm.timezoneOffset}
-										placeholder="+07:00"
-									/>
-								</label>
-							</div>
-
-							<div class="report-content-card">
-								<div class="report-content-head">
-									<div>
-										<h4>Report Content per Vessel</h4>
-										<p>
-											Choose which daily report sections are included for
-											{getVesselDisplayName(selectedReportingVessel)}.
-										</p>
-									</div>
-
-									<div class="report-content-actions">
-										<span>{autoReportForm.reportSections.length} selected</span>
-										<button type="button" class="ghost-button small" on:click={selectAllReportContentSections}>
-											Select All
-										</button>
-										<button type="button" class="ghost-button small" on:click={clearReportContentSections}>
-											Clear
-										</button>
-									</div>
-								</div>
-
-								<label class="report-content-search">
-									<span>Search Section</span>
-									<input
-										type="search"
-										bind:value={reportingContentSearch}
-										placeholder="Search report section, table, or permission key..."
-									/>
-								</label>
-
-								{#if permissionsLoading}
-									<LoadingSkeleton label="Loading report content catalog" variant="admin-compact-list" rows={4} />
-								{:else if visibleReportContentPermissions.length === 0}
-									<div class="empty-box">No report content section found.</div>
-								{:else}
-									<div class="report-content-list">
-										{#each visibleReportContentPermissions as permission}
-											<label
-												class:report-content-item-checked={hasReportContentSection(permission.key)}
-												class="report-content-item"
-											>
-												<input
-													type="checkbox"
-													checked={hasReportContentSection(permission.key)}
-													on:change={() => toggleReportContentSection(permission.key)}
-												/>
-												<span class="report-content-checkmark" aria-hidden="true"></span>
-												<div>
-													<strong>{permission.label || prettify(permission.key)}</strong>
-													<span class="report-content-meta">
-														{permission.tableLabel || permission.moduleLabel || 'Daily Report'}
-													</span>
-													<small>{permission.description || permission.key}</small>
-												</div>
-											</label>
-										{/each}
-									</div>
+								{#if autoReportForm.timezoneMode === 'manual'}
+									<label>
+										<span>Timezone Offset</span>
+										<select bind:value={autoReportForm.timezoneOffset}>
+											{#each TIMEZONE_OFFSET_OPTIONS as option}
+												<option value={option.value}>{option.label}</option>
+											{/each}
+										</select>
+									</label>
 								{/if}
 							</div>
+
+							{#if reportingMode === 'daily'}
+								<div class="report-content-card">
+									<div class="report-content-head">
+										<div>
+											<h4>Report Content per Vessel</h4>
+											<p>
+												Choose which daily report sections are included for
+												{getVesselDisplayName(selectedReportingVessel)}.
+											</p>
+										</div>
+
+										<div class="report-content-actions">
+											<span>{autoReportForm.reportSections.length} selected</span>
+											<button type="button" class="ghost-button small" on:click={selectAllReportContentSections}>
+												Select All
+											</button>
+											<button type="button" class="ghost-button small" on:click={clearReportContentSections}>
+												Clear
+											</button>
+										</div>
+									</div>
+
+									<label class="report-content-search">
+										<span>Search Section</span>
+										<input
+											type="search"
+											bind:value={reportingContentSearch}
+											placeholder="Search report section, table, or permission key..."
+										/>
+									</label>
+
+									{#if permissionsLoading}
+										<LoadingSkeleton label="Loading report content catalog" variant="admin-compact-list" rows={4} />
+									{:else if visibleReportContentPermissions.length === 0}
+										<div class="empty-box">No report content section found.</div>
+									{:else}
+										<div class="report-content-list">
+											{#each visibleReportContentPermissions as permission}
+												<label
+													class:report-content-item-checked={hasReportContentSection(permission.key)}
+													class="report-content-item"
+												>
+													<input
+														type="checkbox"
+														checked={hasReportContentSection(permission.key)}
+														on:change={() => toggleReportContentSection(permission.key)}
+													/>
+													<span class="report-content-checkmark" aria-hidden="true"></span>
+													<div>
+														<strong>{permission.label || prettify(permission.key)}</strong>
+														<span class="report-content-meta">
+															{permission.tableLabel || permission.moduleLabel || 'Daily Report'}
+														</span>
+														<small>{permission.description || permission.key}</small>
+													</div>
+												</label>
+											{/each}
+										</div>
+									{/if}
+								</div>
+							{/if}
 
 							<div class="recipient-picker-card">
 								<div class="recipient-picker-head">
@@ -4166,44 +4505,97 @@
 									on:click={saveAutoReportConfig}
 									disabled={reportingSaving}
 								>
-									{reportingSaving ? 'Saving...' : 'Save Auto Report'}
+									{reportingSaving
+										? 'Saving...'
+										: reportingMode === 'periodical'
+											? 'Save Periodical Auto Report'
+											: 'Save Auto Report'}
 								</button>
 							</div>
 						</section>
 
-						<section class="reporting-section-card">
-							<div class="reporting-section-head">
-								<div>
-									<h3>Manual Daily Report</h3>
-									<p>Download Excel or send the daily report email manually.</p>
+						{#if reportingMode === 'periodical'}
+							<section class="reporting-section-card">
+								<div class="reporting-section-head">
+									<div>
+										<h3>Manual Periodical Report</h3>
+										<p>Download Excel/PDF or send the configured periodical report email manually.</p>
+									</div>
 								</div>
-							</div>
 
-							<div class="form-grid manual-report-grid">
-								<label>
-									<span>Report Date</span>
-									<input type="date" bind:value={manualReportDate} />
-								</label>
+								<div class="form-grid manual-report-grid periodical-manual-grid">
+									<label>
+										<span>Start</span>
+										<input type="datetime-local" bind:value={manualPeriodicalStart} />
+									</label>
 
-								<button
-									type="button"
-									class="ghost-button"
-									on:click={downloadManualDailyReport}
-									disabled={reportingActionLoadingId === `download-${selectedReportingVessel.id}`}
-								>
-									Download Excel
-								</button>
+									<label>
+										<span>End</span>
+										<input type="datetime-local" bind:value={manualPeriodicalEnd} />
+									</label>
 
-								<button
-									type="button"
-									class="primary-button"
-									on:click={sendManualDailyReportEmail}
-									disabled={reportingActionLoadingId === `send-${selectedReportingVessel.id}`}
-								>
-									Send Email
-								</button>
-							</div>
-						</section>
+									<label>
+										<span>Download Format</span>
+										<select bind:value={manualPeriodicalFormat}>
+											<option value="excel">Excel</option>
+											<option value="pdf">PDF</option>
+										</select>
+									</label>
+
+									<button
+										type="button"
+										class="ghost-button"
+										on:click={downloadManualPeriodicalReport}
+										disabled={reportingActionLoadingId === `periodical-download-${selectedReportingVessel.id}`}
+									>
+										Download Report
+									</button>
+
+									<button
+										type="button"
+										class="primary-button"
+										on:click={sendManualPeriodicalReportEmail}
+										disabled={reportingActionLoadingId === `periodical-send-${selectedReportingVessel.id}`}
+									>
+										Send Email
+									</button>
+								</div>
+							</section>
+						{:else}
+							<section class="reporting-section-card">
+								<div class="reporting-section-head">
+									<div>
+										<h3>Manual Daily Report</h3>
+										<p>Download Excel or send the daily report email manually.</p>
+									</div>
+								</div>
+
+								<div class="form-grid manual-report-grid">
+									<label>
+										<span>Report Date</span>
+										<input type="date" bind:value={manualReportDate} />
+									</label>
+
+									<button
+										type="button"
+										class="ghost-button"
+										on:click={downloadManualDailyReport}
+										disabled={reportingActionLoadingId === `download-${selectedReportingVessel.id}`}
+									>
+										Download Excel
+									</button>
+
+									<button
+										type="button"
+										class="primary-button"
+										on:click={sendManualDailyReportEmail}
+										disabled={reportingActionLoadingId === `send-${selectedReportingVessel.id}`}
+									>
+										Send Email
+									</button>
+								</div>
+							</section>
+						{/if}
 
 						<section class="reporting-section-card">
 							<div class="reporting-section-head">
@@ -5769,6 +6161,25 @@
 		min-width: 0;
 	}
 
+	.fuel-source-pill {
+		display: inline-flex !important;
+		align-items: center;
+		justify-content: center;
+		width: fit-content;
+		margin-top: 0 !important;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 999px;
+		padding: 5px 9px;
+		background: rgba(37, 99, 235, 0.14);
+		color: #bfdbfe !important;
+		font-size: 10px !important;
+		font-weight: 850 !important;
+		line-height: 1;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+
 	.hire-status-pill {
 		display: inline-flex !important;
 		align-items: center;
@@ -6203,6 +6614,29 @@
 		line-height: 1.45;
 	}
 
+	.permission-item .permission-effect {
+		display: flex;
+		gap: 7px;
+		align-items: flex-start;
+		width: fit-content;
+		max-width: 100%;
+		margin-top: 8px;
+		border: 1px solid rgba(96, 165, 250, 0.18);
+		border-radius: 10px;
+		padding: 6px 8px;
+		color: #bfdbfe;
+		background: rgba(37, 99, 235, 0.1);
+	}
+
+	.permission-item .permission-effect b {
+		flex: 0 0 auto;
+		color: #60a5fa;
+		font-size: 10px;
+		font-weight: 900;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+	}
+
 	.permission-item em {
 		border-radius: 999px;
 		padding: 4px 8px;
@@ -6406,6 +6840,38 @@
 		display: grid;
 		gap: 8px;
 		padding: 0 16px 12px;
+	}
+
+	.reporting-mode-switch {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 6px;
+		padding: 4px;
+		border: 1px solid rgba(96, 165, 250, 0.14);
+		border-radius: 13px;
+		background: rgba(15, 23, 42, 0.42);
+	}
+
+	.reporting-mode-switch button {
+		min-height: 34px;
+		border: 1px solid transparent;
+		border-radius: 10px;
+		background: transparent;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 850;
+		cursor: pointer;
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease,
+			color 0.16s ease;
+	}
+
+	.reporting-mode-switch button:hover,
+	.reporting-mode-switch button.active-mode {
+		border-color: rgba(59, 130, 246, 0.35);
+		background: rgba(37, 99, 235, 0.18);
+		color: var(--text-primary);
 	}
 
 	.reporting-filter-box input,

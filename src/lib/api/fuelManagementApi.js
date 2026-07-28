@@ -1,9 +1,8 @@
 import { apiRequest } from '$lib/api/authApi.js';
 
-export async function getFuelManagementData({ vesselId, date, timezoneMode = 'auto', timezoneOffset = '' }) {
+export async function getFuelManagementData({ vesselId, timezoneMode = 'auto', timezoneOffset = '' }) {
 	const params = new URLSearchParams({
 		vesselId: String(vesselId),
-		date,
 		timezoneMode
 	});
 
@@ -16,13 +15,27 @@ export async function getFuelManagementData({ vesselId, date, timezoneMode = 'au
 	});
 }
 
-export async function getFuelManagementHistory({ vesselId, date, page = 1, limit = 10 }) {
+export async function getFuelManagementHistory({
+	vesselId,
+	startDate,
+	endDate,
+	timezoneMode = 'auto',
+	timezoneOffset = '',
+	page = 1,
+	limit = 10
+}) {
 	const params = new URLSearchParams({
 		vesselId: String(vesselId),
-		date,
+		startDate,
+		endDate,
+		timezoneMode,
 		page: String(page),
 		limit: String(limit)
 	});
+
+	if (timezoneMode === 'manual' && timezoneOffset) {
+		params.set('timezoneOffset', timezoneOffset);
+	}
 
 	return apiRequest(`/fuel-management/history?${params.toString()}`, {
 		method: 'GET'
