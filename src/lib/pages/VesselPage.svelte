@@ -194,18 +194,50 @@
 		return vessel?.vesselId || vessel?.id || vessel?.vessel_id || vessel?.dbId || null;
 	}
 
+	function getVesselDisplayName(vessel) {
+		return (
+			vessel?.vesselName ||
+			vessel?.vessel_name ||
+			vessel?.name ||
+			vessel?.deviceName ||
+			vessel?.raw?.vesselName ||
+			vessel?.raw?.vessel_name ||
+			vessel?.raw?.vessel?.vesselName ||
+			vessel?.raw?.vessel?.vessel_name ||
+			''
+		);
+	}
+
+	function getVesselCompanyName(vessel) {
+		return (
+			vessel?.companyName ||
+			vessel?.company_name ||
+			vessel?.company?.name ||
+			vessel?.company?.companyName ||
+			vessel?.raw?.companyName ||
+			vessel?.raw?.company_name ||
+			vessel?.raw?.company?.name ||
+			vessel?.raw?.company?.companyName ||
+			vessel?.raw?.vessel?.companyName ||
+			vessel?.raw?.vessel?.company_name ||
+			vessel?.raw?.vessel?.company?.name ||
+			vessel?.raw?.vessel?.company?.companyName ||
+			vessel?.raw?.detail?.companyName ||
+			vessel?.raw?.detail?.company_name ||
+			vessel?.raw?.detail?.company?.name ||
+			vessel?.raw?.detail?.company?.companyName ||
+			''
+		);
+	}
+
 	let filteredVessels = $derived(
 		vessels.filter((vessel) => {
 			const keyword = vesselSearch.trim().toLowerCase();
 			if (!keyword) return true;
 
 			return [
-				vessel?.vesselName,
-				vessel?.name,
-				vessel?.companyName,
-				vessel?.deviceName,
-				vessel?.deviceId,
-				getVesselId(vessel)
+				getVesselDisplayName(vessel),
+				getVesselCompanyName(vessel)
 			]
 				.filter(Boolean)
 				.some((value) => String(value).toLowerCase().includes(keyword));
