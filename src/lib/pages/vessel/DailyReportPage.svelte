@@ -1305,6 +1305,12 @@
 		);
 	}
 
+	function hasClutchInTimelineData(group) {
+		const segments = Array.isArray(group?.segments) ? group.segments : [];
+
+		return segments.some((segment) => isOnStatus(segment?.status));
+	}
+
 	function buildStatusTransitionLabels(segments = []) {
 		if (!Array.isArray(segments) || !segments.length) return [];
 
@@ -3464,7 +3470,9 @@
 							<div
 								class="compact-timeline-area"
 								class:engine-timeline-area={canViewClutchInChart &&
-									getTimelineGroupByEngine(clutchTimelineGroups, group.engineName)}
+									hasClutchInTimelineData(
+										getTimelineGroupByEngine(clutchTimelineGroups, group.engineName)
+									)}
 							>
 								<div class="compact-transition-labels">
 									{#each group.transitionLabels as label}
@@ -3501,7 +3509,7 @@
 							</div>
 
 							{#each [getTimelineGroupByEngine(clutchTimelineGroups, group.engineName)] as clutchGroup}
-								{#if canViewClutchInChart && clutchGroup}
+								{#if canViewClutchInChart && hasClutchInTimelineData(clutchGroup)}
 									<div class="compact-timeline-area clutch-timeline-area">
 										<div class="compact-transition-labels">
 											{#each clutchGroup.transitionLabels as label}
