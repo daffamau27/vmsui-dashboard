@@ -328,6 +328,38 @@
 		return Number.isFinite(time) ? time : 0;
 	}
 
+	function sortRowsNewestFirst(rows = []) {
+		return [...rows].sort((a, b) => parseRowTimestamp(b) - parseRowTimestamp(a));
+	}
+
+	function normalizeDataLogPagination(rawPagination = {}, fallbackPage = 1, fallbackTotalRows = 0) {
+		const page = Number(rawPagination?.page ?? rawPagination?.currentPage ?? fallbackPage ?? 1) || 1;
+		const pageSize =
+			Number(rawPagination?.pageSize ?? rawPagination?.page_size ?? rawPagination?.limit) ||
+			DATA_LOG_PAGE_SIZE;
+		const totalItems =
+			Number(
+				rawPagination?.totalItems ??
+					rawPagination?.total_items ??
+					rawPagination?.total ??
+					rawPagination?.count
+			) || fallbackTotalRows;
+		const totalPages =
+			Number(rawPagination?.totalPages ?? rawPagination?.total_pages ?? rawPagination?.pages) ||
+			Math.max(1, Math.ceil(totalItems / pageSize)) ||
+			page;
+
+		return {
+			...rawPagination,
+			page,
+			pageSize,
+			totalItems,
+			totalPages,
+			hasNext: rawPagination?.hasNext ?? rawPagination?.has_next ?? page < totalPages,
+			hasPrevious: rawPagination?.hasPrevious ?? rawPagination?.has_previous ?? page > 1
+		};
+	}
+
 	function pad(value) {
 		return String(value).padStart(2, '0');
 	}
@@ -575,9 +607,8 @@
 	let dataRows = $derived(loadedRows);
 
 	let hasNextDataLogPage = $derived(
-		Boolean(dataLogPagination?.hasNext) ||
-			(Number(dataLogPagination?.page || dataLogPage) <
-				Number(dataLogPagination?.totalPages || dataLogPage))
+		Boolean(dataLogPagination?.hasPrevious) ||
+			Number(dataLogPagination?.page || dataLogPage) > 1
 	);
 
 	let hasRawData = $derived(Boolean(logData));
@@ -622,7 +653,24 @@
 		}
 	}
 
-	async function loadDataLog({ page = 1, append = false } = {}) {
+	function getDataLogRequestParams(page = 1) {
+		return {
+			vesselId: $selectedVesselId,
+			start: toApiDateTime(startDateTime),
+			end: toApiDateTime(endDateTime),
+			timezoneMode,
+			timezoneOffset,
+			columns: '',
+			page,
+			pageSize: DATA_LOG_PAGE_SIZE
+		};
+	}
+
+	async function fetchDataLogPage(page = 1) {
+		return getDataLogData(getDataLogRequestParams(page));
+	}
+
+	async function loadDataLog({ page = null, append = false } = {}) {
 		if (!$selectedVesselId) {
 			error = 'No vessel has been selected from Fleet View.';
 			logData = null;
@@ -651,30 +699,49 @@
 		error = '';
 
 		try {
-			const result = await getDataLogData({
-				vesselId: $selectedVesselId,
-				start: toApiDateTime(startDateTime),
-				end: toApiDateTime(endDateTime),
-				timezoneMode,
-				timezoneOffset,
-				columns: '',
-				page,
-				pageSize: DATA_LOG_PAGE_SIZE
-			});
+			let targetPage = Number(page || 1);
+			let result;
+			let payload;
+			let rows;
+			let pagination;
 
-			if (requestId !== dataLogRequestId) return;
+			if (append) {
+				targetPage = Math.max(1, Number(page || dataLogPage - 1));
+				result = await fetchDataLogPage(targetPage);
+				if (requestId !== dataLogRequestId) return;
 
-			const payload = result?.data || result || {};
-			const rows = getPayloadRows(payload);
-			const nextRows = append ? [...loadedRows, ...rows] : rows;
-			const pagination = payload?.pagination || {
-				page,
-				pageSize: DATA_LOG_PAGE_SIZE,
-				totalItems: nextRows.length,
-				totalPages: page,
-				hasNext: false,
-				hasPrevious: page > 1
-			};
+				payload = result?.data || result || {};
+				rows = getPayloadRows(payload);
+				pagination = normalizeDataLogPagination(payload?.pagination, targetPage, rows.length);
+			} else {
+				const firstResult = await fetchDataLogPage(1);
+				if (requestId !== dataLogRequestId) return;
+
+				const firstPayload = firstResult?.data || firstResult || {};
+				const firstRows = getPayloadRows(firstPayload);
+				const firstPagination = normalizeDataLogPagination(
+					firstPayload?.pagination,
+					1,
+					firstRows.length
+				);
+				const newestPage = Math.max(1, Number(firstPagination?.totalPages || 1));
+
+				if (newestPage > 1) {
+					result = await fetchDataLogPage(newestPage);
+					if (requestId !== dataLogRequestId) return;
+
+					payload = result?.data || result || {};
+					rows = getPayloadRows(payload);
+					pagination = normalizeDataLogPagination(payload?.pagination, newestPage, firstPagination.totalItems);
+				} else {
+					result = firstResult;
+					payload = firstPayload;
+					rows = firstRows;
+					pagination = firstPagination;
+				}
+			}
+
+			const nextRows = sortRowsNewestFirst(append ? [...loadedRows, ...rows] : rows);
 			const stats = payload?.stats || {};
 
 			loadedRows = nextRows;
@@ -722,7 +789,7 @@
 
 	function loadMoreDataLog() {
 		if (!hasNextDataLogPage || loading || loadingMore) return;
-		loadDataLog({ page: dataLogPage + 1, append: true });
+		loadDataLog({ page: Math.max(1, dataLogPage - 1), append: true });
 	}
 
 	function handleDataLogTableScroll(event) {
@@ -1243,9 +1310,9 @@
 							of {dataLogPagination.totalPages}
 						{/if}
 						{#if loadingMore}
-							<span>• Loading next page...</span>
+							<span>• Loading older rows...</span>
 						{:else if hasNextDataLogPage}
-							<span>• Scroll down to load more</span>
+							<span>• Scroll down to load older rows</span>
 						{:else}
 							<span>• All loaded</span>
 						{/if}

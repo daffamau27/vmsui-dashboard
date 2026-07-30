@@ -333,7 +333,7 @@
 					note: 'Manual report basis'
 				},
 				{
-					label: 'Daily System',
+					label: 'Daily Consumption',
 					value: formatLiter(fuelConsumption?.daily_system),
 					note: `Source: ${formatFuelSourceLabel(fuelConsumption?.daily_system_source)}`
 				}
