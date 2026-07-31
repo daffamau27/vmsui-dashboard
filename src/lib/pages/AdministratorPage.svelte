@@ -1695,6 +1695,8 @@
 
 	let searchUser = '';
 	let searchPermission = '';
+	let searchUserAssetAccess = '';
+	let searchUserVesselAccess = '';
 	let activeModule = 'all';
 	let alert = null;
 
@@ -1787,6 +1789,23 @@
 			.filter(Boolean)
 			.some((value) => String(value).toLowerCase().includes(keyword));
 	});
+
+	function matchAccessOption(option, keyword = '') {
+		if (!keyword) return true;
+
+		return [option?.id ? String(option.id) : '', option?.label, option?.sublabel]
+			.filter(Boolean)
+			.some((value) => String(value).toLowerCase().includes(keyword));
+	}
+
+	$: assetAccessKeyword = searchUserAssetAccess.trim().toLowerCase();
+	$: vesselAccessKeyword = searchUserVesselAccess.trim().toLowerCase();
+	$: filteredAssetOptions = assetOptions.filter((asset) =>
+		matchAccessOption(asset, assetAccessKeyword)
+	);
+	$: filteredVesselOptions = vesselOptions.filter((vessel) =>
+		matchAccessOption(vessel, vesselAccessKeyword)
+	);
 
 	$: activeUsers = users.filter((user) => !user.deletedAt).length;
 	$: inactiveUsers = users.filter((user) => user.deletedAt).length;
@@ -2750,6 +2769,8 @@
 		mode = 'create';
 		selectedUser = null;
 		form = createEmptyForm();
+		searchUserAssetAccess = '';
+		searchUserVesselAccess = '';
 		clearAlert();
 	}
 
@@ -2765,6 +2786,8 @@
 
 			selectedUser = detail;
 			mode = 'edit';
+			searchUserAssetAccess = '';
+			searchUserVesselAccess = '';
 
 			const assetIds = extractIdsFromAccess(detail?.assetAccess, 'assetIds');
 			const vesselIds = extractIdsFromAccess(detail?.vesselAccess, 'vesselIds');
@@ -3355,8 +3378,16 @@
 
 							{#if form.assetAccessMode === 'selected'}
 								{#if assetOptions.length > 0}
+									<div class="access-search-row">
+										<input
+											type="search"
+											bind:value={searchUserAssetAccess}
+											placeholder="Search asset name, ID, type..."
+										/>
+										<span>{filteredAssetOptions.length} of {assetOptions.length}</span>
+									</div>
 									<div class="option-list">
-										{#each assetOptions as asset}
+										{#each filteredAssetOptions as asset}
 											<label class="option-chip">
 												<input
 													type="checkbox"
@@ -3372,6 +3403,9 @@
 											</label>
 										{/each}
 									</div>
+									{#if filteredAssetOptions.length === 0}
+										<div class="muted-box">No asset matches your search.</div>
+									{/if}
 								{:else}
 									<div class="muted-box">
 										Asset list is not available from the current user. Enter the asset ID manually.
@@ -3397,8 +3431,16 @@
 
 							{#if form.vesselAccessMode === 'selected'}
 								{#if vesselOptions.length > 0}
+									<div class="access-search-row">
+										<input
+											type="search"
+											bind:value={searchUserVesselAccess}
+											placeholder="Search vessel name, ID, device..."
+										/>
+										<span>{filteredVesselOptions.length} of {vesselOptions.length}</span>
+									</div>
 									<div class="option-list">
-										{#each vesselOptions as vessel}
+										{#each filteredVesselOptions as vessel}
 											<label class="option-chip">
 												<input
 													type="checkbox"
@@ -3414,6 +3456,9 @@
 											</label>
 										{/each}
 									</div>
+									{#if filteredVesselOptions.length === 0}
+										<div class="muted-box">No vessel matches your search.</div>
+									{/if}
 								{:else}
 									<div class="muted-box">
 										Vessel list is not available from the current user. Enter the vessel ID manually.
@@ -6448,6 +6493,28 @@
 	.access-head select,
 	.permission-actions select {
 		width: 126px;
+	}
+
+	.access-search-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 10px;
+		margin-bottom: 10px;
+	}
+
+	.access-search-row input {
+		min-width: 0;
+		min-height: 38px;
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.28);
+	}
+
+	.access-search-row span {
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 800;
+		white-space: nowrap;
 	}
 
 	.option-list {

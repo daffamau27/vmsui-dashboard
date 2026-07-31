@@ -109,6 +109,19 @@
 	let overrideSourceFilePath = $state('');
 	let overrideMessage = $state('');
 	let overrideError = $state('');
+	let overrideImports = $state([]);
+	let overrideImportsLoading = $state(false);
+	let overrideImportsError = $state('');
+	let overrideImportsPagination = $state({
+		page: 1,
+		pageSize: 20,
+		totalItems: 0,
+		totalPages: 1,
+		hasNext: false,
+		hasPrevious: false
+	});
+	let overrideImportDeletingPath = $state('');
+	const OVERRIDE_IMPORTS_PAGE_SIZE = 20;
 
 	let canViewAnyEngineFuelSource = $derived(
 		canViewFuelEcu ||
@@ -421,12 +434,94 @@
 		activeTimePreset = presetId;
 		startDateTime = toLocalInputValue(start);
 		endDateTime = toLocalInputValue(end);
+		markDataLogFiltersDirty();
+	}
+
+	function markDataLogFiltersDirty({ clearPreset = false } = {}) {
+		if (clearPreset) {
+			activeTimePreset = '';
+		}
+
 		hasLoadedDateRange = false;
+		overrideImports = [];
+		overrideImportsError = '';
+		overrideImportsPagination = {
+			page: 1,
+			pageSize: OVERRIDE_IMPORTS_PAGE_SIZE,
+			totalItems: 0,
+			totalPages: 1,
+			hasNext: false,
+			hasPrevious: false
+		};
 	}
 
 	function clearActiveTimePreset() {
-		activeTimePreset = '';
-		hasLoadedDateRange = false;
+		markDataLogFiltersDirty({ clearPreset: true });
+	}
+
+	function formatTimezoneOffsetFromMinutes(offsetMinutes) {
+		const normalizedMinutes = Number(offsetMinutes);
+
+		if (!Number.isFinite(normalizedMinutes)) return '';
+
+		const totalMinutes = -normalizedMinutes;
+		const sign = totalMinutes >= 0 ? '+' : '-';
+		const absoluteMinutes = Math.abs(totalMinutes);
+		const hours = Math.floor(absoluteMinutes / 60);
+		const minutes = absoluteMinutes % 60;
+
+		return `UTC${sign}${pad(hours)}:${pad(minutes)}`;
+	}
+
+	function normalizeUtcLabel(value) {
+		if (value === undefined || value === null || value === '') return '';
+
+		const text = String(value).trim();
+		if (!text || text === '-') return '';
+
+		if (/^Asia\/Jakarta$/i.test(text) || /^WIB$/i.test(text)) return 'UTC+07:00';
+		if (/^Asia\/Makassar$/i.test(text) || /^WITA$/i.test(text)) return 'UTC+08:00';
+		if (/^Asia\/Jayapura$/i.test(text) || /^WIT$/i.test(text)) return 'UTC+09:00';
+
+		const utcMatch =
+			text.match(/\bUTC\s*([+-]\d{1,2})(?::?(\d{2}))?/i) ||
+			text.match(/^([+-]\d{1,2})(?::?(\d{2}))?$/);
+
+		if (!utcMatch) return '';
+
+		const rawHour = utcMatch[1];
+		const sign = rawHour.startsWith('-') ? '-' : '+';
+		const hour = rawHour.replace(/^[+-]/, '').padStart(2, '0');
+		const minute = (utcMatch[2] || '00').padStart(2, '0');
+
+		return `UTC${sign}${hour}:${minute}`;
+	}
+
+	function getAutoTimezoneLabel() {
+		const payload = normalizedData || {};
+		const vessel = $selectedVesselInfo || {};
+
+		return (
+			normalizeUtcLabel(payload?.timezone) ||
+			normalizeUtcLabel(payload?.timezoneOffset) ||
+			normalizeUtcLabel(payload?.timezone_offset) ||
+			normalizeUtcLabel(payload?.utc) ||
+			normalizeUtcLabel(payload?.utcOffset) ||
+			normalizeUtcLabel(payload?.utc_offset) ||
+			normalizeUtcLabel(vessel?.timezone) ||
+			normalizeUtcLabel(vessel?.timeZone) ||
+			normalizeUtcLabel(vessel?.timezoneOffset) ||
+			normalizeUtcLabel(vessel?.timezone_offset) ||
+			normalizeUtcLabel(vessel?.utc) ||
+			normalizeUtcLabel(vessel?.utcOffset) ||
+			normalizeUtcLabel(vessel?.utc_offset) ||
+			normalizeUtcLabel(vessel?.raw?.timezone) ||
+			normalizeUtcLabel(vessel?.raw?.timezoneOffset) ||
+			normalizeUtcLabel(vessel?.raw?.utcOffset) ||
+			(typeof window !== 'undefined'
+				? formatTimezoneOffsetFromMinutes(new Date().getTimezoneOffset())
+				: 'UTC+07:00')
+		);
 	}
 
 	function toApiDateTime(value) {
@@ -771,6 +866,11 @@
 			} else if (Array.isArray(payload.available_columns) && payload.available_columns.length) {
 				selectedColumns = filterDisplayColumns(payload.available_columns);
 			}
+
+			if (!append && canManageDataLogOverride) {
+				loadOverrideImports({ page: 1 });
+			}
+
 			console.log('[DATA_LOG_DATA]', result);
 		} catch (err) {
 			console.error('[DATA_LOG_ERROR]', err);
@@ -855,6 +955,143 @@
 			response?.source_file_path ||
 			''
 		);
+	}
+
+	function unwrapOverrideImportsPayload(response = {}) {
+		return response?.data?.items || response?.data?.pagination
+			? response.data
+			: response?.data?.data?.items || response?.data?.data?.pagination
+				? response.data.data
+				: response?.items || response?.pagination
+					? response
+					: response?.data || response || {};
+	}
+
+	function normalizeOverrideImportsPagination(rawPagination = {}, fallbackPage = 1, fallbackTotal = 0) {
+		const page = Number(rawPagination?.page ?? rawPagination?.currentPage ?? fallbackPage ?? 1) || 1;
+		const pageSize =
+			Number(rawPagination?.pageSize ?? rawPagination?.page_size ?? rawPagination?.limit) ||
+			OVERRIDE_IMPORTS_PAGE_SIZE;
+		const totalItems =
+			Number(
+				rawPagination?.totalItems ??
+					rawPagination?.total_items ??
+					rawPagination?.total ??
+					rawPagination?.count
+			) || fallbackTotal;
+		const totalPages =
+			Number(rawPagination?.totalPages ?? rawPagination?.total_pages ?? rawPagination?.pages) ||
+			Math.max(1, Math.ceil(totalItems / pageSize)) ||
+			1;
+
+		return {
+			...rawPagination,
+			page,
+			pageSize,
+			totalItems,
+			totalPages,
+			hasNext: rawPagination?.hasNext ?? rawPagination?.has_next ?? page < totalPages,
+			hasPrevious: rawPagination?.hasPrevious ?? rawPagination?.has_previous ?? page > 1
+		};
+	}
+
+	function getOverrideImportRows(payload = {}) {
+		return pickArray(
+			payload?.items,
+			payload?.imports,
+			payload?.files,
+			payload?.data,
+			Array.isArray(payload) ? payload : []
+		);
+	}
+
+	function getOverrideImportFilename(item = {}) {
+		const sourceFilePath = item?.source_file_path || item?.sourceFilePath || '';
+
+		return (
+			item?.filename ||
+			item?.fileName ||
+			(sourceFilePath ? sourceFilePath.split(/[\\/]/).pop() : '') ||
+			'Imported override file'
+		);
+	}
+
+	function getOverrideImportSourcePath(item = {}) {
+		return item?.source_file_path || item?.sourceFilePath || '';
+	}
+
+	function getOverrideImportDateRange(item = {}) {
+		const start = item?.start || item?.min_ts || item?.recorded_from || '';
+		const end = item?.end || item?.max_ts || item?.recorded_until || '';
+
+		if (start && end) return `${start} — ${end}`;
+		if (start) return `From ${start}`;
+		if (end) return `Until ${end}`;
+
+		return '-';
+	}
+
+	function getOverrideImportDateIso(item = {}) {
+		if (Array.isArray(item?.date_iso) && item.date_iso.length) {
+			return item.date_iso.join(', ');
+		}
+
+		return item?.date_iso || '-';
+	}
+
+	async function loadOverrideImports({ page = 1 } = {}) {
+		if (!$selectedVesselId || !startDateTime || !endDateTime) return;
+
+		await loadCurrentUser();
+
+		if (!canManageDataLogOverride) return;
+
+		overrideImportsLoading = true;
+		overrideImportsError = '';
+
+		try {
+			const query = new URLSearchParams({
+				vesselId: String($selectedVesselId),
+				start: toApiDateTime(startDateTime),
+				end: toApiDateTime(endDateTime),
+				timezoneMode,
+				page: String(page),
+				pageSize: String(OVERRIDE_IMPORTS_PAGE_SIZE)
+			});
+
+			if (timezoneMode === 'manual' && timezoneOffset) {
+				query.set('timezoneOffset', timezoneOffset);
+			}
+
+			const response = await apiRequest(`/data-logs/overrides/imports?${query.toString()}`, {
+				method: 'GET'
+			});
+
+			const payload = unwrapOverrideImportsPayload(response);
+			const rows = getOverrideImportRows(payload);
+
+			overrideImports = rows;
+			overrideImportsPagination = normalizeOverrideImportsPagination(
+				payload?.pagination,
+				page,
+				rows.length
+			);
+		} catch (err) {
+			console.error('[DATA_LOG_OVERRIDE_IMPORTS_ERROR]', err);
+			overrideImports = [];
+			overrideImportsPagination = {
+				page,
+				pageSize: OVERRIDE_IMPORTS_PAGE_SIZE,
+				totalItems: 0,
+				totalPages: 1,
+				hasNext: false,
+				hasPrevious: false
+			};
+			overrideImportsError =
+				err?.message || 'Failed to load imported override files for this date range.';
+		} finally {
+			overrideImportsLoading = false;
+		}
 	}
 
 	function handleOverrideFileChange(event) {
@@ -984,7 +1221,7 @@
 		}
 	}
 
-	async function handleDeleteOverrideImport() {
+	async function handleDeleteOverrideImport(sourceFilePath = overrideSourceFilePath) {
 		if (!$selectedVesselId) {
 			overrideError = 'No vessel has been selected.';
 			return;
@@ -997,7 +1234,9 @@
 			return;
 		}
 
-		if (!overrideSourceFilePath.trim()) {
+		const normalizedSourceFilePath = String(sourceFilePath || '').trim();
+
+		if (!normalizedSourceFilePath) {
 			overrideError = 'Enter the source file path to delete.';
 			return;
 		}
@@ -1009,13 +1248,14 @@
 		if (!confirmed) return;
 
 		overrideDeleting = true;
+		overrideImportDeletingPath = normalizedSourceFilePath;
 		overrideMessage = '';
 		overrideError = '';
 
 		try {
 			const query = new URLSearchParams({
 				vesselId: String($selectedVesselId),
-				sourceFilePath: overrideSourceFilePath.trim()
+				sourceFilePath: normalizedSourceFilePath
 			});
 
 			const response = await apiRequest(`/data-logs/overrides/imports?${query.toString()}`, {
@@ -1037,6 +1277,7 @@
 				'Failed to delete override import. Make sure sourceFilePath and vessel access are correct.';
 		} finally {
 			overrideDeleting = false;
+			overrideImportDeletingPath = '';
 		}
 	}
 
@@ -1079,8 +1320,13 @@
 		</label>
 
 		<label>
-			<span>Timezone Mode</span>
-			<select bind:value={timezoneMode} onchange={() => (hasLoadedDateRange = false)}>
+			<span class="field-label-row">
+				Timezone Mode
+				{#if timezoneMode === 'auto'}
+					<small class="timezone-auto-pill">Auto • {getAutoTimezoneLabel()}</small>
+				{/if}
+			</span>
+			<select bind:value={timezoneMode} onchange={() => markDataLogFiltersDirty()}>
 				{#each TIMEZONE_MODE_OPTIONS as option}
 					<option value={option.value}>{option.label}</option>
 				{/each}
@@ -1090,7 +1336,7 @@
 		{#if timezoneMode === 'manual'}
 			<label>
 				<span>Timezone Offset</span>
-				<select bind:value={timezoneOffset} onchange={() => (hasLoadedDateRange = false)}>
+				<select bind:value={timezoneOffset} onchange={() => markDataLogFiltersDirty()}>
 					{#each TIMEZONE_OFFSET_OPTIONS as option}
 						<option value={option.value}>{option.label}</option>
 					{/each}
@@ -1142,6 +1388,25 @@
 					<span class="section-kicker">Override</span>
 					<h2>Data Log Override</h2>
 				</div>
+
+				<div class="override-actions">
+					<button
+						type="button"
+						class="ghost-btn"
+						onclick={handleDownloadOverrideTemplate}
+						disabled={overrideDownloadingTemplate}
+					>
+						{overrideDownloadingTemplate ? 'Downloading...' : 'Download Template'}
+					</button>
+					<button
+						type="button"
+						class="ghost-btn"
+						onclick={() => loadOverrideImports({ page: overrideImportsPagination.page || 1 })}
+						disabled={overrideImportsLoading || shouldShowDateRangeOverlay}
+					>
+						{overrideImportsLoading ? 'Refreshing...' : 'Refresh Imports'}
+					</button>
+				</div>
 			</div>
 
 			<div class="override-grid">
@@ -1176,24 +1441,84 @@
 				</div>
 			</div>
 
-			<div class="override-delete-row">
-				<label class="override-field">
-					<span>Source File Path</span>
-					<input
-						type="text"
-						bind:value={overrideSourceFilePath}
-						placeholder="Enter the source_file_path from the import result"
-					/>
-				</label>
+			<div class="override-imports-panel">
+				<div class="override-imports-header">
+					<div>
+						<h3>Imported Override Files</h3>
+						<p>Files are filtered by the selected data-log date range.</p>
+					</div>
+					<strong>{overrideImportsPagination.totalItems || overrideImports.length} files</strong>
+				</div>
 
-				<button
-					type="button"
-					class="danger-btn"
-					onclick={handleDeleteOverrideImport}
-					disabled={overrideDeleting || !overrideSourceFilePath.trim()}
-				>
-					{overrideDeleting ? 'Deleting...' : 'Delete Import'}
-				</button>
+				{#if overrideImportsLoading && !overrideImports.length}
+					<div class="override-imports-loading">Loading imported override files...</div>
+				{:else if overrideImportsError}
+					<div class="status-box error-box">{overrideImportsError}</div>
+				{:else if overrideImports.length}
+					<div class="override-import-list">
+						{#each overrideImports as item}
+							{@const sourcePath = getOverrideImportSourcePath(item)}
+							<div class="override-import-item">
+								<div class="override-import-main">
+									<strong>{getOverrideImportFilename(item)}</strong>
+									<small>{sourcePath || '-'}</small>
+								</div>
+
+								<div class="override-import-meta">
+									<div>
+										<span>Overrides</span>
+										<strong>{item?.override_count ?? item?.overrideCount ?? '-'}</strong>
+									</div>
+									<div>
+										<span>Range</span>
+										<strong>{getOverrideImportDateRange(item)}</strong>
+									</div>
+									<div>
+										<span>Date ISO</span>
+										<strong>{getOverrideImportDateIso(item)}</strong>
+									</div>
+								</div>
+
+								<button
+									type="button"
+									class="danger-btn"
+									onclick={() => handleDeleteOverrideImport(sourcePath)}
+									disabled={overrideDeleting || !sourcePath}
+								>
+									{overrideImportDeletingPath === sourcePath ? 'Deleting...' : 'Delete'}
+								</button>
+							</div>
+						{/each}
+					</div>
+
+					<div class="override-imports-pagination">
+						<button
+							type="button"
+							class="ghost-btn"
+							onclick={() =>
+								loadOverrideImports({ page: Math.max(1, (overrideImportsPagination.page || 1) - 1) })}
+							disabled={!overrideImportsPagination.hasPrevious || overrideImportsLoading}
+						>
+							Previous
+						</button>
+						<span>
+							Page {overrideImportsPagination.page || 1} of {overrideImportsPagination.totalPages || 1}
+						</span>
+						<button
+							type="button"
+							class="ghost-btn"
+							onclick={() =>
+								loadOverrideImports({ page: (overrideImportsPagination.page || 1) + 1 })}
+							disabled={!overrideImportsPagination.hasNext || overrideImportsLoading}
+						>
+							Next
+						</button>
+					</div>
+				{:else}
+					<div class="empty-box">
+						No imported override files found for this selected date range.
+					</div>
+				{/if}
 			</div>
 
 			{#if overrideMessage}
@@ -1460,10 +1785,158 @@
 		color: var(--text-secondary);
 	}
 
+	.field-label-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.timezone-auto-pill {
+		display: inline-flex;
+		align-items: center;
+		min-height: 18px;
+		padding: 2px 7px;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.1);
+		color: #bfdbfe;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0;
+		text-transform: none;
+		white-space: nowrap;
+	}
+
 	.override-actions {
 		display: flex;
 		align-items: center;
 		gap: 10px;
+	}
+
+	.override-imports-panel {
+		display: grid;
+		gap: 12px;
+		padding: 14px;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		border-radius: 16px;
+		background: rgba(15, 23, 42, 0.26);
+	}
+
+	.override-imports-header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 14px;
+	}
+
+	.override-imports-header h3 {
+		margin: 0;
+		font-size: 15px;
+		font-weight: 800;
+		color: var(--text-primary);
+	}
+
+	.override-imports-header p {
+		margin: 4px 0 0;
+		font-size: 12px;
+		color: var(--text-secondary);
+	}
+
+	.override-imports-header > strong {
+		flex: 0 0 auto;
+		padding: 7px 11px;
+		border: 1px solid rgba(96, 165, 250, 0.34);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.12);
+		color: #bfdbfe;
+		font-size: 12px;
+	}
+
+	.override-imports-loading {
+		padding: 16px;
+		border-radius: 14px;
+		background: rgba(15, 23, 42, 0.26);
+		color: var(--text-secondary);
+		font-size: 13px;
+	}
+
+	.override-import-list {
+		display: grid;
+		gap: 10px;
+	}
+
+	.override-import-item {
+		display: grid;
+		grid-template-columns: minmax(220px, 1.1fr) minmax(320px, 1.7fr) auto;
+		align-items: center;
+		gap: 12px;
+		padding: 12px;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 14px;
+		background: rgba(15, 23, 42, 0.34);
+	}
+
+	.override-import-main {
+		display: grid;
+		gap: 5px;
+		min-width: 0;
+	}
+
+	.override-import-main strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.override-import-main small {
+		color: var(--text-secondary);
+		font-size: 11px;
+		line-height: 1.35;
+		overflow-wrap: anywhere;
+	}
+
+	.override-import-meta {
+		display: grid;
+		grid-template-columns: 0.55fr 1.15fr 0.8fr;
+		gap: 8px;
+	}
+
+	.override-import-meta div {
+		display: grid;
+		gap: 4px;
+		padding: 9px 10px;
+		border-radius: 12px;
+		background: rgba(30, 41, 59, 0.6);
+	}
+
+	.override-import-meta span {
+		color: var(--text-muted);
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+	}
+
+	.override-import-meta strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 1.35;
+	}
+
+	.override-imports-pagination {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 10px;
+	}
+
+	.override-imports-pagination span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
 	}
 
 	.ghost-btn,
@@ -1508,6 +1981,20 @@
 
 		.override-grid,
 		.override-delete-row {
+			grid-template-columns: 1fr;
+		}
+
+		.override-imports-header,
+		.override-imports-pagination {
+			align-items: stretch;
+			flex-direction: column;
+		}
+
+		.override-import-item {
+			grid-template-columns: 1fr;
+		}
+
+		.override-import-meta {
 			grid-template-columns: 1fr;
 		}
 	}
