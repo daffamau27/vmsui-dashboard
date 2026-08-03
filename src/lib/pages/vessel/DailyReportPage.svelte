@@ -27,6 +27,7 @@
 		handleCoordinateCopyClick
 	} from '$lib/utils/coordinateClipboard.js';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
 	
 	let loading = $state(false);
 	let exporting = $state(false);
@@ -2476,6 +2477,9 @@
 	}
 
 	let normalizedReport = $derived(reportData?.data || reportData || {});
+	let autoTimezoneLabel = $derived(
+		getAutoTimezoneLabelFromSources(normalizedReport, reportData, $selectedVesselInfo)
+	);
 
 	let rawRuntimeRows = $derived(
 		pickArray(
@@ -3059,7 +3063,12 @@
 		</label>
 
 		<label>
-			<span>Timezone Mode</span>
+			<span class="field-label-row">
+				Timezone Mode
+				{#if timezoneMode === 'auto'}
+					<small class="timezone-auto-pill">Auto • {autoTimezoneLabel}</small>
+				{/if}
+			</span>
 			<select bind:value={timezoneMode} onchange={markDateFilterDirty}>
 				{#each TIMEZONE_MODE_OPTIONS as option}
 					<option value={option.value}>{option.label}</option>
@@ -3206,10 +3215,6 @@
 				</article>
 			{/if}
 
-			<article>
-				<span>Timezone</span>
-				<strong>{normalizedReport?.timezone || '-'}</strong>
-			</article>
 		</section>
 	{/if}
 
@@ -4100,6 +4105,29 @@
 		text-transform: uppercase;
 	}
 
+	.field-label-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.timezone-auto-pill {
+		display: inline-flex;
+		align-items: center;
+		min-height: 18px;
+		padding: 2px 7px;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.1);
+		color: #bfdbfe;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0;
+		text-transform: none;
+		white-space: nowrap;
+	}
+
 	.filter-card input,
 	.filter-card select {
 		height: 32px;
@@ -4640,7 +4668,7 @@
 	.speed-detail-grid {
 		margin-top: 14px;
 		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 12px;
 	}
 

@@ -9,6 +9,7 @@
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
 
 	let loading = $state(false);
 	let exporting = $state(false);
@@ -141,6 +142,9 @@
 	);
 
 	let normalizedData = $derived(reportData?.data || reportData || {});
+	let autoTimezoneLabel = $derived(
+		getAutoTimezoneLabelFromSources(normalizedData, reportData, $selectedVesselInfo)
+	);
 
 	let hasRawData = $derived(Boolean(reportData));
 
@@ -484,7 +488,12 @@
 		</label>
 
 		<label>
-			<span>Timezone Mode</span>
+			<span class="field-label-row">
+				Timezone Mode
+				{#if timezoneMode === 'auto'}
+					<small class="timezone-auto-pill">Auto • {autoTimezoneLabel}</small>
+				{/if}
+			</span>
 			<select bind:value={timezoneMode} onchange={markDateFilterDirty}>
 				{#each TIMEZONE_MODE_OPTIONS as option}
 					<option value={option.value}>{option.label}</option>
@@ -574,10 +583,6 @@
 			</article>
 		{/if}
 
-		<article class="summary-card">
-			<span>Timezone</span>
-			<strong>{normalizedData?.timezone || '-'}</strong>
-		</article>
 	</section>
 
 	<section class="table-section">
@@ -847,6 +852,29 @@
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
+	}
+
+	.field-label-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.timezone-auto-pill {
+		display: inline-flex;
+		align-items: center;
+		min-height: 18px;
+		padding: 2px 7px;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.1);
+		color: #bfdbfe;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0;
+		text-transform: none;
+		white-space: nowrap;
 	}
 
 	.filter-card input,

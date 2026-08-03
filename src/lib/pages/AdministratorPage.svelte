@@ -5,6 +5,7 @@
 	import { getCurrentUserApi } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
 	import {
 		getPermissionCatalogApi,
 		getAllUsersApi,
@@ -778,6 +779,10 @@
 		reportingAssignableSearch = '';
 		clearAlert();
 		loadReportingVessels();
+	}
+
+	function getAutoReportTimezoneLabel() {
+		return getAutoTimezoneLabelFromSources(selectedReportingVessel);
 	}
 
 	async function loadReportingAssignableUsers(vesselId, page = 1) {
@@ -4278,7 +4283,12 @@
 								</label>
 
 								<label>
-									<span>Timezone Mode</span>
+									<span class="field-label-row">
+										Timezone Mode
+										{#if autoReportForm.timezoneMode === 'auto'}
+											<small class="timezone-auto-pill">Auto • {getAutoReportTimezoneLabel()}</small>
+										{/if}
+									</span>
 									<select bind:value={autoReportForm.timezoneMode}>
 										{#each TIMEZONE_MODE_OPTIONS as option}
 											<option value={option.value}>{option.label}</option>
@@ -6368,6 +6378,29 @@
 		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 900;
+	}
+
+	.field-label-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.timezone-auto-pill {
+		display: inline-flex;
+		align-items: center;
+		min-height: 18px;
+		padding: 2px 7px;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.1);
+		color: #bfdbfe;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0;
+		text-transform: none;
+		white-space: nowrap;
 	}
 
 	input,

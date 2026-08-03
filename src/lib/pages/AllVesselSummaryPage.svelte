@@ -3,6 +3,7 @@
 	import { apiRequest } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
 
 	const TIME_RANGE_PRESETS = [
 		{ id: 'midnight', label: '00:00 - 06:00', startTime: '00:00', endTime: '06:00' },
@@ -394,6 +395,10 @@
 				offset: defaultTimezoneOffset
 			}
 		);
+	}
+
+	function getDeviceAutoTimezoneLabel(device = null) {
+		return getAutoTimezoneLabelFromSources(device);
 	}
 
 	function setVesselTimezone(deviceId, field, value) {
@@ -968,7 +973,9 @@
 							</div>
 
 							<span class="request-badge">
-								{defaultTimezoneMode === 'auto' ? 'Auto UTC' : defaultTimezoneOffset}
+								{defaultTimezoneMode === 'auto'
+									? `Auto • ${getDeviceAutoTimezoneLabel()}`
+									: defaultTimezoneOffset}
 							</span>
 						</div>
 
@@ -992,7 +999,12 @@
 							</label>
 
 							<label class="request-field">
-								<span>Default UTC Mode</span>
+								<span class="field-label-row">
+									Default UTC Mode
+									{#if defaultTimezoneMode === 'auto'}
+										<small class="timezone-auto-pill">Auto • {getDeviceAutoTimezoneLabel()}</small>
+									{/if}
+								</span>
 								<select bind:value={defaultTimezoneMode}>
 									{#each TIMEZONE_MODE_OPTIONS as option}
 										<option value={option.value}>{option.label}</option>
@@ -1057,7 +1069,11 @@
 
 						<div class="request-summary-item">
 							<span>Default UTC</span>
-							<strong>{defaultTimezoneMode === 'auto' ? 'Auto UTC' : defaultTimezoneOffset}</strong>
+							<strong>
+								{defaultTimezoneMode === 'auto'
+									? `Auto • ${getDeviceAutoTimezoneLabel()}`
+									: defaultTimezoneOffset}
+							</strong>
 						</div>
 
 						<div class="request-summary-item">
@@ -1096,7 +1112,7 @@
 
 											<span class="vessel-utc-pill">
 												{getVesselTimezone(device.id).mode === 'auto'
-													? 'Auto UTC'
+													? `Auto • ${getDeviceAutoTimezoneLabel(device)}`
 													: getVesselTimezone(device.id).offset}
 											</span>
 										</div>
@@ -1123,7 +1139,12 @@
 											</label>
 
 											<label class="request-field">
-												<span>UTC Mode</span>
+												<span class="field-label-row">
+													UTC Mode
+													{#if getVesselTimezone(device.id).mode === 'auto'}
+														<small class="timezone-auto-pill">Auto • {getDeviceAutoTimezoneLabel(device)}</small>
+													{/if}
+												</span>
 												<select
 													value={getVesselTimezone(device.id).mode}
 													onchange={(event) =>
@@ -1743,6 +1764,29 @@
 		font-weight: 900;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
+	}
+
+	.field-label-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.timezone-auto-pill {
+		display: inline-flex;
+		align-items: center;
+		min-height: 18px;
+		padding: 2px 7px;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.1);
+		color: #bfdbfe;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0;
+		text-transform: none;
+		white-space: nowrap;
 	}
 
 	.request-field input,

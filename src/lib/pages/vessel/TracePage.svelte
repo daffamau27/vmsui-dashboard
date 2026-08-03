@@ -8,6 +8,7 @@
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
 	import CctvSnapshotImage from '$lib/components/CctvSnapshotImage.svelte';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
 
 	let { active = false } = $props();
 
@@ -32,6 +33,9 @@
 	let hasLoadedDateRange = $state(false);
 	let shouldShowDateRangeOverlay = $derived(
 		!hasLoadedDateRange || !startDateTime || !endDateTime
+	);
+	let autoTimezoneLabel = $derived(
+		getAutoTimezoneLabelFromSources(traceData, traceData?.data, $selectedVesselInfo)
 	);
 
 	let cctvItems = $state([]);
@@ -1655,7 +1659,12 @@
 				</label>
 
 				<label>
-					<span>Timezone</span>
+					<span class="field-label-row">
+						Timezone
+						{#if timezoneMode === 'auto'}
+							<small class="timezone-auto-pill">Auto • {autoTimezoneLabel}</small>
+						{/if}
+					</span>
 					<select bind:value={timezoneMode} onchange={() => (hasLoadedDateRange = false)}>
 						{#each TIMEZONE_MODE_OPTIONS as option}
 							<option value={option.value}>{option.label}</option>
@@ -2080,6 +2089,29 @@
 		font-weight: 950;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
+	}
+
+	.field-label-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.timezone-auto-pill {
+		display: inline-flex;
+		align-items: center;
+		min-height: 17px;
+		padding: 2px 7px;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.1);
+		color: #bfdbfe;
+		font-size: 9px;
+		font-weight: 800;
+		letter-spacing: 0;
+		text-transform: none;
+		white-space: nowrap;
 	}
 
 	.filter-controls input,

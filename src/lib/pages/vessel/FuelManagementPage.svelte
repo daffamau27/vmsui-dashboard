@@ -13,6 +13,7 @@
 		downloadVdorTemplate
 	} from '$lib/api/fuelManagementApi.js';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
 
 	let { active = true } = $props();
 
@@ -314,6 +315,9 @@
 	let canImportVdor = $derived(hasPermission('import_fuel_vdor'));
 	let canManageFuelOperations = $derived(canManageRob || canManageTransactions || canImportVdor);
 	let shouldShowDateRangeOverlay = $derived(!hasLoadedDateRange || !historyStartDate || !historyEndDate);
+	let autoTimezoneLabel = $derived(
+		getAutoTimezoneLabelFromSources(dashboardData, dashboardData?.data, $selectedVesselInfo)
+	);
 
 	function canViewTableConfig(config) {
 		if (!canViewFuelConsumptionTable) return false;
@@ -1190,7 +1194,6 @@
 			<div class="header-rob-card">
 				<span>Latest ROB</span>
 				<strong>{loadingData ? 'Loading...' : latestRobHeader}</strong>
-				<small>{report?.timezone || 'fuel_rob'}</small>
 			</div>
 		</div>
 	</header>
@@ -1269,9 +1272,6 @@
 					<h2>Comparison</h2>
 					<p>System total compared with VDOR basis.</p>
 				</div>
-				{#if report?.timezone}
-					<span class="badge">{report.timezone}</span>
-				{/if}
 			</div>
 
 			{#if loadingData}
@@ -1394,7 +1394,12 @@
 					</label>
 
 					<label>
-						<span>Timezone</span>
+						<span class="field-label-row">
+							Timezone
+							{#if timezoneMode === 'auto'}
+								<small class="timezone-auto-pill">Auto • {autoTimezoneLabel}</small>
+							{/if}
+						</span>
 						<select bind:value={timezoneMode} onchange={markDateFilterDirty}>
 							{#each TIMEZONE_MODE_OPTIONS as option}
 								<option value={option.value}>{option.label}</option>
@@ -1895,6 +1900,29 @@
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
+	}
+
+	.field-label-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.timezone-auto-pill {
+		display: inline-flex;
+		align-items: center;
+		min-height: 18px;
+		padding: 2px 7px;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.1);
+		color: #bfdbfe;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0;
+		text-transform: none;
+		white-space: nowrap;
 	}
 
 	input,
