@@ -608,10 +608,30 @@
 		return Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
 	}
 
-	function parseVesselDateTime(value) {
+	function parseVesselDateTime(value, timezoneHint = null) {
 		if (!value || value === '-') return null;
 
 		const text = String(value).trim();
+		const timezoneText = `${text} ${timezoneHint || ''}`;
+		const timezoneMatch = timezoneText.match(/\(?\bUTC\s*([+-])(\d{1,2})(?::?(\d{2}))?\)?/i);
+		const timezoneOffsetMinutes = timezoneMatch
+			? (timezoneMatch[1] === '-' ? -1 : 1) *
+				(Number(timezoneMatch[2]) * 60 + Number(timezoneMatch[3] || 0))
+			: null;
+
+		function buildDateWithOptionalTimezone({ year, month, day, hour, minute, second }) {
+			if (Number.isFinite(timezoneOffsetMinutes)) {
+				const utcTime =
+					Date.UTC(year, month - 1, day, hour, minute, second) -
+					timezoneOffsetMinutes * 60 * 1000;
+
+				const date = new Date(utcTime);
+				return Number.isNaN(date.getTime()) ? null : date;
+			}
+
+			const date = new Date(year, month - 1, day, hour, minute, second);
+			return Number.isNaN(date.getTime()) ? null : date;
+		}
 
 		// Format contoh: "03/06/2026 16:34:00 (UTC+07:00)"
 		const match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
@@ -619,17 +639,34 @@
 		if (match) {
 			const [, dd, mm, yyyy, hh, min, ss] = match;
 
-			// Created using the browser local time
-			const date = new Date(
-				Number(yyyy),
-				Number(mm) - 1,
-				Number(dd),
-				Number(hh),
-				Number(min),
-				Number(ss)
-			);
+			const date = buildDateWithOptionalTimezone({
+				year: Number(yyyy),
+				month: Number(mm),
+				day: Number(dd),
+				hour: Number(hh),
+				minute: Number(min),
+				second: Number(ss)
+			});
 
-			if (!Number.isNaN(date.getTime())) return date;
+			if (date) return date;
+		}
+
+		const isoLikeMatch = text.match(
+			/^(\d{4})-(\d{2})-(\d{2})[T\s]+(\d{2}):(\d{2})(?::(\d{2}))?/
+		);
+
+		if (isoLikeMatch) {
+			const [, yyyy, mm, dd, hh, min, ss = '0'] = isoLikeMatch;
+			const date = buildDateWithOptionalTimezone({
+				year: Number(yyyy),
+				month: Number(mm),
+				day: Number(dd),
+				hour: Number(hh),
+				minute: Number(min),
+				second: Number(ss)
+			});
+
+			if (date) return date;
 		}
 
 		const fallbackDate = new Date(text);
@@ -657,10 +694,10 @@
 		});
 	}
 
-	function formatLastUpdated(value) {
+	function formatLastUpdated(value, timezoneHint = null) {
 		if (!value || value === '-') return '-';
 
-		const date = parseVesselDateTime(value);
+		const date = parseVesselDateTime(value, timezoneHint);
 		if (!date) return value;
 
 		const diffMs = Date.now() - date.getTime();
@@ -731,8 +768,8 @@
 		return stripUtcLabel(formatValue(value, '-'));
 	}
 
-	function formatLastUpdatedBadge(value) {
-		return stripUtcLabel(formatLastUpdated(value));
+	function formatLastUpdatedBadge(value, timezoneHint = null) {
+		return stripUtcLabel(formatLastUpdated(value, timezoneHint));
 	}
 
 	function formatActualLastUpdated(value) {
@@ -3084,7 +3121,7 @@
 											Last Updated: 
 										</p>
 										<p>
-											{formatLastUpdatedBadge(vessel.lastUpdated)}
+											{formatLastUpdatedBadge(vessel.lastUpdated, vessel.timezone)}
 										</p>
 									</div>
 								</div>
