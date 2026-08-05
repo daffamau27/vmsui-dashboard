@@ -50,8 +50,7 @@
 	const CCTV_BACKGROUND_PAGE_DELAY_MS = 900;
 	const TRACE_MS_PER_REAL_MS = 60;
 	const PLAYBACK_TICK_INTERVAL_MS = 100;
-	const MAX_TRACE_POINT_JUMP_NM = 10;
-	const MAX_TRACE_POINT_SPEED_KN = 80;
+	const MAX_TRACE_POINT_JUMP_NM = 1000;
 	const TRACE_DEBUG = false;
 
 	function traceDebug(...args) {
@@ -1048,24 +1047,13 @@
 
 			if (previous) {
 				const distanceNm = calculateDistanceNm(previous, point);
-				const previousTimeMs = parseDateTimeMs(previous.timestampRaw || previous.timestamp);
-				const pointTimeMs = parseDateTimeMs(point.timestampRaw || point.timestamp);
-				const elapsedHours =
-					Number.isFinite(previousTimeMs) && Number.isFinite(pointTimeMs)
-						? Math.max((pointTimeMs - previousTimeMs) / 3_600_000, 1 / 60)
-						: 1 / 60;
-				const allowedDistanceNm = Math.max(
-					MAX_TRACE_POINT_JUMP_NM,
-					MAX_TRACE_POINT_SPEED_KN * elapsedHours
-				);
 
-				if (distanceNm > allowedDistanceNm) {
+				if (distanceNm > MAX_TRACE_POINT_JUMP_NM) {
 					dropped.push({
 						index: point.rawIndex ?? point.index,
 						latitude: point.latitude,
 						longitude: point.longitude,
-						distanceNm,
-						allowedDistanceNm
+						distanceNm
 					});
 					return;
 				}
@@ -1081,7 +1069,6 @@
 			traceDebug('[TRACE_POINTS_OUTLIERS_DROPPED]', {
 				dropped: dropped.length,
 				thresholdNm: MAX_TRACE_POINT_JUMP_NM,
-				maxSpeedKn: MAX_TRACE_POINT_SPEED_KN,
 				samples: dropped.slice(0, 8)
 			});
 		}
