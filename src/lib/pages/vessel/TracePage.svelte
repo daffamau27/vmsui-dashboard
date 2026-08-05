@@ -50,6 +50,8 @@
 	const CCTV_BACKGROUND_PAGE_DELAY_MS = 900;
 	const TRACE_MS_PER_REAL_MS = 60;
 	const PLAYBACK_TICK_INTERVAL_MS = 100;
+	const MAX_TRACE_POINT_JUMP_NM = 10;
+	const MAX_TRACE_POINT_SPEED_KN = 80;
 	const TRACE_DEBUG = false;
 
 	function traceDebug(...args) {
@@ -965,6 +967,128 @@
 		return values.reduce((sum, value) => sum + value, 0) / values.length;
 	}
 
+	function normalizeOceanCurrent(value) {
+		const ocean = value || {};
+
+		return {
+			speedKph: toNumber(
+				ocean.speed_kph ?? ocean.speedKph ?? ocean.current_speed_kph ?? ocean.currentSpeedKph,
+				NaN
+			),
+			directionTo:
+				ocean.direction_to ??
+				ocean.directionTo ??
+				ocean.current_direction_to ??
+				ocean.currentDirectionTo ??
+				'',
+			directionDeg: toNumber(
+				ocean.direction_to_deg ??
+					ocean.directionToDeg ??
+					ocean.current_direction_to_deg ??
+					ocean.currentDirectionToDeg,
+				NaN
+			)
+		};
+	}
+
+	function formatOceanCurrent(ocean = {}) {
+		const speed = Number(ocean?.speedKph);
+		const degree = Number(ocean?.directionDeg);
+		const direction = ocean?.directionTo ? String(ocean.directionTo) : '';
+		const parts = [];
+
+		if (Number.isFinite(speed)) parts.push(`${formatNumber(speed, 1, '0.0')} kph`);
+		if (Number.isFinite(degree)) {
+			parts.push(`${formatNumber(degree, 0, '0')}°`);
+		} else if (direction) {
+			parts.push(direction);
+		}
+
+		return parts.length ? parts.join(' • ') : '-';
+	}
+
+	function calculateDistanceNm(fromPoint, toPoint) {
+		const lat1 = Number(fromPoint?.latitude);
+		const lng1 = Number(fromPoint?.longitude);
+		const lat2 = Number(toPoint?.latitude);
+		const lng2 = Number(toPoint?.longitude);
+
+		if (![lat1, lng1, lat2, lng2].every(Number.isFinite)) return Infinity;
+
+		const toRadians = (degree) => (degree * Math.PI) / 180;
+		const earthRadiusNm = 3440.065;
+		const deltaLat = toRadians(lat2 - lat1);
+		const deltaLng = toRadians(lng2 - lng1);
+		const a =
+			Math.sin(deltaLat / 2) ** 2 +
+			Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(deltaLng / 2) ** 2;
+		const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+		return earthRadiusNm * c;
+	}
+
+	function isValidTraceCoordinate(lat, lng) {
+		return (
+			Number.isFinite(lat) &&
+			Number.isFinite(lng) &&
+			lat >= -90 &&
+			lat <= 90 &&
+			lng >= -180 &&
+			lng <= 180 &&
+			!(lat === 0 && lng === 0)
+		);
+	}
+
+	function filterTracePointJumps(points = []) {
+		const filtered = [];
+		const dropped = [];
+
+		points.forEach((point) => {
+			const previous = filtered[filtered.length - 1];
+
+			if (previous) {
+				const distanceNm = calculateDistanceNm(previous, point);
+				const previousTimeMs = parseDateTimeMs(previous.timestampRaw || previous.timestamp);
+				const pointTimeMs = parseDateTimeMs(point.timestampRaw || point.timestamp);
+				const elapsedHours =
+					Number.isFinite(previousTimeMs) && Number.isFinite(pointTimeMs)
+						? Math.max((pointTimeMs - previousTimeMs) / 3_600_000, 1 / 60)
+						: 1 / 60;
+				const allowedDistanceNm = Math.max(
+					MAX_TRACE_POINT_JUMP_NM,
+					MAX_TRACE_POINT_SPEED_KN * elapsedHours
+				);
+
+				if (distanceNm > allowedDistanceNm) {
+					dropped.push({
+						index: point.rawIndex ?? point.index,
+						latitude: point.latitude,
+						longitude: point.longitude,
+						distanceNm,
+						allowedDistanceNm
+					});
+					return;
+				}
+			}
+
+			filtered.push({
+				...point,
+				index: filtered.length
+			});
+		});
+
+		if (dropped.length) {
+			traceDebug('[TRACE_POINTS_OUTLIERS_DROPPED]', {
+				dropped: dropped.length,
+				thresholdNm: MAX_TRACE_POINT_JUMP_NM,
+				maxSpeedKn: MAX_TRACE_POINT_SPEED_KN,
+				samples: dropped.slice(0, 8)
+			});
+		}
+
+		return filtered;
+	}
+
 	function getTracePoints(data) {
 		const candidates =
 			data?.points ||
@@ -1016,13 +1140,32 @@
 					NaN
 				);
 
-				if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-				if (lat === 0 && lng === 0) return null;
+				if (!isValidTraceCoordinate(lat, lng)) return null;
 
 				const rpm = normalizeRpm(item.rpm ?? item.me_rpm ?? item.mePortRpm ?? item.me_port_rpm);
+				const timestampRaw =
+					item.timestamp ??
+					item.ts ??
+					item.timestampMs ??
+					item.timeMs ??
+					item.timeRaw ??
+					item.time_formatted ??
+					item.timeFormatted ??
+					item.time ??
+					item.datetime ??
+					item.createdAt ??
+					item.created_at ??
+					'';
+				const timestampDisplay =
+					item.timeFormatted ??
+					item.time_formatted ??
+					item.displayTime ??
+					item.display_time ??
+					formatDateTime(timestampRaw);
 
 				return {
 					index,
+					rawIndex: index,
 					latitude: lat,
 					longitude: lng,
 					heading: toNumber(item.heading ?? item.course ?? item.bearing, 0),
@@ -1039,33 +1182,22 @@
 						0
 					),
 					weather: item.weather || item.weatherForecast || item.condition || '-',
+					ocean: normalizeOceanCurrent(item.ocean ?? item.oceanCurrent ?? item.current),
 					queue: toNumber(item.queue, 0),
 					sdCard: toNumber(item.sdCard ?? item.sd_card, 0),
-					online: Boolean(item.online),
-					timestampRaw:
-						item.timestamp ||
-						item.ts ||
-						item.time ||
-						item.datetime ||
-						item.createdAt ||
-						item.created_at ||
-						'',
-					timestamp: formatDateTime(
-						item.timestamp ||
-							item.ts ||
-							item.time ||
-							item.datetime ||
-							item.createdAt ||
-							item.created_at ||
-							'-'
-					)
+					online: item.online === undefined ? true : Boolean(item.online),
+					timeFormatted: timestampDisplay,
+					timestampRaw,
+					timestamp: timestampDisplay
 				};
 			})
 			.filter(Boolean);
 
-		traceDebug('[TRACE_POINTS_PARSED]', points.length, points.slice(0, 3));
+		const filteredPoints = filterTracePointJumps(points);
 
-		return points;
+		traceDebug('[TRACE_POINTS_PARSED]', filteredPoints.length, filteredPoints.slice(0, 3));
+
+		return filteredPoints;
 	}
 
 	let tracePoints = $derived(getTracePoints(traceData));
@@ -1085,9 +1217,10 @@
 				: Math.max(0, findClosestTraceIndexByTime(activeTimelineTimestampMs))
 	);
 	let activeTimelineLabel = $derived(
-		(Number.isFinite(activeTimelineTimestampMs) ? formatDateTime(activeTimelineTimestampMs) : '') ||
-			activeTimelineEvent?.label ||
-			formatDateTime(activeTimelineTimestampMs) ||
+		activeTimelineEvent?.label ||
+			tracePoints[activeTraceIndex]?.timeFormatted ||
+			tracePoints[activeTraceIndex]?.timestamp ||
+			(Number.isFinite(activeTimelineTimestampMs) ? formatDateTime(activeTimelineTimestampMs) : '') ||
 			tracePoints[activeTraceIndex]?.timestamp ||
 			'-'
 	);
@@ -1105,6 +1238,7 @@
 				avgRpm: 0,
 				fuelPerMinute: 0,
 				weather: $selectedVesselInfo?.weather?.current?.condition || '-',
+				ocean: normalizeOceanCurrent($selectedVesselInfo?.oceanCurrent?.current || {}),
 				queue: 0,
 				sdCard: 0,
 				online: false,
@@ -1159,6 +1293,7 @@
 		avgRpm: `${formatNumber(activePoint.avgRpm, 0, '0')} RPM`,
 		fuelPerMinute: `${formatNumber(activePoint.fuelPerMinute, 2, '0.00')} L/min`,
 		weatherForecast: activePoint.weather || $selectedVesselInfo?.weather?.current?.condition || '-',
+		oceanCurrent: formatOceanCurrent(activePoint.ocean),
 		lastUpdate: activeTimelineLabel || activePoint.timestamp || '-',
 		onlineStatus: activePoint.online ? 'Online' : 'Offline'
 	});
@@ -1875,7 +2010,7 @@
 							activeIndex={activeTraceIndex}
 							renderKey={playbackRenderTick}
 							showTraceLine={true}
-							followActivePoint={isPlaying}
+							followActivePoint={false}
 						/>
 					{/if}
 				</div>
@@ -1963,6 +2098,11 @@
 					<article class="info-card">
 						<span>Weather</span>
 						<strong>{vesselInfo.weatherForecast}</strong>
+					</article>
+
+					<article class="info-card">
+						<span>Ocean</span>
+						<strong>{vesselInfo.oceanCurrent}</strong>
 					</article>
 
 					<article class="info-card">

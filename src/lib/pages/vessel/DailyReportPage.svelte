@@ -1590,6 +1590,25 @@
 		);
 	}
 
+	function hasFiniteChartData(values = []) {
+		return (
+			Array.isArray(values) &&
+			values.some((value) => {
+				const number = Number(value);
+
+				return Number.isFinite(number);
+			})
+		);
+	}
+
+	function toNullableChartNumber(value) {
+		if (value === undefined || value === null || value === '' || value === '-') return null;
+
+		const number = Number(value);
+
+		return Number.isFinite(number) ? number : null;
+	}
+
 	function toNullablePositiveNumber(value) {
 		if (value === undefined || value === null || value === '' || value === '-') return null;
 
@@ -1598,6 +1617,30 @@
 		if (!Number.isFinite(number)) return null;
 
 		return number > 0 ? number : null;
+	}
+
+	function getChartFuelValue(row, sourceKey) {
+		if (sourceKey === 'ems_internal') {
+			return row?.fuel_ems_internal ?? row?.fuelEmsInternal;
+		}
+
+		if (sourceKey === 'ems_external') {
+			return row?.fuel_ems_external ?? row?.fuelEmsExternal;
+		}
+
+		if (sourceKey === 'fms') {
+			return row?.fuel_fms ?? row?.fuelFms;
+		}
+
+		if (sourceKey === 'ecu') {
+			return row?.fuel_ecu ?? row?.fuelEcu;
+		}
+
+		if (sourceKey === 'engine_maker') {
+			return row?.fuel_engine_maker ?? row?.fuelEngineMaker ?? row?.fuel_maker ?? row?.fuelMaker;
+		}
+
+		return undefined;
 	}
 
 	function buildRpmFuelCurveChartGroups(data) {
@@ -1615,11 +1658,21 @@
 
 				const validRows = downsampleChartRows(chartRows).filter((row) => {
 					const rpm = Number(row?.rpm);
-					const fuelInternal = Number(row?.fuel_ems_internal ?? row?.fuelEmsInternal);
-					const fuelExternal = Number(row?.fuel_ems_external ?? row?.fuelEmsExternal);
+					const speed = Number(row?.speed);
+					const fuelInternal = Number(getChartFuelValue(row, 'ems_internal'));
+					const fuelExternal = Number(getChartFuelValue(row, 'ems_external'));
+					const fuelFms = Number(getChartFuelValue(row, 'fms'));
+					const fuelEcu = Number(getChartFuelValue(row, 'ecu'));
+					const fuelEngineMaker = Number(getChartFuelValue(row, 'engine_maker'));
 
 					return (
-						Number.isFinite(rpm) || Number.isFinite(fuelInternal) || Number.isFinite(fuelExternal)
+						Number.isFinite(rpm) ||
+						Number.isFinite(speed) ||
+						Number.isFinite(fuelInternal) ||
+						Number.isFinite(fuelExternal) ||
+						Number.isFinite(fuelFms) ||
+						Number.isFinite(fuelEcu) ||
+						Number.isFinite(fuelEngineMaker)
 					);
 				});
 
@@ -1632,31 +1685,107 @@
 					return Number.isFinite(rpm) ? rpm : null;
 				});
 
+				const speedData = validRows.map((row) => toNullableChartNumber(row?.speed));
+
 				const internalFuelData = validRows.map((row) =>
-					toNullablePositiveNumber(row?.fuel_ems_internal ?? row?.fuelEmsInternal)
+					toNullablePositiveNumber(getChartFuelValue(row, 'ems_internal'))
 				);
 
 				const externalFuelData = validRows.map((row) =>
-					toNullablePositiveNumber(row?.fuel_ems_external ?? row?.fuelEmsExternal)
+					toNullablePositiveNumber(getChartFuelValue(row, 'ems_external'))
+				);
+
+				const fmsFuelData = validRows.map((row) =>
+					toNullablePositiveNumber(getChartFuelValue(row, 'fms'))
+				);
+
+				const ecuFuelData = validRows.map((row) =>
+					toNullablePositiveNumber(getChartFuelValue(row, 'ecu'))
+				);
+
+				const engineMakerFuelData = validRows.map((row) =>
+					toNullablePositiveNumber(getChartFuelValue(row, 'engine_maker'))
 				);
 
 				const hasInternal = hasPositiveChartData(internalFuelData);
 				const hasExternal = hasPositiveChartData(externalFuelData);
+				const hasFms = hasPositiveChartData(fmsFuelData);
+				const hasEcu = hasPositiveChartData(ecuFuelData);
+				const hasEngineMaker = hasPositiveChartData(engineMakerFuelData);
+				const hasSpeed = hasPositiveChartData(speedData);
+				const hasRpm = hasFiniteChartData(rpmData);
+				const hasVisibleFuel =
+					(hasInternal && canShowFuelEmsInternal) ||
+					(hasExternal && canShowFuelEmsExternal) ||
+					(hasFms && canShowFuelFms) ||
+					(hasEcu && canShowFuelEcu) ||
+					(hasEngineMaker && canShowFuelEngineMaker);
 
-				if (!hasInternal && !hasExternal) return null;
+				if (!hasVisibleFuel) return null;
 
 				return {
 					engineKey,
 					engineName,
 					labels,
 					rpmData,
+					speedData,
 					internalFuelData,
 					externalFuelData,
+					fmsFuelData,
+					ecuFuelData,
+					engineMakerFuelData,
+					hasRpm,
+					hasSpeed,
 					hasInternal,
-					hasExternal
+					hasExternal,
+					hasFms,
+					hasEcu,
+					hasEngineMaker
 				};
 			})
 			.filter(Boolean);
+	}
+
+	function buildFodChartGroup(data) {
+		const fodRows = data?.fod_chart || data?.fodChart || data?.fuel_fod_chart || data?.fuelFodChart || [];
+
+		if (!Array.isArray(fodRows) || !fodRows.length) return null;
+
+		const validRows = downsampleChartRows(fodRows).filter((row) => {
+			const fuelFod = Number(row?.fuel_fod ?? row?.fuelFod);
+			const fuelFodPort = Number(row?.fuel_fod_port ?? row?.fuelFodPort);
+			const fuelFodStbd = Number(row?.fuel_fod_stbd ?? row?.fuelFodStbd);
+
+			return Number.isFinite(fuelFod) || Number.isFinite(fuelFodPort) || Number.isFinite(fuelFodStbd);
+		});
+
+		if (!validRows.length) return null;
+
+		const labels = validRows.map((row) => row?.time || '-');
+		const singleData = validRows.map((row) => toNullableChartNumber(row?.fuel_fod ?? row?.fuelFod));
+		const portData = validRows.map((row) =>
+			toNullableChartNumber(row?.fuel_fod_port ?? row?.fuelFodPort)
+		);
+		const stbdData = validRows.map((row) =>
+			toNullableChartNumber(row?.fuel_fod_stbd ?? row?.fuelFodStbd)
+		);
+
+		const hasSingle = hasFiniteChartData(singleData);
+		const hasPort = hasFiniteChartData(portData);
+		const hasStbd = hasFiniteChartData(stbdData);
+
+		if (!hasSingle && !hasPort && !hasStbd) return null;
+
+		return {
+			labels,
+			singleData,
+			portData,
+			stbdData,
+			hasSingle,
+			hasPort,
+			hasStbd,
+			points: validRows.length
+		};
 	}
 
 	function rpmFuelCurveChart(node, group) {
@@ -1688,6 +1817,8 @@
 					label: 'RPM',
 					data: chartGroup.rpmData,
 					yAxisID: 'rpm',
+					borderColor: '#60a5fa',
+					backgroundColor: 'rgba(96, 165, 250, 0.18)',
 					borderWidth: 2,
 					tension: 0.25,
 					pointRadius: 0,
@@ -1695,11 +1826,55 @@
 				}
 			];
 
+			if (chartGroup.hasSpeed) {
+				datasets.push({
+					label: 'Speed kn',
+					data: chartGroup.speedData,
+					yAxisID: 'speed',
+					borderColor: '#22c55e',
+					backgroundColor: 'rgba(34, 197, 94, 0.16)',
+					borderWidth: 2,
+					tension: 0.25,
+					pointRadius: 0,
+					pointHoverRadius: 4
+				});
+			}
+
+			if (chartGroup.hasEcu && canShowFuelEcu) {
+				datasets.push({
+					label: `${getDailyFuelSourceLabel('ecu')} L/min`,
+					data: chartGroup.ecuFuelData,
+					yAxisID: 'fuel',
+					borderColor: '#f97316',
+					backgroundColor: 'rgba(249, 115, 22, 0.14)',
+					borderWidth: 2,
+					tension: 0.25,
+					pointRadius: 0,
+					pointHoverRadius: 4
+				});
+			}
+
+			if (chartGroup.hasFms && canShowFuelFms) {
+				datasets.push({
+					label: `${getDailyFuelSourceLabel('fms')} L/min`,
+					data: chartGroup.fmsFuelData,
+					yAxisID: 'fuel',
+					borderColor: '#a855f7',
+					backgroundColor: 'rgba(168, 85, 247, 0.14)',
+					borderWidth: 2,
+					tension: 0.25,
+					pointRadius: 0,
+					pointHoverRadius: 4
+				});
+			}
+
 			if (chartGroup.hasInternal && canShowFuelEmsInternal) {
 				datasets.push({
-					label: `${getDailyFuelSourceLabel('ems_internal')} L/h`,
+					label: `${getDailyFuelSourceLabel('ems_internal')} L/min`,
 					data: chartGroup.internalFuelData,
 					yAxisID: 'fuel',
+					borderColor: '#38bdf8',
+					backgroundColor: 'rgba(56, 189, 248, 0.14)',
 					borderWidth: 2,
 					tension: 0.25,
 					pointRadius: 0,
@@ -1709,9 +1884,25 @@
 
 			if (chartGroup.hasExternal && canShowFuelEmsExternal) {
 				datasets.push({
-					label: `${getDailyFuelSourceLabel('ems_external')} L/h`,
+					label: `${getDailyFuelSourceLabel('ems_external')} L/min`,
 					data: chartGroup.externalFuelData,
 					yAxisID: 'fuel',
+					borderColor: '#f59e0b',
+					backgroundColor: 'rgba(245, 158, 11, 0.14)',
+					borderWidth: 2,
+					tension: 0.25,
+					pointRadius: 0,
+					pointHoverRadius: 4
+				});
+			}
+
+			if (chartGroup.hasEngineMaker && canShowFuelEngineMaker) {
+				datasets.push({
+					label: `${getDailyFuelSourceLabel('engine_maker')} L/min`,
+					data: chartGroup.engineMakerFuelData,
+					yAxisID: 'fuel',
+					borderColor: '#ec4899',
+					backgroundColor: 'rgba(236, 72, 153, 0.14)',
 					borderWidth: 2,
 					tension: 0.25,
 					pointRadius: 0,
@@ -1753,7 +1944,11 @@
 										return `${label}: ${formatNumber(value, 0)} RPM`;
 									}
 
-									return `${label}: ${formatNumber(value, 2)} L/h`;
+									if (context.dataset.yAxisID === 'speed') {
+										return `${label}: ${formatNumber(value, 2)} kn`;
+									}
+
+									return `${label}: ${formatNumber(value, 2)} L/min`;
 								}
 							}
 						},
@@ -1822,10 +2017,208 @@
 							beginAtZero: true,
 							title: {
 								display: true,
-								text: 'Fuel L/h'
+								text: 'Fuel L/min'
 							},
 							grid: {
 								drawOnChartArea: false
+							},
+							ticks: {
+								font: {
+									size: 10
+								}
+							}
+						},
+						speed: {
+							type: 'linear',
+							position: 'right',
+							min: 0,
+							beginAtZero: true,
+							title: {
+								display: true,
+								text: 'Speed kn'
+							},
+							grid: {
+								drawOnChartArea: false
+							},
+							ticks: {
+								font: {
+									size: 10
+								}
+							}
+						}
+					}
+				}
+			});
+		}
+
+		render(group);
+
+		return {
+			update(nextGroup) {
+				render(nextGroup);
+			},
+			destroy() {
+				disposed = true;
+				node.removeEventListener('dblclick', handleResetZoom);
+
+				if (chart) {
+					chart.destroy();
+					chart = null;
+				}
+			}
+		};
+	}
+
+	function fodLineChart(node, group) {
+		let chart;
+		let disposed = false;
+
+		node.style.touchAction = 'none';
+
+		const handleResetZoom = () => {
+			chart?.resetZoom?.();
+		};
+
+		node.addEventListener('dblclick', handleResetZoom);
+
+		async function render(chartGroup) {
+			if (!chartGroup || disposed) return;
+
+			await ensureChartZoomPlugin();
+
+			if (disposed) return;
+
+			if (chart) {
+				chart.destroy();
+				chart = null;
+			}
+
+			const datasets = [];
+
+			if (chartGroup.hasSingle) {
+				datasets.push({
+					label: 'FOD',
+					data: chartGroup.singleData,
+					borderColor: '#facc15',
+					backgroundColor: 'rgba(250, 204, 21, 0.18)',
+					borderWidth: 2,
+					tension: 0.28,
+					pointRadius: 0,
+					pointHoverRadius: 4
+				});
+			}
+
+			if (chartGroup.hasPort) {
+				datasets.push({
+					label: 'FOD Port',
+					data: chartGroup.portData,
+					borderColor: '#38bdf8',
+					backgroundColor: 'rgba(56, 189, 248, 0.16)',
+					borderWidth: 2,
+					tension: 0.28,
+					pointRadius: 0,
+					pointHoverRadius: 4
+				});
+			}
+
+			if (chartGroup.hasStbd) {
+				datasets.push({
+					label: 'FOD STBD',
+					data: chartGroup.stbdData,
+					borderColor: '#fb923c',
+					backgroundColor: 'rgba(251, 146, 60, 0.16)',
+					borderWidth: 2,
+					tension: 0.28,
+					pointRadius: 0,
+					pointHoverRadius: 4
+				});
+			}
+
+			chart = new Chart(node, {
+				type: 'line',
+				data: {
+					labels: chartGroup.labels,
+					datasets
+				},
+				options: {
+					responsive: true,
+					maintainAspectRatio: false,
+					interaction: {
+						mode: 'index',
+						intersect: false
+					},
+					plugins: {
+						legend: {
+							position: 'top',
+							labels: {
+								boxWidth: 12,
+								font: {
+									size: 11,
+									weight: 'bold'
+								}
+							}
+						},
+						tooltip: {
+							callbacks: {
+								label(context) {
+									const label = context.dataset.label || '';
+									const value = context.parsed.y;
+
+									return `${label}: ${formatNumber(value, 2)} L`;
+								}
+							}
+						},
+						zoom: {
+							limits: {
+								x: {
+									min: 'original',
+									max: 'original',
+									minRange: 5
+								}
+							},
+							pan: {
+								enabled: true,
+								mode: 'x',
+								modifierKey: 'shift'
+							},
+							zoom: {
+								wheel: {
+									enabled: true,
+									speed: 0.08
+								},
+								pinch: {
+									enabled: true
+								},
+								drag: {
+									enabled: true,
+									backgroundColor: 'rgba(250, 204, 21, 0.12)',
+									borderColor: 'rgba(250, 204, 21, 0.45)',
+									borderWidth: 1
+								},
+								mode: 'x'
+							}
+						}
+					},
+					scales: {
+						x: {
+							ticks: {
+								maxTicksLimit: 10,
+								font: {
+									size: 10
+								}
+							},
+							grid: {
+								display: false
+							}
+						},
+						y: {
+							type: 'linear',
+							position: 'left',
+							min: 0,
+							beginAtZero: true,
+							title: {
+								display: true,
+								text: 'FOD L'
 							},
 							ticks: {
 								font: {
@@ -2445,15 +2838,7 @@
 			if (!Array.isArray(rows)) return false;
 
 			return rows.some((row) => {
-				if (sourceKey === 'ems_internal') {
-					return hasPositiveFuelValue(row?.fuel_ems_internal ?? row?.fuelEmsInternal);
-				}
-
-				if (sourceKey === 'ems_external') {
-					return hasPositiveFuelValue(row?.fuel_ems_external ?? row?.fuelEmsExternal);
-				}
-
-				return false;
+				return hasPositiveFuelValue(getChartFuelValue(row, sourceKey));
 			});
 		});
 	}
@@ -2747,6 +3132,8 @@
 	let visibleFuelSourceForDistance = $derived(priorityFuelSourceForDistance.label);
 
 	let rpmFuelCurveChartGroups = $derived(buildRpmFuelCurveChartGroups(normalizedReport));
+
+	let fodChartGroup = $derived(buildFodChartGroup(normalizedReport));
 
 	let rawEngineRpmStatsRows = $derived(
 		pickArray(
@@ -3813,12 +4200,28 @@
 								</div>
 
 								<div class="rpm-fuel-chart-badges">
+									{#if group.hasSpeed}
+										<span>Speed</span>
+									{/if}
+
+									{#if group.hasEcu && canShowFuelEcu}
+										<span>{getDailyFuelSourceLabel('ecu')}</span>
+									{/if}
+
+									{#if group.hasFms && canShowFuelFms}
+										<span>{getDailyFuelSourceLabel('fms')}</span>
+									{/if}
+
 									{#if group.hasInternal && canShowFuelEmsInternal}
 										<span>{getDailyFuelSourceLabel('ems_internal')}</span>
 									{/if}
 
 									{#if group.hasExternal && canShowFuelEmsExternal}
 										<span>{getDailyFuelSourceLabel('ems_external')}</span>
+									{/if}
+
+									{#if group.hasEngineMaker && canShowFuelEngineMaker}
+										<span>{getDailyFuelSourceLabel('engine_maker')}</span>
 									{/if}
 								</div>
 							</div>
@@ -3835,6 +4238,54 @@
 				</div>
 			{:else}
 				<div class="empty-box">RPM vs fuel curve chart is not available yet.</div>
+			{/if}
+		</section>
+	{/if}
+
+	{#if canViewFuelFod}
+		<section class="table-section rpm-fuel-curve-section fod-chart-section">
+			<div class="section-header">
+				<div>
+					<span class="section-kicker">FOD</span>
+					<h2>FOD Fuel Curve</h2>
+				</div>
+
+				<strong>{fodChartGroup?.points || 0} points</strong>
+			</div>
+
+			{#if fodChartGroup}
+				<div class="rpm-fuel-chart-grid fod-chart-grid">
+					<article class="rpm-fuel-chart-card fod-chart-card">
+						<div class="rpm-fuel-chart-header">
+							<div>
+								<span>Fuel oil day tank</span>
+								<strong>
+									{#if fodChartGroup.hasPort || fodChartGroup.hasStbd}
+										FOD Port / FOD STBD
+									{:else}
+										FOD Single
+									{/if}
+								</strong>
+							</div>
+
+							<div class="rpm-fuel-chart-badges">
+								{#if fodChartGroup.hasSingle}<span>FOD Single</span>{/if}
+								{#if fodChartGroup.hasPort}<span>FOD Port</span>{/if}
+								{#if fodChartGroup.hasStbd}<span>FOD STBD</span>{/if}
+							</div>
+						</div>
+
+						<div class="rpm-fuel-chart-canvas fod-chart-canvas">
+							<canvas use:fodLineChart={fodChartGroup}></canvas>
+						</div>
+
+						<div class="rpm-fuel-chart-hint">
+							Scroll to zoom in/out, drag to select a zoom area, Shift + drag to pan, double click to reset.
+						</div>
+					</article>
+				</div>
+			{:else}
+				<div class="empty-box">FOD fuel curve chart is not available yet.</div>
 			{/if}
 		</section>
 	{/if}
@@ -5444,12 +5895,20 @@
 		background: var(--color-elevated);
 	}
 
+	.fod-chart-grid {
+		grid-template-columns: 1fr;
+	}
+
 	.rpm-fuel-chart-card {
 		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		border-radius: 12px;
 		overflow: hidden;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+	}
+
+	.fod-chart-card {
+		min-width: 0;
 	}
 
 	.rpm-fuel-chart-header {
@@ -5500,6 +5959,10 @@
 	.rpm-fuel-chart-canvas {
 		height: 280px;
 		padding: 14px;
+	}
+
+	.fod-chart-canvas {
+		height: 320px;
 	}
 
 	.rpm-fuel-chart-canvas canvas {
