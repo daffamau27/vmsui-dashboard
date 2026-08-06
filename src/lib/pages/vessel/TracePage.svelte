@@ -51,6 +51,7 @@
 	const TRACE_MS_PER_REAL_MS = 60;
 	const PLAYBACK_TICK_INTERVAL_MS = 100;
 	const MAX_TRACE_POINT_JUMP_NM = 1000;
+	const MAX_TRACE_POINT_SPEED_KN = 80;
 	const TRACE_DEBUG = false;
 
 	function traceDebug(...args) {
@@ -990,6 +991,32 @@
 		};
 	}
 
+	function normalizeTraceWeather(value) {
+		if (!value) return '-';
+
+		if (typeof value === 'string') return value || '-';
+
+		if (typeof value === 'object') {
+			const condition =
+				value.condition ??
+				value.weather ??
+				value.label ??
+				value.text ??
+				value.current?.condition ??
+				value.current?.weather ??
+				'';
+			const windDirection = value.wind_dir_deg ?? value.windDirDeg ?? value.wind_direction_deg;
+			const windText =
+				Number.isFinite(Number(windDirection))
+					? `${formatNumber(windDirection, 0, '0')}°`
+					: value.wind_dir ?? value.windDir ?? value.wind_direction ?? '';
+
+			return [condition, windText ? `Wind ${windText}` : ''].filter(Boolean).join(' • ') || '-';
+		}
+
+		return String(value);
+	}
+
 	function formatOceanCurrent(ocean = {}) {
 		const speed = Number(ocean?.speedKph);
 		const degree = Number(ocean?.directionDeg);
@@ -1047,13 +1074,26 @@
 
 			if (previous) {
 				const distanceNm = calculateDistanceNm(previous, point);
+				const previousTime = parseDateTimeMs(previous?.timestampRaw || previous?.timestamp);
+				const pointTime = parseDateTimeMs(point?.timestampRaw || point?.timestamp);
+				const elapsedHours =
+					Number.isFinite(previousTime) && Number.isFinite(pointTime)
+						? Math.max(Math.abs(pointTime - previousTime) / 3_600_000, 1 / 60)
+						: 1 / 60;
+				const allowedDistanceNm = Math.max(
+					MAX_TRACE_POINT_JUMP_NM,
+					MAX_TRACE_POINT_SPEED_KN * elapsedHours
+				);
 
-				if (distanceNm > MAX_TRACE_POINT_JUMP_NM) {
+				if (distanceNm > allowedDistanceNm) {
 					dropped.push({
 						index: point.rawIndex ?? point.index,
 						latitude: point.latitude,
 						longitude: point.longitude,
-						distanceNm
+						distanceNm,
+						allowedDistanceNm,
+						from: previous.timeFormatted || previous.timestamp,
+						to: point.timeFormatted || point.timestamp
 					});
 					return;
 				}
@@ -1068,7 +1108,8 @@
 		if (dropped.length) {
 			traceDebug('[TRACE_POINTS_OUTLIERS_DROPPED]', {
 				dropped: dropped.length,
-				thresholdNm: MAX_TRACE_POINT_JUMP_NM,
+				minThresholdNm: MAX_TRACE_POINT_JUMP_NM,
+				maxSpeedKn: MAX_TRACE_POINT_SPEED_KN,
 				samples: dropped.slice(0, 8)
 			});
 		}
@@ -1076,16 +1117,23 @@
 		return filtered;
 	}
 
-	function getTracePoints(data) {
-		const candidates =
-			data?.points ||
-			data?.trace ||
-			data?.traces ||
-			data?.coordinates ||
-			data?.path ||
-			data?.rows ||
-			data?.items ||
-			data?.result ||
+	function getTracePayload(data) {
+		const payload = data?.data && !Array.isArray(data?.data) ? data.data : data;
+		return payload || {};
+	}
+
+	function getTraceCandidates(data) {
+		const payload = getTracePayload(data);
+
+		return (
+			payload?.points ||
+			payload?.trace ||
+			payload?.traces ||
+			payload?.coordinates ||
+			payload?.path ||
+			payload?.rows ||
+			payload?.items ||
+			payload?.result ||
 			data?.data?.points ||
 			data?.data?.trace ||
 			data?.data?.coordinates ||
@@ -1093,7 +1141,45 @@
 			data?.data?.rows ||
 			data?.data ||
 			data ||
-			[];
+			[]
+		);
+	}
+
+	function getTraceTimestampRaw(item = {}) {
+		return (
+			item.timestamp ??
+			item.timestamp_ms ??
+			item.timestampMs ??
+			item.ts ??
+			item.timeMs ??
+			item.timeRaw ??
+			item.time_raw ??
+			item.time ??
+			item.datetime ??
+			item.createdAt ??
+			item.created_at ??
+			item.timeFormatted ??
+			item.time_formatted ??
+			''
+		);
+	}
+
+	function getTraceDisplayTime(item = {}, timestampRaw = '') {
+		const display =
+			item.timeFormatted ??
+			item.time_formatted ??
+			item.displayTime ??
+			item.display_time ??
+			item.localTime ??
+			item.local_time ??
+			'';
+
+		if (display) return formatDateTime(display);
+		return formatDateTime(timestampRaw);
+	}
+
+	function getTracePoints(data) {
+		const candidates = getTraceCandidates(data);
 
 		if (!Array.isArray(candidates)) {
 			console.warn('[TRACE_POINTS_NOT_ARRAY]', data);
@@ -1130,25 +1216,8 @@
 				if (!isValidTraceCoordinate(lat, lng)) return null;
 
 				const rpm = normalizeRpm(item.rpm ?? item.me_rpm ?? item.mePortRpm ?? item.me_port_rpm);
-				const timestampRaw =
-					item.timestamp ??
-					item.ts ??
-					item.timestampMs ??
-					item.timeMs ??
-					item.timeRaw ??
-					item.time_formatted ??
-					item.timeFormatted ??
-					item.time ??
-					item.datetime ??
-					item.createdAt ??
-					item.created_at ??
-					'';
-				const timestampDisplay =
-					item.timeFormatted ??
-					item.time_formatted ??
-					item.displayTime ??
-					item.display_time ??
-					formatDateTime(timestampRaw);
+				const timestampRaw = getTraceTimestampRaw(item);
+				const timestampDisplay = getTraceDisplayTime(item, timestampRaw);
 
 				return {
 					index,
@@ -1168,7 +1237,7 @@
 							item.f_rate,
 						0
 					),
-					weather: item.weather || item.weatherForecast || item.condition || '-',
+					weather: normalizeTraceWeather(item.weather ?? item.weatherForecast ?? item.condition),
 					ocean: normalizeOceanCurrent(item.ocean ?? item.oceanCurrent ?? item.current),
 					queue: toNumber(item.queue, 0),
 					sdCard: toNumber(item.sdCard ?? item.sd_card, 0),

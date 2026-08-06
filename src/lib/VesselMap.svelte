@@ -35,8 +35,12 @@
   let isMounted = false;
   let mapZones = $state([]);
 
-  let traceLayerGroup = null;
+  let traceBaseLayerGroup = null;
+  let traceProgressLayerGroup = null;
+  let traceMarkerLayerGroup = null;
   let zoneLayerGroup = null;
+  let lastDrawnTraceSignature = "";
+  let lastProgressTraceIndex = -1;
 
   const TRACE_SPEED_RANGES = [
     { label: "0–1 kn", min: 0, max: 1, color: "#9ca3af" },
@@ -145,12 +149,22 @@ function getTraceSpeedColor(speed) {
   return TRACE_SPEED_RANGES[4].color;
 }
 
-function drawColoredTraceSegments(points, { untilIndex = points.length - 1, weight = 4, opacity = 0.55 } = {}) {
-  if (!L || !traceLayerGroup || !Array.isArray(points) || points.length < 2) return;
+function drawColoredTraceSegments(
+  points,
+  {
+    layerGroup = traceBaseLayerGroup,
+    fromIndex = 1,
+    untilIndex = points.length - 1,
+    weight = 4,
+    opacity = 0.55
+  } = {}
+) {
+  if (!L || !layerGroup || !Array.isArray(points) || points.length < 2) return;
 
-  const lastIndex = Math.max(1, Math.min(untilIndex, points.length - 1));
+  const firstIndex = Math.max(1, Math.min(fromIndex, points.length - 1));
+  const lastIndex = Math.max(firstIndex, Math.min(untilIndex, points.length - 1));
 
-  for (let index = 1; index <= lastIndex; index += 1) {
+  for (let index = firstIndex; index <= lastIndex; index += 1) {
     const previous = points[index - 1];
     const current = points[index];
     const segmentSpeed = current?.speed ?? previous?.speed ?? 0;
@@ -161,7 +175,7 @@ function drawColoredTraceSegments(points, { untilIndex = points.length - 1, weig
       opacity,
       lineCap: "round",
       lineJoin: "round"
-    }).addTo(traceLayerGroup);
+    }).addTo(layerGroup);
   }
 }
 
@@ -286,66 +300,107 @@ function resetTraceFitIfNeeded() {
     return null;
   }
 
+function ensureTraceLayers() {
+  if (!map || !L) return;
+
+  if (!traceBaseLayerGroup) traceBaseLayerGroup = L.layerGroup().addTo(map);
+  if (!traceProgressLayerGroup) traceProgressLayerGroup = L.layerGroup().addTo(map);
+  if (!traceMarkerLayerGroup) traceMarkerLayerGroup = L.layerGroup().addTo(map);
+}
+
+function clearTraceLayers() {
+  traceBaseLayerGroup?.clearLayers();
+  traceProgressLayerGroup?.clearLayers();
+  traceMarkerLayerGroup?.clearLayers();
+}
+
     function drawTraceLine() {
     if (!map || !L) return;
 
-    if (!traceLayerGroup) {
-        traceLayerGroup = L.layerGroup().addTo(map);
+    ensureTraceLayers();
+
+    if (!showTraceLine) {
+      clearTraceLayers();
+      lastDrawnTraceSignature = "";
+      lastProgressTraceIndex = -1;
+      return;
     }
 
-    traceLayerGroup.clearLayers();
-
-    if (!showTraceLine) return;
+    const traceSignature = getTraceSignature();
+    const needsBaseRedraw = traceSignature !== lastDrawnTraceSignature;
 
     const validPoints = getValidTracePoints();
     const latLngs = validPoints.map((item) => item.latLng);
 
-    console.log("[VESSEL_MAP_TRACE_LATLNGS]", latLngs.length);
-
-    if (latLngs.length < 2) return;
+    if (latLngs.length < 2) {
+      clearTraceLayers();
+      lastDrawnTraceSignature = traceSignature;
+      lastProgressTraceIndex = -1;
+      return;
+    }
 
     const passedIndex = Math.max(
       0,
       validPoints.findLastIndex((item) => item.originalIndex <= activeIndex)
     );
 
-    drawColoredTraceSegments(validPoints, {
-      untilIndex: validPoints.length - 1,
-      weight: 4,
-      opacity: 0.48
-    });
+    if (needsBaseRedraw) {
+      traceBaseLayerGroup.clearLayers();
+      traceMarkerLayerGroup.clearLayers();
+      traceProgressLayerGroup.clearLayers();
+      lastProgressTraceIndex = -1;
 
-    drawColoredTraceSegments(validPoints, {
-      untilIndex: passedIndex,
-      weight: 6,
-      opacity: 0.98
-    });
+      drawColoredTraceSegments(validPoints, {
+        layerGroup: traceBaseLayerGroup,
+        untilIndex: validPoints.length - 1,
+        weight: 4,
+        opacity: 0.58
+      });
 
-    L.marker(latLngs[0], {
+      L.marker(latLngs[0], {
         icon: createStartIcon(),
         zIndexOffset: 800
-    })
+      })
         .bindPopup("Start")
-        .addTo(traceLayerGroup);
+        .addTo(traceMarkerLayerGroup);
 
-    L.marker(latLngs[latLngs.length - 1], {
+      L.marker(latLngs[latLngs.length - 1], {
         icon: createFinishIcon(),
         zIndexOffset: 800
-    })
+      })
         .bindPopup("Finish")
-        .addTo(traceLayerGroup);
+        .addTo(traceMarkerLayerGroup);
 
-    const pointStep = Math.max(1, Math.floor(latLngs.length / 80));
+      const pointStep = Math.max(1, Math.floor(latLngs.length / 80));
 
-    latLngs.forEach((latLng, index) => {
+      latLngs.forEach((latLng, index) => {
         if (index !== 0 && index !== latLngs.length - 1 && index % pointStep === 0) {
-        L.marker(latLng, {
+          L.marker(latLng, {
             icon: createTracePointIcon(validPoints[index]?.speed),
             interactive: false,
             zIndexOffset: 400
-        }).addTo(traceLayerGroup);
+          }).addTo(traceMarkerLayerGroup);
         }
-    });
+      });
+
+      lastDrawnTraceSignature = traceSignature;
+    }
+
+    if (passedIndex !== lastProgressTraceIndex) {
+      traceProgressLayerGroup.clearLayers();
+
+      if (passedIndex > 0) {
+        drawColoredTraceSegments(validPoints, {
+          layerGroup: traceProgressLayerGroup,
+          fromIndex: Math.max(1, passedIndex - 10),
+          untilIndex: passedIndex,
+          weight: 7,
+          opacity: 0.98
+        });
+      }
+
+      lastProgressTraceIndex = passedIndex;
+    }
     }
 
 function fitTraceBoundsOnce() {
@@ -482,7 +537,7 @@ async function loadMapZones() {
     addLeafletZoomAndScale(L, map);
 
     rebuildZoneLayer();
-    traceLayerGroup = L.layerGroup().addTo(map);
+    ensureTraceLayers();
     container.addEventListener("click", handleCoordinateCopyClick, true);
 
     loadMapZones();
@@ -504,7 +559,6 @@ $effect(() => {
   zoom;
   tracePoints;
   activeIndex;
-  renderKey;
   showTraceLine;
   followActivePoint;
 
@@ -516,10 +570,22 @@ $effect(() => {
   onDestroy(() => {
     isMounted = false;
 
-    if (traceLayerGroup) {
-      traceLayerGroup.clearLayers();
-      traceLayerGroup.remove();
-      traceLayerGroup = null;
+    if (traceBaseLayerGroup) {
+      traceBaseLayerGroup.clearLayers();
+      traceBaseLayerGroup.remove();
+      traceBaseLayerGroup = null;
+    }
+
+    if (traceProgressLayerGroup) {
+      traceProgressLayerGroup.clearLayers();
+      traceProgressLayerGroup.remove();
+      traceProgressLayerGroup = null;
+    }
+
+    if (traceMarkerLayerGroup) {
+      traceMarkerLayerGroup.clearLayers();
+      traceMarkerLayerGroup.remove();
+      traceMarkerLayerGroup = null;
     }
 
     if (zoneLayerGroup) {
