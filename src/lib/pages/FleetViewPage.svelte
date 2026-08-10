@@ -1491,7 +1491,7 @@
 		})();
 	}
 
-	function openVesselPopupFromInteraction(id, { zoom = 7, keepSidebarOpen = false } = {}) {
+	async function openVesselPopupFromInteraction(id, { zoom = 7, keepSidebarOpen = false } = {}) {
 		const normalizedId = String(id);
 		const previousId = selectedVesselId ? String(selectedVesselId) : null;
 
@@ -1518,6 +1518,14 @@
 			marker?.openPopup?.();
 		}, 0);
 		void scrollSidebarToVessel(normalizedId);
+
+		const detail = await loadVesselDetail(normalizedId);
+
+		if (detail && String(selectedVesselId) === normalizedId && !showDetailPanel) {
+			const marker = markers.get(normalizedId);
+			marker?.setPopupContent?.(createPopupHtml(detail));
+			marker?.openPopup?.();
+		}
 	}
 
 	function closeVesselDetail() {
@@ -1595,7 +1603,7 @@
 
 			marker.on('click', () => {
 				closeVesselTooltips();
-				openVesselPopupFromInteraction(vesselId, { zoom: map?.getZoom?.() ?? 7 });
+				void openVesselPopupFromInteraction(vesselId, { zoom: map?.getZoom?.() ?? 7 });
 			});
 
 			marker.on('popupclose', () => {
@@ -2456,7 +2464,7 @@
 	function selectVessel(id) {
 		const normalizedId = String(id);
 
-		openVesselPopupFromInteraction(normalizedId, { keepSidebarOpen: true });
+		void openVesselPopupFromInteraction(normalizedId, { keepSidebarOpen: true });
 	}
 
 	async function waitForMapContainer(maxRetry = 20) {
@@ -2473,7 +2481,7 @@
 		return null;
 	}
 
-	async function loadFleetVessels({ silent = false, includeLiveDetails = false } = {}) {
+	async function loadFleetVessels({ silent = false } = {}) {
 		if (fleetRefreshInProgress) return;
 
 		fleetRefreshInProgress = true;
@@ -2492,11 +2500,7 @@
 		try {
 			const vessels = await getFleetVessels({});
 
-			let normalizedVessels = Array.isArray(vessels) ? vessels.map(normalizeFleetVessel) : [];
-
-			if (includeLiveDetails) {
-				normalizedVessels = await loadLiveDetailsForAllVessels(normalizedVessels);
-			}
+			const normalizedVessels = Array.isArray(vessels) ? vessels.map(normalizeFleetVessel) : [];
 
 			console.log('[FLEET_VIEW][VESSELS_REFRESHED]', normalizedVessels);
 
@@ -2633,17 +2637,21 @@
 	async function loadVesselDetail(id) {
 		if (!id) return null;
 
-		try {
-			const existing = vesselData.find((item) => String(item.id) === String(id));
+		const normalizedId = String(id);
 
-			const liveDetail = await getFleetVesselLiveDetail(id);
+		try {
+			const existing = vesselData.find((item) => String(item.id) === normalizedId);
+
+			const liveDetail = await getFleetVesselLiveDetail(normalizedId);
 
 			const mergedDetail = mergeVesselWithLiveDetail(existing, liveDetail);
 
-			selectedVesselDetail = mergedDetail;
+			if (String(selectedVesselId) === normalizedId) {
+				selectedVesselDetail = mergedDetail;
+			}
 
 			vesselData = vesselData.map((item) => {
-				if (String(item.id) !== String(id)) return item;
+				if (String(item.id) !== normalizedId) return item;
 				return mergedDetail;
 			});
 
@@ -2697,8 +2705,7 @@
 			if (!isFleetMounted) return;
 
 			loadFleetVessels({
-				silent: true,
-				includeLiveDetails: true
+				silent: true
 			});
 		}, FLEET_REFRESH_INTERVAL_MS);
 	}
@@ -2865,9 +2872,7 @@
 
 		await initializeFleetMap();
 
-		await loadFleetVessels({
-			includeLiveDetails: true
-		});
+		await loadFleetVessels();
 
 		await loadFleetAssets();
 

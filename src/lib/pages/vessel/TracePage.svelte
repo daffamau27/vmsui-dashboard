@@ -24,6 +24,8 @@
 	let playbackClockStartedAtRealMs = 0;
 	let playbackClockStartedAtTraceMs = NaN;
 	let lastPlaybackToggleAt = 0;
+	let playbackSpeedMultiplier = $state(1);
+	let playbackDirection = $state(1);
 
 	let startDateTime = $state('');
 	let endDateTime = $state('');
@@ -50,6 +52,7 @@
 	const CCTV_BACKGROUND_PAGE_DELAY_MS = 900;
 	const TRACE_MS_PER_REAL_MS = 60;
 	const PLAYBACK_TICK_INTERVAL_MS = 100;
+	const PLAYBACK_SPEED_OPTIONS = [1, 2, 5, 10];
 	const MAX_TRACE_POINT_JUMP_NM = 1000;
 	const MAX_TRACE_POINT_SPEED_KN = 80;
 	const TRACE_DEBUG = false;
@@ -1555,20 +1558,25 @@
 			: clampPlaybackTimestamp(activePlaybackTimestampMs);
 		const elapsedRealMs =
 			source === 'start' ? 0 : Math.max(0, Date.now() - playbackClockStartedAtRealMs);
-		const nextTime = Math.min(end, baseTraceTime + elapsedRealMs * TRACE_MS_PER_REAL_MS);
+		const direction = playbackDirection === -1 ? -1 : 1;
+		const rawNextTime =
+			baseTraceTime + elapsedRealMs * TRACE_MS_PER_REAL_MS * playbackSpeedMultiplier * direction;
+		const nextTime = direction === -1 ? Math.max(start, rawNextTime) : Math.min(end, rawNextTime);
 		const nextIndex = findTimelineIndexAtOrBefore(timelineEvents, nextTime);
 
-		if (nextTime >= end) {
-			setPlaybackTimestamp(end);
+		if ((direction === 1 && nextTime >= end) || (direction === -1 && nextTime <= start)) {
+			const boundaryTime = direction === -1 ? start : end;
+			setPlaybackTimestamp(boundaryTime);
 
 			traceDebug('[TRACE_PLAY_STOP_END]', {
 				activeIndex,
 				totalTimelineEvents,
-				playbackTime: formatDateTime(end),
-				source
+				playbackTime: formatDateTime(boundaryTime),
+				source,
+				direction
 			});
 
-			clearPlaybackInterval('end');
+			clearPlaybackInterval(direction === -1 ? 'start' : 'end');
 			isPlaying = false;
 			return;
 		}
@@ -1620,9 +1628,10 @@
 		}
 	}
 
-	function startPlayback() {
+	function startPlayback(direction = 1) {
 		clearPlaybackInterval('restart');
 		const { start, end } = getTimelineBounds(timelineEvents);
+		const normalizedDirection = direction === -1 ? -1 : 1;
 
 		if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
 			isPlaying = false;
@@ -1632,15 +1641,25 @@
 		const currentTimestamp = Number.isFinite(activePlaybackTimestampMs)
 			? clampPlaybackTimestamp(activePlaybackTimestampMs)
 			: start;
-		const startTimestamp = currentTimestamp >= end ? start : currentTimestamp;
+		const startTimestamp =
+			normalizedDirection === -1
+				? currentTimestamp <= start
+					? end
+					: currentTimestamp
+				: currentTimestamp >= end
+					? start
+					: currentTimestamp;
 		setPlaybackTimestamp(startTimestamp, { bumpRender: false });
+		playbackDirection = normalizedDirection;
 		playbackClockStartedAtTraceMs = startTimestamp;
 		playbackClockStartedAtRealMs = Date.now();
 
 		traceDebug('[TRACE_PLAY_START]', {
 			activeIndex,
 			playbackStartTime: formatDateTime(startTimestamp),
-			speed: '1 real second = 1 trace minute',
+			speed: `1 real second = ${playbackSpeedMultiplier} trace minute(s)`,
+			speedMultiplier: playbackSpeedMultiplier,
+			direction: playbackDirection,
 			totalTimelineEvents: timelineEvents.length,
 			totalTracePoints: tracePoints.length,
 			cctvItems: cctvItems.length
@@ -1660,7 +1679,9 @@
 			totalTimelineEvents: timelineEvents.length,
 			totalTracePoints: tracePoints.length,
 			delayMs: PLAYBACK_TICK_INTERVAL_MS,
-			traceMsPerRealMs: TRACE_MS_PER_REAL_MS
+			traceMsPerRealMs: TRACE_MS_PER_REAL_MS,
+			speedMultiplier: playbackSpeedMultiplier,
+			direction: playbackDirection
 		});
 	}
 
@@ -1669,7 +1690,29 @@
 		isPlaying = false;
 	}
 
-	function togglePlayback() {
+	function setPlaybackSpeed(multiplier) {
+		const nextMultiplier = Number(multiplier);
+		if (!PLAYBACK_SPEED_OPTIONS.includes(nextMultiplier)) return;
+		if (playbackSpeedMultiplier === nextMultiplier) return;
+
+		if (isPlaying) {
+			runPlaybackTick('speed-change');
+			playbackClockStartedAtTraceMs = getCurrentTimelineTimestampMs();
+			playbackClockStartedAtRealMs = Date.now();
+		}
+
+		playbackSpeedMultiplier = nextMultiplier;
+
+		traceDebug('[TRACE_PLAY_SPEED_CHANGE]', {
+			speedMultiplier: playbackSpeedMultiplier,
+			direction: playbackDirection,
+			activeIndex,
+			playbackTime: formatDateTime(getCurrentTimelineTimestampMs()),
+			isPlaying
+		});
+	}
+
+	function togglePlayback(direction = 1) {
 		if (!timelineEvents.length) {
 			console.warn('[TRACE_PLAY_TOGGLE_BLOCKED]', {
 				reason: 'timelineEvents is empty',
@@ -1693,11 +1736,14 @@
 
 		lastPlaybackToggleAt = now;
 
-		const nextPlaying = !isPlaying;
+		const normalizedDirection = direction === -1 ? -1 : 1;
+		const nextPlaying = !(isPlaying && playbackDirection === normalizedDirection);
 
 		traceDebug('[TRACE_PLAY_TOGGLE]', {
 			from: isPlaying,
 			to: nextPlaying,
+			fromDirection: playbackDirection,
+			toDirection: normalizedDirection,
 			activeIndex,
 			activeTraceIndex,
 			totalTimelineEvents: timelineEvents.length,
@@ -1714,7 +1760,11 @@
 		});
 
 		if (nextPlaying) {
-			startPlayback();
+			if (isPlaying && playbackDirection !== normalizedDirection) {
+				runPlaybackTick('direction-change');
+			}
+
+			startPlayback(normalizedDirection);
 		} else {
 			stopPlayback('toggle');
 		}
@@ -2091,12 +2141,44 @@
 						onclick={(event) => {
 							event.preventDefault();
 							event.stopPropagation();
-							togglePlayback();
+							togglePlayback(-1);
 						}}
 						disabled={!timelineEvents.length}
 					>
-						{isPlaying ? 'Pause' : 'Play'}
+						{isPlaying && playbackDirection === -1 ? 'Pause' : 'Reverse'}
 					</button>
+
+					<button
+						type="button"
+						class="play-button"
+						onclick={(event) => {
+							event.preventDefault();
+							event.stopPropagation();
+							togglePlayback(1);
+						}}
+						disabled={!timelineEvents.length}
+					>
+						{isPlaying && playbackDirection === 1 ? 'Pause' : 'Play'}
+					</button>
+
+					<div
+						class="speed-controls"
+						style={`--speed-index: ${PLAYBACK_SPEED_OPTIONS.indexOf(playbackSpeedMultiplier)}`}
+						aria-label="Playback speed"
+					>
+						{#each PLAYBACK_SPEED_OPTIONS as speed}
+							<button
+								type="button"
+								class="speed-btn"
+								class:active-speed={playbackSpeedMultiplier === speed}
+								onclick={() => setPlaybackSpeed(speed)}
+								disabled={!timelineEvents.length}
+								aria-pressed={playbackSpeedMultiplier === speed}
+							>
+								x{speed}
+							</button>
+						{/each}
+					</div>
 
 					<button
 						type="button"
@@ -3048,8 +3130,44 @@
 		gap: 7px;
 	}
 
+	.speed-controls {
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		gap: 3px;
+		padding: 3px;
+		border: 1px solid rgba(147, 197, 253, 0.24);
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.42);
+		overflow: hidden;
+		--speed-button-width: 34px;
+		--speed-gap: 3px;
+		--speed-index: 0;
+	}
+
+	.speed-controls::before {
+		content: '';
+		position: absolute;
+		z-index: 0;
+		top: 3px;
+		left: 3px;
+		width: var(--speed-button-width);
+		height: 22px;
+		border-radius: 999px;
+		background: linear-gradient(135deg, #2563eb, #3b82f6);
+		box-shadow:
+			0 0 0 1px rgba(147, 197, 253, 0.35),
+			0 8px 18px rgba(37, 99, 235, 0.26);
+		transform: translateX(calc(var(--speed-index) * (var(--speed-button-width) + var(--speed-gap))));
+		transition:
+			transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+			box-shadow 220ms ease,
+			opacity 180ms ease;
+	}
+
 	.play-button,
-	.step-btn {
+	.step-btn,
+	.speed-btn {
 		height: 28px;
 		border: 1px solid #93b4ec;
 		background: #2563eb;
@@ -3070,8 +3188,38 @@
 		line-height: 1;
 	}
 
+	.speed-btn {
+		position: relative;
+		z-index: 1;
+		width: 34px;
+		height: 22px;
+		border-color: transparent;
+		border-radius: 999px;
+		background: transparent;
+		color: #9fb4d2;
+		font-size: 10px;
+		font-weight: 850;
+		transition:
+			color 160ms ease,
+			transform 160ms ease,
+			background 160ms ease;
+	}
+
+	.speed-btn:hover:not(:disabled) {
+		color: #f8fbff;
+		background: rgba(96, 165, 250, 0.18);
+		transform: translateY(-1px);
+	}
+
+	.speed-btn.active-speed {
+		color: #ffffff;
+		background: transparent;
+		box-shadow: none;
+	}
+
 	.play-button:disabled,
-	.step-btn:disabled {
+	.step-btn:disabled,
+	.speed-btn:disabled {
 		opacity: 0.45;
 		cursor: not-allowed;
 	}

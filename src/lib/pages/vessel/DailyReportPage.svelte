@@ -47,6 +47,7 @@
 	let timezoneMode = $state('auto');
 	let timezoneOffset = $state('+07:00');
 	let hasLoadedDateRange = $state(false);
+	let selectedRpmRuntimeFuelTableKey = $state('');
 
 	let zoomPluginRegistered = false;
 	let shouldShowDateRangeOverlay = $derived(!hasLoadedDateRange || !reportDate);
@@ -189,12 +190,28 @@
 		return sources.length ? sources.join(' + ') : '-';
 	}
 
+	function canViewRpmFuelSource(sourceKey) {
+		if (sourceKey === 'ems_internal') return canViewFuelEmsInternal;
+		if (sourceKey === 'ems_external') return canViewFuelEmsExternal;
+		if (sourceKey === 'engine_maker') return canViewFuelEngineMaker;
+		if (sourceKey === 'fms') return canViewFuelFms;
+		if (sourceKey === 'ecu') return canViewFuelEcu;
+
+		return false;
+	}
+
 	function canViewRpmCurveTable(table) {
 		const curveType = String(table?.curveType || '').toLowerCase();
+		const sourceKeys = Array.isArray(table?.sourceKeys) ? table.sourceKeys : [];
+
+		if (sourceKeys.length) {
+			return sourceKeys.some(canViewRpmFuelSource);
+		}
 
 		if (curveType === 'ems_internal') return canViewFuelEmsInternal;
 		if (curveType === 'ems_external') return canViewFuelEmsExternal;
 		if (curveType === 'engine_maker') return canViewFuelEngineMaker;
+		if (curveType === 'fms_ecu') return canViewFuelFms || canViewFuelEcu;
 
 		return false;
 	}
@@ -2692,33 +2709,167 @@
 		return row?.lh_ems ?? row?.lhEms ?? row?.lh_maker ?? row?.lhMaker ?? row?.lh ?? 0;
 	}
 
+	function getConsumptionPerRangeRows(data) {
+		return pickArray(
+			data?.consumption_per_range?.detail,
+			data?.consumption_per_range?.details,
+			data?.consumption_per_range?.items,
+			data?.consumptionPerRange?.detail,
+			data?.consumptionPerRange?.details,
+			data?.consumptionPerRange?.items
+		);
+	}
+
+	function getRpmFuelValue(row, sourceKey) {
+		if (sourceKey === 'ems_internal') {
+			return (
+				row?.fuel_ems_internal ??
+				row?.fuelEmsInternal ??
+				row?.fuel_estimated_l ??
+				row?.fuelEstimatedL ??
+				row?.fuel ??
+				row?.fuelUsed
+			);
+		}
+
+		if (sourceKey === 'ems_external') {
+			return (
+				row?.fuel_ems_external ??
+				row?.fuelEmsExternal ??
+				row?.fuel_estimated_l ??
+				row?.fuelEstimatedL ??
+				row?.fuel ??
+				row?.fuelUsed
+			);
+		}
+
+		if (sourceKey === 'engine_maker') {
+			return (
+				row?.fuel_engine_maker ??
+				row?.fuelEngineMaker ??
+				row?.fuel_maker ??
+				row?.fuelMaker ??
+				row?.fuel_estimated_l ??
+				row?.fuelEstimatedL ??
+				row?.fuel ??
+				row?.fuelUsed
+			);
+		}
+
+		if (sourceKey === 'fms') {
+			return row?.fuel_fms ?? row?.fuelFms ?? row?.fms;
+		}
+
+		if (sourceKey === 'ecu') {
+			return row?.fuel_ecu ?? row?.fuelEcu ?? row?.ecu;
+		}
+
+		return row?.fuel_estimated_l ?? row?.fuelEstimatedL ?? row?.fuel ?? row?.fuelUsed;
+	}
+
+	function hasPresentRpmFuelValue(row, sourceKey) {
+		const value = getRpmFuelValue(row, sourceKey);
+
+		if (value === undefined || value === null || value === '' || value === '-') return false;
+
+		const number = Number(value);
+		return Number.isFinite(number);
+	}
+
+	function getRpmSourceLabel(sourceKey) {
+		if (sourceKey === 'ems_internal') return 'VMS';
+		if (sourceKey === 'ems_external') return 'EMS';
+		if (sourceKey === 'engine_maker') return 'Engine Maker';
+		if (sourceKey === 'fms') return 'FMS';
+		if (sourceKey === 'ecu') return 'ECU';
+
+		return sourceKey || '-';
+	}
+
+	function getRpmCurveTableLabel(table) {
+		const sourceKeys = Array.isArray(table?.sourceKeys) ? table.sourceKeys : [];
+
+		if (sourceKeys.length === 2 && sourceKeys.includes('fms') && sourceKeys.includes('ecu')) {
+			return 'FMS / ECU';
+		}
+
+		if (sourceKeys.length === 1) return getRpmSourceLabel(sourceKeys[0]);
+
+		if (table?.curveType === 'ems_internal') return 'VMS';
+		if (table?.curveType === 'ems_external') return 'EMS';
+		if (table?.curveType === 'engine_maker') return 'Engine Maker';
+
+		return table?.title || '-';
+	}
+
+	function formatRpmRangeLabel(value) {
+		if (value === undefined || value === null || value === '') return '-';
+
+		const text = String(value).trim();
+
+		if (!text || text === '-' || text === '—') return text || '-';
+
+		return text.replace(/-?\d+(?:[.,]\d+)?/g, (match) => {
+			const number = Number(match.replace(',', '.'));
+			return Number.isFinite(number) ? String(Math.round(number)) : match;
+		});
+	}
+
 	function buildRpmCurveTables(data) {
+		const consumptionRows = addRpmCurveSource(getConsumptionPerRangeRows(data), 'fms_ecu');
+		const hasFmsRows = consumptionRows.some((row) => hasPresentRpmFuelValue(row, 'fms'));
+		const hasEcuRows = consumptionRows.some((row) => hasPresentRpmFuelValue(row, 'ecu'));
+		const consumptionSourceKeys = [
+			...(hasFmsRows ? ['fms'] : []),
+			...(hasEcuRows ? ['ecu'] : [])
+		];
+
 		const tables = [
 			{
+				key: 'ems_internal',
 				curveType: 'ems_internal',
-				title: 'ems_internal',
+				title: 'VMS',
+				sourceKeys: ['ems_internal'],
+				showLh: true,
 				rows: addRpmCurveSource(
 					data?.rpm_ranges_ems_internal?.details || data?.rpmRangesEmsInternal?.details,
 					'ems_internal'
 				)
 			},
 			{
+				key: 'ems_external',
 				curveType: 'ems_external',
-				title: 'ems_external',
+				title: 'EMS',
+				sourceKeys: ['ems_external'],
+				showLh: true,
 				rows: addRpmCurveSource(
 					data?.rpm_ranges_ems_external?.details || data?.rpmRangesEmsExternal?.details,
 					'ems_external'
 				)
 			},
 			{
+				key: 'engine_maker',
 				curveType: 'engine_maker',
 				title: 'Engine Maker',
+				sourceKeys: ['engine_maker'],
+				showLh: true,
 				rows: addRpmCurveSource(
 					data?.rpm_ranges_maker?.details || data?.rpmRangesMaker?.details,
 					'engine_maker'
 				)
 			}
 		];
+
+		if (consumptionSourceKeys.length) {
+			tables.push({
+				key: 'fms_ecu',
+				curveType: 'fms_ecu',
+				title: consumptionSourceKeys.map(getRpmSourceLabel).join(' / '),
+				sourceKeys: consumptionSourceKeys,
+				showLh: false,
+				rows: consumptionRows
+			});
+		}
 
 		return tables
 			.map((table) => ({
@@ -2728,10 +2879,42 @@
 			.filter((table) => table.rows.length);
 	}
 
-	function getRpmRuntimeHours(row) {
-		const runtimeHours = Number(row?.runtime_hours ?? row?.runtimeHours);
+	function parseRuntimeHours(value) {
+		if (value === undefined || value === null || value === '') return 0;
 
-		if (Number.isFinite(runtimeHours)) return runtimeHours;
+		const directNumber = Number(value);
+		if (Number.isFinite(directNumber)) return directNumber;
+
+		const text = String(value).trim();
+		const clockMatch = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+
+		if (clockMatch) {
+			const hours = Number(clockMatch[1]);
+			const minutes = Number(clockMatch[2]);
+			const seconds = Number(clockMatch[3] || 0);
+
+			return hours + minutes / 60 + seconds / 3600;
+		}
+
+		const partsMatch = text.match(
+			/^(?:(\d+(?:\.\d+)?)\s*h)?\s*(?:(\d+(?:\.\d+)?)\s*m)?\s*(?:(\d+(?:\.\d+)?)\s*s)?$/i
+		);
+
+		if (partsMatch && (partsMatch[1] || partsMatch[2] || partsMatch[3])) {
+			const hours = Number(partsMatch[1] || 0);
+			const minutes = Number(partsMatch[2] || 0);
+			const seconds = Number(partsMatch[3] || 0);
+
+			return hours + minutes / 60 + seconds / 3600;
+		}
+
+		return 0;
+	}
+
+	function getRpmRuntimeHours(row) {
+		const runtimeHours = parseRuntimeHours(row?.runtime_hours ?? row?.runtimeHours);
+
+		if (Number.isFinite(runtimeHours) && runtimeHours > 0) return runtimeHours;
 
 		const runtimeMinutes = Number(row?.runtime_minutes ?? row?.runtimeMinutes);
 
@@ -2826,6 +3009,15 @@
 			return Array.isArray(rows) && rows.some((row) => hasRuntimeValue(row));
 		}
 
+		if (sourceKey === 'fms' || sourceKey === 'ecu') {
+			const rows = getConsumptionPerRangeRows(normalizedReport);
+
+			return (
+				Array.isArray(rows) &&
+				rows.some((row) => hasRuntimeValue(row) && hasPresentRpmFuelValue(row, sourceKey))
+			);
+		}
+
 		return false;
 	}
 
@@ -2890,6 +3082,10 @@
 		...addRpmCurveSource(
 			normalizedReport?.rpm_ranges_maker?.details || normalizedReport?.rpmRangesMaker?.details,
 			'engine_maker'
+		),
+		...addRpmCurveSource(
+			getConsumptionPerRangeRows(normalizedReport),
+			'fms_ecu'
 		)
 	]);
 
@@ -3056,9 +3252,37 @@
 
 	let canViewFuelEngineMaker = $derived(hasPermission('view_fuel_engine_maker'));
 
-	let visibleRpmCurveTables = $derived(rpmCurveTables.filter(canViewRpmCurveTable));
+	let visibleRpmCurveTables = $derived(
+		rpmCurveTables
+			.map((table) => ({
+				...table,
+				sourceKeys: (Array.isArray(table.sourceKeys) ? table.sourceKeys : []).filter(
+					canViewRpmFuelSource
+				)
+			}))
+			.filter((table) => table.sourceKeys.length && canViewRpmCurveTable(table))
+	);
 
 	let visibleRpmRows = $derived(visibleRpmCurveTables.flatMap((table) => table.rows || []));
+
+	let selectedRpmCurveTable = $derived(
+		visibleRpmCurveTables.find((table) => table.key === selectedRpmRuntimeFuelTableKey) ||
+			visibleRpmCurveTables[0] ||
+			null
+	);
+
+	$effect(() => {
+		const keys = visibleRpmCurveTables.map((table) => table.key);
+
+		if (!keys.length) {
+			selectedRpmRuntimeFuelTableKey = '';
+			return;
+		}
+
+		if (!keys.includes(selectedRpmRuntimeFuelTableKey)) {
+			selectedRpmRuntimeFuelTableKey = keys[0];
+		}
+	});
 
 	let canViewRpmRangeRuntimeFuel = $derived(visibleRpmCurveTables.length > 0);
 
@@ -4113,64 +4337,69 @@
 					<span class="section-kicker">RPM</span>
 					<h2>RPM Range Runtime & Fuel</h2>
 				</div>
-				<strong>{visibleRpmRows.length} rows</strong>
+
+				<div class="rpm-curve-source-control">
+					<label for="rpm-runtime-fuel-source">Table Source</label>
+					<select id="rpm-runtime-fuel-source" bind:value={selectedRpmRuntimeFuelTableKey}>
+						{#each visibleRpmCurveTables as table}
+							<option value={table.key}>{getRpmCurveTableLabel(table)}</option>
+						{/each}
+					</select>
+				</div>
 			</div>
 
-			{#if visibleRpmCurveTables.length}
+			{#if selectedRpmCurveTable}
 				<div class="rpm-curve-table-list">
-					{#each visibleRpmCurveTables as table}
-						<article class="rpm-curve-table-card">
-							<div class="rpm-curve-table-header">
-								<div>
-									<span>Curve Source</span>
-									<strong>
-										{table.curveType === 'ems_internal' || table.curveType === 'ems_external'
-											? getDailyFuelSourceLabel(table.curveType)
-											: table.title}
-									</strong>
-								</div>
-
-								<div class="rpm-curve-table-count">
-									{table.rows.length} rows
-								</div>
+					<article class="rpm-curve-table-card">
+						<div class="rpm-curve-table-header">
+							<div>
+								<span>Curve Source</span>
+								<strong>{getRpmCurveTableLabel(selectedRpmCurveTable)}</strong>
 							</div>
 
-							<div class="table-wrapper">
-								<table>
-									<thead>
-										<tr>
-											<th>Engine</th>
-											<th>RPM Range</th>
-											<th>Runtime</th>
+							<div class="rpm-curve-table-count">
+								{selectedRpmCurveTable.rows.length} rows
+							</div>
+						</div>
+
+						<div class="table-wrapper">
+							<table>
+								<thead>
+									<tr>
+										<th>Engine</th>
+										<th>RPM Range</th>
+										<th>Runtime</th>
+										{#if selectedRpmCurveTable.showLh}
 											<th>L/h</th>
-											<th>Fuel Estimated</th>
-										</tr>
-									</thead>
-
-									<tbody>
-										{#each table.rows as row}
-											<tr class:total-row={row.is_total_row || row.isTotalRow}>
-												<td>{row.engine_name || row.engineName || row.engine || row.name || '-'}</td
-												>
-
-												<td>{row.rpm_range || row.rpmRange || row.range || '-'}</td>
-
-												<td>{formatHour(getRpmRuntimeHours(row))}</td>
-
-												<td>{formatNumber(getRpmLhValue(row), 2)}</td>
-
-												<td>
-													{formatLiter(
-														row.fuel_estimated_l ?? row.fuelEstimatedL ?? row.fuel ?? row.fuelUsed
-													)}
-												</td>
-											</tr>
+										{/if}
+										{#each selectedRpmCurveTable.sourceKeys as sourceKey}
+											<th>{getRpmSourceLabel(sourceKey)} Fuel</th>
 										{/each}
-									</tbody>
-								</table>
-							</div>
-						</article>
-					{/each}
+									</tr>
+								</thead>
+
+								<tbody>
+									{#each selectedRpmCurveTable.rows as row}
+										<tr class:total-row={row.is_total_row || row.isTotalRow}>
+											<td>{row.engine_name || row.engineName || row.engine || row.name || '-'}</td>
+
+											<td>{formatRpmRangeLabel(row.rpm_range || row.rpmRange || row.range)}</td>
+
+											<td>{formatHour(getRpmRuntimeHours(row))}</td>
+
+											{#if selectedRpmCurveTable.showLh}
+												<td>{formatNumber(getRpmLhValue(row), 2)}</td>
+											{/if}
+
+											{#each selectedRpmCurveTable.sourceKeys as sourceKey}
+												<td>{formatLiter(getRpmFuelValue(row, sourceKey))}</td>
+											{/each}
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					</article>
 				</div>
 			{:else}
 				<div class="empty-box">RPM range data is not available yet.</div>
@@ -5758,6 +5987,38 @@
 
 	.rpm-curve-section {
 		overflow: hidden;
+	}
+
+	.rpm-curve-source-control {
+		min-width: min(260px, 100%);
+		display: grid;
+		gap: 6px;
+	}
+
+	.rpm-curve-source-control label {
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+	}
+
+	.rpm-curve-source-control select {
+		width: 100%;
+		min-height: 42px;
+		padding: 0 38px 0 14px;
+		border: 1px solid var(--border-soft);
+		border-radius: 12px;
+		background: var(--color-surface);
+		color: var(--text-primary);
+		font: inherit;
+		font-weight: 700;
+		outline: none;
+	}
+
+	.rpm-curve-source-control select:focus {
+		border-color: var(--color-accent);
+		box-shadow: 0 0 0 3px rgba(47, 110, 236, 0.18);
 	}
 
 	.rpm-curve-table-list {

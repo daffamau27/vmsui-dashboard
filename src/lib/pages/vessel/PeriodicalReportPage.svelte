@@ -21,6 +21,7 @@
 	let timezoneMode = $state('auto');
 	let timezoneOffset = $state('+07:00');
 	let hasLoadedDateRange = $state(false);
+	let selectedRpmRuntimeFuelTableKey = $state('');
 
 	let { active = false } = $props();
 	let shouldShowDateRangeOverlay = $derived(
@@ -89,6 +90,85 @@
 		return `${h}h ${m}m`;
 	}
 
+	function formatRuntimeValue(value) {
+		if (value === undefined || value === null || value === '') return '-';
+
+		const text = String(value).trim();
+
+		if (text && /[hms]/i.test(text)) return text;
+
+		return formatRuntimeHours(value);
+	}
+
+	function formatRpmRangeLabel(value) {
+		if (value === undefined || value === null || value === '') return '-';
+
+		const text = String(value).trim();
+		if (!text || text === '-' || text === '—' || text === 'â€”') return '—';
+
+		return text.replace(/-?\d+(?:[.,]\d+)?/g, (match) => {
+			const number = Number(match.replace(',', '.'));
+			return Number.isFinite(number) ? String(Math.round(number)) : match;
+		});
+	}
+
+	function pickArray(...values) {
+		for (const value of values) {
+			if (Array.isArray(value)) return value;
+		}
+
+		return [];
+	}
+
+	function getConsumptionPerRangeRows(data) {
+		return pickArray(
+			data?.consumption_per_range?.detail,
+			data?.consumption_per_range?.details,
+			data?.consumption_per_range?.items,
+			data?.consumptionPerRange?.detail,
+			data?.consumptionPerRange?.details,
+			data?.consumptionPerRange?.items
+		);
+	}
+
+	function getRpmFuelValue(row, sourceKey) {
+		if (sourceKey === 'fms') return row?.fuel_fms ?? row?.fuelFms ?? row?.fms;
+		if (sourceKey === 'ecu') return row?.fuel_ecu ?? row?.fuelEcu ?? row?.ecu;
+
+		return row?.fuel_estimated_l ?? row?.fuelEstimatedL ?? row?.fuel ?? row?.fuelUsed;
+	}
+
+	function hasPresentRpmFuelValue(row, sourceKey) {
+		const value = getRpmFuelValue(row, sourceKey);
+
+		if (value === undefined || value === null || value === '' || value === '-') return false;
+
+		const number = Number(value);
+		return Number.isFinite(number);
+	}
+
+	function getRpmSourceLabel(sourceKey) {
+		if (sourceKey === 'ems_internal') return 'VMS';
+		if (sourceKey === 'ems_external') return 'EMS';
+		if (sourceKey === 'engine_maker') return 'Engine Maker';
+		if (sourceKey === 'fms') return 'FMS';
+		if (sourceKey === 'ecu') return 'ECU';
+
+		return sourceKey || '-';
+	}
+
+	function getRpmTableLabel(table) {
+		const sourceKeys = Array.isArray(table?.sourceKeys) ? table.sourceKeys : [];
+
+		if (sourceKeys.length === 2 && sourceKeys.includes('fms') && sourceKeys.includes('ecu')) {
+			return 'FMS / ECU';
+		}
+
+		if (sourceKeys.length === 1) return getRpmSourceLabel(sourceKeys[0]);
+
+		return table?.label || '-';
+	}
+
 	function formatRuntimeFromMinutes(minutes) {
 		const totalMinutes = Number(minutes);
 
@@ -131,6 +211,10 @@
 		if (key === 'engine_maker') return 'Engine Maker';
 
 		return sourceKey || '-';
+	}
+
+	function hasObject(value) {
+		return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 	}
 
 	let vesselName = $derived(
@@ -197,6 +281,8 @@
 	}
 
 	function hasFuelSourceValue(sourceKey) {
+		if (hasObject(fuelConsumption?.[sourceKey])) return true;
+
 		const total = getFuelSourceTotal(sourceKey);
 		const engines = getFuelSourceEngines(sourceKey);
 
@@ -269,6 +355,132 @@
 			toFuelNumber(robBunker?.fod_single_l ?? robBunker?.fodSingleL) > 0 ||
 			toFuelNumber(robBunker?.total_fod_l ?? robBunker?.totalFodL) > 0 ||
 			toFuelNumber(robBunker?.bunker_l ?? robBunker?.bunkerL) > 0
+	);
+
+	let travelDistance = $derived(
+		normalizedData?.travel_distance || normalizedData?.travelDistance || {}
+	);
+
+	let totalDistanceNm = $derived(
+		Number(
+			travelDistance?.total_distance_nm ??
+				travelDistance?.totalDistanceNm ??
+				travelDistance?.totalDistance
+		)
+	);
+
+	let outsideSafetyZoneDistanceNm = $derived(
+		Number(
+			travelDistance?.outside_safety_zone_distance_nm ??
+				travelDistance?.outsideSafetyZoneDistanceNm ??
+				travelDistance?.outsideSafetyZoneDistance
+		)
+	);
+
+	let hasTravelDistance = $derived(
+		Number.isFinite(totalDistanceNm) || Number.isFinite(outsideSafetyZoneDistanceNm)
+	);
+
+	function getRpmRangePayload() {
+		const consumptionRows = getConsumptionPerRangeRows(normalizedData);
+		const hasFmsRows = consumptionRows.some((row) => hasPresentRpmFuelValue(row, 'fms'));
+		const hasEcuRows = consumptionRows.some((row) => hasPresentRpmFuelValue(row, 'ecu'));
+		const consumptionSourceKeys = [
+			...(hasFmsRows ? ['fms'] : []),
+			...(hasEcuRows ? ['ecu'] : [])
+		];
+
+		const candidates = [
+			{
+				key: 'ems_internal',
+				label: 'VMS',
+				sourceKeys: ['ems_internal'],
+				showLh: true,
+				value: normalizedData?.rpm_ranges_ems_internal || normalizedData?.rpmRangesEmsInternal
+			},
+			{
+				key: 'ems_external',
+				label: 'EMS',
+				sourceKeys: ['ems_external'],
+				showLh: true,
+				value: normalizedData?.rpm_ranges_ems_external || normalizedData?.rpmRangesEmsExternal
+			},
+			{
+				key: 'engine_maker',
+				label: 'Engine Maker',
+				sourceKeys: ['engine_maker'],
+				showLh: true,
+				value: normalizedData?.rpm_ranges_maker || normalizedData?.rpmRangesMaker
+			}
+		];
+
+		const tables = candidates
+			.map((candidate) => ({
+				...candidate,
+				details: Array.isArray(candidate.value?.details) ? candidate.value.details : [],
+				grandTotal: candidate.value?.grand_total || candidate.value?.grandTotal || {}
+			}))
+			.filter((candidate) => candidate.details.length);
+
+		if (consumptionSourceKeys.length) {
+			tables.push({
+				key: 'fms_ecu',
+				label: consumptionSourceKeys.map(getRpmSourceLabel).join(' / '),
+				sourceKeys: consumptionSourceKeys,
+				showLh: false,
+				details: consumptionRows,
+				grandTotal:
+					normalizedData?.consumption_per_range?.grand_total ||
+					normalizedData?.consumptionPerRange?.grandTotal ||
+					{}
+			});
+		}
+
+		return tables;
+	}
+
+	let rpmRangeTables = $derived(getRpmRangePayload());
+
+	let rpmRangeRows = $derived(rpmRangeTables.flatMap((table) => table.details));
+
+	let selectedRpmRangeTable = $derived(
+		rpmRangeTables.find((table) => table.key === selectedRpmRuntimeFuelTableKey) ||
+			rpmRangeTables[0] ||
+			null
+	);
+
+	$effect(() => {
+		const keys = rpmRangeTables.map((table) => table.key);
+
+		if (!keys.length) {
+			selectedRpmRuntimeFuelTableKey = '';
+			return;
+		}
+
+		if (!keys.includes(selectedRpmRuntimeFuelTableKey)) {
+			selectedRpmRuntimeFuelTableKey = keys[0];
+		}
+	});
+
+	let highRpmLowSpeed = $derived(
+		normalizedData?.high_rpm_low_speed || normalizedData?.highRpmLowSpeed || {}
+	);
+
+	let highRpmLowSpeedRows = $derived(
+		Array.isArray(highRpmLowSpeed?.engines) ? highRpmLowSpeed.engines : []
+	);
+
+	let literPerNauticalMile = $derived(
+		normalizedData?.liter_per_nautical_mile || normalizedData?.literPerNauticalMile || {}
+	);
+
+	let literPerNmCards = $derived(
+		Object.entries(literPerNauticalMile || {})
+			.filter(([, value]) => Number.isFinite(Number(value)))
+			.map(([key, value]) => ({
+				label: normalizeFuelSourceLabel(key, rawVisibleFuelSources),
+				value
+			}))
 	);
 
 	let robBunkerCards = $derived([
@@ -569,6 +781,20 @@
 			<strong>{formatLiter(totalFuel)}</strong>
 		</article>
 
+		{#if Number.isFinite(totalDistanceNm)}
+			<article class="summary-card">
+				<span>Total Distance</span>
+				<strong>{formatNumber(totalDistanceNm, 3)} NM</strong>
+			</article>
+		{/if}
+
+		{#if Number.isFinite(outsideSafetyZoneDistanceNm)}
+			<article class="summary-card">
+				<span>Outside Safety Zone</span>
+				<strong>{formatNumber(outsideSafetyZoneDistanceNm, 3)} NM</strong>
+			</article>
+		{/if}
+
 		{#if hasAverageSpeed}
 			<article class="summary-card">
 				<span>Average Speed</span>
@@ -584,6 +810,40 @@
 		{/if}
 
 	</section>
+
+	{#if hasTravelDistance || literPerNmCards.length}
+		<section class="table-section">
+			<div class="section-header">
+				<div>
+					<span class="section-kicker">Distance</span>
+					<h2>Travel Distance & Fuel Efficiency</h2>
+				</div>
+			</div>
+
+			<div class="speed-detail-grid">
+				{#if Number.isFinite(totalDistanceNm)}
+					<article>
+						<span>Total Distance</span>
+						<strong>{formatNumber(totalDistanceNm, 3)} NM</strong>
+					</article>
+				{/if}
+
+				{#if Number.isFinite(outsideSafetyZoneDistanceNm)}
+					<article>
+						<span>Outside Safety Zone</span>
+						<strong>{formatNumber(outsideSafetyZoneDistanceNm, 3)} NM</strong>
+					</article>
+				{/if}
+
+				{#each literPerNmCards as card}
+					<article>
+						<span>{card.label} Fuel per NM</span>
+						<strong>{formatNumber(card.value, 2)} L/NM</strong>
+					</article>
+				{/each}
+			</div>
+		</section>
+	{/if}
 
 	<section class="table-section">
 		<div class="section-header">
@@ -625,6 +885,134 @@
 			</div>
 		{:else}
 			<div class="empty-box">Engine runtime data is not available yet.</div>
+		{/if}
+	</section>
+
+	<section class="table-section">
+		<div class="section-header">
+			<div>
+				<span class="section-kicker">RPM</span>
+				<h2>RPM Range Runtime & Fuel</h2>
+			</div>
+
+			<div class="rpm-source-control">
+				<label for="periodical-rpm-source">Table Source</label>
+				<select id="periodical-rpm-source" bind:value={selectedRpmRuntimeFuelTableKey}>
+					{#each rpmRangeTables as table}
+						<option value={table.key}>{getRpmTableLabel(table)}</option>
+					{/each}
+				</select>
+			</div>
+		</div>
+
+		{#if selectedRpmRangeTable}
+			<div class="periodical-rpm-table-list">
+				<article class="periodical-rpm-card">
+						<div class="periodical-rpm-card-header">
+							<div>
+								<span>Source</span>
+								<strong>{getRpmTableLabel(selectedRpmRangeTable)}</strong>
+							</div>
+							<small>{selectedRpmRangeTable.details.length} rows</small>
+						</div>
+
+						<div class="table-wrapper">
+							<table>
+								<thead>
+									<tr>
+										<th>Engine</th>
+										<th>RPM Range</th>
+										<th>Runtime</th>
+										{#if selectedRpmRangeTable.showLh}
+											<th>L/h</th>
+										{/if}
+										{#each selectedRpmRangeTable.sourceKeys as sourceKey}
+											<th>{getRpmSourceLabel(sourceKey)} Fuel</th>
+										{/each}
+									</tr>
+								</thead>
+
+								<tbody>
+									{#each selectedRpmRangeTable.details as row}
+										<tr class:total-row={row.is_total_row || row.isTotalRow}>
+											<td>{row.engine_name || row.engineName || '-'}</td>
+											<td>{formatRpmRangeLabel(row.rpm_range || row.rpmRange || row.range)}</td>
+											<td>{formatRuntimeValue(row.runtime_hours ?? row.runtimeHours)}</td>
+											{#if selectedRpmRangeTable.showLh}
+												<td>{formatNumber(row.lh_ems ?? row.lhEms ?? row.lh_maker ?? row.lhMaker ?? row.lh, 2)}</td>
+											{/if}
+											{#each selectedRpmRangeTable.sourceKeys as sourceKey}
+												<td>{formatLiter(getRpmFuelValue(row, sourceKey))}</td>
+											{/each}
+										</tr>
+									{/each}
+
+									{#if selectedRpmRangeTable.grandTotal && Object.keys(selectedRpmRangeTable.grandTotal).length}
+										<tr class="total-row">
+											<td>Grand Total</td>
+											<td>—</td>
+											<td>{formatRuntimeValue(selectedRpmRangeTable.grandTotal.runtime_hours ?? selectedRpmRangeTable.grandTotal.runtimeHours)}</td>
+											{#if selectedRpmRangeTable.showLh}
+												<td>{formatNumber(selectedRpmRangeTable.grandTotal.lh_ems ?? selectedRpmRangeTable.grandTotal.lhEms ?? selectedRpmRangeTable.grandTotal.lh, 2)}</td>
+											{/if}
+											{#each selectedRpmRangeTable.sourceKeys as sourceKey}
+												<td>{formatLiter(getRpmFuelValue(selectedRpmRangeTable.grandTotal, sourceKey))}</td>
+											{/each}
+										</tr>
+									{/if}
+								</tbody>
+							</table>
+						</div>
+					</article>
+			</div>
+		{:else}
+			<div class="empty-box">RPM range data is not available yet.</div>
+		{/if}
+	</section>
+
+	<section class="table-section">
+		<div class="section-header">
+			<div>
+				<span class="section-kicker">RPM</span>
+				<h2>High RPM Low Speed</h2>
+			</div>
+
+			<strong>{highRpmLowSpeedRows.length} engines</strong>
+		</div>
+
+		{#if highRpmLowSpeedRows.length}
+			<div class="table-wrapper">
+				<table>
+					<thead>
+						<tr>
+							<th>Engine</th>
+							<th>Duration</th>
+							<th>Duration Minutes</th>
+							<th>Fuel Used</th>
+						</tr>
+					</thead>
+
+					<tbody>
+						{#each highRpmLowSpeedRows as row}
+							<tr>
+								<td>{row.engine_name || row.engineName || '-'}</td>
+								<td>{row.duration_formatted || row.durationFormatted || formatRuntimeFromMinutes(row.duration_minutes ?? row.durationMinutes)}</td>
+								<td>{formatNumber(row.duration_minutes ?? row.durationMinutes, 0)}</td>
+								<td>{formatLiter(row.fuel_used_l ?? row.fuelUsedL ?? row.fuel)}</td>
+							</tr>
+						{/each}
+
+						<tr class="total-row">
+							<td>Grand Total</td>
+							<td>{highRpmLowSpeed?.grand_total_duration_formatted || highRpmLowSpeed?.grandTotalDurationFormatted || formatRuntimeFromMinutes(highRpmLowSpeed?.grand_total_duration_minutes ?? highRpmLowSpeed?.grandTotalDurationMinutes)}</td>
+							<td>{formatNumber(highRpmLowSpeed?.grand_total_duration_minutes ?? highRpmLowSpeed?.grandTotalDurationMinutes, 0)}</td>
+							<td>{formatLiter(highRpmLowSpeed?.grand_total_l ?? highRpmLowSpeed?.grandTotalL)}</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+		{:else}
+			<div class="empty-box">High RPM low speed data is not available yet.</div>
 		{/if}
 	</section>
 
@@ -1037,6 +1425,38 @@
 		white-space: nowrap;
 	}
 
+	.rpm-source-control {
+		min-width: min(260px, 100%);
+		display: grid;
+		gap: 6px;
+	}
+
+	.rpm-source-control label {
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+	}
+
+	.rpm-source-control select {
+		width: 100%;
+		min-height: 42px;
+		padding: 0 38px 0 14px;
+		border: 1px solid var(--border-soft);
+		border-radius: 12px;
+		background: var(--color-surface);
+		color: var(--text-primary);
+		font: inherit;
+		font-weight: 700;
+		outline: none;
+	}
+
+	.rpm-source-control select:focus {
+		border-color: var(--color-accent);
+		box-shadow: 0 0 0 3px rgba(47, 110, 236, 0.18);
+	}
+
 	.table-wrapper {
 		width: 100%;
 		overflow: auto;
@@ -1085,6 +1505,59 @@
 		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 800;
+	}
+
+	.periodical-rpm-table-list {
+		padding: 14px;
+		display: grid;
+		gap: 14px;
+		background: var(--color-elevated);
+	}
+
+	.periodical-rpm-card {
+		overflow: hidden;
+		background: var(--color-surface);
+		border: 1px solid #d9e2ec;
+		border-radius: 12px;
+		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+	}
+
+	.periodical-rpm-card-header {
+		min-height: 52px;
+		padding: 10px 14px;
+		border-bottom: 1px solid #e5edf5;
+		background: var(--color-surface);
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.periodical-rpm-card-header span,
+	.periodical-rpm-card-header small {
+		display: block;
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 900;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.periodical-rpm-card-header strong {
+		display: block;
+		margin-top: 3px;
+		color: var(--text-primary);
+		font-size: 15px;
+		font-weight: 900;
+	}
+
+	.periodical-rpm-card-header small {
+		flex-shrink: 0;
+		padding: 5px 10px;
+		border-radius: 999px;
+		background: var(--color-accent-muted);
+		border: 1px solid #bfdbfe;
+		color: #1d4ed8;
 	}
 
 	.fod-usage-summary {
