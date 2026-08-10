@@ -12,7 +12,7 @@
   } from "$lib/api/dashboardApi.js";
   import { getFleetAssets, getFleetVesselLiveDetail } from "$lib/api/fleetApi.js";
   import { apiRequest } from "$lib/api/authApi.js";
-  import { VMS_TILE_URL, VMS_TILE_OPTIONS } from "$lib/mapStyle.js";
+  import { addMapTileLayer } from "$lib/mapStyle.js";
   import { addLeafletZoomAndScale } from "$lib/utils/leafletControls.js";
   import LoadingSkeleton from "$lib/components/LoadingSkeleton.svelte";
   import CopyableCoordinate from "$lib/components/CopyableCoordinate.svelte";
@@ -1073,7 +1073,7 @@
         preferCanvas: true
       }).setView(center, coords ? 12 : 5);
 
-      L.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(dashboardMap);
+      addMapTileLayer(L, dashboardMap);
       addLeafletZoomAndScale(L, dashboardMap);
 
       setupDashboardMapPanes();

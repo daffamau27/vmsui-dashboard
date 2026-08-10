@@ -1,3 +1,10 @@
+import {
+	MAP_SOURCES,
+	getMapSourceId,
+	setStoredMapSourceId,
+	switchMapTileLayer
+} from '$lib/mapStyle.js';
+
 export function addLeafletZoomAndScale(leaflet, map, options = {}) {
 	if (!leaflet || !map) return null;
 
@@ -15,11 +22,76 @@ export function addLeafletZoomAndScale(leaflet, map, options = {}) {
 		position,
 		maxWidth: options.maxWidth || 132
 	});
+	const mapSourceControl =
+		options.mapSourceControl === false
+			? null
+			: createMapSourceControl(leaflet, {
+					position,
+					onChange: (sourceId) => {
+						switchMapTileLayer(leaflet, map, sourceId);
+						setStoredMapSourceId(sourceId);
+					}
+				});
 
 	zoomControl.addTo(map);
 	scaleControl.addTo(map);
+	mapSourceControl?.addTo(map);
 
-	return { zoomControl, scaleControl };
+	return { zoomControl, scaleControl, mapSourceControl };
+}
+
+function createMapSourceControl(leaflet, options = {}) {
+	return new (leaflet.Control.extend({
+		options: {
+			position: options.position || 'topleft'
+		},
+
+		onAdd() {
+			const container = leaflet.DomUtil.create(
+				'div',
+				'leaflet-control vms-map-source-control'
+			);
+			const label = leaflet.DomUtil.create('span', 'vms-map-source-control__label', container);
+			label.textContent = 'Map';
+
+			const group = leaflet.DomUtil.create('div', 'vms-map-source-control__options', container);
+			const currentSourceId = getMapSourceId();
+			this._buttons = {};
+
+			Object.values(MAP_SOURCES).forEach((source) => {
+				const button = leaflet.DomUtil.create(
+					'button',
+					`vms-map-source-control__button${source.id === currentSourceId ? ' active' : ''}`,
+					group
+				);
+				button.type = 'button';
+				button.textContent = source.label;
+				button.setAttribute('aria-pressed', source.id === currentSourceId ? 'true' : 'false');
+				button.title = `Use ${source.label} map`;
+
+				leaflet.DomEvent.on(button, 'click', (event) => {
+					leaflet.DomEvent.stop(event);
+					this._setActive(source.id);
+					options.onChange?.(source.id);
+				});
+
+				this._buttons[source.id] = button;
+			});
+
+			leaflet.DomEvent.disableClickPropagation(container);
+			leaflet.DomEvent.disableScrollPropagation(container);
+
+			return container;
+		},
+
+		_setActive(sourceId) {
+			Object.entries(this._buttons || {}).forEach(([id, button]) => {
+				const active = id === sourceId;
+				button.classList.toggle('active', active);
+				button.setAttribute('aria-pressed', active ? 'true' : 'false');
+			});
+		}
+	}))(options);
 }
 
 function createDualScaleControl(leaflet, options = {}) {

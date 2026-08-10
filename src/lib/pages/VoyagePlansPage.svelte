@@ -13,7 +13,13 @@
 		isZoneAsset,
 		normalizeMapZonesFromAssets
 	} from '$lib/utils/mapZones.js';
-	import { VMS_TILE_OPTIONS, VMS_TILE_URL } from '$lib/mapStyle.js';
+	import {
+		MAP_SOURCES,
+		addMapTileLayer,
+		getMapSourceId,
+		setStoredMapSourceId,
+		switchMapTileLayer
+	} from '$lib/mapStyle.js';
 	import {
 		createCopyableCoordinateHtml,
 		handleCoordinateCopyClick
@@ -22,6 +28,7 @@
 
 	const PAGE_SIZE_OPTIONS = [10, 20, 50];
 	const ASSET_LEGEND_TYPES = ['anchor', 'buoy', 'dock', 'shipyard', 'mess', 'office', 'fso', 'rig', 'whp'];
+	const mapSourceOptions = Object.values(MAP_SOURCES);
 
 	let loading = false;
 	let active = false;
@@ -122,6 +129,7 @@
 		nauticalStart: 12,
 		nauticalLabelLeft: 49
 	};
+	let activeMapSourceId = getMapSourceId();
 	let showPlanMapView = false;
 	let planViewMapContainer;
 	let planViewMap;
@@ -523,6 +531,20 @@
 		}
 	}
 
+	function selectMapSource(sourceId) {
+		const nextSourceId = setStoredMapSourceId(sourceId);
+		activeMapSourceId = nextSourceId;
+
+		if (L && routeMap) {
+			switchMapTileLayer(L, routeMap, nextSourceId);
+			updateRouteMapScale();
+		}
+
+		if (L && planViewMap) {
+			switchMapTileLayer(L, planViewMap, nextSourceId);
+		}
+	}
+
 	function updateRouteMapScale() {
 		if (!routeMap?._loaded) {
 			routeMapScale = {
@@ -631,7 +653,7 @@
 				preferCanvas: true
 			});
 
-			leaflet.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(routeMap);
+			addMapTileLayer(leaflet, routeMap);
 
 			renderZoneLayer();
 			assetMarkerLayer = leaflet.layerGroup().addTo(routeMap);
@@ -814,7 +836,7 @@
 			preferCanvas: true
 		});
 
-		leaflet.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(planViewMap);
+		addMapTileLayer(leaflet, planViewMap);
 		planViewZoneLayer = addMapZonesToLeafletMap(leaflet, planViewMap, zones, {
 			paneName: 'voyagePlanViewZonePane',
 			zIndex: 355
@@ -1368,6 +1390,7 @@
 		let cleanupVesselTransferMode = () => {};
 
 		if (browser) {
+			activeMapSourceId = getMapSourceId();
 			window.addEventListener('keydown', handleRouteEditorKeydown);
 			document.addEventListener('fullscreenchange', handleRouteMapFullscreenChange);
 			document.addEventListener('webkitfullscreenchange', handleRouteMapFullscreenChange);
@@ -3009,6 +3032,22 @@
 										>
 											{routeMapScale.nauticalLabel}
 										</span>
+									</div>
+								</div>
+
+								<div class="route-map-source-control" aria-label="Map source">
+									<span>Map</span>
+									<div>
+										{#each mapSourceOptions as source}
+											<button
+												type="button"
+												class:active={activeMapSourceId === source.id}
+												aria-pressed={activeMapSourceId === source.id}
+												on:click={() => selectMapSource(source.id)}
+											>
+												{source.label}
+											</button>
+										{/each}
 									</div>
 								</div>
 							</div>
@@ -5721,6 +5760,73 @@
 		box-shadow: var(--shadow-md);
 		color: #eaf2ff;
 		backdrop-filter: blur(12px);
+	}
+
+	.route-map-source-control {
+		height: 34px;
+		min-height: 34px;
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 4px 5px 4px 8px;
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.82);
+		box-shadow: var(--shadow-md);
+		color: #eaf2ff;
+		backdrop-filter: blur(12px);
+	}
+
+	.route-map-source-control > span {
+		color: #93c5fd;
+		font-size: 9px;
+		font-weight: 800;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+	}
+
+	.route-map-source-control > div {
+		display: inline-grid;
+		grid-template-columns: repeat(2, minmax(58px, 1fr));
+		gap: 2px;
+		padding: 2px;
+		border-radius: 10px;
+		background: rgba(2, 6, 23, 0.28);
+	}
+
+	.route-map-source-control button {
+		height: 24px;
+		min-width: 58px;
+		padding: 0 8px;
+		border: 0;
+		border-radius: 8px;
+		background: transparent;
+		color: #aebbd0;
+		font: inherit;
+		font-size: 10px;
+		font-weight: 800;
+		line-height: 1;
+		cursor: pointer;
+		transition:
+			color 0.16s ease,
+			background 0.16s ease,
+			box-shadow 0.16s ease,
+			transform 0.16s ease;
+	}
+
+	.route-map-source-control button:hover {
+		color: #ffffff;
+		background: rgba(37, 99, 235, 0.2);
+	}
+
+	.route-map-source-control button.active {
+		color: #ffffff;
+		background: linear-gradient(135deg, rgba(37, 99, 235, 0.92), rgba(14, 165, 233, 0.82));
+		box-shadow: 0 6px 16px rgba(37, 99, 235, 0.28);
+	}
+
+	.route-map-source-control button:active {
+		transform: scale(0.96);
 	}
 
 	.route-map-scale-ruler {

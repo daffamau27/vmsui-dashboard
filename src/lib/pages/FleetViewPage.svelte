@@ -4,7 +4,7 @@
 	import { getFleetVessels, getFleetVesselLiveDetail, getFleetAssets } from '$lib/api/fleetApi.js';
 	import { setSelectedVessel } from '$lib/stores/selectedVessel.svelte.js';
 	import { activeMenu, setActiveMenu } from '$lib/stores/appNavigation.svelte.js';
-	import { VMS_TILE_URL, VMS_TILE_OPTIONS } from '$lib/mapStyle.js';
+	import { addMapTileLayer } from '$lib/mapStyle.js';
 	import { addLeafletZoomAndScale } from '$lib/utils/leafletControls.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
@@ -2737,7 +2737,7 @@
 				closePopupOnClick: false
 			}).setView([-2.8, 114.5], 5);
 
-			L.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(map);
+			addMapTileLayer(L, map);
 			addLeafletZoomAndScale(L, map);
 
 			setupMapPanes();

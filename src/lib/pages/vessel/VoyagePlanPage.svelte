@@ -9,7 +9,7 @@
 		restoreSelectedVessel
 	} from '$lib/stores/selectedVessel.svelte.js';
 	import 'leaflet/dist/leaflet.css';
-	import { VMS_TILE_URL, VMS_TILE_OPTIONS } from '$lib/mapStyle.js';
+	import { addMapTileLayer } from '$lib/mapStyle.js';
 	import { addLeafletZoomAndScale } from '$lib/utils/leafletControls.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
@@ -1004,7 +1004,7 @@
 				preferCanvas: true
 			});
 
-			leaflet.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(routeMap);
+			addMapTileLayer(leaflet, routeMap);
 			addLeafletZoomAndScale(leaflet, routeMap);
 
 			renderZoneLayer();

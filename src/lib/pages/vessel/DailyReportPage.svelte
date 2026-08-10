@@ -11,7 +11,7 @@
 	import { getEngineCurvesForVessel } from '$lib/api/engineCurveApi.js';
 	import { getFleetVesselDetail } from '$lib/api/fleetApi.js';
 	import { downloadApiFile, apiRequest } from '$lib/api/authApi.js';
-	import { VMS_TILE_URL, VMS_TILE_OPTIONS } from '$lib/mapStyle.js';
+	import { addMapTileLayer } from '$lib/mapStyle.js';
 	import { addLeafletZoomAndScale } from '$lib/utils/leafletControls.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
@@ -2521,7 +2521,7 @@
 					attributionControl: false
 				});
 
-				leaflet.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(map);
+				addMapTileLayer(leaflet, map);
 				addLeafletZoomAndScale(leaflet, map);
 			}
 
