@@ -78,8 +78,6 @@
 			permission: 'view_fuel_fms',
 			columns: [
 				{ label: 'Engine', field: 'engine', align: 'left' },
-				{ label: 'Source', field: 'source', align: 'left' },
-				{ label: 'Metric', field: 'metric', align: 'left' },
 				{ label: 'Total', field: 'total', type: 'liter', align: 'right' }
 			]
 		},
