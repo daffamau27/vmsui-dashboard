@@ -130,6 +130,8 @@
 	let selectedEngineCurveDetail = null;
 	let selectedEngineCurveLoading = false;
 	let searchEngineCurve = '';
+	let searchEngineCurveImportVessel = '';
+	let engineCurveImportVesselDropdownOpen = false;
 	let engineCurveFileInput;
 
 	let reportingVessels = [];
@@ -511,8 +513,7 @@
 		const companyId = vessel?.companyId ?? vessel?.company_id;
 		const company = vessel?.company || getCompanyById(companyId);
 
-		if (company) return `${getCompanyDisplayName(company)} • ID ${company.id}`;
-		if (companyId) return `Company ID ${companyId}`;
+		if (company) return `${getCompanyDisplayName(company)}`;
 
 		return 'No Company';
 	}
@@ -1559,6 +1560,35 @@
 			.some((value) => String(value).toLowerCase().includes(keyword));
 	});
 
+	$: filteredEngineCurveImportVessels = vessels.filter((vessel) => {
+		const keyword = searchEngineCurveImportVessel.trim().toLowerCase();
+		const selectedId = String(engineCurveForm.vesselId || '');
+		const vesselId = String(vessel?.id || '');
+
+		if (selectedId && vesselId === selectedId) return true;
+		if (!keyword) return true;
+
+		const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
+
+		return [
+			getVesselDisplayName(vessel),
+			getCompanyDisplayName(company)
+		]
+			.filter(Boolean)
+			.some((value) => String(value).toLowerCase().includes(keyword));
+	});
+
+	$: selectedEngineCurveImportVessel =
+		vessels.find((vessel) => Number(vessel?.id) === Number(engineCurveForm.vesselId)) || null;
+
+	function selectEngineCurveImportVessel(vessel) {
+		engineCurveForm = {
+			...engineCurveForm,
+			vesselId: vessel?.id || ''
+		};
+		engineCurveImportVesselDropdownOpen = false;
+	}
+
 	function getCurveId(curve) {
 		return curve?.curve_id || curve?.curveId || curve?.id || '';
 	}
@@ -2490,6 +2520,8 @@
 		selectedEngineCurve = null;
 		selectedEngineCurveDetail = null;
 		engineCurveForm = createEmptyEngineCurveForm();
+		searchEngineCurveImportVessel = '';
+		engineCurveImportVesselDropdownOpen = false;
 
 		if (engineCurveFileInput) {
 			engineCurveFileInput.value = '';
@@ -3968,17 +4000,77 @@
 
 					<section class="engine-curve-form-card">
 						<div class="form-grid engine-curve-form-grid">
-							<label>
+							<div class="engine-curve-vessel-picker">
 								<span>Vessel</span>
-								<select bind:value={engineCurveForm.vesselId}>
-									<option value="">Select vessel</option>
-									{#each vessels as vessel}
-										<option value={vessel.id}>
-											{vessel.vesselName || `Vessel ${vessel.id}`} — ID {vessel.id}
-										</option>
-									{/each}
-								</select>
-							</label>
+								<div class="engine-curve-vessel-dropdown">
+									<button
+										type="button"
+										class="engine-curve-vessel-selector"
+										class:has-selection={selectedEngineCurveImportVessel}
+										on:click={() => (engineCurveImportVesselDropdownOpen = !engineCurveImportVesselDropdownOpen)}
+									>
+										<span class="selector-copy">
+											<strong>
+												{selectedEngineCurveImportVessel
+													? getVesselDisplayName(selectedEngineCurveImportVessel)
+													: 'Select vessel'}
+											</strong>
+										</span>
+										<span class="selector-chevron">v</span>
+									</button>
+
+									{#if engineCurveImportVesselDropdownOpen}
+										<div class="engine-curve-vessel-menu">
+											<div class="engine-curve-vessel-search-box">
+												<input
+													type="search"
+													placeholder="Search vessel..."
+													aria-label="Search vessel"
+													bind:value={searchEngineCurveImportVessel}
+												/>
+												{#if searchEngineCurveImportVessel}
+													<button
+														type="button"
+														class="engine-curve-vessel-search-clear"
+														aria-label="Clear vessel search"
+														on:click={() => (searchEngineCurveImportVessel = '')}
+													>
+													</button>
+												{/if}
+											</div>
+
+											{#if vesselsLoading}
+												<div class="engine-curve-vessel-state">
+													<LoadingSkeleton label="Loading vessels" variant="list" rows={4} compact />
+												</div>
+											{:else if vessels.length === 0}
+												<div class="engine-curve-vessel-state">No vessels available.</div>
+											{:else if filteredEngineCurveImportVessels.length === 0}
+												<div class="engine-curve-vessel-state">No vessel found.</div>
+											{:else}
+												<div class="engine-curve-vessel-items">
+													{#each filteredEngineCurveImportVessels as vessel}
+														<button
+															type="button"
+															class="engine-curve-vessel-item"
+															class:active-vessel={Number(engineCurveForm.vesselId) === Number(vessel.id)}
+															on:click={() => selectEngineCurveImportVessel(vessel)}
+														>
+															<span class="vessel-item-copy">
+																<strong>{getVesselDisplayName(vessel)}</strong>
+																<small>{getVesselCompanyLabel(vessel)} - ID {vessel.id}</small>
+															</span>
+															{#if Number(engineCurveForm.vesselId) === Number(vessel.id)}
+																<span class="active-check">Selected</span>
+															{/if}
+														</button>
+													{/each}
+												</div>
+											{/if}
+										</div>
+									{/if}
+								</div>
+							</div>
 
 							<label>
 								<span>Curve Type</span>
@@ -5826,7 +5918,242 @@
 	}
 
 	.engine-curve-form-grid {
-		grid-template-columns: 1fr 180px 1fr 1fr;
+		grid-template-columns: minmax(240px, 1fr) 180px 1fr 1fr;
+		align-items: start;
+	}
+
+	.engine-curve-vessel-picker {
+		display: grid;
+		gap: 8px;
+		min-width: 0;
+	}
+
+	.engine-curve-vessel-picker > span {
+		display: block;
+		margin-bottom: -2px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+	}
+
+	.engine-curve-vessel-dropdown {
+		position: relative;
+		min-width: 0;
+	}
+
+	.engine-curve-vessel-selector {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 10px;
+		width: 100%;
+		min-height: 42px;
+		padding: 7px 10px;
+		border: 1px solid rgba(148, 163, 184, 0.28);
+		border-radius: 8px;
+		background: rgba(15, 23, 42, 0.82);
+		color: var(--text-primary);
+		text-align: left;
+		transition:
+			border-color 120ms ease,
+			background 120ms ease,
+			box-shadow 120ms ease;
+	}
+
+	.engine-curve-vessel-selector:hover,
+	.engine-curve-vessel-selector.has-selection {
+		border-color: rgba(96, 165, 250, 0.48);
+		background: rgba(15, 23, 42, 0.92);
+	}
+
+	.engine-curve-vessel-selector:focus {
+		border-color: rgba(96, 165, 250, 0.72);
+		box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+		outline: none;
+	}
+
+	.engine-curve-vessel-selector .selector-copy,
+	.engine-curve-vessel-item .vessel-item-copy {
+		display: block;
+		min-width: 0;
+	}
+
+	.engine-curve-vessel-selector .selector-copy strong,
+	.engine-curve-vessel-item .vessel-item-copy strong {
+		display: block;
+		overflow: hidden;
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 750;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.engine-curve-vessel-selector .selector-copy small,
+	.engine-curve-vessel-item .vessel-item-copy small {
+		display: block;
+		overflow: hidden;
+		margin-top: 2px;
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 600;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.engine-curve-vessel-selector .selector-chevron {
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 800;
+		text-transform: uppercase;
+	}
+
+	.engine-curve-vessel-menu {
+		position: absolute;
+		top: calc(100% + 8px);
+		left: 0;
+		z-index: 100;
+		width: 100%;
+		min-width: 280px;
+		max-height: min(320px, calc(100vh - 180px));
+		overflow-y: auto;
+		padding: 6px;
+		border: 1px solid rgba(148, 163, 184, 0.24);
+		border-radius: 10px;
+		background: #111827;
+		box-shadow: 0 12px 24px rgba(0, 0, 0, 0.34);
+		animation: engineCurveVesselMenuIn 150ms ease;
+	}
+
+	.engine-curve-vessel-search-box {
+		position: sticky;
+		top: 0;
+		z-index: 2;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 5px;
+		margin-bottom: 6px;
+		padding-bottom: 6px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+		background: #111827;
+	}
+
+	.engine-curve-vessel-search-box input {
+		width: 100%;
+		min-width: 0;
+		height: 34px;
+		padding: 0 10px;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		border-radius: 7px;
+		background: rgba(15, 23, 42, 0.9);
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 600;
+		outline: none;
+	}
+
+	.engine-curve-vessel-search-box input::placeholder {
+		color: rgba(148, 163, 184, 0.78);
+	}
+
+	.engine-curve-vessel-search-box input:focus {
+		border-color: rgba(59, 130, 246, 0.58);
+		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+	}
+
+	.engine-curve-vessel-search-clear {
+		display: grid;
+		place-items: center;
+		width: 34px;
+		height: 34px;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		border-radius: 7px;
+		background: rgba(30, 41, 59, 0.72);
+		color: var(--text-secondary);
+		font-size: 0;
+		font-weight: 800;
+		line-height: 1;
+		transition:
+			background 120ms ease,
+			color 120ms ease,
+			border-color 120ms ease;
+	}
+
+	.engine-curve-vessel-search-clear::before {
+		content: 'X';
+		font-size: 11px;
+	}
+
+	.engine-curve-vessel-search-clear:hover {
+		border-color: rgba(96, 165, 250, 0.36);
+		background: rgba(37, 99, 235, 0.18);
+		color: #dbeafe;
+	}
+
+	.engine-curve-vessel-items {
+		display: grid;
+		gap: 2px;
+	}
+
+	.engine-curve-vessel-item {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 8px;
+		width: 100%;
+		min-height: 38px;
+		padding: 7px 8px;
+		border: 1px solid transparent;
+		border-radius: 8px;
+		background: transparent;
+		color: var(--text-secondary);
+		text-align: left;
+		transition:
+			background 120ms ease,
+			color 120ms ease,
+			border-color 120ms ease;
+	}
+
+	.engine-curve-vessel-item:hover {
+		border-color: rgba(96, 165, 250, 0.14);
+		background: rgba(30, 41, 59, 0.62);
+		color: var(--text-primary);
+	}
+
+	.engine-curve-vessel-item.active-vessel {
+		border-color: rgba(96, 165, 250, 0.34);
+		background: rgba(37, 99, 235, 0.14);
+		color: #bfdbfe;
+	}
+
+	.engine-curve-vessel-state {
+		padding: 10px;
+		border-radius: 8px;
+		background: rgba(15, 23, 42, 0.72);
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 650;
+	}
+
+	.engine-curve-vessel-menu .active-check {
+		padding: 2px 6px;
+		border-radius: 6px;
+		background: rgba(37, 99, 235, 0.16);
+		color: #bfdbfe;
+		font-size: 9px;
+		font-weight: 750;
+		letter-spacing: 0.02em;
+	}
+
+	@keyframes engineCurveVesselMenuIn {
+		from {
+			opacity: 0;
+			transform: translateY(-5px) scale(0.985);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0) scale(1);
+		}
 	}
 
 	.checkbox-line {
@@ -8505,6 +8832,23 @@
 	.reporting-editor-panel > :last-child,
 	.global-audit-panel > :last-child {
 		margin-bottom: 14px;
+	}
+
+	.engine-curve-editor-panel {
+		position: relative;
+		z-index: 8;
+		overflow: visible;
+	}
+
+	.engine-curve-form-card {
+		position: relative;
+		z-index: 12;
+		overflow: visible;
+	}
+
+	.engine-curve-detail-card {
+		position: relative;
+		z-index: 1;
 	}
 
 	.panel-title-row h2,

@@ -364,7 +364,6 @@
 				? [
 						makeNode('wayjun', wayjun?.name || 'HIGH SPEED COUNTER', 315, 760, {
 							online: wayjun?.online,
-							subtitle: 'Wayjun\nCounter',
 							icon: '/assets/engine.png',
 							variant: 'device',
 							width: 156,
