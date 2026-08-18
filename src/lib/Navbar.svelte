@@ -63,6 +63,11 @@
 			label: 'Fuel Management',
 			key: 'fuel-management',
 			permissions: ['access_fuel_management']
+		},
+		{
+			label: 'Single Line Diagram',
+			key: 'single-line-diagram',
+			permissions: ['access_single_line']
 		}
 	];
 

@@ -308,6 +308,7 @@
 		access_trace: 'Shows the Trace menu and trace playback page.',
 		access_data_log: 'Shows the Data Log menu, date filters, column picker, table, and export action.',
 		access_fuel_management: 'Shows the Fuel Management menu and fuel operation page.',
+		access_single_line: 'Shows the Single Line Diagram menu and vessel electrical diagram workspace.',
 		access_fleet_view: 'Shows the Fleet View sidebar menu and fleet monitoring map.',
 		access_all_vessel_summary: 'Shows the All Vessel Summary sidebar menu and summary page.',
 		access_voyage_plan_fleet: 'Shows the Voyage Plan Fleet sidebar menu and fleet plan management page.',
@@ -3755,7 +3756,7 @@
 										: 'Save Vessel'}
 							</button>
 						</div>
-					</div>letakk
+					</div>
 
 					{#if selectedVessel?.engines?.length}
 						<section class="engine-preview-card">

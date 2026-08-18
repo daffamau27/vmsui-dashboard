@@ -369,8 +369,6 @@
 									<div class="access-icon vessel-icon">V</div>
 									<div>
 										<strong>{vessel.vesselName || vessel.deviceName || '-'}</strong>
-										<p>{vessel.deviceName || '-'} · ID: {vessel.id}</p>
-										<small>{vessel.deviceId || '-'}</small>
 									</div>
 								</div>
 							{/each}
@@ -397,8 +395,6 @@
 									<div class="access-icon asset-icon">A</div>
 									<div>
 										<strong>{asset.assetName || asset.thingsboardName || '-'}</strong>
-										<p>{asset.thingsboardName || '-'}</p>
-										<small>{asset.assetId || '-'}</small>
 									</div>
 								</div>
 							{/each}

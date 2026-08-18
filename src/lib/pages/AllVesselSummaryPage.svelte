@@ -653,27 +653,8 @@
 					}))
 				: [];
 
-			if (!selectedDeviceIds.length && devices.length) {
-				const firstDeviceId = devices[0].id;
-
-				selectedDeviceIds = [firstDeviceId];
-
-				vesselRanges = {
-					...vesselRanges,
-					[firstDeviceId]: {
-						start: defaultStartDate,
-						end: defaultEndDate
-					}
-				};
-
-				vesselTimezones = {
-					...vesselTimezones,
-					[firstDeviceId]: {
-						mode: defaultTimezoneMode,
-						offset: defaultTimezoneOffset
-					}
-				};
-			}
+			const availableDeviceIds = new Set(devices.map((device) => device.id));
+			selectedDeviceIds = selectedDeviceIds.filter((deviceId) => availableDeviceIds.has(deviceId));
 		} catch (err) {
 			console.error('[ALL_VESSEL][LOAD_VESSELS][ERROR]', err);
 			devicesError = err?.message || 'Failed to load the vessel list from the API.';
@@ -1486,7 +1467,9 @@
 	}
 
 	.vessel-panel {
-		min-height: 420px;
+		height: clamp(420px, calc(100vh - 230px), 620px);
+		min-height: 0;
+		align-self: start;
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
@@ -1540,6 +1523,7 @@
 
 	.vessel-list {
 		flex: 1;
+		min-height: 0;
 		overflow: auto;
 		padding: 10px;
 		display: grid;
@@ -2237,6 +2221,10 @@
 		.filter-grid,
 		.column-groups {
 			grid-template-columns: 1fr;
+		}
+
+		.vessel-panel {
+			height: min(520px, 70vh);
 		}
 
 		.avs-header-card,

@@ -12,6 +12,7 @@
 	import TracePage from '$lib/pages/vessel/TracePage.svelte';
 	import DataLogPage from '$lib/pages/vessel/DataLogPage.svelte';
 	import FuelManagementPage from '$lib/pages/vessel/FuelManagementPage.svelte';
+	import SingleLineDiagramPage from '$lib/pages/vessel/SingleLineDiagramPage.svelte';
 
 	import { getFleetVesselsWithEngines } from '$lib/api/fleetApi.js';
 	import {
@@ -83,6 +84,11 @@
 			label: 'Fuel Management',
 			key: 'fuel-management',
 			permissions: ['access_fuel_management']
+		},
+		{
+			label: 'Single Line Diagram',
+			key: 'single-line-diagram',
+			permissions: ['access_single_line']
 		}
 	];
 
@@ -916,6 +922,12 @@
 				{#if shouldMountPage('fuel-management') && isPageAllowed('fuel-management')}
 					<section class="vessel-page" class:active-vessel-page={isPageActive('fuel-management')}>
 						<FuelManagementPage active={isPageActive('fuel-management')} />
+					</section>
+				{/if}
+
+				{#if shouldMountPage('single-line-diagram') && isPageAllowed('single-line-diagram')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('single-line-diagram')}>
+						<SingleLineDiagramPage active={isPageActive('single-line-diagram')} />
 					</section>
 				{/if}
 			{/key}

@@ -1326,20 +1326,26 @@
 			</div>
 
 			<div class="vdash-cctv-grid">
-			{#each range(4) as _, index}
-				<article class="vdash-cctv-box" style={`--skeleton-delay: ${index * 55}ms`}>
-				<div class="vdash-cctv-top">
-					<span class="vdash-camera-dot"></span>
-					<span class="vdash-skeleton-line status"></span>
-				</div>
-
-				<div class="vdash-cctv-content">
-					<span class="vdash-cctv-icon"></span>
+			<div class="vdash-cctv-focus-layout">
+				<article class="vdash-cctv-box vdash-cctv-main-box" style="--skeleton-delay: 0ms">
+				<span class="vdash-cctv-frame"></span>
+				<div class="vdash-cctv-main-meta">
 					<span class="vdash-skeleton-line cctv-title"></span>
 					<span class="vdash-skeleton-line cctv-subtitle"></span>
 				</div>
 				</article>
-			{/each}
+
+				<div class="vdash-cctv-thumbnail-row">
+				{#each range(3) as _, index}
+					<article class="vdash-cctv-box vdash-cctv-thumb-box" style={`--skeleton-delay: ${index * 55 + 70}ms`}>
+					<span class="vdash-cctv-frame"></span>
+					<div class="vdash-cctv-thumb-meta">
+						<span class="vdash-skeleton-line cctv-thumb-title"></span>
+					</div>
+					</article>
+				{/each}
+				</div>
+			</div>
 			</div>
 		</section>
 
@@ -1421,8 +1427,8 @@
 		{/each}
 		</section>
 
-		<section class="vdash-environment-summary">
-		{#each range(2) as _, panelIndex}
+		<section class="vdash-environment-summary combined">
+		{#each range(1) as _, panelIndex}
 			<section class="vdash-panel vdash-environment-card" style={`--skeleton-delay: ${panelIndex * 80}ms`}>
 			<div class="vdash-section-header">
 				<div>
@@ -1436,6 +1442,8 @@
 				<article style={`--skeleton-delay: ${panelIndex * 80 + index * 45}ms`}>
 					<span class="vdash-skeleton-line label"></span>
 					<span class="vdash-skeleton-line env-value"></span>
+					<span class="vdash-skeleton-line env-note"></span>
+					<span class="vdash-skeleton-line env-value secondary"></span>
 					<span class="vdash-skeleton-line env-note"></span>
 				</article>
 				{/each}
@@ -4604,6 +4612,7 @@
 		gap: 14px;
 		width: 100%;
 		min-width: 0;
+		margin-top: 14px;
 	}
 
 	.vdash-panel,
@@ -4707,31 +4716,49 @@
 
 	.vdash-hero-grid {
 		display: grid;
-		grid-template-columns: minmax(360px, 1fr) minmax(420px, 1.15fr);
+		grid-template-columns: minmax(330px, 440px) minmax(0, 1fr);
 		gap: 14px;
-		min-height: 404px;
+		min-height: 430px;
 	}
 
 	.vdash-cctv-section,
 	.vdash-map-section {
 		min-width: 0;
-		min-height: 404px;
+		min-height: 430px;
 		display: flex;
 		flex-direction: column;
 	}
 
+	.vdash-cctv-section {
+		align-self: start;
+	}
+
 	.vdash-cctv-grid {
 		flex: 1;
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 12px;
+		display: block;
 		padding: 14px;
 		background: var(--vdash-elevated);
 	}
 
+	.vdash-cctv-focus-layout {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		width: 100%;
+		min-height: 0;
+	}
+
+	.vdash-cctv-thumbnail-row {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 7px;
+		width: 100%;
+	}
+
 	.vdash-cctv-box {
 		position: relative;
-		min-height: 142px;
+		min-height: 0;
+		aspect-ratio: 4 / 3;
 		border-radius: 12px;
 		overflow: hidden;
 		background:
@@ -4743,28 +4770,61 @@
 		display: flex;
 		flex-direction: column;
 		justify-content: space-between;
-		padding: 12px;
+		padding: 0;
+		isolation: isolate;
 	}
 
-	.vdash-cctv-top {
-		display: flex;
-		align-items: center;
-		gap: 8px;
+	.vdash-cctv-main-box {
+		width: 100%;
+		display: grid;
+		grid-template-rows: minmax(0, 1fr) auto;
+		background: #111827;
 	}
 
-	.vdash-camera-dot {
-		width: 12px;
-		height: 12px;
-		border-radius: 999px;
-		background: #22c55e;
-		box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.14);
-		flex: 0 0 auto;
+	.vdash-cctv-thumb-box {
+		border-radius: 10px;
 	}
 
-	.vdash-skeleton-line.status {
-		width: 44px;
-		height: 10px;
-		background: rgba(219, 234, 254, 0.42);
+	.vdash-cctv-frame {
+		position: absolute;
+		inset: 0;
+		display: block;
+		background:
+			linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+			linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+			linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0)),
+			#334155;
+		background-size: 22px 22px, 22px 22px, auto, auto;
+		opacity: 1;
+	}
+
+	.vdash-cctv-main-box .vdash-cctv-frame {
+		position: relative;
+		inset: auto;
+		grid-row: 1;
+		aspect-ratio: 4 / 3;
+	}
+
+	.vdash-cctv-main-meta,
+	.vdash-cctv-thumb-meta {
+		position: relative;
+		z-index: 2;
+		background: #111827;
+	}
+
+	.vdash-cctv-main-meta {
+		grid-row: 2;
+		display: grid;
+		gap: 5px;
+		padding: 7px 10px 8px;
+	}
+
+	.vdash-cctv-thumb-meta {
+		align-self: end;
+		margin-top: auto;
+		padding: 7px 8px;
+		border-radius: 9px;
+		background: rgba(15, 23, 42, 0.78);
 	}
 
 	.vdash-cctv-content {
@@ -4783,22 +4843,28 @@
 	}
 
 	.vdash-skeleton-line.cctv-title {
-		width: 82px;
-		height: 14px;
+		width: 96px;
+		height: 12px;
 		background: rgba(241, 245, 249, 0.55);
 	}
 
 	.vdash-skeleton-line.cctv-subtitle {
-		width: 110px;
-		height: 10px;
+		width: 138px;
+		height: 9px;
 		background: rgba(219, 227, 236, 0.45);
+	}
+
+	.vdash-skeleton-line.cctv-thumb-title {
+		width: 76%;
+		height: 10px;
+		background: rgba(241, 245, 249, 0.55);
 	}
 
 	.vdash-map-box {
 		position: relative;
 		flex: 1;
 		width: 100%;
-		min-height: 320px;
+		min-height: 372px;
 		background: #d9e1eb;
 		overflow: hidden;
 	}
@@ -4998,6 +5064,10 @@
 		gap: 14px;
 	}
 
+	.vdash-environment-summary.combined {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
 	.vdash-environment-grid {
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -5012,12 +5082,19 @@
 		border-radius: 10px;
 		background: var(--vdash-panel);
 		border: 1px solid var(--vdash-border);
+		display: grid;
+		gap: 8px;
 	}
 
 	.vdash-skeleton-line.env-value {
 		width: 86px;
 		height: 17px;
 		margin-top: 9px;
+	}
+
+	.vdash-skeleton-line.env-value.secondary {
+		width: 74px;
+		margin-top: 2px;
 	}
 
 	.vdash-skeleton-line.env-note {

@@ -29,7 +29,8 @@
 		'voyage-plan': 'Voyage Plan',
 		trace: 'Trace',
 		'data-log': 'Data Log',
-		'fuel-management': 'Fuel Management'
+		'fuel-management': 'Fuel Management',
+		'single-line-diagram': 'Single Line Diagram'
 	};
 
 	let isLoginPage = $derived(page.url.pathname === '/');
