@@ -8,7 +8,6 @@
 	import '@xyflow/svelte/dist/style.css';
 	import { apiRequest } from '$lib/api/authApi.js';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
-	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import SingleLineNode from '$lib/components/single-line/SingleLineNode.svelte';
 	import SingleLineSectionNode from '$lib/components/single-line/SingleLineSectionNode.svelte';
 
@@ -563,17 +562,60 @@
 				Live vessel system topology for MCP, Router, GPS, EIP, engine signals, fuel source, and
 				auxiliary load monitoring.
 			</p>
-	</div>
-	<div class="hero-status {overallOnline ? 'online' : 'offline'}">
-		<span class="overall-label"><i></i> Overall status</span>
-		<strong>{overallOnline ? 'Online' : 'Offline'}</strong>
-		<small>{mcp?.uptime ? `MCP uptime: ${mcp.uptime}` : 'Realtime component state'}</small>
-	</div>
+		</div>
+		<div class="hero-status {overallOnline ? 'online' : 'offline'}">
+			<span class="overall-label"><i></i> Overall status</span>
+			<strong>{overallOnline ? 'Online' : 'Offline'}</strong>
+			<small>{mcp?.uptime ? `MCP uptime: ${mcp.uptime}` : 'Realtime component state'}</small>
+		</div>
 	</div>
 
 	{#if loading}
-		<div class="loading-card">
-			<LoadingSkeleton label="Loading single line diagram" variant="card" rows={6} />
+		<div class="diagram-shell sld-skeleton-shell" aria-label="Loading single line diagram">
+			<div class="sld-skeleton-canvas">
+				<div class="sld-skeleton-section wheelhouse">
+					<span></span>
+				</div>
+				<div class="sld-skeleton-section mast">
+					<span></span>
+				</div>
+				<div class="sld-skeleton-section engine-room">
+					<span></span>
+				</div>
+
+				<div class="sld-skeleton-group vessel-system top"></div>
+				<div class="sld-skeleton-group engine-system"></div>
+				<div class="sld-skeleton-group output-system"></div>
+
+				<div class="sld-skeleton-node small gps"></div>
+				<div class="sld-skeleton-node small power"></div>
+				<div class="sld-skeleton-node small wind"></div>
+				<div class="sld-skeleton-node small speed"></div>
+				<div class="sld-skeleton-node panel mcp"></div>
+				<div class="sld-skeleton-node device router"></div>
+				<div class="sld-skeleton-node device mast-gps"></div>
+				<div class="sld-skeleton-node panel eip"></div>
+				<div class="sld-skeleton-node small engine-one"></div>
+				<div class="sld-skeleton-node small engine-two"></div>
+				<div class="sld-skeleton-node small engine-three"></div>
+				<div class="sld-skeleton-node small engine-four"></div>
+				<div class="sld-skeleton-node device ae-one"></div>
+				<div class="sld-skeleton-node device ae-two"></div>
+				<div class="sld-skeleton-node device fuel-one"></div>
+				<div class="sld-skeleton-node device fuel-two"></div>
+
+				<div class="sld-skeleton-wire wire-gps"></div>
+				<div class="sld-skeleton-wire wire-power"></div>
+				<div class="sld-skeleton-wire wire-wind"></div>
+				<div class="sld-skeleton-wire wire-speed"></div>
+				<div class="sld-skeleton-wire wire-router"></div>
+				<div class="sld-skeleton-wire wire-mast"></div>
+				<div class="sld-skeleton-wire wire-down-one"></div>
+				<div class="sld-skeleton-wire wire-down-two"></div>
+				<div class="sld-skeleton-wire wire-eip-out-one"></div>
+				<div class="sld-skeleton-wire wire-eip-out-two"></div>
+				<div class="sld-skeleton-label">Loading single line diagram...</div>
+			</div>
 		</div>
 	{:else if errorMessage}
 		<section class="empty-card">
@@ -628,7 +670,6 @@
 
 	.page-hero,
 	.diagram-shell,
-	.loading-card,
 	.empty-card {
 		border-radius: 12px;
 		background: var(--color-surface);
@@ -735,7 +776,6 @@
 		color: var(--text-primary);
 	}
 
-	.loading-card,
 	.empty-card {
 		padding: 22px;
 	}
@@ -783,6 +823,307 @@
 		z-index: 10;
 		border-radius: 12px;
 		box-shadow: 0 14px 30px rgba(0, 0, 0, 0.34);
+	}
+
+	.sld-skeleton-shell {
+		overflow: hidden;
+	}
+
+	.sld-skeleton-canvas {
+		position: relative;
+		width: 100%;
+		height: min(82vh, 980px);
+		min-height: 760px;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		background:
+			radial-gradient(circle at 18% 12%, rgba(37, 99, 235, 0.16), transparent 30%),
+			linear-gradient(180deg, #0f172a 0%, #0b1220 100%);
+		box-shadow: 0 22px 60px rgba(0, 0, 0, 0.35);
+		overflow: hidden;
+	}
+
+	.sld-skeleton-section,
+	.sld-skeleton-group,
+	.sld-skeleton-node,
+	.sld-skeleton-wire,
+	.sld-skeleton-label {
+		position: absolute;
+	}
+
+	.sld-skeleton-section {
+		border: 2px dashed rgba(147, 197, 253, 0.3);
+		background: rgba(11, 18, 32, 0.16);
+	}
+
+	.sld-skeleton-section span {
+		position: absolute;
+		top: 16px;
+		left: 24px;
+		width: 150px;
+		height: 22px;
+		border-radius: 8px;
+		background: rgba(226, 232, 240, 0.18);
+		overflow: hidden;
+	}
+
+	.sld-skeleton-section.wheelhouse {
+		left: 2%;
+		top: 4%;
+		width: 58%;
+		height: 34%;
+	}
+
+	.sld-skeleton-section.mast {
+		right: 3%;
+		top: 4%;
+		width: 30%;
+		height: 34%;
+	}
+
+	.sld-skeleton-section.engine-room {
+		left: 2%;
+		bottom: 4%;
+		width: 62%;
+		height: 51%;
+	}
+
+	.sld-skeleton-group {
+		border: 1px dashed rgba(147, 197, 253, 0.24);
+		background: rgba(15, 23, 42, 0.28);
+	}
+
+	.sld-skeleton-group.top {
+		left: 6%;
+		top: 10%;
+		width: 13%;
+		height: 24%;
+	}
+
+	.sld-skeleton-group.engine-system {
+		left: 6%;
+		top: 48%;
+		width: 15%;
+		height: 40%;
+	}
+
+	.sld-skeleton-group.output-system {
+		left: 48%;
+		top: 48%;
+		width: 17%;
+		height: 40%;
+	}
+
+	.sld-skeleton-node {
+		border: 1px solid rgba(186, 230, 253, 0.44);
+		border-radius: 12px;
+		background: linear-gradient(180deg, rgba(226, 232, 240, 0.14), rgba(148, 163, 184, 0.08));
+		box-shadow:
+			0 16px 32px rgba(0, 0, 0, 0.2),
+			inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+		overflow: hidden;
+	}
+
+	.sld-skeleton-node::before,
+	.sld-skeleton-section span::before,
+	.sld-skeleton-wire::before,
+	.sld-skeleton-label::before {
+		content: '';
+		position: absolute;
+		inset: 0;
+		transform: translateX(-100%);
+		background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
+		animation: sld-shimmer 1.45s ease-in-out infinite;
+	}
+
+	.sld-skeleton-node.small {
+		width: 8.8%;
+		height: 9%;
+	}
+
+	.sld-skeleton-node.panel {
+		width: 11%;
+		height: 20%;
+	}
+
+	.sld-skeleton-node.device {
+		width: 9.5%;
+		height: 10%;
+	}
+
+	.sld-skeleton-node.gps {
+		left: 8%;
+		top: 13%;
+	}
+
+	.sld-skeleton-node.power {
+		left: 8%;
+		top: 23%;
+	}
+
+	.sld-skeleton-node.wind {
+		left: 8%;
+		top: 33%;
+	}
+
+	.sld-skeleton-node.speed {
+		left: 8%;
+		top: 43%;
+	}
+
+	.sld-skeleton-node.mcp {
+		left: 25%;
+		top: 16%;
+	}
+
+	.sld-skeleton-node.router {
+		left: 46%;
+		top: 23%;
+	}
+
+	.sld-skeleton-node.mast-gps {
+		right: 12%;
+		top: 15%;
+	}
+
+	.sld-skeleton-node.eip {
+		left: 27%;
+		top: 56%;
+	}
+
+	.sld-skeleton-node.engine-one {
+		left: 8%;
+		top: 50%;
+	}
+
+	.sld-skeleton-node.engine-two {
+		left: 8%;
+		top: 61%;
+	}
+
+	.sld-skeleton-node.engine-three {
+		left: 8%;
+		top: 72%;
+	}
+
+	.sld-skeleton-node.engine-four {
+		left: 8%;
+		top: 83%;
+	}
+
+	.sld-skeleton-node.ae-one {
+		left: 53%;
+		top: 52%;
+	}
+
+	.sld-skeleton-node.ae-two {
+		left: 53%;
+		top: 65%;
+	}
+
+	.sld-skeleton-node.fuel-one {
+		left: 53%;
+		top: 78%;
+	}
+
+	.sld-skeleton-node.fuel-two {
+		left: 53%;
+		top: 91%;
+	}
+
+	.sld-skeleton-wire {
+		height: 4px;
+		border-radius: 999px;
+		background: rgba(16, 185, 129, 0.42);
+		overflow: hidden;
+		box-shadow: 0 0 16px rgba(16, 185, 129, 0.12);
+	}
+
+	.sld-skeleton-wire.wire-router {
+		background: rgba(14, 165, 233, 0.44);
+	}
+
+	.sld-skeleton-wire.wire-gps {
+		left: 17%;
+		top: 18%;
+		width: 9%;
+	}
+
+	.sld-skeleton-wire.wire-power {
+		left: 17%;
+		top: 28%;
+		width: 9%;
+		background: rgba(245, 158, 11, 0.42);
+	}
+
+	.sld-skeleton-wire.wire-wind {
+		left: 17%;
+		top: 38%;
+		width: 9%;
+	}
+
+	.sld-skeleton-wire.wire-speed {
+		left: 17%;
+		top: 48%;
+		width: 9%;
+	}
+
+	.sld-skeleton-wire.wire-router {
+		left: 36%;
+		top: 28%;
+		width: 11%;
+	}
+
+	.sld-skeleton-wire.wire-mast {
+		left: 36%;
+		top: 18%;
+		width: 47%;
+	}
+
+	.sld-skeleton-wire.wire-down-one,
+	.sld-skeleton-wire.wire-down-two {
+		width: 4px;
+		height: 26%;
+		top: 36%;
+		left: 31%;
+	}
+
+	.sld-skeleton-wire.wire-down-two {
+		left: 33%;
+		background: rgba(14, 165, 233, 0.44);
+	}
+
+	.sld-skeleton-wire.wire-eip-out-one {
+		left: 37%;
+		top: 62%;
+		width: 17%;
+	}
+
+	.sld-skeleton-wire.wire-eip-out-two {
+		left: 37%;
+		top: 75%;
+		width: 17%;
+	}
+
+	.sld-skeleton-label {
+		right: 18px;
+		top: 18px;
+		width: 210px;
+		height: 40px;
+		display: grid;
+		place-items: center;
+		border: 1px solid rgba(147, 197, 253, 0.18);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.78);
+		color: #bfdbfe;
+		font-size: 12px;
+		font-weight: 850;
+		overflow: hidden;
+	}
+
+	@keyframes sld-shimmer {
+		100% {
+			transform: translateX(100%);
+		}
 	}
 
 	:global(.single-line-page .svelte-flow) {
