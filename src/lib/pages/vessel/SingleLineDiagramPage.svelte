@@ -2,12 +2,12 @@
 	import { onMount, tick } from 'svelte';
 	import {
 		SvelteFlow,
-		Controls,
 		ConnectionLineType
 	} from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 	import { apiRequest } from '$lib/api/authApi.js';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
+	import SingleLineFlowControls from '$lib/components/single-line/SingleLineFlowControls.svelte';
 	import SingleLineNode from '$lib/components/single-line/SingleLineNode.svelte';
 	import SingleLineSectionNode from '$lib/components/single-line/SingleLineSectionNode.svelte';
 
@@ -19,6 +19,8 @@
 	let lastLoadKey = $state('');
 	let flowNodes = $state([]);
 	let flowEdges = $state([]);
+	let diagramFullscreen = $state(false);
+	let diagramShellElement;
 
 	const nodeTypes = {
 		sldNode: SingleLineNode,
@@ -539,6 +541,51 @@
 		}
 	}
 
+	async function openDiagramFullscreen() {
+		diagramFullscreen = true;
+		await tick();
+		try {
+			if (
+				typeof document !== 'undefined' &&
+				diagramShellElement?.requestFullscreen &&
+				document.fullscreenElement !== diagramShellElement
+			) {
+				await diagramShellElement.requestFullscreen();
+			}
+		} catch {
+			// Keep the in-app fullscreen overlay when the browser fullscreen request is unavailable.
+		}
+		if (typeof window !== 'undefined') {
+			window.dispatchEvent(new Event('resize'));
+		}
+	}
+
+	async function closeDiagramFullscreen() {
+		diagramFullscreen = false;
+		try {
+			if (
+				typeof document !== 'undefined' &&
+				document.fullscreenElement === diagramShellElement &&
+				document.exitFullscreen
+			) {
+				await document.exitFullscreen();
+			}
+		} catch {
+			// The overlay state is already closed; browser fullscreen cleanup is best-effort.
+		}
+		if (typeof window !== 'undefined') {
+			window.dispatchEvent(new Event('resize'));
+		}
+	}
+
+	function toggleDiagramFullscreen() {
+		if (diagramFullscreen) {
+			closeDiagramFullscreen();
+		} else {
+			openDiagramFullscreen();
+		}
+	}
+
 	$effect(() => {
 		if (!active) return;
 
@@ -550,6 +597,26 @@
 
 	onMount(() => {
 		if (active) loadDiagram();
+
+		function handleEscape(event) {
+			if (event.key === 'Escape') {
+				diagramFullscreen = false;
+			}
+		}
+
+		function handleFullscreenChange() {
+			if (document.fullscreenElement !== diagramShellElement) {
+				diagramFullscreen = false;
+			}
+		}
+
+		window.addEventListener('keydown', handleEscape);
+		document.addEventListener('fullscreenchange', handleFullscreenChange);
+
+		return () => {
+			window.removeEventListener('keydown', handleEscape);
+			document.removeEventListener('fullscreenchange', handleFullscreenChange);
+		};
 	});
 </script>
 
@@ -625,7 +692,11 @@
 			<button type="button" onclick={() => loadDiagram(true)}>Retry</button>
 		</section>
 	{:else}
-		<div class="diagram-shell">
+		<div
+			class="diagram-shell"
+			class:diagram-fullscreen={diagramFullscreen}
+			bind:this={diagramShellElement}
+		>
 			<div class="flow-canvas" aria-label="Single line diagram flow">
 				<button
 					type="button"
@@ -652,7 +723,10 @@
 					connectionLineType={ConnectionLineType.SmoothStep}
 					proOptions={{ hideAttribution: true }}
 				>
-					<Controls />
+					<SingleLineFlowControls
+						fullscreen={diagramFullscreen}
+						onToggleFullscreen={toggleDiagramFullscreen}
+					/>
 				</SvelteFlow>
 			</div>
 		</div>
@@ -661,9 +735,13 @@
 
 <style>
 	.single-line-page {
-		min-height: 100%;
+		height: 100%;
+		min-height: 0;
+		box-sizing: border-box;
+		display: flex;
+		flex-direction: column;
 		padding: 18px;
-		overflow: auto;
+		overflow: hidden;
 		background: #0a0e1a;
 		color: #f4f7fb;
 	}
@@ -801,14 +879,33 @@
 	}
 
 	.diagram-shell {
+		flex: 1 1 auto;
+		min-height: 0;
 		overflow: hidden;
+	}
+
+	.diagram-shell.diagram-fullscreen {
+		position: fixed;
+		inset: 0;
+		z-index: 50000;
+		box-sizing: border-box;
+		display: flex;
+		padding: 14px;
+		border-radius: 0;
+		background: #0a0e1a;
+	}
+
+	.diagram-shell.diagram-fullscreen .flow-canvas {
+		flex: 1 1 auto;
+		height: 100%;
+		border-radius: 16px;
 	}
 
 	.flow-canvas {
 		position: relative;
 		width: 100%;
-		height: min(82vh, 980px);
-		min-height: 760px;
+		height: 100%;
+		min-height: 0;
 		border: 1px solid rgba(148, 163, 184, 0.18);
 		background:
 			radial-gradient(circle at 18% 12%, rgba(37, 99, 235, 0.16), transparent 30%),
@@ -826,14 +923,16 @@
 	}
 
 	.sld-skeleton-shell {
+		flex: 1 1 auto;
+		min-height: 0;
 		overflow: hidden;
 	}
 
 	.sld-skeleton-canvas {
 		position: relative;
 		width: 100%;
-		height: min(82vh, 980px);
-		min-height: 760px;
+		height: 100%;
+		min-height: 0;
 		border: 1px solid rgba(148, 163, 184, 0.18);
 		background:
 			radial-gradient(circle at 18% 12%, rgba(37, 99, 235, 0.16), transparent 30%),
@@ -1176,6 +1275,148 @@
 		color: #f8fafc;
 	}
 
+	:global(.single-line-page .sld-custom-flow-controls) {
+		border: 1px solid rgba(148, 163, 184, 0.2);
+		background: rgba(15, 23, 42, 0.9);
+		backdrop-filter: blur(12px);
+	}
+
+	:global(.single-line-page .sld-custom-flow-controls .svelte-flow__controls-button) {
+		width: 34px;
+		height: 34px;
+		display: grid;
+		place-items: center;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+	}
+
+	:global(.single-line-page .sld-custom-flow-controls .svelte-flow__controls-button:last-child) {
+		border-bottom: 0;
+	}
+
+	:global(.single-line-page .sld-custom-flow-controls .svelte-flow__controls-button:hover) {
+		background: rgba(37, 99, 235, 0.34);
+		color: #ffffff;
+	}
+
+	:global(.single-line-page .sld-control-icon) {
+		position: relative;
+		width: 18px;
+		height: 18px;
+		display: inline-block;
+		color: currentColor;
+	}
+
+	:global(.single-line-page .sld-control-icon.plus::before),
+	:global(.single-line-page .sld-control-icon.plus::after),
+	:global(.single-line-page .sld-control-icon.minus::before) {
+		content: '';
+		position: absolute;
+		left: 3px;
+		right: 3px;
+		top: 50%;
+		height: 2px;
+		border-radius: 999px;
+		background: currentColor;
+		transform: translateY(-50%);
+	}
+
+	:global(.single-line-page .sld-control-icon.plus::after) {
+		left: 50%;
+		right: auto;
+		top: 3px;
+		bottom: 3px;
+		width: 2px;
+		height: auto;
+		transform: translateX(-50%);
+	}
+
+	:global(.single-line-page .sld-control-icon.fullscreen::before),
+	:global(.single-line-page .sld-control-icon.fullscreen::after) {
+		content: '';
+		position: absolute;
+		inset: 2px;
+		border: 2px solid currentColor;
+		border-radius: 3px;
+		clip-path: polygon(
+			0 0,
+			42% 0,
+			42% 18%,
+			18% 18%,
+			18% 42%,
+			0 42%,
+			0 0,
+			58% 0,
+			100% 0,
+			100% 42%,
+			82% 42%,
+			82% 18%,
+			58% 18%,
+			58% 0,
+			100% 58%,
+			100% 100%,
+			58% 100%,
+			58% 82%,
+			82% 82%,
+			82% 58%,
+			100% 58%,
+			42% 100%,
+			0 100%,
+			0 58%,
+			18% 58%,
+			18% 82%,
+			42% 82%,
+			42% 100%
+		);
+	}
+
+	:global(.single-line-page .sld-control-icon.fullscreen.active::before) {
+		inset: 3px;
+		clip-path: polygon(
+			18% 0,
+			42% 0,
+			42% 18%,
+			58% 18%,
+			58% 0,
+			82% 0,
+			82% 42%,
+			100% 42%,
+			100% 58%,
+			82% 58%,
+			82% 100%,
+			58% 100%,
+			58% 82%,
+			42% 82%,
+			42% 100%,
+			18% 100%,
+			18% 58%,
+			0 58%,
+			0 42%,
+			18% 42%
+		);
+	}
+
+	:global(.single-line-page .sld-control-icon.fit::before),
+	:global(.single-line-page .sld-control-icon.fit::after) {
+		content: '';
+		position: absolute;
+		border: 2px solid currentColor;
+		border-radius: 3px;
+	}
+
+	:global(.single-line-page .sld-control-icon.fit::before) {
+		inset: 3px;
+		opacity: 0.92;
+	}
+
+	:global(.single-line-page .sld-control-icon.fit::after) {
+		left: 6px;
+		right: 6px;
+		top: 6px;
+		bottom: 6px;
+		border-radius: 999px;
+		background: currentColor;
+	}
+
 	@media (max-width: 900px) {
 		.single-line-page {
 			padding: 12px;
@@ -1190,13 +1431,9 @@
 			text-align: left;
 		}
 
-		.diagram-shell {
-			padding: 10px;
-		}
-
 		.flow-canvas {
-			height: 76vh;
-			min-height: 560px;
+			height: 100%;
+			min-height: 0;
 		}
 	}
 </style>
