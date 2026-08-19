@@ -919,6 +919,101 @@ body .app-content :is(.status-box.loading-box, .selected-pill, .option-chip.sele
   color: var(--text-accent) !important;
 }
 
+/* Vessel pages use a sharper, consistent component language. Keep the
+   surrounding marine UI dark and structured, but remove rounded corners from
+   cards, panels, controls, tables, and form fields inside VesselPage routes. */
+body .app-content :is(
+  .vessel-page,
+  .dashboard-content,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .data-log-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page,
+  .single-line-page
+) :is(
+  [class$="-card"],
+  [class*="-card "],
+  [class$="-panel"],
+  [class*="-panel "],
+  [class$="-section"],
+  [class*="-section "],
+  [class$="-box"],
+  [class*="-box "],
+  [class$="-item"],
+  [class*="-item "],
+  [class$="-row"],
+  [class*="-row "],
+  [class$="-wrap"],
+  [class*="-wrap "],
+  [class$="-wrapper"],
+  [class*="-wrapper "],
+  [class$="-table"],
+  [class*="-table "],
+  [class$="-control"],
+  [class*="-control "],
+  [class$="-button"],
+  [class*="-button "],
+  [class$="-btn"],
+  [class*="-btn "],
+  [class$="-pill"],
+  [class*="-pill "],
+  [class$="-chip"],
+  [class*="-chip "],
+  .panel,
+  .table-wrapper,
+  .table-wrap,
+  .route-table-wrap,
+  .range-table-wrap,
+  .data-log-table-wrapper,
+  .monthly-table-wrapper,
+  .event-table-wrapper,
+  .high-rpm-table-wrapper,
+  .low-speed-table-wrapper,
+  .leaflet-popup-content-wrapper,
+  .leaflet-popup-tip,
+  button,
+  input,
+  select,
+  textarea,
+  table,
+  th,
+  td
+) {
+  border-radius: 0 !important;
+}
+
+/* Dots and vessel/map symbols must stay round/correct because they communicate
+   status or heading rather than acting as rectangular UI components. */
+body .app-content :is(
+  .vessel-page,
+  .dashboard-content,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .data-log-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page,
+  .single-line-page
+) :is(
+  .status-dot,
+  .chip-dot,
+  .legend-dot,
+  .online-dot,
+  .offline-dot,
+  .connection-dot,
+  .gps-dot,
+  .point-marker,
+  .marker-dot,
+  .sld-status-dot,
+  .leaflet-marker-icon
+) {
+  border-radius: 999px !important;
+}
+
 body .app-content :is(
   .administrator-page,
   .fleet-page,
@@ -1186,14 +1281,35 @@ body .app-content .vms-map-controls .vms-map-source-control__label {
 body .app-content .vms-map-controls .vms-map-source-control__options {
   position: relative;
   display: inline-grid;
-  grid-template-columns: repeat(2, minmax(58px, 1fr));
+  grid-template-columns: repeat(var(--map-source-count, 2), minmax(58px, 1fr));
   gap: 2px;
   padding: 2px;
   border-radius: 10px;
   background: rgba(2, 6, 23, 0.28);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+body .app-content .vms-map-controls .vms-map-source-control__thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  z-index: 0;
+  width: calc((100% - 4px - (var(--map-source-gap-count, 1) * 2px)) / var(--map-source-count, 2));
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.94), rgba(14, 165, 233, 0.84));
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.28);
+  transform: translateX(calc(var(--map-source-index, 0) * (100% + 2px)));
+  transition:
+    transform 0.24s cubic-bezier(0.2, 0.9, 0.2, 1),
+    width 0.2s ease;
+  pointer-events: none;
 }
 
 body .app-content .vms-map-controls .vms-map-source-control__button {
+  position: relative;
+  z-index: 1;
   height: 24px;
   min-width: 58px;
   padding: 0 8px;
@@ -1208,20 +1324,15 @@ body .app-content .vms-map-controls .vms-map-source-control__button {
   cursor: pointer;
   transition:
     color 0.16s ease,
-    background 0.16s ease,
-    box-shadow 0.16s ease,
     transform 0.16s ease;
 }
 
 body .app-content .vms-map-controls .vms-map-source-control__button:hover {
   color: #ffffff;
-  background: rgba(37, 99, 235, 0.2);
 }
 
 body .app-content .vms-map-controls .vms-map-source-control__button.active {
   color: #ffffff;
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.92), rgba(14, 165, 233, 0.82));
-  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.28);
 }
 
 body .app-content .vms-map-controls .vms-map-source-control__button:active {

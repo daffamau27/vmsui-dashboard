@@ -55,10 +55,18 @@ function createMapSourceControl(leaflet, options = {}) {
 			label.textContent = 'Map';
 
 			const group = leaflet.DomUtil.create('div', 'vms-map-source-control__options', container);
+			const sources = Object.values(MAP_SOURCES);
 			const currentSourceId = getMapSourceId();
+			const currentSourceIndex = Math.max(0, sources.findIndex((source) => source.id === currentSourceId));
+			group.style.setProperty('--map-source-count', String(sources.length));
+			group.style.setProperty('--map-source-gap-count', String(Math.max(0, sources.length - 1)));
+			group.style.setProperty('--map-source-index', String(currentSourceIndex));
+			leaflet.DomUtil.create('span', 'vms-map-source-control__thumb', group);
+
+			this._group = group;
 			this._buttons = {};
 
-			Object.values(MAP_SOURCES).forEach((source) => {
+			sources.forEach((source, index) => {
 				const button = leaflet.DomUtil.create(
 					'button',
 					`vms-map-source-control__button${source.id === currentSourceId ? ' active' : ''}`,
@@ -76,6 +84,7 @@ function createMapSourceControl(leaflet, options = {}) {
 				});
 
 				this._buttons[source.id] = button;
+				button.dataset.sourceIndex = String(index);
 			});
 
 			leaflet.DomEvent.disableClickPropagation(container);
@@ -89,6 +98,9 @@ function createMapSourceControl(leaflet, options = {}) {
 				const active = id === sourceId;
 				button.classList.toggle('active', active);
 				button.setAttribute('aria-pressed', active ? 'true' : 'false');
+				if (active) {
+					this._group?.style.setProperty('--map-source-index', button.dataset.sourceIndex || '0');
+				}
 			});
 		}
 	}))(options);

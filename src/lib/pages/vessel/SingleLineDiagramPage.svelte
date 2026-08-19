@@ -67,9 +67,7 @@
 	let aeLoads = $derived(normalizeComponentList(eip?.ae_load));
 	let fuelSources = $derived(normalizeFuelSources(eip?.fuel_source));
 
-	let overallOnline = $derived(
-		Boolean(mcp?.online || router?.online || mastGps?.online || eip?.online)
-	);
+	let overallOnline = $derived(mcp?.online === true);
 
 	function getCurrentVesselId() {
 		return (
@@ -748,7 +746,6 @@
 	.page-hero,
 	.diagram-shell,
 	.empty-card {
-		border-radius: 12px;
 		background: var(--color-surface);
 		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
 	}

@@ -100,16 +100,16 @@
 	}
 
 	.sld-node.panel {
-		border-radius: 10px;
+		border-radius: 0 !important;
 		min-height: 190px;
 	}
 
 	.sld-node.device {
-		border-radius: 10px;
+		border-radius: 0;
 	}
 
 	.sld-node.sensor {
-		border-radius: 10px;
+		border-radius: 0;
 	}
 
 	.sld-node.online {
