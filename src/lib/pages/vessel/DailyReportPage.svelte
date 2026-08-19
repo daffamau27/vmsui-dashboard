@@ -3660,14 +3660,14 @@
 
 <section class="daily-page">
 	<section class="daily-header-card">
-		<div>
+		<div class="daily-header-copy">
 			<div class="page-kicker">Daily Report</div>
 			<h1>{vesselName}</h1>
 			<p>Daily vessel operation report, runtime, speed, RPM range, and fuel usage.</p>
 		</div>
-	</section>
 
-	<section class="filter-card">
+		<div class="daily-header-filters">
+			<div class="filter-card">
 		<label>
 			<span>Date</span>
 			<input type="date" bind:value={reportDate} onchange={markDateFilterDirty} />
@@ -3710,6 +3710,8 @@
 			<button type="button" class="export-btn pdf" onclick={handleExportPdf} disabled={exportingPdf || shouldShowDateRangeOverlay}>
 				{exportingPdf ? 'Exporting PDF...' : 'Export PDF'}
 			</button>
+		</div>
+			</div>
 		</div>
 	</section>
 
@@ -4691,7 +4693,6 @@
 	}
 
 	.daily-header-card,
-	.filter-card,
 	.summary-card,
 	.table-section,
 	.raw-box,
@@ -4704,10 +4705,21 @@
 
 	.daily-header-card {
 		padding: 16px;
-		display: flex;
+		display: grid;
+		grid-template-columns: minmax(240px, 0.75fr) minmax(520px, 1.25fr);
 		align-items: center;
-		justify-content: space-between;
-		gap: 16px;
+		gap: 18px;
+	}
+
+	.daily-header-copy {
+		min-width: 0;
+		max-width: 560px;
+	}
+
+	.daily-header-filters {
+		min-width: 0;
+		display: grid;
+		justify-items: end;
 	}
 
 	.page-kicker,
@@ -4765,12 +4777,15 @@
 	}
 
 	.filter-card {
-		margin-top: 14px;
-		padding: 12px;
-		display: flex;
+		width: 100%;
+		display: grid;
+		grid-template-columns: minmax(150px, 0.85fr) minmax(190px, 1fr) auto;
 		align-items: end;
 		gap: 10px;
-		flex-wrap: wrap;
+	}
+
+	.filter-card:has(label:nth-of-type(3)) {
+		grid-template-columns: minmax(140px, 0.75fr) minmax(175px, 0.9fr) minmax(150px, 0.8fr) auto;
 	}
 
 	.filter-card label {
@@ -4811,7 +4826,8 @@
 	.filter-card input,
 	.filter-card select {
 		height: 32px;
-		min-width: 150px;
+		width: 100%;
+		min-width: 0;
 		border: 1px solid #cbd5e1;
 		background: var(--color-surface);
 		padding: 0 9px;
@@ -4824,7 +4840,8 @@
 	.filter-actions {
 		display: flex;
 		gap: 8px;
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
+		justify-content: flex-end;
 	}
 
 	.primary-btn,
@@ -6460,6 +6477,24 @@
 	}
 
 	@media (max-width: 1100px) {
+		.daily-header-card {
+			grid-template-columns: 1fr;
+			align-items: start;
+		}
+
+		.daily-header-filters {
+			justify-items: stretch;
+		}
+
+		.filter-card,
+		.filter-card:has(label:nth-of-type(3)) {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.filter-actions {
+			grid-column: 1 / -1;
+		}
+
 		.summary-grid {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
@@ -6479,8 +6514,7 @@
 		}
 
 		.daily-header-card {
-			flex-direction: column;
-			align-items: flex-start;
+			padding: 14px;
 		}
 
 		.header-meta {
@@ -6510,12 +6544,19 @@
 			line-height: 1.1;
 		}
 
+		.filter-card,
+		.filter-card:has(label:nth-of-type(3)) {
+			grid-template-columns: 1fr;
+		}
+
 		.filter-card input,
 		.filter-card select {
 			min-width: 100%;
 		}
 
 		.filter-actions {
+			grid-column: auto;
+			flex-direction: column;
 			width: 100%;
 		}
 

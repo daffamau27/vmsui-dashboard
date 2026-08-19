@@ -10,7 +10,7 @@
     getLatestCctvSnapshots,
     getVesselDashboard
   } from "$lib/api/dashboardApi.js";
-  import { getFleetAssets, getFleetVesselLiveDetail } from "$lib/api/fleetApi.js";
+  import { getFleetAssets } from "$lib/api/fleetApi.js";
   import { apiRequest } from "$lib/api/authApi.js";
   import { addMapTileLayer } from "$lib/mapStyle.js";
   import { addLeafletZoomAndScale } from "$lib/utils/leafletControls.js";
@@ -31,7 +31,6 @@
   let loading = $state(false);
   let error = $state("");
   let dashboardData = $state(null);
-  let liveVesselDetail = $state(null);
   let cctvSnapshots = $state([]);
   let cctvSnapshotsLoading = $state(false);
   let cctvSnapshotsError = $state("");
@@ -453,20 +452,17 @@
 
   let currentVessel = $derived({
     ...($selectedVesselInfo || {}),
-    ...(liveVesselDetail || {}),
+    ...(dashboardData || {}),
 
     // engine configuration remains from selected vessel
     engines: Array.isArray($selectedVesselInfo?.engines)
       ? $selectedVesselInfo.engines
-      : Array.isArray(liveVesselDetail?.engines)
-        ? liveVesselDetail.engines
+      : Array.isArray(dashboardData?.engines)
+        ? dashboardData.engines
         : [],
 
-    // live engine RPM from /fleet/vessels/{id}
-    liveEngines: Array.isArray(liveVesselDetail?.liveEngines)
-      ? liveVesselDetail.liveEngines
-      : Array.isArray(liveVesselDetail?.rawLive?.engines)
-        ? liveVesselDetail.rawLive.engines
+    liveEngines: Array.isArray(dashboardData?.engines)
+      ? dashboardData.engines
         : []
   });
 
@@ -1826,7 +1822,6 @@
 
   function resetDashboardStateForVessel() {
     dashboardData = null;
-    liveVesselDetail = null;
     cctvSnapshots = [];
     cctvSnapshotsError = "";
     selectedDashboardCctvKey = "";
@@ -1846,7 +1841,6 @@
 
     if (!targetVesselId) {
       dashboardData = null;
-      liveVesselDetail = null;
       cctvSnapshots = [];
       error = "No vessel has been selected from Fleet View.";
       return;
@@ -1856,9 +1850,8 @@
     error = "";
 
     try {
-      const [dashboardResult, liveResult] = await Promise.all([
+      const [dashboardResult] = await Promise.all([
         getVesselDashboard(targetVesselId),
-        getFleetVesselLiveDetail(targetVesselId),
         loadDashboardAssets(),
         loadLatestCctvSnapshots(targetVesselId, requestId),
         loadCurrentUser()
@@ -1867,13 +1860,8 @@
       if (!isDashboardRequestCurrent(targetVesselId, requestId)) return;
 
       dashboardData = dashboardResult?.data || dashboardResult || null;
-      liveVesselDetail = liveResult || null;
 
       console.log("[VESSEL_DASHBOARD_DATA]", { vesselId: targetVesselId, data: dashboardData });
-      console.log("[VESSEL_DASHBOARD_LIVE_DETAIL]", {
-        vesselId: targetVesselId,
-        data: liveVesselDetail
-      });
 
       scheduleDashboardMapRefresh({ center: true });
     } catch (err) {
@@ -1882,7 +1870,6 @@
       console.error("[VESSEL_DASHBOARD_ERROR]", err);
       error = err?.message || "Failed to load vessel dashboard.";
       dashboardData = null;
-      liveVesselDetail = null;
       cctvSnapshots = [];
     } finally {
       if (isDashboardRequestCurrent(targetVesselId, requestId)) {
@@ -2027,7 +2014,6 @@
     showWindParticles;
     showCurrentParticles;
     dashboardData;
-    liveVesselDetail;
     vesselInfo.latitude;
     vesselInfo.longitude;
     vesselInfo.heading;

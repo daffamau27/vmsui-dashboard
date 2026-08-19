@@ -1295,16 +1295,16 @@
 
 <section class="data-log-page">
 	<section class="data-log-header-card">
-		<div>
+		<div class="data-log-header-copy">
 			<div class="page-kicker">Data Log</div>
 			<h1>{vesselName}</h1>
 			<p>
 				Granular 1-minute telemetry log with position, speed, runtime, RPM, load, and fuel data.
 			</p>
 		</div>
-	</section>
 
-	<section class="filter-card">
+		<div class="data-log-header-filters">
+			<div class="filter-card">
 		<label>
 			<span>Start</span>
 			<input
@@ -1376,6 +1376,8 @@
 						{preset.label}
 					</button>
 				{/each}
+			</div>
+		</div>
 			</div>
 		</div>
 	</section>
@@ -1691,7 +1693,6 @@
 	}
 
 	.data-log-header-card,
-	.filter-card,
 	.column-card,
 	.table-section,
 	.raw-box {
@@ -1702,10 +1703,21 @@
 
 	.data-log-header-card {
 		padding: 14px 16px;
-		display: flex;
+		display: grid;
+		grid-template-columns: minmax(240px, 0.75fr) minmax(620px, 1.25fr);
 		align-items: center;
-		justify-content: space-between;
-		gap: 16px;
+		gap: 18px;
+	}
+
+	.data-log-header-copy {
+		min-width: 0;
+		max-width: 560px;
+	}
+
+	.data-log-header-filters {
+		min-width: 0;
+		display: grid;
+		justify-items: end;
 	}
 
 	.override-card {
@@ -2054,15 +2066,19 @@
 	}
 
 	.filter-card {
-		margin-top: 12px;
-		padding: 12px;
-		display: flex;
+		width: 100%;
+		display: grid;
+		grid-template-columns: minmax(170px, 1fr) minmax(170px, 1fr) minmax(190px, 1fr) auto;
 		align-items: end;
 		gap: 10px;
-		flex-wrap: wrap;
+	}
+
+	.filter-card:has(label:nth-of-type(4)) {
+		grid-template-columns: repeat(4, minmax(135px, 1fr)) auto;
 	}
 
 	.filter-card label {
+		min-width: 0;
 		display: grid;
 		gap: 5px;
 	}
@@ -2077,7 +2093,8 @@
 	.filter-card input,
 	.filter-card select {
 		height: 32px;
-		min-width: 160px;
+		width: 100%;
+		min-width: 0;
 		border: 1px solid #cbd5e1;
 		background: var(--color-surface);
 		padding: 0 9px;
@@ -2090,15 +2107,16 @@
 	.filter-actions {
 		display: flex;
 		gap: 8px;
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
 	}
 
 	.time-preset-row {
-		flex: 1 1 100%;
+		grid-column: 1 / -1;
 		display: flex;
 		align-items: center;
+		justify-content: flex-end;
 		gap: 8px;
-		margin-top: -2px;
+		margin-top: 0;
 		min-width: 0;
 	}
 
@@ -2113,6 +2131,7 @@
 	.time-preset-list {
 		display: flex;
 		align-items: center;
+		justify-content: flex-end;
 		gap: 6px;
 		flex-wrap: wrap;
 		min-width: 0;
@@ -2585,6 +2604,34 @@
 	}
 
 	@media (max-width: 1100px) {
+		.data-log-header-card {
+			grid-template-columns: 1fr;
+			align-items: stretch;
+			gap: 14px;
+		}
+
+		.data-log-header-copy {
+			max-width: none;
+		}
+
+		.data-log-header-filters {
+			justify-items: stretch;
+		}
+
+		.filter-card,
+		.filter-card:has(label:nth-of-type(4)) {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.filter-actions {
+			width: 100%;
+		}
+
+		.time-preset-row,
+		.time-preset-list {
+			justify-content: flex-start;
+		}
+
 		.column-grid {
 			grid-template-columns: repeat(2, minmax(160px, 1fr));
 		}
@@ -2596,17 +2643,17 @@
 		}
 
 		.data-log-header-card {
-			flex-direction: column;
-			align-items: flex-start;
+			padding: 14px;
 		}
 
-		.filter-card input,
-		.filter-card select {
-			min-width: 100%;
+		.filter-card,
+		.filter-card:has(label:nth-of-type(4)) {
+			grid-template-columns: 1fr;
 		}
 
 		.filter-actions {
 			width: 100%;
+			flex-direction: column;
 		}
 
 		.time-preset-row {

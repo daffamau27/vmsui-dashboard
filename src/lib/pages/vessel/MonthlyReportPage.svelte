@@ -1153,7 +1153,7 @@
 
 <section class="monthly-page">
 	<section class="monthly-header-card">
-		<div>
+		<div class="monthly-header-copy">
 			<div class="page-kicker">Monthly Report</div>
 			<h1>{vesselName}</h1>
 			<p>
@@ -1161,9 +1161,9 @@
 				speed summary.
 			</p>
 		</div>
-	</section>
 
-	<section class="filter-card">
+		<div class="monthly-header-filters">
+			<div class="filter-card">
 		<label>
 			<span>Month</span>
 			<input
@@ -1234,6 +1234,8 @@
 		</div>
 
 		<p class="filter-hint">{getMonthlyRangeLimitText()}</p>
+			</div>
+		</div>
 	</section>
 
 	<div class="load-required-area" class:is-locked={shouldShowDateRangeOverlay}>
@@ -1469,7 +1471,6 @@
 	}
 
 	.monthly-header-card,
-	.filter-card,
 	.summary-card,
 	.table-section,
 	.raw-box {
@@ -1480,10 +1481,21 @@
 
 	.monthly-header-card {
 		padding: 14px 16px;
-		display: flex;
+		display: grid;
+		grid-template-columns: minmax(240px, 0.65fr) minmax(650px, 1.35fr);
 		align-items: center;
-		justify-content: space-between;
-		gap: 16px;
+		gap: 18px;
+	}
+
+	.monthly-header-copy {
+		min-width: 0;
+		max-width: 560px;
+	}
+
+	.monthly-header-filters {
+		min-width: 0;
+		display: grid;
+		justify-items: end;
 	}
 
 	.page-kicker,
@@ -1541,12 +1553,26 @@
 	}
 
 	.filter-card {
-		margin-top: 12px;
-		padding: 12px;
-		display: flex;
+		width: 100%;
+		display: grid;
+		grid-template-columns:
+			minmax(140px, 0.9fr)
+			minmax(95px, 0.55fr)
+			minmax(95px, 0.55fr)
+			minmax(175px, 1fr)
+			auto;
 		align-items: end;
 		gap: 10px;
-		flex-wrap: wrap;
+	}
+
+	.filter-card:has(label:nth-of-type(5)) {
+		grid-template-columns:
+			minmax(130px, 0.8fr)
+			minmax(82px, 0.5fr)
+			minmax(82px, 0.5fr)
+			minmax(150px, 0.85fr)
+			minmax(130px, 0.7fr)
+			auto;
 	}
 
 	.filter-card label {
@@ -1587,7 +1613,8 @@
 	.filter-card input,
 	.filter-card select {
 		height: 32px;
-		min-width: 130px;
+		width: 100%;
+		min-width: 0;
 		border: 1px solid #cbd5e1;
 		background: var(--color-surface);
 		padding: 0 9px;
@@ -1600,11 +1627,12 @@
 	.filter-actions {
 		display: flex;
 		gap: 8px;
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
+		justify-content: flex-end;
 	}
 
 	.filter-hint {
-		flex: 1 1 100%;
+		grid-column: 1 / -1;
 		margin: -2px 0 0;
 		color: var(--text-secondary);
 		font-size: 11px;
@@ -1842,6 +1870,25 @@
 	}
 
 	@media (max-width: 1100px) {
+		.monthly-header-card {
+			grid-template-columns: 1fr;
+			align-items: start;
+		}
+
+		.monthly-header-filters {
+			justify-items: stretch;
+		}
+
+		.filter-card,
+		.filter-card:has(label:nth-of-type(5)) {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.filter-actions,
+		.filter-hint {
+			grid-column: 1 / -1;
+		}
+
 		.summary-grid {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
@@ -1853,8 +1900,7 @@
 		}
 
 		.monthly-header-card {
-			flex-direction: column;
-			align-items: flex-start;
+			padding: 14px;
 		}
 
 		.header-meta {
@@ -1866,13 +1912,24 @@
 			grid-template-columns: 1fr;
 		}
 
+		.filter-card,
+		.filter-card:has(label:nth-of-type(5)) {
+			grid-template-columns: 1fr;
+		}
+
 		.filter-card input,
 		.filter-card select {
 			min-width: 100%;
 		}
 
 		.filter-actions {
+			grid-column: auto;
+			flex-direction: column;
 			width: 100%;
+		}
+
+		.filter-hint {
+			grid-column: auto;
 		}
 
 		.primary-btn,

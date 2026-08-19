@@ -1874,30 +1874,32 @@
 
 <section class="trace-root page-content">
 	<section class="trace-viewport">
-		<section class="compact-filter-card">
-			<div class="filter-title">
-				<strong>Trace Playback</strong>
-				<span>{vesselInfo.vesselName}</span>
+		<section class="trace-header-card">
+			<div class="trace-header-copy">
+				<div class="page-kicker">Trace Playback</div>
+				<h1>{vesselInfo.vesselName}</h1>
+				<p>Replay vessel position, route trail, telemetry, engine RPM, and CCTV snapshots by time range.</p>
 			</div>
 
-			<div class="filter-controls">
-				<label>
-					<span>Start</span>
-					<input
-						type="datetime-local"
-						bind:value={startDateTime}
-						oninput={clearActiveTimePreset}
-					/>
-				</label>
+			<div class="trace-header-filters">
+				<div class="filter-controls">
+					<label>
+						<span>Start</span>
+						<input
+							type="datetime-local"
+							bind:value={startDateTime}
+							oninput={clearActiveTimePreset}
+						/>
+					</label>
 
-				<label>
-					<span>End</span>
-					<input
-						type="datetime-local"
-						bind:value={endDateTime}
-						oninput={clearActiveTimePreset}
-					/>
-				</label>
+					<label>
+						<span>End</span>
+						<input
+							type="datetime-local"
+							bind:value={endDateTime}
+							oninput={clearActiveTimePreset}
+						/>
+					</label>
 
 				<label>
 					<span class="field-label-row">
@@ -1924,7 +1926,12 @@
 					</label>
 				{/if}
 
-				<button type="button" onclick={loadTrace} disabled={loading || !startDateTime || !endDateTime}>
+				<button
+					type="button"
+					class="primary-btn"
+					onclick={loadTrace}
+					disabled={loading || !startDateTime || !endDateTime}
+				>
 					{loading ? 'Loading...' : 'Load Trace'}
 				</button>
 			</div>
@@ -1942,6 +1949,7 @@
 						</button>
 					{/each}
 				</div>
+			</div>
 			</div>
 		</section>
 
@@ -2310,61 +2318,91 @@
 		overflow: visible;
 	}
 
-	.compact-filter-card {
-		min-height: 64px;
-		padding: 10px 18px;
+	.trace-header-card,
+	.monitor-card,
+	.playback-card,
+	.info-card,
+	.rpm-panel {
 		background: var(--color-surface);
 		border: 1px solid #d8dde3;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+	}
+
+	.trace-header-card {
+		padding: 16px;
 		display: grid;
-		grid-template-columns: 260px minmax(0, 1fr);
+		grid-template-columns: minmax(240px, 0.75fr) minmax(520px, 1.25fr);
 		align-items: center;
 		gap: 16px;
 	}
 
-	.filter-title {
-		display: grid;
-		align-content: center;
-		gap: 4px;
-		min-height: 42px;
+	.trace-header-copy {
+		min-width: 220px;
+		max-width: 520px;
 	}
 
-	.filter-title strong {
-		display: block;
-		color: var(--text-primary);
-		font-size: 13px;
-		font-weight: 950;
-		line-height: 1.1;
-	}
-
-	.filter-title span {
-		display: block;
-		margin-top: 4px;
-		color: var(--text-secondary);
+	.page-kicker,
+	.section-kicker {
+		display: inline-flex;
+		width: fit-content;
+		align-items: center;
+		justify-content: center;
+		padding: 4px 9px;
+		border-radius: 999px;
+		background: var(--color-accent-muted);
+		color: #1d4ed8;
 		font-size: 10px;
-		font-weight: 800;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
+		font-weight: 900;
+		letter-spacing: 0.07em;
+		text-transform: uppercase;
+	}
+
+	.trace-header-card h1 {
+		margin: 8px 0 0;
+		color: var(--text-primary);
+		font-size: 22px;
+		font-weight: 900;
+		line-height: 1.2;
+	}
+
+	.trace-header-card p {
+		margin: 7px 0 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.trace-header-filters {
+		width: 100%;
+		min-width: 0;
+		display: grid;
+		justify-items: end;
+		gap: 8px;
 	}
 
 	.filter-controls {
-		display: flex;
-		align-items: center;
+		width: 100%;
+		display: grid;
+		grid-template-columns: minmax(170px, 1fr) minmax(170px, 1fr) minmax(190px, 1fr) auto;
+		align-items: end;
 		justify-content: flex-end;
 		gap: 10px;
-		flex-wrap: wrap;
+	}
+
+	.filter-controls:has(label:nth-of-type(4)) {
+		grid-template-columns: repeat(4, minmax(135px, 1fr)) auto;
 	}
 
 	.filter-controls label {
+		min-width: 0;
 		display: grid;
 		gap: 4px;
 	}
 
 	.filter-controls label span {
 		color: var(--text-secondary);
-		font-size: 9px;
-		font-weight: 950;
+		font-size: 10px;
+		font-weight: 900;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 	}
@@ -2394,14 +2432,15 @@
 
 	.filter-controls input,
 	.filter-controls select {
-		height: 28px;
-		min-width: 135px;
+		height: 32px;
+		width: 100%;
+		min-width: 0;
 		border: 1px solid #cbd5e1;
 		background: var(--color-surface);
-		padding: 0 8px;
+		padding: 0 9px;
 		color: var(--text-primary);
-		font-size: 10px;
-		font-weight: 750;
+		font-size: 12px;
+		font-weight: 700;
 		outline: none;
 		box-sizing: border-box;
 	}
@@ -2413,13 +2452,14 @@
 	}
 
 	.filter-controls button {
-		height: 28px;
+		height: 32px;
 		padding: 0 12px;
+		align-self: end;
 		border: none;
 		background: #2563eb;
 		color: #ffffff;
-		font-size: 10px;
-		font-weight: 950;
+		font-size: 12px;
+		font-weight: 900;
 		cursor: pointer;
 	}
 
@@ -2429,12 +2469,12 @@
 	}
 
 	.time-preset-row {
-		grid-column: 2;
+		width: 100%;
 		display: flex;
 		align-items: center;
 		justify-content: flex-end;
 		gap: 8px;
-		margin-top: -8px;
+		margin-top: 0;
 		min-width: 0;
 	}
 
@@ -3496,6 +3536,36 @@
 		}
 	}
 
+	@media (max-width: 1100px) {
+		.trace-header-card {
+			grid-template-columns: 1fr;
+			align-items: stretch;
+			gap: 14px;
+		}
+
+		.trace-header-copy {
+			max-width: none;
+		}
+
+		.trace-header-filters {
+			justify-items: stretch;
+		}
+
+		.filter-controls {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			justify-content: stretch;
+		}
+
+		.filter-controls button {
+			width: 100%;
+		}
+
+		.time-preset-row,
+		.time-preset-list {
+			justify-content: flex-start;
+		}
+	}
+
 	@media (max-width: 760px) {
 		.trace-viewport {
 			padding: 8px;
@@ -3509,20 +3579,32 @@
 			min-height: 360px;
 		}
 
-		.compact-filter-card {
-			grid-template-columns: 1fr;
+		.trace-header-card {
+			padding: 14px;
+			gap: 12px;
+		}
+
+		.trace-header-card h1 {
+			font-size: 20px;
+		}
+
+		.trace-header-copy,
+		.trace-header-filters {
+			width: 100%;
+			min-width: 0;
 		}
 
 		.filter-controls {
-			justify-content: flex-start;
+			width: 100%;
+			grid-template-columns: 1fr;
+			justify-content: stretch;
 		}
 
 		.time-preset-row {
-			grid-column: 1;
 			align-items: flex-start;
 			justify-content: flex-start;
 			flex-direction: column;
-			margin-top: -2px;
+			margin-top: 0;
 		}
 
 		.time-preset-list {

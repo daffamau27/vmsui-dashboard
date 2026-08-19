@@ -1,5 +1,5 @@
 <script>
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
 	import { activeVesselMenu, setActiveVesselMenu } from '$lib/stores/vesselNavigation.svelte.js';
 	import { apiRequest } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
@@ -14,7 +14,7 @@
 	import FuelManagementPage from '$lib/pages/vessel/FuelManagementPage.svelte';
 	import SingleLineDiagramPage from '$lib/pages/vessel/SingleLineDiagramPage.svelte';
 
-	import { getFleetVesselsWithEngines } from '$lib/api/fleetApi.js';
+	import { getMyVesselsApi } from '$lib/api/authApi.js';
 	import {
 		selectedVesselId,
 		selectedVesselInfo,
@@ -29,6 +29,9 @@
 	let menuOpen = $state(false);
 	let vesselDropdownOpen = $state(false);
 	let vesselSearch = $state('');
+	let focusedVesselIndex = $state(-1);
+	let vesselMenuElement = $state(null);
+	let vesselSearchInputElement = $state(null);
 
 	let vessels = $state([]);
 	let vesselLoading = $state(false);
@@ -200,6 +203,77 @@
 		return vessel?.vesselId || vessel?.id || vessel?.vessel_id || vessel?.dbId || null;
 	}
 
+	function normalizeVesselForSelector(item = {}) {
+		const source = item?.vessel || item?.raw?.vessel || item;
+		const vesselId =
+			source?.id ??
+			source?.vesselId ??
+			source?.vessel_id ??
+			item?.id ??
+			item?.vesselId ??
+			item?.vessel_id ??
+			item?.dbId ??
+			null;
+
+		const vesselName =
+			source?.vesselName ||
+			source?.vessel_name ||
+			source?.name ||
+			source?.deviceName ||
+			item?.vesselName ||
+			item?.vessel_name ||
+			item?.name ||
+			item?.deviceName ||
+			(vesselId ? `Vessel ${vesselId}` : 'Vessel');
+
+		const companyName =
+			source?.companyName ||
+			source?.company_name ||
+			source?.company?.name ||
+			source?.company?.companyName ||
+			item?.companyName ||
+			item?.company_name ||
+			item?.company?.name ||
+			item?.company?.companyName ||
+			'-';
+
+		return {
+			...item,
+			...source,
+			id: vesselId,
+			vesselId,
+			dbId: vesselId,
+			name: vesselName,
+			vesselName,
+			deviceName: source?.deviceName || item?.deviceName || vesselName,
+			deviceId: source?.deviceId || source?.device_id || item?.deviceId || item?.device_id || '',
+			companyName,
+			timezone: source?.timezone || item?.timezone || item?.timezoneOffset || item?.timezone_offset || '',
+			engines: Array.isArray(source?.engines)
+				? source.engines
+				: Array.isArray(item?.engines)
+					? item.engines
+					: [],
+			raw: item
+		};
+	}
+
+	function extractVesselsFromResponse(response) {
+		const data = response?.data ?? response;
+		const candidates = [
+			data,
+			data?.items,
+			data?.vessels,
+			data?.data,
+			data?.data?.items,
+			data?.data?.vessels
+		];
+
+		const rows = candidates.find((candidate) => Array.isArray(candidate)) || [];
+
+		return rows.map(normalizeVesselForSelector).filter((vessel) => getVesselId(vessel));
+	}
+
 	function getVesselDisplayName(vessel) {
 		return (
 			vessel?.vesselName ||
@@ -249,6 +323,155 @@
 				.some((value) => String(value).toLowerCase().includes(keyword));
 		})
 	);
+
+	function getActiveVesselIndex(list = filteredVessels) {
+		if (!Array.isArray(list) || list.length === 0) return -1;
+
+		const selectedId = $selectedVesselId || getVesselId($selectedVesselInfo);
+		if (!selectedId) return 0;
+
+		const selectedIndex = list.findIndex(
+			(vessel) => Number(getVesselId(vessel)) === Number(selectedId)
+		);
+
+		return selectedIndex >= 0 ? selectedIndex : 0;
+	}
+
+	async function scrollVesselOptionIntoView(index = focusedVesselIndex, block = 'nearest') {
+		if (!vesselDropdownOpen || index < 0) return;
+
+		await tick();
+
+		const option = vesselMenuElement?.querySelector?.(
+			`[data-vessel-option-index="${index}"]`
+		);
+
+		option?.scrollIntoView?.({
+			block,
+			inline: 'nearest',
+			behavior: 'smooth'
+		});
+	}
+
+	async function prepareVesselDropdown({ focusSearch = false, scrollBlock = 'center' } = {}) {
+		await tick();
+
+		focusedVesselIndex = getActiveVesselIndex();
+		await scrollVesselOptionIntoView(focusedVesselIndex, scrollBlock);
+
+		if (focusSearch) {
+			await tick();
+			vesselSearchInputElement?.focus?.();
+		}
+	}
+
+	function openVesselDropdown({ focusSearch = true } = {}) {
+		vesselDropdownOpen = true;
+		void prepareVesselDropdown({ focusSearch });
+	}
+
+	function toggleVesselDropdown() {
+		if (vesselDropdownOpen) {
+			vesselDropdownOpen = false;
+			return;
+		}
+
+		openVesselDropdown();
+	}
+
+	function moveFocusedVessel(nextIndex) {
+		if (!filteredVessels.length) {
+			focusedVesselIndex = -1;
+			return;
+		}
+
+		const maxIndex = filteredVessels.length - 1;
+		focusedVesselIndex = Math.max(0, Math.min(maxIndex, nextIndex));
+		void scrollVesselOptionIntoView(focusedVesselIndex);
+	}
+
+	function handleVesselSelectorKeydown(event) {
+		if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+			event.preventDefault();
+			openVesselDropdown();
+		}
+	}
+
+	function handleVesselDropdownKeydown(event) {
+		if (!vesselDropdownOpen) return;
+
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			vesselDropdownOpen = false;
+			return;
+		}
+
+		if (!filteredVessels.length) return;
+
+		const currentIndex =
+			focusedVesselIndex >= 0 ? focusedVesselIndex : getActiveVesselIndex(filteredVessels);
+
+		if (event.key === 'ArrowDown') {
+			event.preventDefault();
+			moveFocusedVessel(currentIndex + 1);
+			return;
+		}
+
+		if (event.key === 'ArrowUp') {
+			event.preventDefault();
+			moveFocusedVessel(currentIndex - 1);
+			return;
+		}
+
+		if (event.key === 'Home') {
+			event.preventDefault();
+			moveFocusedVessel(0);
+			return;
+		}
+
+		if (event.key === 'End') {
+			event.preventDefault();
+			moveFocusedVessel(filteredVessels.length - 1);
+			return;
+		}
+
+		if (event.key === 'PageDown') {
+			event.preventDefault();
+			moveFocusedVessel(currentIndex + 6);
+			return;
+		}
+
+		if (event.key === 'PageUp') {
+			event.preventDefault();
+			moveFocusedVessel(currentIndex - 6);
+			return;
+		}
+
+		if (event.key === 'Enter') {
+			event.preventDefault();
+			const vessel = filteredVessels[currentIndex];
+			if (vessel) selectVessel(vessel);
+		}
+	}
+
+	function handleVesselSearchKeydown(event) {
+		handleVesselDropdownKeydown(event);
+
+		if (
+			[
+				'ArrowDown',
+				'ArrowUp',
+				'Home',
+				'End',
+				'PageDown',
+				'PageUp',
+				'Enter',
+				'Escape'
+			].includes(event.key)
+		) {
+			event.stopPropagation();
+		}
+	}
 
 	function formatNumber(value) {
 		const number = Number(value);
@@ -607,6 +830,25 @@
 		startLatestStatusPolling(vesselId);
 	});
 
+	$effect(() => {
+		if (!vesselDropdownOpen) {
+			focusedVesselIndex = -1;
+			return;
+		}
+
+		const searchKey = vesselSearch;
+		const vesselCount = filteredVessels.length;
+		const selectedId = $selectedVesselId || getVesselId($selectedVesselInfo);
+
+		searchKey;
+		vesselCount;
+		selectedId;
+
+		const nextFocusedIndex = getActiveVesselIndex(filteredVessels);
+		focusedVesselIndex = nextFocusedIndex;
+		void scrollVesselOptionIntoView(nextFocusedIndex, 'nearest');
+	});
+
 	async function loadCurrentUserPermissions() {
 		permissionLoading = true;
 
@@ -641,7 +883,8 @@
 		try {
 			console.log('[VESSEL_PAGE][LOAD_VESSELS][START]');
 
-			const rows = await getFleetVesselsWithEngines();
+			const response = await getMyVesselsApi();
+			const rows = extractVesselsFromResponse(response);
 
 			console.log('[VESSEL_PAGE][LOAD_VESSELS][RESULT]', rows);
 
@@ -798,7 +1041,8 @@
 			<button
 				type="button"
 				class="vessel-selector"
-				onclick={() => (vesselDropdownOpen = !vesselDropdownOpen)}
+				onclick={toggleVesselDropdown}
+				onkeydown={handleVesselSelectorKeydown}
 			>
 				<span class="vessel-selector-icon" aria-hidden="true">🚢</span>
 				<span class="selector-copy">
@@ -808,7 +1052,14 @@
 			</button>
 
 			{#if vesselDropdownOpen}
-				<div class="vessel-menu">
+				<div
+					class="vessel-menu"
+					bind:this={vesselMenuElement}
+					onkeydown={handleVesselDropdownKeydown}
+					role="listbox"
+					aria-label="Vessel list"
+					tabindex="-1"
+				>
 					{#if vesselLoading}
 						<div class="vessel-state"><LoadingSkeleton label="Loading vessels" variant="list" rows={4} compact /></div>
 					{:else if vesselError}
@@ -822,6 +1073,8 @@
 								placeholder="Search vessel..."
 								aria-label="Search vessel"
 								bind:value={vesselSearch}
+								bind:this={vesselSearchInputElement}
+								onkeydown={handleVesselSearchKeydown}
 							/>
 							{#if vesselSearch}
 								<button
@@ -837,11 +1090,17 @@
 						{#if filteredVessels.length === 0}
 							<div class="vessel-state">No vessel found.</div>
 						{:else}
-							{#each filteredVessels as vessel}
+							{#each filteredVessels as vessel, index}
 							<button
 								type="button"
 								class="vessel-item"
 								class:active-vessel={Number($selectedVesselId) === Number(getVesselId(vessel))}
+								class:keyboard-active={focusedVesselIndex === index &&
+									Number($selectedVesselId) !== Number(getVesselId(vessel))}
+								data-vessel-option-index={index}
+								role="option"
+								aria-selected={focusedVesselIndex === index}
+								onmouseenter={() => (focusedVesselIndex = index)}
 								onclick={() => selectVessel(vessel)}
 							>
 								<span class="vessel-item-icon" aria-hidden="true">🚢</span>
@@ -1885,6 +2144,22 @@
 		border-color: rgba(59, 130, 246, 0.18);
 		background: var(--color-accent-muted);
 		color: var(--text-accent);
+	}
+
+	.vessel-item.keyboard-active {
+		border-color: rgba(96, 165, 250, 0.38);
+		background:
+			linear-gradient(90deg, rgba(59, 130, 246, 0.18), rgba(59, 130, 246, 0.08)),
+			rgba(255, 255, 255, 0.045);
+		color: var(--text-primary);
+		box-shadow:
+			inset 3px 0 0 rgba(96, 165, 250, 0.9),
+			0 8px 18px rgba(15, 23, 42, 0.18);
+	}
+
+	.vessel-item.keyboard-active .vessel-item-icon {
+		background: rgba(59, 130, 246, 0.18);
+		color: #93c5fd;
 	}
 
 	.vessel-item-icon {

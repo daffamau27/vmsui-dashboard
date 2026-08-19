@@ -689,8 +689,8 @@
 		if (!vesselId) return;
 
 		try {
-			const [fleetResult, latestStatusResult] = await Promise.allSettled([
-				apiFetch(`/fleet/vessels/${vesselId}`, {
+			const [dashboardResult, latestStatusResult] = await Promise.allSettled([
+				apiFetch(`/dashboard/vessels/${vesselId}`, {
 					method: 'GET',
 					headers: {
 						Accept: 'application/json'
@@ -704,16 +704,19 @@
 				})
 			]);
 
-			const fleetData = fleetResult.status === 'fulfilled' ? fleetResult.value?.data || fleetResult.value : null;
+			const dashboardData =
+				dashboardResult.status === 'fulfilled'
+					? dashboardResult.value?.data || dashboardResult.value
+					: null;
 			const latestStatus =
 				latestStatusResult.status === 'fulfilled'
 					? latestStatusResult.value?.data || latestStatusResult.value
 					: null;
 
 			vesselMapInfo = {
-				...(fleetData || {}),
+				...(dashboardData || {}),
 				latestStatus,
-				rawFleet: fleetData,
+				rawDashboard: dashboardData,
 				rawLatestStatus: latestStatus
 			};
 		} catch (error) {

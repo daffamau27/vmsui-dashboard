@@ -678,7 +678,7 @@
 
 <section class="periodical-page">
 	<section class="periodical-header-card">
-		<div>
+		<div class="periodical-header-copy">
 			<div class="page-kicker">Periodical Report</div>
 			<h1>{vesselName}</h1>
 			<p>
@@ -686,9 +686,9 @@
 				received, and telemetry summary.
 			</p>
 		</div>
-	</section>
 
-	<section class="filter-card">
+		<div class="periodical-header-filters">
+			<div class="filter-card">
 		<label>
 			<span>Start</span>
 			<input type="datetime-local" bind:value={startDateTime} oninput={markDateFilterDirty} />
@@ -732,6 +732,8 @@
 			<button type="button" class="export-btn" onclick={handleExportExcel} disabled={exporting || shouldShowDateRangeOverlay}>
 				{exporting ? 'Exporting...' : 'Export Excel'}
 			</button>
+		</div>
+			</div>
 		</div>
 	</section>
 
@@ -1146,7 +1148,6 @@
 	}
 
 	.periodical-header-card,
-	.filter-card,
 	.summary-card,
 	.table-section,
 	.raw-box,
@@ -1160,10 +1161,21 @@
 
 	.periodical-header-card {
 		padding: 16px;
-		display: flex;
+		display: grid;
+		grid-template-columns: minmax(240px, 0.75fr) minmax(620px, 1.25fr);
 		align-items: center;
-		justify-content: space-between;
-		gap: 16px;
+		gap: 18px;
+	}
+
+	.periodical-header-copy {
+		min-width: 0;
+		max-width: 580px;
+	}
+
+	.periodical-header-filters {
+		min-width: 0;
+		display: grid;
+		justify-items: end;
 	}
 
 	.page-kicker,
@@ -1222,12 +1234,20 @@
 	}
 
 	.filter-card {
-		margin-top: 14px;
-		padding: 12px;
-		display: flex;
+		width: 100%;
+		display: grid;
+		grid-template-columns: minmax(165px, 1fr) minmax(165px, 1fr) minmax(175px, 1fr) auto;
 		align-items: end;
 		gap: 10px;
-		flex-wrap: wrap;
+	}
+
+	.filter-card:has(label:nth-of-type(4)) {
+		grid-template-columns:
+			minmax(150px, 1fr)
+			minmax(150px, 1fr)
+			minmax(150px, 0.9fr)
+			minmax(130px, 0.75fr)
+			auto;
 	}
 
 	.filter-card label {
@@ -1268,7 +1288,8 @@
 	.filter-card input,
 	.filter-card select {
 		height: 32px;
-		min-width: 150px;
+		width: 100%;
+		min-width: 0;
 		border: 1px solid #cbd5e1;
 		border-radius: 0;
 		background: var(--color-surface);
@@ -1288,7 +1309,8 @@
 	.filter-actions {
 		display: flex;
 		gap: 8px;
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
+		justify-content: flex-end;
 	}
 
 	.primary-btn,
@@ -1647,6 +1669,24 @@
 	}
 
 	@media (max-width: 1100px) {
+		.periodical-header-card {
+			grid-template-columns: 1fr;
+			align-items: start;
+		}
+
+		.periodical-header-filters {
+			justify-items: stretch;
+		}
+
+		.filter-card,
+		.filter-card:has(label:nth-of-type(4)) {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.filter-actions {
+			grid-column: 1 / -1;
+		}
+
 		.summary-grid {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
@@ -1663,7 +1703,6 @@
 
 		.periodical-header-card,
 		.data-received-card {
-			flex-direction: column;
 			align-items: flex-start;
 		}
 
@@ -1677,6 +1716,11 @@
 			display: grid;
 		}
 
+		.filter-card,
+		.filter-card:has(label:nth-of-type(4)) {
+			grid-template-columns: 1fr;
+		}
+
 		.filter-card input,
 		.filter-card select {
 			min-width: 100%;
@@ -1684,6 +1728,8 @@
 		}
 
 		.filter-actions {
+			grid-column: auto;
+			flex-direction: column;
 			width: 100%;
 		}
 
