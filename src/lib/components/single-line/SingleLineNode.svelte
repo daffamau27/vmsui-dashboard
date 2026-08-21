@@ -7,6 +7,8 @@
 		data?.online === true ? 'online' : data?.online === false ? 'offline' : 'unknown'
 	);
 	let statusLabel = $derived(status === 'online' ? 'Online' : status === 'offline' ? 'Offline' : 'N/A');
+	let hasPanelStatus = $derived(typeof data?.panelOpened === 'boolean');
+	let panelStatusLabel = $derived(data?.panelOpened ? 'Panel Open' : 'Panel Closed');
 	let width = $derived(data?.width || 130);
 	let height = $derived(data?.height || 64);
 	let customHandles = $derived(Array.isArray(data?.handles) ? data.handles : []);
@@ -28,6 +30,16 @@
 
 		return `top: ${offset}%;`;
 	}
+
+	function getPortDotStyle(handle) {
+		const offset = Number.isFinite(Number(handle?.offset)) ? Number(handle.offset) : 50;
+		const side = handle?.side || 'right';
+
+		if (side === 'left') return `left: 0; top: ${offset}%; transform: translate(-50%, -50%);`;
+		if (side === 'right') return `right: 0; top: ${offset}%; transform: translate(50%, -50%);`;
+		if (side === 'top') return `top: 0; left: ${offset}%; transform: translate(-50%, -50%);`;
+		return `bottom: 0; left: ${offset}%; transform: translate(-50%, 50%);`;
+	}
 </script>
 
 <div
@@ -48,10 +60,26 @@
 			class="sld-port-handle {handle.type === 'target' ? 'target' : 'source'} {handle.side || 'right'}"
 			style={getHandleStyle(handle)}
 		/>
+		<span
+			class="sld-port-dot {handle.type === 'target' ? 'target' : 'source'} {handle.side || 'right'}"
+			style={getPortDotStyle(handle)}
+			aria-hidden="true"
+		></span>
 	{/each}
 
 	{#if data?.showStatus !== false}
 		<span class="status-dot {status}" title={statusLabel} aria-label={statusLabel}></span>
+	{/if}
+
+	{#if hasPanelStatus}
+		<span
+			class="panel-status-indicator {data.panelOpened ? 'open' : 'closed'}"
+			title={panelStatusLabel}
+			aria-label={panelStatusLabel}
+		>
+			<i></i>
+			{data.panelOpened ? 'Open' : 'Closed'}
+		</span>
 	{/if}
 
 	<div class="node-copy node-title">
@@ -155,8 +183,8 @@
 
 	.status-dot {
 		position: absolute;
-		top: 8px;
-		right: 8px;
+		top: 10px;
+		right: 10px;
 		width: 10px;
 		height: 10px;
 		border-radius: 999px;
@@ -164,6 +192,7 @@
 		box-shadow:
 			0 0 0 3px rgba(148, 163, 184, 0.16),
 			0 6px 12px rgba(0, 0, 0, 0.22);
+		z-index: 4;
 	}
 
 	.status-dot.online {
@@ -180,6 +209,61 @@
 		box-shadow:
 			0 0 0 3px rgba(148, 163, 184, 0.16),
 			0 6px 12px rgba(0, 0, 0, 0.22);
+	}
+
+	.panel-status-indicator {
+		position: absolute;
+		top: 8px;
+		left: 8px;
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		max-width: calc(100% - 42px);
+		height: 20px;
+		padding: 0 7px;
+		border: 1px solid rgba(148, 163, 184, 0.44);
+		background: rgba(15, 23, 42, 0.08);
+		color: #334155;
+		font-size: 9px;
+		font-weight: 800;
+		line-height: 1;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		z-index: 4;
+	}
+
+	.panel-status-indicator i {
+		width: 6px;
+		height: 6px;
+		border-radius: 999px;
+		background: #64748b;
+		box-shadow: 0 0 0 2px rgba(100, 116, 139, 0.12);
+	}
+
+	.panel-status-indicator.open {
+		border-color: rgba(245, 158, 11, 0.46);
+		background: rgba(245, 158, 11, 0.12);
+		color: #92400e;
+	}
+
+	.panel-status-indicator.open i {
+		background: #f59e0b;
+		box-shadow:
+			0 0 0 2px rgba(245, 158, 11, 0.16),
+			0 0 10px rgba(245, 158, 11, 0.26);
+	}
+
+	.panel-status-indicator.closed {
+		border-color: rgba(34, 197, 94, 0.42);
+		background: rgba(34, 197, 94, 0.1);
+		color: #166534;
+	}
+
+	.panel-status-indicator.closed i {
+		background: #22c55e;
+		box-shadow:
+			0 0 0 2px rgba(34, 197, 94, 0.16),
+			0 0 10px rgba(34, 197, 94, 0.36);
 	}
 
 	.node-logo {
@@ -240,6 +324,7 @@
 		font-size: 1rem;
 		font-weight: 750;
 		color: #0b2141 !important;
+		white-space: pre-line;
 	}
 
 	.sld-node.has-icon .node-copy small {
@@ -258,37 +343,37 @@
 	}
 
 	:global(.sld-port-handle) {
-		width: 8px !important;
-		height: 8px !important;
-		min-width: 8px !important;
-		min-height: 8px !important;
-		border: 2px solid rgba(15, 23, 42, 0.48) !important;
-		border-radius: 999px !important;
-		background: #0f172a !important;
-		opacity: 1 !important;
+		width: 1px !important;
+		height: 1px !important;
+		min-width: 1px !important;
+		min-height: 1px !important;
+		border: 0 !important;
+		background: transparent !important;
+		opacity: 0 !important;
 		pointer-events: none !important;
-		box-shadow:
-			0 0 0 2px rgba(226, 232, 240, 0.74),
-			0 4px 9px rgba(15, 23, 42, 0.28) !important;
 	}
 
-	:global(.sld-port-handle.source) {
+	.sld-port-dot {
+		position: absolute;
+		width: 9px;
+		height: 9px;
+		border: 2px solid rgba(15, 23, 42, 0.52);
+		border-radius: 999px;
+		background: #0f172a;
+		pointer-events: none;
+		box-shadow:
+			0 0 0 2px rgba(226, 232, 240, 0.9),
+			0 4px 9px rgba(15, 23, 42, 0.28);
+		z-index: 8;
+	}
+
+	.sld-port-dot.source {
 		background: #065f46 !important;
 		border-color: rgba(16, 185, 129, 0.58) !important;
 	}
 
-	:global(.sld-port-handle.target) {
+	.sld-port-dot.target {
 		background: #1e293b !important;
 		border-color: rgba(148, 163, 184, 0.72) !important;
-	}
-
-	:global(.sld-port-handle.left),
-	:global(.sld-port-handle.right) {
-		transform: translate(0, -50%) !important;
-	}
-
-	:global(.sld-port-handle.top),
-	:global(.sld-port-handle.bottom) {
-		transform: translate(-50%, 0) !important;
 	}
 </style>

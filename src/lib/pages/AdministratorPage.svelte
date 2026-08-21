@@ -9258,4 +9258,442 @@
 		}
 	}
 
+	/* =========================================================
+	   Smartphone-friendly Administrator Page refinements
+	   ========================================================= */
+	@media (max-width: 900px) {
+		.administrator-page {
+			width: 100%;
+			min-width: 0;
+			padding: 10px 10px 22px;
+			scroll-padding-top: 10px;
+		}
+
+		.admin-header-card {
+			display: grid;
+			grid-template-columns: 1fr;
+			gap: 12px;
+			padding: 14px;
+		}
+
+		.admin-header-card h1 {
+			font-size: clamp(20px, 6vw, 26px);
+			line-height: 1.12;
+		}
+
+		.admin-header-card p {
+			max-width: none;
+			font-size: 13px;
+			line-height: 1.45;
+		}
+
+		.header-actions,
+		.editor-toolbar-actions,
+		.editor-footer,
+		.permission-actions,
+		.detail-actions,
+		.company-actions,
+		.global-audit-filter-actions,
+		.filter-actions,
+		.module-buttons,
+		.recipient-page-actions,
+		.assignable-pagination {
+			display: grid;
+			grid-template-columns: 1fr;
+			width: 100%;
+			gap: 8px;
+		}
+
+		.admin-tabs {
+			position: sticky;
+			top: 0;
+			z-index: 30;
+			display: flex !important;
+			flex-direction: row !important;
+			align-items: center !important;
+			gap: 6px;
+			margin: 10px -10px 0;
+			padding: 8px 10px;
+			border-left: 0;
+			border-right: 0;
+			overflow-x: auto;
+			overflow-y: hidden;
+			-webkit-overflow-scrolling: touch;
+			scroll-snap-type: x proximity;
+		}
+
+		.admin-tabs::-webkit-scrollbar {
+			height: 4px;
+		}
+
+		.admin-tabs button {
+			flex: 0 0 auto;
+			width: auto !important;
+			min-width: max-content;
+			min-height: 36px;
+			padding: 0 13px;
+			scroll-snap-align: start;
+		}
+
+		.admin-tab-indicator {
+			display: none !important;
+		}
+
+		.admin-tabs button.active-tab {
+			background: #2563eb;
+			color: #ffffff;
+		}
+
+		.summary-grid,
+		.admin-workspace,
+		.vessel-admin-workspace,
+		.asset-admin-workspace,
+		.engine-curve-admin-workspace,
+		.reporting-admin-workspace,
+		.cctv-admin-workspace,
+		.global-audit-workspace,
+		.telegram-layout,
+		.form-grid,
+		.vessel-form-grid,
+		.asset-form-grid,
+		.engine-curve-form-grid,
+		.curve-meta-grid,
+		.reporting-form-grid,
+		.recipient-grid,
+		.manual-recipient-form,
+		.selected-recipient-grid,
+		.health-grid,
+		.telegram-form-grid,
+		.cctv-camera-grid,
+		.global-audit-filter-card,
+		.company-registry-card,
+		.alarm-key-grid,
+		.engine-grid,
+		.access-grid,
+		.permission-filter {
+			grid-template-columns: 1fr !important;
+		}
+
+		.users-panel,
+		.vessel-list-panel,
+		.asset-list-panel,
+		.engine-curve-list-panel,
+		.reporting-vessel-panel,
+		.cctv-vessel-panel,
+		.editor-panel,
+		.vessel-editor-panel,
+		.asset-editor-panel,
+		.engine-curve-editor-panel,
+		.reporting-editor-panel,
+		.cctv-editor-panel,
+		.global-audit-panel {
+			width: 100%;
+			min-width: 0;
+			max-width: 100%;
+			position: static !important;
+			max-height: none !important;
+			overflow: visible;
+		}
+
+		.users-list,
+		.vessel-list,
+		.asset-list,
+		.engine-curve-list,
+		.reporting-vessel-list,
+		.cctv-vessel-list,
+		.audit-log-list,
+		.telegram-list,
+		.company-list,
+		.assignable-user-list,
+		.cctv-camera-list {
+			max-height: min(420px, 52vh);
+			overflow-y: auto;
+			-webkit-overflow-scrolling: touch;
+		}
+
+		.panel-title-row,
+		.editor-toolbar,
+		.global-audit-header,
+		.permission-header,
+		.access-head,
+		.reporting-section-head,
+		.report-content-head,
+		.engine-curve-detail-head,
+		.company-registry-head,
+		.cctv-camera-head,
+		.recipient-picker-head,
+		.telegram-vessel-picker .picker-head {
+			display: grid;
+			grid-template-columns: 1fr;
+			align-items: stretch;
+			gap: 10px;
+			min-height: auto;
+		}
+
+		.editor-panel > :not(.editor-toolbar),
+		.asset-editor-panel > :not(.editor-toolbar),
+		.vessel-editor-panel > :not(.editor-toolbar),
+		.engine-curve-editor-panel > :not(.editor-toolbar),
+		.reporting-editor-panel > :not(.editor-toolbar),
+		.global-audit-panel > :not(.global-audit-header) {
+			margin-left: 10px;
+			margin-right: 10px;
+		}
+
+		.access-card,
+		.permission-panel,
+		.vessel-form-card,
+		.asset-form-card,
+		.engine-preview-card,
+		.engine-curve-form-card,
+		.engine-curve-detail-card,
+		.reporting-empty-card,
+		.reporting-section-card,
+		.global-audit-filter-card,
+		.global-audit-table-card,
+		.telegram-form-card,
+		.company-registry-card,
+		.cctv-config-card,
+		.cctv-camera-card,
+		.muted-box,
+		.empty-box,
+		.vessel-note,
+		.asset-note,
+		.engine-curve-note {
+			padding: 12px;
+			border-radius: 10px;
+		}
+
+		.user-row,
+		.vessel-row,
+		.asset-row,
+		.engine-curve-row,
+		.reporting-vessel-row,
+		.cctv-vessel-row,
+		.telegram-row,
+		.company-row,
+		.audit-log-row,
+		.assignable-user-row {
+			display: grid !important;
+			grid-template-columns: 1fr;
+			align-items: start;
+			gap: 8px;
+			width: 100%;
+			min-width: 0;
+			padding: 12px;
+		}
+
+		.user-main,
+		.vessel-row > div,
+		.asset-row > div,
+		.engine-curve-row > div,
+		.reporting-vessel-row > div,
+		.cctv-vessel-row > div,
+		.telegram-row > div,
+		.company-row > div,
+		.audit-log-row > div {
+			min-width: 0;
+		}
+
+		.user-main strong,
+		.vessel-row strong,
+		.asset-row strong,
+		.engine-curve-row strong,
+		.reporting-vessel-row strong,
+		.cctv-vessel-row strong,
+		.telegram-row strong,
+		.company-row strong,
+		.audit-log-row strong {
+			overflow-wrap: anywhere;
+			line-height: 1.25;
+		}
+
+		.active-badge,
+		.inactive-badge,
+		.action-badge,
+		.vessel-row em,
+		.engine-curve-row em,
+		.reporting-vessel-row em,
+		.cctv-vessel-row em,
+		.telegram-row em {
+			width: fit-content;
+			max-width: 100%;
+		}
+
+		.search-input,
+		.reporting-filter-box input,
+		.reporting-filter-box select,
+		input,
+		textarea,
+		select {
+			width: 100%;
+			max-width: 100%;
+			min-width: 0 !important;
+			font-size: 16px;
+		}
+
+		.search-input {
+			width: calc(100% - 20px);
+			margin: 10px;
+		}
+
+		.primary-button,
+		.ghost-button,
+		.danger-button,
+		.activate-button,
+		.text-button {
+			width: 100%;
+			min-height: 38px;
+			justify-content: center;
+			white-space: normal;
+		}
+
+		.permission-item {
+			grid-template-columns: 22px minmax(0, 1fr);
+			align-items: start;
+			gap: 10px;
+		}
+
+		.permission-item input,
+		.checkbox-line input,
+		.option-chip input,
+		.switch-line input {
+			width: 18px;
+			height: 18px;
+			min-height: 18px;
+			margin-top: 1px;
+			flex: 0 0 auto;
+		}
+
+		.option-chip,
+		.checkbox-line,
+		.switch-line,
+		.boxed-switch {
+			width: 100%;
+			min-height: 38px;
+		}
+
+		.permission-list,
+		.report-content-list,
+		.selected-recipient-list,
+		.option-list {
+			max-height: min(430px, 55vh);
+			overflow-y: auto;
+			-webkit-overflow-scrolling: touch;
+		}
+
+		.global-audit-table-wrap,
+		.range-table-wrap,
+		.table-wrap,
+		.table-wrapper,
+		.engine-table-wrap,
+		.monthly-table-wrapper,
+		.data-log-table-wrapper,
+		.event-table-wrapper,
+		.high-rpm-table-wrapper,
+		.low-speed-table-wrapper {
+			width: 100%;
+			max-width: 100%;
+			overflow-x: auto;
+			-webkit-overflow-scrolling: touch;
+		}
+
+		.global-audit-table-wrap table,
+		.range-table-wrap table,
+		.table-wrap table,
+		.table-wrapper table {
+			min-width: 720px;
+		}
+
+		.engine-curve-vessel-dropdown,
+		.engine-curve-vessel-picker {
+			width: 100%;
+			min-width: 0;
+		}
+
+		.engine-curve-vessel-menu {
+			left: 0;
+			right: 0;
+			width: 100%;
+			max-width: calc(100vw - 40px);
+		}
+
+		.cctv-camera-grid {
+			gap: 8px;
+		}
+
+		.cctv-updated-meta,
+		.field-help,
+		.filter-help,
+		.reporting-empty-card p,
+		.reporting-section-card p {
+			overflow-wrap: anywhere;
+		}
+	}
+
+	@media (max-width: 520px) {
+		.administrator-page {
+			padding: 8px 8px 20px;
+		}
+
+		.admin-tabs {
+			margin-left: -8px;
+			margin-right: -8px;
+			padding-left: 8px;
+			padding-right: 8px;
+		}
+
+		.summary-card {
+			min-height: 78px;
+			padding: 12px;
+		}
+
+		.summary-card strong {
+			font-size: 19px;
+		}
+
+		.panel-title-row,
+		.editor-toolbar,
+		.global-audit-header {
+			padding: 11px 12px;
+		}
+
+		.users-list,
+		.vessel-list,
+		.asset-list,
+		.engine-curve-list,
+		.reporting-vessel-list,
+		.cctv-vessel-list {
+			padding-left: 8px;
+			padding-right: 8px;
+		}
+
+		.editor-panel > :not(.editor-toolbar),
+		.asset-editor-panel > :not(.editor-toolbar),
+		.vessel-editor-panel > :not(.editor-toolbar),
+		.engine-curve-editor-panel > :not(.editor-toolbar),
+		.reporting-editor-panel > :not(.editor-toolbar),
+		.global-audit-panel > :not(.global-audit-header) {
+			margin-left: 8px;
+			margin-right: 8px;
+		}
+
+		.access-card,
+		.permission-panel,
+		.vessel-form-card,
+		.asset-form-card,
+		.engine-preview-card,
+		.engine-curve-form-card,
+		.engine-curve-detail-card,
+		.reporting-section-card,
+		.global-audit-filter-card,
+		.global-audit-table-card,
+		.telegram-form-card,
+		.company-registry-card,
+		.cctv-config-card,
+		.cctv-camera-card {
+			padding: 10px;
+		}
+	}
+
 </style>

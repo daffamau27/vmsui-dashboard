@@ -59,13 +59,19 @@
 	);
 
 	let mcp = $derived(diagramData?.mcp || {});
-	let eip = $derived(mcp?.eip || {});
+	let eip = $derived(mcp?.eip || null);
 	let router = $derived(mcp?.router || {});
 	let mastGps = $derived(mcp?.gps || {});
-	let engines = $derived(normalizeComponentList(eip?.engines_rpm));
-	let wayjun = $derived(normalizeWayjun(eip?.wayjun));
-	let aeLoads = $derived(normalizeComponentList(eip?.ae_load));
-	let fuelSources = $derived(normalizeFuelSources(eip?.fuel_source));
+	let hasEip = $derived(Boolean(eip));
+	let wayjun = $derived(normalizeWayjun(mcp?.wayjun));
+	let hasWayjun = $derived(Boolean(wayjun));
+	let engines = $derived(
+		hasWayjun
+			? normalizeComponentList(wayjun?.engines_rpm)
+			: normalizeComponentList(eip?.engines_rpm)
+	);
+	let aeLoads = $derived(normalizeComponentList(hasEip ? eip?.ae_load : mcp?.ae_load));
+	let fuelSources = $derived(normalizeFuelSources(hasEip ? eip?.fuel_source : mcp?.fuel_source));
 
 	let overallOnline = $derived(mcp?.online === true);
 
@@ -113,6 +119,12 @@
 		return `${value}${suffix}`;
 	}
 
+	function formatPanelMeta(panel = {}) {
+		const rows = [];
+		if (panel?.uptime) rows.push(panel.uptime);
+		return rows.join('\n');
+	}
+
 	function makeSection(id, title, x, y, width, height, options = {}) {
 		return {
 			id,
@@ -141,7 +153,8 @@
 				width: options.width,
 				height: options.height,
 				handles: options.handles,
-				showStatus: options.showStatus
+				showStatus: options.showStatus,
+				panelOpened: options.panelOpened
 			},
 			selectable: false,
 			draggable: false,
@@ -177,10 +190,10 @@
 	}
 
 	function buildDiagramElements() {
-		const hasWayjun = Boolean(wayjun);
-		const engineSourceRows = hasWayjun ? normalizeComponentList(wayjun?.engines_rpm) : engines;
-		const engineRows = engineSourceRows.length
-			? engineSourceRows.slice(0, 6)
+		const mcpProcessorTargetId = hasEip ? 'eip' : hasWayjun ? 'wayjun' : null;
+		const engineProcessorId = hasWayjun ? 'wayjun' : hasEip ? 'eip' : null;
+		const engineRows = engines.length
+			? engines.slice(0, 6)
 			: [
 					{ name: 'ME PORT MPU/ECU', online: null },
 					{ name: 'ME STBD MPU/ECU', online: null },
@@ -190,16 +203,21 @@
 
 		const aeRows = aeLoads.length ? aeLoads.slice(0, 2) : [];
 
-		const fuelRows = fuelSources.length ? fuelSources.slice(0, 3) : [];
+		const fuelRows = fuelSources.length ? fuelSources.slice(0, 10) : [];
 		const wheelhouseSectionWidth = 1010;
 		const wheelhouseSectionHeight = 470;
 		const mastSectionX = 1110;
 		const mastSectionWidth = 500;
 		const engineSectionY = 545;
 		const engineSectionWidth = 1040;
-		const eipX = hasWayjun ? 500 : 405;
-		const eipY = hasWayjun ? 745 : 700;
-		const eipHeight = hasWayjun ? 286 : 328;
+		const eipX = hasWayjun ? 535 : 405;
+		const eipY = 690;
+		const eipHeight = 328;
+		const eipWidth = 168;
+		const wayjunX = hasEip ? 335 : 405;
+		const wayjunY = hasEip ? 760 : 720;
+		const wayjunHeight = 180;
+		const wayjunWidth = hasEip ? 176 : 188;
 		const engineNodeX = 95;
 		const engineNodeStartY = 635;
 		const engineNodeGap = 142;
@@ -214,28 +232,29 @@
 		const aeNodeGap = 154;
 		const fuelNodeStartY = aeRows.length ? 940 : 700;
 		const fuelNodeGap = 154;
-		const mcpToEipCables = ['power', 'ethernet', 'canbus'];
-		const mcpBottomPorts = mcpToEipCables.map((name, index) =>
-			makePort(`eip-${name}-out`, 'source', 'bottom', spreadOffset(index, mcpToEipCables.length, 38, 62))
+		const mcpToProcessorCables = mcpProcessorTargetId ? (hasEip ? ['power', 'ethernet', 'canbus'] : ['canbus']) : [];
+		const mcpBottomPorts = mcpToProcessorCables.map((name, index) =>
+			makePort(`${mcpProcessorTargetId}-${name}-out`, 'source', 'bottom', spreadOffset(index, mcpToProcessorCables.length, 38, 62))
 		);
-		const eipTopPorts = mcpToEipCables.map((name, index) =>
-			makePort(`${name}-in`, 'target', 'top', spreadOffset(index, mcpToEipCables.length, 38, 62))
+		const processorTopPorts = mcpToProcessorCables.map((name, index) =>
+			makePort(`${name}-in`, 'target', 'top', spreadOffset(index, mcpToProcessorCables.length, 38, 62))
 		);
 		const engineTargetPorts = engineRows.map((_, index) =>
 			makePort(`engine-${index}-in`, 'target', 'left', spreadOffset(index, engineRows.length, 18, 82))
 		);
-		const wayjunTargetPorts = engineRows.map((_, index) =>
-			makePort(`engine-${index}-in`, 'target', 'left', spreadOffset(index, engineRows.length, 18, 82))
-		);
+		const outputPortSide = 'right';
+		const outputPortMin = hasEip ? 20 : 72;
+		const outputPortMax = hasEip ? 80 : 92;
+		const outputPortTotal = Math.max(aeRows.length + fuelRows.length, 1);
 		const aeSourcePorts = aeRows.map((_, index) =>
-			makePort(`ae-${index}-out`, 'source', 'right', spreadOffset(index, Math.max(aeRows.length + fuelRows.length, 1), 20, 80))
+			makePort(`ae-${index}-out`, 'source', outputPortSide, spreadOffset(index, outputPortTotal, outputPortMin, outputPortMax))
 		);
 		const fuelSourcePorts = fuelRows.map((_, index) =>
 			makePort(
 				`fuel-${index}-out`,
 				'source',
-				'right',
-				spreadOffset(aeRows.length + index, Math.max(aeRows.length + fuelRows.length, 1), 20, 80)
+				outputPortSide,
+				spreadOffset(aeRows.length + index, outputPortTotal, outputPortMin, outputPortMax)
 			)
 		);
 		const rightContentBottom = Math.max(
@@ -246,7 +265,8 @@
 			640,
 			engineGroupHeight + 130,
 			rightContentBottom - engineSectionY + 90,
-			eipY + eipHeight - engineSectionY + 90
+			...(hasEip ? [eipY + eipHeight - engineSectionY + 90] : []),
+			...(hasWayjun ? [wayjunY + wayjunHeight - engineSectionY + 90] : [])
 		);
 
 		const nextNodes = [
@@ -314,19 +334,21 @@
 			makeNode('mcp', mcp?.name || 'MCP', 395, 115, {
 				online: mcp?.online,
 				subtitle: 'Main Controller\nPanel (MCP)',
-				meta: mcp?.uptime,
+				meta: formatPanelMeta(mcp),
 				logo: '/assets/SeMAR.png',
 				variant: 'panel',
 				width: 182,
 				height: 236,
+				panelOpened: mcp?.panel_opened,
 				handles: [
 					makePort('gps-in', 'target', 'left', 18),
 					makePort('power-in', 'target', 'left', 34),
 					makePort('wind-in', 'target', 'left', 50),
 					makePort('speed-in', 'target', 'left', 66),
-					makePort('mast-out', 'source', 'right', 22),
-					makePort('router-out', 'source', 'right', 50),
-					...mcpBottomPorts
+					makePort('mast-out', 'source', 'right', 28),
+					makePort('router-out', 'source', 'right', 55),
+					...mcpBottomPorts,
+					...(hasEip ? [] : [...aeSourcePorts, ...fuelSourcePorts])
 				]
 			}),
 			makeNode('router', router?.name || 'ROUTER', 755, 205, {
@@ -338,35 +360,47 @@
 			}),
 			makeNode('mast-gps', mastGps?.name || 'GPS', 1280, 118, {
 				online: mastGps?.online,
-				icon: '/assets/gps.png',
+				logo: '/assets/SeMAR.png',
+				subtitle: mastGps?.name || 'GPS',
 				width: 148,
 				height: 106,
 				handles: [makePort('in', 'target', 'left', 50)]
 			}),
 
-			makeNode('eip', eip?.name || 'EIP', eipX, eipY, {
-				online: eip?.online,
-				subtitle: 'Engine Interface\nPanel (EIP)',
-				logo: '/assets/SeMAR.png',
-				variant: 'panel',
-				width: 168,
-				height: eipHeight,
-				handles: [
-					...eipTopPorts,
-					...(hasWayjun ? [makePort('wayjun-in', 'target', 'left', 50)] : engineTargetPorts),
-					...aeSourcePorts,
-					...fuelSourcePorts
-				]
-			}),
+			...(hasEip
+				? [
+						makeNode('eip', eip?.name || 'EIP', eipX, eipY, {
+							online: eip?.online,
+							subtitle: 'Engine Interface\nPanel (EIP)',
+							logo: '/assets/SeMAR.png',
+							variant: 'panel',
+							meta: hasEip ? formatPanelMeta(eip) : undefined,
+							panelOpened: hasEip ? eip?.panel_opened : undefined,
+							width: eipWidth,
+							height: eipHeight,
+							handles: [
+								...processorTopPorts,
+								...(hasWayjun ? [makePort('wayjun-in', 'target', 'left', 72)] : engineTargetPorts),
+								...aeSourcePorts,
+								...fuelSourcePorts
+							]
+						})
+					]
+				: []),
 			...(hasWayjun
 				? [
-						makeNode('wayjun', wayjun?.name || 'HIGH SPEED COUNTER', 315, 760, {
+						makeNode('wayjun', wayjun?.name || 'HIGH SPEED COUNTER', wayjunX, wayjunY, {
 							online: wayjun?.online,
+							subtitle: 'High Speed\nCounter',
 							icon: '/assets/engine.png',
 							variant: 'device',
-							width: 156,
-							height: 138,
-							handles: [...wayjunTargetPorts, makePort('eip-out', 'source', 'right', 50)]
+							width: wayjunWidth,
+							height: wayjunHeight,
+							handles: [
+								...(hasEip ? [] : processorTopPorts),
+								...engineTargetPorts,
+								...(hasEip ? [makePort('eip-out', 'source', 'right', 72)] : [])
+							]
 						})
 					]
 				: [])
@@ -436,31 +470,18 @@
 				sourceHandle: 'mast-out',
 				targetHandle: 'in'
 			}),
-			makeEdge('mcp-power-to-eip', 'mcp', 'eip', 'powerDc', {
-				sourceHandle: 'eip-power-out',
-				targetHandle: 'power-in'
-			}),
-			makeEdge('mcp-ethernet-to-eip', 'mcp', 'eip', 'ethernet', {
-				sourceHandle: 'eip-ethernet-out',
-				targetHandle: 'ethernet-in'
-			}),
-			makeEdge('mcp-canbus-to-eip', 'mcp', 'eip', 'canbus', {
-				sourceHandle: 'eip-canbus-out',
-				targetHandle: 'canbus-in'
-			})
+			...mcpToProcessorCables.map((name) =>
+				makeEdge(`mcp-${name}-to-${mcpProcessorTargetId}`, 'mcp', mcpProcessorTargetId, name === 'power' ? 'powerDc' : name, {
+					sourceHandle: `${mcpProcessorTargetId}-${name}-out`,
+					targetHandle: `${name}-in`
+				})
+			)
 		];
 
 		engineRows.forEach((_, index) => {
-			if (hasWayjun) {
+			if (engineProcessorId) {
 				nextEdges.push(
-					makeEdge(`engine-${index}-to-wayjun`, `engine-${index}`, 'wayjun', 'canbus', {
-						sourceHandle: 'out',
-						targetHandle: `engine-${index}-in`
-					})
-				);
-			} else {
-				nextEdges.push(
-					makeEdge(`engine-${index}-to-eip`, `engine-${index}`, 'eip', 'canbus', {
+					makeEdge(`engine-${index}-to-${engineProcessorId}`, `engine-${index}`, engineProcessorId, 'canbus', {
 						sourceHandle: 'out',
 						targetHandle: `engine-${index}-in`
 					})
@@ -468,7 +489,7 @@
 			}
 		});
 
-		if (hasWayjun) {
+		if (hasWayjun && hasEip) {
 			nextEdges.push(
 				makeEdge('wayjun-to-eip', 'wayjun', 'eip', 'canbus', {
 					sourceHandle: 'eip-out',
@@ -478,8 +499,9 @@
 		}
 
 		aeRows.forEach((_, index) => {
+			const sourceNode = hasEip ? 'eip' : 'mcp';
 			nextEdges.push(
-				makeEdge(`eip-to-ae-${index}`, 'eip', `ae-${index}`, 'canbus', {
+				makeEdge(`${sourceNode}-to-ae-${index}`, sourceNode, `ae-${index}`, 'canbus', {
 					sourceHandle: `ae-${index}-out`,
 					targetHandle: 'in'
 				})
@@ -487,8 +509,9 @@
 		});
 
 		fuelRows.forEach((_, index) => {
+			const sourceNode = hasEip ? 'eip' : 'mcp';
 			nextEdges.push(
-				makeEdge(`eip-to-fuel-${index}`, 'eip', `fuel-${index}`, 'canbus', {
+				makeEdge(`${sourceNode}-to-fuel-${index}`, sourceNode, `fuel-${index}`, 'canbus', {
 					sourceHandle: `fuel-${index}-out`,
 					targetHandle: 'in'
 				})
