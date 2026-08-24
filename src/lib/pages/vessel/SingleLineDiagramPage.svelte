@@ -60,18 +60,46 @@
 
 	let mcp = $derived(diagramData?.mcp || {});
 	let eip = $derived(mcp?.eip || null);
+	let ei = $derived(normalizeEi(eip?.ei));
 	let router = $derived(mcp?.router || {});
 	let mastGps = $derived(mcp?.gps || {});
 	let hasEip = $derived(Boolean(eip));
-	let wayjun = $derived(normalizeWayjun(mcp?.wayjun));
-	let hasWayjun = $derived(Boolean(wayjun));
-	let engines = $derived(
-		hasWayjun
-			? normalizeComponentList(wayjun?.engines_rpm)
-			: normalizeComponentList(eip?.engines_rpm)
+	let hasWayjunFuelSource = $derived(
+		hasFuelSourceForWayjun(eip?.wayjun?.fuel_source) ||
+			hasFuelSourceForWayjun(eip?.ei?.fuel_source) ||
+			hasFuelSourceForWayjun(eip?.fuel_source) ||
+			hasFuelSourceForWayjun(mcp?.fuel_source)
 	);
-	let aeLoads = $derived(normalizeComponentList(hasEip ? eip?.ae_load : mcp?.ae_load));
-	let fuelSources = $derived(normalizeFuelSources(hasEip ? eip?.fuel_source : mcp?.fuel_source));
+	let wayjun = $derived(
+		normalizeWayjun(eip?.wayjun || mcp?.wayjun) ||
+			(hasWayjunFuelSource ? { name: 'HIGH SPEED COUNTER' } : null)
+	);
+	let hasEi = $derived(Boolean(ei));
+	let hasWayjun = $derived(Boolean(wayjun));
+	let legacyEipProcessor = $derived(
+		Boolean(
+			eip &&
+				!hasEi &&
+				!hasWayjun &&
+				(eip?.engines_rpm || eip?.fuel_source || eip?.ae_load)
+		)
+	);
+	let engines = $derived([
+		...withProcessor(wayjun?.engines_rpm, 'wayjun'),
+		...withProcessor(ei?.engines_rpm, 'ei'),
+		...(legacyEipProcessor ? withProcessor(eip?.engines_rpm, 'eip') : [])
+	]);
+	let aeLoads = $derived([
+		...withProcessor(ei?.ae_load, 'ei'),
+		...(legacyEipProcessor ? withProcessor(eip?.ae_load, 'eip') : []),
+		...(!hasEip ? withProcessor(mcp?.ae_load, 'mcp') : [])
+	]);
+	let fuelSources = $derived([
+		...normalizeFuelSources(ei?.fuel_source, 'ei'),
+		...normalizeFuelSources(wayjun?.fuel_source, 'wayjun'),
+		...normalizeFuelSources(eip?.fuel_source, 'eip'),
+		...normalizeFuelSources(mcp?.fuel_source, 'mcp')
+	]);
 
 	let overallOnline = $derived(mcp?.online === true);
 
@@ -93,22 +121,56 @@
 		return Array.isArray(rows) ? rows.filter(Boolean) : [];
 	}
 
+	function normalizeEi(rawEi) {
+		if (!rawEi || typeof rawEi !== 'object') return null;
+		return rawEi;
+	}
+
 	function normalizeWayjun(rawWayjun) {
 		if (!rawWayjun || typeof rawWayjun !== 'object') return null;
 		return rawWayjun;
 	}
 
-	function normalizeFuelSources(rawFuelSource = {}) {
+	function isMcpFuelSource(sourceLabel) {
+		return ['FM', 'FMS'].includes(String(sourceLabel || '').toUpperCase());
+	}
+
+	function hasFuelSourceForWayjun(rawFuelSource = {}) {
+		if (!rawFuelSource || typeof rawFuelSource !== 'object') return false;
+		return Object.entries(rawFuelSource).some(([source, rows]) => {
+			const items = Array.isArray(rows) ? rows : rows ? [rows] : [];
+			const sourceLabel = source.toUpperCase();
+			return sourceLabel !== 'ECU' && !isMcpFuelSource(sourceLabel) && items.length > 0;
+		});
+	}
+
+	function withProcessor(rows, processor) {
+		return normalizeComponentList(rows).map((row) => ({
+			...row,
+			processor
+		}));
+	}
+
+	function normalizeFuelSources(rawFuelSource = {}, processor = 'eip') {
 		if (!rawFuelSource || typeof rawFuelSource !== 'object') return [];
 
 		return Object.entries(rawFuelSource)
 			.flatMap(([source, rows]) => {
 				const items = Array.isArray(rows) ? rows : rows ? [rows] : [];
+				const sourceLabel = source.toUpperCase();
+				if (sourceLabel === 'ECU' && processor !== 'ei') return [];
+
+				const routedProcessor = isMcpFuelSource(sourceLabel)
+					? 'mcp'
+					: sourceLabel === 'ECU'
+						? processor
+						: 'wayjun';
 
 				return items.map((item) => ({
 					...item,
-					source: source.toUpperCase(),
-					name: item?.name || `${source.toUpperCase()} SOURCE`
+					source: sourceLabel,
+					name: item?.name || `${sourceLabel} SOURCE`,
+					processor: routedProcessor
 				}));
 			})
 			.filter(Boolean);
@@ -117,6 +179,36 @@
 	function displayValue(value, suffix = '') {
 		if (value === null || value === undefined || value === '') return '-';
 		return `${value}${suffix}`;
+	}
+
+	function resolveEipOnlineStatus() {
+		if (typeof eip?.online === 'boolean') return eip.online;
+		if (hasEi || hasWayjun) {
+			return [ei?.online, wayjun?.online].some((value) => value === true);
+		}
+		return undefined;
+	}
+
+	function normalizeBoolean(value) {
+		if (typeof value === 'boolean') return value;
+		if (typeof value === 'number') return value === 1;
+		if (typeof value === 'string') {
+			const normalized = value.trim().toLowerCase();
+			if (['true', 'open', 'opened', '1', 'yes'].includes(normalized)) return true;
+			if (['false', 'closed', 'close', '0', 'no'].includes(normalized)) return false;
+		}
+		return undefined;
+	}
+
+	function resolvePanelOpened(panel = {}) {
+		return normalizeBoolean(
+			panel?.panel_opened ??
+				panel?.panelOpened ??
+				panel?.is_panel_opened ??
+				panel?.isPanelOpened ??
+				panel?.panel_status ??
+				panel?.panelStatus
+		);
 	}
 
 	function formatPanelMeta(panel = {}) {
@@ -191,14 +283,14 @@
 
 	function buildDiagramElements() {
 		const mcpProcessorTargetId = hasEip ? 'eip' : hasWayjun ? 'wayjun' : null;
-		const engineProcessorId = hasWayjun ? 'wayjun' : hasEip ? 'eip' : null;
+		const defaultEngineProcessorId = hasWayjun ? 'wayjun' : hasEi ? 'ei' : hasEip ? 'eip' : null;
 		const engineRows = engines.length
 			? engines.slice(0, 6)
 			: [
-					{ name: 'ME PORT MPU/ECU', online: null },
-					{ name: 'ME STBD MPU/ECU', online: null },
-					{ name: 'AE PORT MPU/ECU', online: null },
-					{ name: 'AE STBD MPU/ECU', online: null }
+					{ name: 'ME PORT MPU/ECU', online: null, processor: defaultEngineProcessorId },
+					{ name: 'ME STBD MPU/ECU', online: null, processor: defaultEngineProcessorId },
+					{ name: 'AE PORT MPU/ECU', online: null, processor: defaultEngineProcessorId },
+					{ name: 'AE STBD MPU/ECU', online: null, processor: defaultEngineProcessorId }
 				];
 
 		const aeRows = aeLoads.length ? aeLoads.slice(0, 2) : [];
@@ -210,14 +302,22 @@
 		const mastSectionWidth = 500;
 		const engineSectionY = 545;
 		const engineSectionWidth = 1040;
-		const eipX = hasWayjun ? 535 : 405;
+		const eipHasModules = hasEi || hasWayjun;
+		const eipX = eipHasModules ? 360 : 405;
 		const eipY = 690;
-		const eipHeight = 328;
-		const eipWidth = 168;
-		const wayjunX = hasEip ? 335 : 405;
-		const wayjunY = hasEip ? 760 : 720;
-		const wayjunHeight = 180;
-		const wayjunWidth = hasEip ? 176 : 188;
+		const eipHeight = eipHasModules ? (hasEi && hasWayjun ? 440 : 292) : 328;
+		const eipWidth = eipHasModules ? 330 : 168;
+		const moduleNodeX = eipX + 70;
+		const firstModuleY = eipY + 94;
+		const moduleNodeGap = 168;
+		const wayjunX = hasEip ? moduleNodeX : 405;
+		const wayjunY = hasEip ? firstModuleY : 720;
+		const wayjunHeight = hasEip ? 126 : 180;
+		const wayjunWidth = hasEip ? 190 : 188;
+		const eiX = hasEip ? moduleNodeX : 405;
+		const eiY = hasEip ? firstModuleY + (hasWayjun ? moduleNodeGap : 0) : hasWayjun ? 1000 : 760;
+		const eiHeight = hasEip ? 126 : 180;
+		const eiWidth = hasEip ? 190 : 188;
 		const engineNodeX = 95;
 		const engineNodeStartY = 635;
 		const engineNodeGap = 142;
@@ -239,24 +339,73 @@
 		const processorTopPorts = mcpToProcessorCables.map((name, index) =>
 			makePort(`${name}-in`, 'target', 'top', spreadOffset(index, mcpToProcessorCables.length, 38, 62))
 		);
-		const engineTargetPorts = engineRows.map((_, index) =>
-			makePort(`engine-${index}-in`, 'target', 'left', spreadOffset(index, engineRows.length, 18, 82))
-		);
-		const outputPortSide = 'right';
-		const outputPortMin = hasEip ? 20 : 72;
-		const outputPortMax = hasEip ? 80 : 92;
-		const outputPortTotal = Math.max(aeRows.length + fuelRows.length, 1);
-		const aeSourcePorts = aeRows.map((_, index) =>
-			makePort(`ae-${index}-out`, 'source', outputPortSide, spreadOffset(index, outputPortTotal, outputPortMin, outputPortMax))
-		);
-		const fuelSourcePorts = fuelRows.map((_, index) =>
-			makePort(
-				`fuel-${index}-out`,
-				'source',
-				outputPortSide,
-				spreadOffset(aeRows.length + index, outputPortTotal, outputPortMin, outputPortMax)
-			)
-		);
+		function enginePortsForProcessor(processor) {
+			const processorRows = engineRows
+				.map((engine, index) => ({ engine, index }))
+				.filter((entry) => entry.engine?.processor === processor);
+
+			return processorRows.map((entry, localIndex) =>
+				makePort(
+					`engine-${entry.index}-in`,
+					'target',
+					'left',
+					spreadOffset(localIndex, processorRows.length, 24, 76)
+				)
+			);
+		}
+
+		const eipLegacyEngineTargetPorts = legacyEipProcessor ? enginePortsForProcessor('eip') : [];
+		const wayjunEngineTargetPorts = enginePortsForProcessor('wayjun');
+		const eiEngineTargetPorts = enginePortsForProcessor('ei');
+		function resolveOutputProcessor(row) {
+			return row?.processor || (hasEip ? 'eip' : 'mcp');
+		}
+
+		const outgoingConnections = [
+			...aeRows.map((row, index) => ({
+				processor: resolveOutputProcessor(row),
+				handleId: `ae-${index}-out`
+			})),
+			...fuelRows.map((row, index) => ({
+				processor: resolveOutputProcessor(row),
+				handleId: `fuel-${index}-out`
+			}))
+		];
+
+		function outputPortsForProcessor(processor) {
+			const rows = outgoingConnections.filter((entry) => entry.processor === processor);
+
+			return rows.map((entry, localIndex) =>
+				makePort(
+					entry.handleId,
+					'source',
+					'right',
+					spreadOffset(localIndex, rows.length, 26, 74)
+				)
+			);
+		}
+
+		function sourcePortsFromHandles(handles, min = 22, max = 82) {
+			return handles.map((entry, localIndex) =>
+				makePort(entry.handleId, 'source', 'right', spreadOffset(localIndex, handles.length, min, max))
+			);
+		}
+
+		const eipOutputPorts = outputPortsForProcessor('eip');
+		const wayjunOutputPorts = outputPortsForProcessor('wayjun');
+		const eiOutputPorts = outputPortsForProcessor('ei');
+		const mcpDirectOutputConnections = outgoingConnections.filter((entry) => entry.processor === 'mcp');
+		const mcpRightOutputPorts = mcpDirectOutputConnections.length
+			? sourcePortsFromHandles(
+					[
+						{ handleId: 'mast-out' },
+						{ handleId: 'router-out' },
+						...mcpDirectOutputConnections
+					],
+					22,
+					84
+				)
+			: [makePort('mast-out', 'source', 'right', 28), makePort('router-out', 'source', 'right', 55)];
 		const rightContentBottom = Math.max(
 			aeRows.length ? aeNodeStartY + aeRows.length * aeNodeGap : 0,
 			fuelRows.length ? fuelNodeStartY + fuelRows.length * fuelNodeGap : 0
@@ -266,7 +415,8 @@
 			engineGroupHeight + 130,
 			rightContentBottom - engineSectionY + 90,
 			...(hasEip ? [eipY + eipHeight - engineSectionY + 90] : []),
-			...(hasWayjun ? [wayjunY + wayjunHeight - engineSectionY + 90] : [])
+			...(hasWayjun ? [wayjunY + wayjunHeight - engineSectionY + 90] : []),
+			...(hasEi ? [eiY + eiHeight - engineSectionY + 90] : [])
 		);
 
 		const nextNodes = [
@@ -339,16 +489,14 @@
 				variant: 'panel',
 				width: 182,
 				height: 236,
-				panelOpened: mcp?.panel_opened,
+				panelOpened: resolvePanelOpened(mcp),
 				handles: [
 					makePort('gps-in', 'target', 'left', 18),
 					makePort('power-in', 'target', 'left', 34),
 					makePort('wind-in', 'target', 'left', 50),
 					makePort('speed-in', 'target', 'left', 66),
-					makePort('mast-out', 'source', 'right', 28),
-					makePort('router-out', 'source', 'right', 55),
-					...mcpBottomPorts,
-					...(hasEip ? [] : [...aeSourcePorts, ...fuelSourcePorts])
+					...mcpRightOutputPorts,
+					...mcpBottomPorts
 				]
 			}),
 			makeNode('router', router?.name || 'ROUTER', 755, 205, {
@@ -369,20 +517,20 @@
 
 			...(hasEip
 				? [
-						makeNode('eip', eip?.name || 'EIP', eipX, eipY, {
-							online: eip?.online,
-							subtitle: 'Engine Interface\nPanel (EIP)',
-							logo: '/assets/SeMAR.png',
-							variant: 'panel',
+						makeNode('eip', eipHasModules ? 'IP PANEL' : 'IP', eipX, eipY, {
+							online: resolveEipOnlineStatus(),
+							subtitle: eipHasModules ? 'Interface Panel' : 'Interface\nPanel (IP)',
+							logo: eipHasModules ? undefined : '/assets/SeMAR.png',
+							variant: eipHasModules ? 'ip-panel' : 'panel',
 							meta: hasEip ? formatPanelMeta(eip) : undefined,
-							panelOpened: hasEip ? eip?.panel_opened : undefined,
+							panelOpened: hasEip ? resolvePanelOpened(eip) : undefined,
 							width: eipWidth,
 							height: eipHeight,
+							zIndex: eipHasModules ? 1 : 10,
 							handles: [
 								...processorTopPorts,
-								...(hasWayjun ? [makePort('wayjun-in', 'target', 'left', 72)] : engineTargetPorts),
-								...aeSourcePorts,
-								...fuelSourcePorts
+								...eipLegacyEngineTargetPorts,
+								...eipOutputPorts
 							]
 						})
 					]
@@ -398,8 +546,24 @@
 							height: wayjunHeight,
 							handles: [
 								...(hasEip ? [] : processorTopPorts),
-								...engineTargetPorts,
-								...(hasEip ? [makePort('eip-out', 'source', 'right', 72)] : [])
+								...wayjunEngineTargetPorts,
+								...wayjunOutputPorts
+							]
+						})
+					]
+				: []),
+			...(hasEi
+				? [
+						makeNode('ei', ei?.name || 'EI', eiX, eiY, {
+							online: ei?.online,
+							subtitle: 'Engine\nInterface',
+							icon: '/assets/engine.png',
+							variant: 'device',
+							width: eiWidth,
+							height: eiHeight,
+							handles: [
+								...eiEngineTargetPorts,
+								...eiOutputPorts
 							]
 						})
 					]
@@ -478,10 +642,11 @@
 			)
 		];
 
-		engineRows.forEach((_, index) => {
-			if (engineProcessorId) {
+		engineRows.forEach((engine, index) => {
+			const targetProcessor = engine?.processor || defaultEngineProcessorId;
+			if (targetProcessor) {
 				nextEdges.push(
-					makeEdge(`engine-${index}-to-${engineProcessorId}`, `engine-${index}`, engineProcessorId, 'canbus', {
+					makeEdge(`engine-${index}-to-${targetProcessor}`, `engine-${index}`, targetProcessor, 'canbus', {
 						sourceHandle: 'out',
 						targetHandle: `engine-${index}-in`
 					})
@@ -489,17 +654,8 @@
 			}
 		});
 
-		if (hasWayjun && hasEip) {
-			nextEdges.push(
-				makeEdge('wayjun-to-eip', 'wayjun', 'eip', 'canbus', {
-					sourceHandle: 'eip-out',
-					targetHandle: 'wayjun-in'
-				})
-			);
-		}
-
-		aeRows.forEach((_, index) => {
-			const sourceNode = hasEip ? 'eip' : 'mcp';
+		aeRows.forEach((load, index) => {
+			const sourceNode = resolveOutputProcessor(load);
 			nextEdges.push(
 				makeEdge(`${sourceNode}-to-ae-${index}`, sourceNode, `ae-${index}`, 'canbus', {
 					sourceHandle: `ae-${index}-out`,
@@ -508,8 +664,8 @@
 			);
 		});
 
-		fuelRows.forEach((_, index) => {
-			const sourceNode = hasEip ? 'eip' : 'mcp';
+		fuelRows.forEach((source, index) => {
+			const sourceNode = resolveOutputProcessor(source);
 			nextEdges.push(
 				makeEdge(`${sourceNode}-to-fuel-${index}`, sourceNode, `fuel-${index}`, 'canbus', {
 					sourceHandle: `fuel-${index}-out`,
@@ -646,7 +802,7 @@
 			<span class="eyebrow">Single Line Diagram</span>
 			<h1>{vesselName}</h1>
 			<p>
-				Live vessel system topology for MCP, Router, GPS, EIP, engine signals, fuel source, and
+				Live vessel system topology for MCP, Router, GPS, IP panel, engine signals, fuel source, and
 				auxiliary load monitoring.
 			</p>
 		</div>
@@ -1262,15 +1418,24 @@
 	}
 
 	:global(.single-line-page .svelte-flow__node .sld-node .node-copy strong) {
-		color: #0f172a !important;
+		color: var(--sld-title-color, #0f172a) !important;
 	}
 
 	:global(.single-line-page .svelte-flow__node .sld-node .node-copy span) {
-		color: #334155 !important;
+		color: var(--sld-subtitle-color, #334155) !important;
 	}
 
 	:global(.single-line-page .svelte-flow__node .sld-node .node-copy small) {
-		color: #475569 !important;
+		color: var(--sld-meta-color, #475569) !important;
+	}
+
+	:global(.single-line-page .svelte-flow__node .sld-node.ip-panel .node-copy strong) {
+		color: #f8fbff !important;
+	}
+
+	:global(.single-line-page .svelte-flow__node .sld-node.ip-panel .node-copy span),
+	:global(.single-line-page .svelte-flow__node .sld-node.ip-panel .node-copy small) {
+		color: #d9e8ff !important;
 	}
 
 	:global(.single-line-page .svelte-flow__edge-path) {

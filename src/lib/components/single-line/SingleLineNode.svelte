@@ -132,6 +132,54 @@
 		min-height: 190px;
 	}
 
+	.sld-node.ip-panel {
+		--sld-title-color: #f8fbff;
+		--sld-subtitle-color: #d9e8ff;
+		--sld-meta-color: #d9e8ff;
+		place-items: start stretch;
+		align-content: start;
+		justify-items: stretch;
+		padding: 46px 20px 18px;
+		border: 2px dashed rgba(125, 211, 252, 0.9);
+		background:
+			linear-gradient(180deg, rgba(30, 58, 88, 0.62), rgba(20, 44, 74, 0.46)),
+			radial-gradient(circle at 35% 18%, rgba(56, 189, 248, 0.22), transparent 38%),
+			rgba(15, 23, 42, 0.72);
+		color: #e5edf7;
+		box-shadow:
+			inset 0 0 0 1px rgba(186, 230, 253, 0.2),
+			inset 0 0 34px rgba(56, 189, 248, 0.08),
+			0 18px 40px rgba(0, 0, 0, 0.24);
+		pointer-events: none;
+	}
+
+	.sld-node.ip-panel .node-title {
+		justify-items: start;
+		align-self: start;
+		max-width: calc(100% - 70px);
+	}
+
+	.sld-node.ip-panel .node-title strong {
+		color: #f8fbff !important;
+		font-size: 1.12rem;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		text-shadow: 0 2px 10px rgba(0, 0, 0, 0.55);
+	}
+
+	.sld-node.ip-panel .node-meta {
+		justify-items: start;
+		margin-top: 2px;
+	}
+
+	.sld-node.ip-panel .node-meta span,
+	.sld-node.ip-panel .node-meta small {
+		color: #c7d7ee !important;
+		font-size: 0.92rem;
+		font-weight: 700;
+		text-align: left;
+	}
+
 	.sld-node.device {
 		border-radius: 0;
 	}
@@ -158,6 +206,35 @@
 		color: #475569;
 		filter: grayscale(0.82) saturate(0.45);
 		opacity: 0.72;
+	}
+
+	.sld-node.ip-panel.online,
+	.sld-node.ip-panel.offline,
+	.sld-node.ip-panel.unknown {
+		--sld-title-color: #f8fbff;
+		--sld-subtitle-color: #d9e8ff;
+		--sld-meta-color: #d9e8ff;
+		border-color: rgba(125, 211, 252, 0.9);
+		background:
+			linear-gradient(180deg, rgba(30, 58, 88, 0.62), rgba(20, 44, 74, 0.46)),
+			radial-gradient(circle at 35% 18%, rgba(56, 189, 248, 0.22), transparent 38%),
+			rgba(15, 23, 42, 0.72);
+		color: #e5edf7;
+		filter: none;
+		opacity: 1;
+	}
+
+	.sld-node.ip-panel.online {
+		border-color: rgba(125, 211, 252, 0.96);
+		box-shadow:
+			inset 0 0 0 1px rgba(186, 230, 253, 0.24),
+			inset 0 0 34px rgba(56, 189, 248, 0.1),
+			0 18px 40px rgba(0, 0, 0, 0.24);
+	}
+
+	.sld-node.ip-panel.offline,
+	.sld-node.ip-panel.unknown {
+		border-color: rgba(148, 163, 184, 0.88);
 	}
 
 	.sld-node.has-icon {
@@ -266,6 +343,28 @@
 			0 0 10px rgba(34, 197, 94, 0.36);
 	}
 
+	.sld-node.ip-panel .panel-status-indicator {
+		top: 14px;
+		left: 16px;
+		height: 24px;
+		padding: 0 9px;
+		background: rgba(15, 23, 42, 0.72);
+		color: #f8fbff;
+		box-shadow: 0 8px 18px rgba(2, 6, 23, 0.28);
+	}
+
+	.sld-node.ip-panel .panel-status-indicator.open {
+		border-color: rgba(245, 158, 11, 0.72);
+		background: rgba(245, 158, 11, 0.18);
+		color: #fbbf24;
+	}
+
+	.sld-node.ip-panel .panel-status-indicator.closed {
+		border-color: rgba(34, 197, 94, 0.62);
+		background: rgba(34, 197, 94, 0.16);
+		color: #86efac;
+	}
+
 	.node-logo {
 		display: block;
 		width: min(116px, calc(var(--sld-node-width) - 22px));
@@ -299,7 +398,7 @@
 	}
 
 	.node-copy strong {
-		color: #0f172a !important;
+		color: var(--sld-title-color, #0f172a) !important;
 		font-size: 1rem;
 		font-weight: 800;
 		line-height: 1.05;
@@ -312,23 +411,36 @@
 		font-size: 1rem;
 		font-weight: 650;
 		line-height: 1.2;
-		color: #334155 !important;
+		color: var(--sld-subtitle-color, #334155) !important;
 		white-space: pre-line;
 	}
 
 	.sld-node.has-icon .node-copy span {
-		color: #334155 !important;
+		color: var(--sld-subtitle-color, #334155) !important;
 	}
 
 	.node-copy small {
 		font-size: 1rem;
 		font-weight: 750;
-		color: #0b2141 !important;
+		color: var(--sld-meta-color, #0b2141) !important;
 		white-space: pre-line;
 	}
 
 	.sld-node.has-icon .node-copy small {
-		color: #0b2141 !important;
+		color: var(--sld-meta-color, #0b2141) !important;
+	}
+
+	.sld-node.ip-panel .node-title strong {
+		color: #f8fbff !important;
+		text-shadow:
+			0 2px 10px rgba(0, 0, 0, 0.72),
+			0 0 14px rgba(56, 189, 248, 0.24);
+	}
+
+	.sld-node.ip-panel .node-meta span,
+	.sld-node.ip-panel .node-meta small {
+		color: #d9e8ff !important;
+		text-shadow: 0 2px 8px rgba(0, 0, 0, 0.58);
 	}
 
 	:global(.sld-handle) {
