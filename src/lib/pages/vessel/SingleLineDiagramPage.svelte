@@ -132,7 +132,7 @@
 	}
 
 	function isMcpFuelSource(sourceLabel) {
-		return ['FM', 'FMS'].includes(String(sourceLabel || '').toUpperCase());
+		return ['FM', 'FMS', 'FOD'].includes(String(sourceLabel || '').toUpperCase());
 	}
 
 	function hasFuelSourceForWayjun(rawFuelSource = {}) {
