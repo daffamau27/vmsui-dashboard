@@ -2502,8 +2502,6 @@
 
 			const normalizedVessels = Array.isArray(vessels) ? vessels.map(normalizeFleetVessel) : [];
 
-			console.log('[FLEET_VIEW][VESSELS_REFRESHED]', normalizedVessels);
-
 			vesselData = normalizedVessels;
 			fleetError = '';
 

@@ -263,8 +263,17 @@
 		return min + ((max - min) * index) / (total - 1);
 	}
 
+	function laneOffset(index, total, base = 26, step = 16) {
+		if (total <= 1) return base;
+		return base + index * step;
+	}
+
 	function makeEdge(id, source, target, type = 'canbus', options = {}) {
 		const cable = CABLES[type] || CABLES.canbus;
+		const pathOptions = { borderRadius: 0 };
+		if (Number.isFinite(Number(options.pathOffset))) {
+			pathOptions.offset = Number(options.pathOffset);
+		}
 
 		return {
 			id,
@@ -274,7 +283,7 @@
 			targetHandle: options.targetHandle,
 			type: options.edgeType || 'smoothstep',
 			style: `stroke: ${cable.color}; stroke-width: ${options.width || cable.width};`,
-			pathOptions: { borderRadius: 0 },
+			pathOptions,
 			selectable: false,
 			animated: false,
 			zIndex: 5
@@ -296,6 +305,17 @@
 		const aeRows = aeLoads.length ? aeLoads.slice(0, 2) : [];
 
 		const fuelRows = fuelSources.length ? fuelSources.slice(0, 10) : [];
+		function resolveOutputProcessor(row) {
+			return row?.processor || (hasEip ? 'eip' : 'mcp');
+		}
+
+		const outputRows = [...aeRows, ...fuelRows];
+		const wayjunInputCount = engineRows.filter((engine) => engine?.processor === 'wayjun').length;
+		const eiInputCount = engineRows.filter((engine) => engine?.processor === 'ei').length;
+		const eipInputCount = engineRows.filter((engine) => engine?.processor === 'eip').length;
+		const wayjunOutputCount = outputRows.filter((row) => resolveOutputProcessor(row) === 'wayjun').length;
+		const eiOutputCount = outputRows.filter((row) => resolveOutputProcessor(row) === 'ei').length;
+		const eipOutputCount = outputRows.filter((row) => resolveOutputProcessor(row) === 'eip').length;
 		const wheelhouseSectionWidth = 1010;
 		const wheelhouseSectionHeight = 470;
 		const mastSectionX = 1110;
@@ -305,18 +325,36 @@
 		const eipHasModules = hasEi || hasWayjun;
 		const eipX = eipHasModules ? 360 : 405;
 		const eipY = 690;
-		const eipHeight = eipHasModules ? (hasEi && hasWayjun ? 440 : 292) : 328;
 		const eipWidth = eipHasModules ? 330 : 168;
 		const moduleNodeX = eipX + 70;
-		const firstModuleY = eipY + 94;
-		const moduleNodeGap = 168;
+		const wayjunPortDemand = Math.max(wayjunInputCount, wayjunOutputCount, 1);
+		const eiPortDemand = Math.max(eiInputCount, eiOutputCount, 1);
+		const eipPortDemand = Math.max(eipInputCount, eipOutputCount, 1);
+		const wayjunHeight = hasEip
+			? Math.max(144, 76 + wayjunPortDemand * 28)
+			: Math.max(180, 82 + wayjunPortDemand * 30);
+		const eiHeight = hasEip
+			? Math.max(144, 76 + eiPortDemand * 28)
+			: Math.max(180, 82 + eiPortDemand * 30);
+		const legacyEipHeight = Math.max(328, 104 + eipPortDemand * 30);
+		const moduleGap = 62;
+		const firstModuleY = eipY + 122;
+		const moduleNodeGap = wayjunHeight + moduleGap;
+		const eipHeight = eipHasModules
+			? Math.max(
+					320,
+					(firstModuleY - eipY) +
+						(hasWayjun ? wayjunHeight : 0) +
+						(hasEi ? eiHeight : 0) +
+						(hasWayjun && hasEi ? moduleGap : 0) +
+						52
+				)
+			: legacyEipHeight;
 		const wayjunX = hasEip ? moduleNodeX : 405;
 		const wayjunY = hasEip ? firstModuleY : 720;
-		const wayjunHeight = hasEip ? 126 : 180;
 		const wayjunWidth = hasEip ? 190 : 188;
 		const eiX = hasEip ? moduleNodeX : 405;
 		const eiY = hasEip ? firstModuleY + (hasWayjun ? moduleNodeGap : 0) : hasWayjun ? 1000 : 760;
-		const eiHeight = hasEip ? 126 : 180;
 		const eiWidth = hasEip ? 190 : 188;
 		const engineNodeX = 95;
 		const engineNodeStartY = 635;
@@ -349,7 +387,7 @@
 					`engine-${entry.index}-in`,
 					'target',
 					'left',
-					spreadOffset(localIndex, processorRows.length, 24, 76)
+					spreadOffset(localIndex, processorRows.length, 16, 84)
 				)
 			);
 		}
@@ -357,9 +395,6 @@
 		const eipLegacyEngineTargetPorts = legacyEipProcessor ? enginePortsForProcessor('eip') : [];
 		const wayjunEngineTargetPorts = enginePortsForProcessor('wayjun');
 		const eiEngineTargetPorts = enginePortsForProcessor('ei');
-		function resolveOutputProcessor(row) {
-			return row?.processor || (hasEip ? 'eip' : 'mcp');
-		}
 
 		const outgoingConnections = [
 			...aeRows.map((row, index) => ({
@@ -380,7 +415,7 @@
 					entry.handleId,
 					'source',
 					'right',
-					spreadOffset(localIndex, rows.length, 26, 74)
+					spreadOffset(localIndex, rows.length, 18, 82)
 				)
 			);
 		}
@@ -634,32 +669,53 @@
 				sourceHandle: 'mast-out',
 				targetHandle: 'in'
 			}),
-			...mcpToProcessorCables.map((name) =>
+			...mcpToProcessorCables.map((name, index) =>
 				makeEdge(`mcp-${name}-to-${mcpProcessorTargetId}`, 'mcp', mcpProcessorTargetId, name === 'power' ? 'powerDc' : name, {
 					sourceHandle: `${mcpProcessorTargetId}-${name}-out`,
-					targetHandle: `${name}-in`
+					targetHandle: `${name}-in`,
+					pathOffset: laneOffset(index, mcpToProcessorCables.length, 26, 15)
 				})
 			)
 		];
 
+		const engineEdgeLaneCounters = {};
 		engineRows.forEach((engine, index) => {
 			const targetProcessor = engine?.processor || defaultEngineProcessorId;
 			if (targetProcessor) {
+				const targetTotal = engineRows.filter(
+					(row) => (row?.processor || defaultEngineProcessorId) === targetProcessor
+				).length;
+				const targetLane = engineEdgeLaneCounters[targetProcessor] || 0;
+				engineEdgeLaneCounters[targetProcessor] = targetLane + 1;
+
 				nextEdges.push(
 					makeEdge(`engine-${index}-to-${targetProcessor}`, `engine-${index}`, targetProcessor, 'canbus', {
 						sourceHandle: 'out',
-						targetHandle: `engine-${index}-in`
+						targetHandle: `engine-${index}-in`,
+						edgeType: 'step',
+						pathOffset: laneOffset(targetLane, targetTotal, 24, 18)
 					})
 				);
 			}
 		});
+
+		const outputEdgeLaneCounters = {};
+		function getOutputLane(sourceNode) {
+			const sourceTotal = [...aeRows, ...fuelRows].filter(
+				(row) => resolveOutputProcessor(row) === sourceNode
+			).length;
+			const sourceLane = outputEdgeLaneCounters[sourceNode] || 0;
+			outputEdgeLaneCounters[sourceNode] = sourceLane + 1;
+			return laneOffset(sourceLane, sourceTotal, 24, 18);
+		}
 
 		aeRows.forEach((load, index) => {
 			const sourceNode = resolveOutputProcessor(load);
 			nextEdges.push(
 				makeEdge(`${sourceNode}-to-ae-${index}`, sourceNode, `ae-${index}`, 'canbus', {
 					sourceHandle: `ae-${index}-out`,
-					targetHandle: 'in'
+					targetHandle: 'in',
+					pathOffset: getOutputLane(sourceNode)
 				})
 			);
 		});
@@ -669,7 +725,8 @@
 			nextEdges.push(
 				makeEdge(`${sourceNode}-to-fuel-${index}`, sourceNode, `fuel-${index}`, 'canbus', {
 					sourceHandle: `fuel-${index}-out`,
-					targetHandle: 'in'
+					targetHandle: 'in',
+					pathOffset: getOutputLane(sourceNode)
 				})
 			);
 		});

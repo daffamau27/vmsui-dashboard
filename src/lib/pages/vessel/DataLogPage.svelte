@@ -4,6 +4,7 @@
 	import {
 		getAvailableDataLogColumns,
 		getDataLogData,
+		getDataLogDeviations,
 		getDataLogExcelUrl
 	} from '$lib/api/dataLogApi.js';
 
@@ -22,6 +23,9 @@
 	let dataLogPage = $state(1);
 	let dataLogRequestId = 0;
 	const DATA_LOG_PAGE_SIZE = 100;
+	let dataDeviation = $state(null);
+	let dataDeviationLoading = $state(false);
+	let dataDeviationError = $state('');
 
 	let startDateTime = $state('');
 	let endDateTime = $state('');
@@ -99,6 +103,9 @@
 	let canViewFuelEngineMaker = $derived(hasPermission('view_fuel_engine_maker'));
 	let canManageDataLogOverride = $derived(hasPermission('manage_data_log_override'));
 	let canViewDataLogAvailableColumns = $derived(hasPermission('view_data_log_available_columns'));
+	let canViewDataLogDataDeviations = $derived(
+		hasPermission('view_data_log_data_deviations')
+	);
 
 	let overrideDownloadingTemplate = $state(false);
 	let overrideImporting = $state(false);
@@ -266,6 +273,89 @@
 		const extras = [...keys].filter((key) => !preferred.includes(key));
 
 		return [...preferred, ...extras];
+	}
+
+	const DATA_DEVIATION_LABELS = {
+		jumping_data: 'Jumping Data',
+		spike_rpm: 'Spike RPM',
+		outrange_rpm: 'Outrange RPM',
+		rpm_blank: 'RPM Blank'
+	};
+
+	const DATA_DEVIATION_DESCRIPTIONS = {
+		jumping_data: 'Telemetry point jumps or discontinuities found in the selected range.',
+		spike_rpm: 'RPM values that spike sharply beyond the expected trend.',
+		outrange_rpm: 'RPM values outside the configured low/high operating range.',
+		rpm_blank: 'Intervals where RPM values are missing or blank.'
+	};
+
+	function normalizeDeviationKey(key) {
+		return String(key || '')
+			.trim()
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, '_')
+			.replace(/^_+|_+$/g, '');
+	}
+
+	function getDeviationLabel(key) {
+		const normalizedKey = normalizeDeviationKey(key);
+		return DATA_DEVIATION_LABELS[normalizedKey] || formatColumnAcronyms(prettifyColumnLabel(key));
+	}
+
+	function getDeviationDescription(key) {
+		return DATA_DEVIATION_DESCRIPTIONS[normalizeDeviationKey(key)] || 'Deviation found in the selected date range.';
+	}
+
+	function normalizeDeviationPayload(payload = {}) {
+		const source = payload?.data || payload || {};
+		const deviations = source?.deviations || {};
+
+		if (!deviations || typeof deviations !== 'object' || Array.isArray(deviations)) {
+			return [];
+		}
+
+		return Object.entries(deviations).map(([key, value = {}]) => {
+			const rows = Array.isArray(value?.rows) ? value.rows : [];
+
+			return {
+				key: normalizeDeviationKey(key),
+				rawKey: key,
+				label: getDeviationLabel(key),
+				description: getDeviationDescription(key),
+				count: Number(value?.count ?? rows.length ?? 0) || 0,
+				totalDurationMinutes: Number(value?.total_duration_minutes ?? value?.totalDurationMinutes ?? 0) || 0,
+				rows
+			};
+		});
+	}
+
+	function flattenDeviationRows(categories = []) {
+		return categories.flatMap((category) =>
+			(category.rows || []).map((row, index) => ({
+				...row,
+				id: `${category.key}-${index}`,
+				type: category.label,
+				key: category.key
+			}))
+		);
+	}
+
+	function formatDeviationDuration(minutes) {
+		const value = Number(minutes);
+
+		if (!Number.isFinite(value) || value <= 0) return '0 min';
+
+		const totalMinutes = Math.round(value);
+		const days = Math.floor(totalMinutes / 1440);
+		const hours = Math.floor((totalMinutes % 1440) / 60);
+		const mins = totalMinutes % 60;
+		const parts = [];
+
+		if (days) parts.push(`${days}d`);
+		if (hours) parts.push(`${hours}h`);
+		if (mins || !parts.length) parts.push(`${mins}m`);
+
+		return parts.join(' ');
 	}
 
 	let selectedColumns = $state([
@@ -443,6 +533,9 @@
 		}
 
 		hasLoadedDateRange = false;
+		dataDeviation = null;
+		dataDeviationError = '';
+		dataDeviationLoading = false;
 		overrideImports = [];
 		overrideImportsError = '';
 		overrideImportsPagination = {
@@ -698,6 +791,18 @@
 	);
 
 	let normalizedData = $derived(logData?.data || logData || {});
+	let normalizedDeviationData = $derived(dataDeviation?.data || dataDeviation || {});
+	let dataDeviationCategories = $derived(normalizeDeviationPayload(normalizedDeviationData));
+	let dataDeviationRows = $derived(flattenDeviationRows(dataDeviationCategories));
+	let dataDeviationTotalCount = $derived(
+		dataDeviationCategories.reduce((total, item) => total + (Number(item.count) || 0), 0)
+	);
+	let dataDeviationTotalDuration = $derived(
+		dataDeviationCategories.reduce(
+			(total, item) => total + (Number(item.totalDurationMinutes) || 0),
+			0
+		)
+	);
 
 	let dataRows = $derived(loadedRows);
 
@@ -768,12 +873,15 @@
 	async function loadDataLog({ page = null, append = false } = {}) {
 		if (!$selectedVesselId) {
 			error = 'No vessel has been selected from Fleet View.';
-			logData = null;
-			loadedRows = [];
-			dataLogPagination = null;
-			hasLoadedDateRange = false;
-			return;
-		}
+		logData = null;
+		loadedRows = [];
+		dataLogPagination = null;
+		hasLoadedDateRange = false;
+		dataDeviation = null;
+		dataDeviationError = '';
+		dataDeviationLoading = false;
+		return;
+	}
 
 		await loadCurrentUser();
 		await loadAvailableColumns();
@@ -789,11 +897,17 @@
 			logData = null;
 			dataLogPagination = null;
 			dataLogPage = 1;
+			dataDeviation = null;
+			dataDeviationError = '';
 		}
 
 		error = '';
 
 		try {
+			if (!append && canViewDataLogDataDeviations) {
+				loadDataDeviation({ requestId });
+			}
+
 			let targetPage = Number(page || 1);
 			let result;
 			let payload;
@@ -880,10 +994,55 @@
 				loadedRows = [];
 				dataLogPagination = null;
 				hasLoadedDateRange = false;
+				dataDeviation = null;
 			}
 		} finally {
 			loading = false;
 			loadingMore = false;
+		}
+	}
+
+	async function loadDataDeviation({ requestId = dataLogRequestId } = {}) {
+		if (
+			!$selectedVesselId ||
+			!startDateTime ||
+			!endDateTime ||
+			!canViewDataLogDataDeviations
+		) {
+			dataDeviation = null;
+			dataDeviationError = '';
+			dataDeviationLoading = false;
+			return null;
+		}
+
+		dataDeviationLoading = true;
+		dataDeviationError = '';
+
+		try {
+			const result = await getDataLogDeviations({
+				vesselId: $selectedVesselId,
+				start: toApiDateTime(startDateTime),
+				end: toApiDateTime(endDateTime),
+				timezoneMode,
+				timezoneOffset
+			});
+
+			if (requestId !== dataLogRequestId) return null;
+
+			dataDeviation = result?.data || result || null;
+			console.log('[DATA_LOG_DEVIATION]', result);
+			return dataDeviation;
+		} catch (err) {
+			if (requestId !== dataLogRequestId) return null;
+
+			console.error('[DATA_LOG_DEVIATION_ERROR]', err);
+			dataDeviation = null;
+			dataDeviationError = err?.message || 'Failed to load data deviations.';
+			return null;
+		} finally {
+			if (requestId === dataLogRequestId) {
+				dataDeviationLoading = false;
+			}
 		}
 	}
 
@@ -1579,6 +1738,107 @@
 		<div class="status-box error-box">{currentUserError}</div>
 	{/if}
 
+	{#if canViewDataLogDataDeviations}
+		<section class="deviation-card">
+			<div class="section-header deviation-header">
+				<div>
+					<span class="section-kicker">Deviation</span>
+					<h2>Data Deviation</h2>
+				</div>
+
+				<strong>
+					{dataDeviationTotalCount}
+					{dataDeviationTotalCount === 1 ? 'event' : 'events'}
+				</strong>
+			</div>
+
+			{#if dataDeviationLoading && !dataDeviation}
+				<div class="deviation-loading">Loading data deviation...</div>
+			{:else if dataDeviationError}
+				<div class="status-box error-box">{dataDeviationError}</div>
+			{:else if dataDeviation}
+				<div class="deviation-overview">
+					<div class="deviation-vessel-meta">
+						<div>
+							<span>Total Duration</span>
+							<strong>{formatDeviationDuration(dataDeviationTotalDuration)}</strong>
+						</div>
+					</div>
+
+					{#if normalizedDeviationData?.rpm_limits}
+						<div class="rpm-limit-strip" aria-label="RPM deviation limits">
+							<span class="rpm-limit-title">RPM Limits</span>
+							<div>
+								<span>Low RPM</span>
+								<strong>{formatValue(normalizedDeviationData.rpm_limits.low)}</strong>
+							</div>
+							<div>
+								<span>High RPM</span>
+								<strong>{formatValue(normalizedDeviationData.rpm_limits.high)}</strong>
+							</div>
+							<div>
+								<span>Lower Limit</span>
+								<strong>{formatValue(normalizedDeviationData.rpm_limits.lower_limit)}</strong>
+							</div>
+							<div>
+								<span>Upper Limit</span>
+								<strong>{formatValue(normalizedDeviationData.rpm_limits.upper_limit)}</strong>
+							</div>
+						</div>
+					{/if}
+
+					<div class="deviation-summary-grid">
+						{#each dataDeviationCategories as item}
+							<article class="deviation-summary-item" data-deviation={item.key}>
+								<div>
+									<span>{item.label}</span>
+									<p>{item.description}</p>
+								</div>
+								<div class="deviation-summary-value">
+									<strong>{item.count}</strong>
+									<small>{formatDeviationDuration(item.totalDurationMinutes)}</small>
+								</div>
+							</article>
+						{/each}
+					</div>
+
+					{#if dataDeviationRows.length}
+						<div class="deviation-table-wrapper">
+							<table class="deviation-table">
+								<thead>
+									<tr>
+										<th>Type</th>
+										<th>Start</th>
+										<th>End</th>
+										<th>Duration</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each dataDeviationRows as row}
+										<tr>
+											<td>
+												<span class="deviation-type-chip" data-deviation={row.key}>{row.type}</span>
+											</td>
+											<td>{formatCellValue(row?.start, 'timestamp')}</td>
+											<td>{formatCellValue(row?.end, 'timestamp')}</td>
+											<td>{formatDeviationDuration(row?.duration_minutes ?? row?.durationMinutes)}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					{:else}
+						<div class="empty-box">No data deviation found for the selected date range.</div>
+					{/if}
+				</div>
+			{:else}
+				<div class="empty-box">
+					Data deviation will be shown after you choose a date range and click Load Data.
+				</div>
+			{/if}
+		</section>
+	{/if}
+
 	{#if loading && !dataRows.length}
 		<LoadingSkeleton
 			label="Loading telemetry log"
@@ -1694,6 +1954,7 @@
 
 	.data-log-header-card,
 	.column-card,
+	.deviation-card,
 	.table-section,
 	.raw-box {
 		background: var(--color-surface);
@@ -2446,6 +2707,288 @@
 		overflow: hidden;
 	}
 
+	.deviation-card {
+		margin-top: 12px;
+		overflow: hidden;
+	}
+
+	.deviation-header {
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.03)),
+			var(--color-surface);
+	}
+
+	.deviation-loading {
+		padding: 18px 14px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 800;
+	}
+
+	.deviation-overview {
+		display: grid;
+		gap: 10px;
+		padding: 12px;
+		background: rgba(15, 23, 42, 0.26);
+	}
+
+	.deviation-vessel-meta {
+		display: grid;
+		grid-template-columns: minmax(180px, 260px);
+		gap: 8px;
+	}
+
+	.rpm-limit-strip {
+		display: flex;
+		align-items: stretch;
+		gap: 8px;
+		padding: 10px;
+		border: 1px solid rgba(96, 165, 250, 0.16);
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(15, 23, 42, 0.22)),
+			rgba(15, 23, 42, 0.34);
+		overflow-x: auto;
+	}
+
+	.rpm-limit-title {
+		flex: 0 0 116px;
+		display: grid;
+		place-items: center start;
+		padding: 0 12px;
+		border-right: 1px solid rgba(148, 163, 184, 0.2);
+		color: #bfdbfe !important;
+		font-size: 11px !important;
+		font-weight: 900 !important;
+		letter-spacing: 0.08em !important;
+		text-transform: uppercase !important;
+	}
+
+	.deviation-vessel-meta div,
+	.rpm-limit-strip div {
+		min-width: 0;
+		padding: 9px 12px;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		background:
+			linear-gradient(180deg, rgba(30, 41, 59, 0.52), rgba(15, 23, 42, 0.5)),
+			rgba(15, 23, 42, 0.32);
+	}
+
+	.deviation-vessel-meta div {
+		position: relative;
+		min-height: 64px;
+		padding: 12px 14px;
+		border-color: rgba(96, 165, 250, 0.22);
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.18), rgba(14, 165, 233, 0.05)),
+			rgba(15, 23, 42, 0.52);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+	}
+
+	.deviation-vessel-meta div::after {
+		content: '';
+		position: absolute;
+		right: 12px;
+		top: 12px;
+		width: 8px;
+		height: 8px;
+		border-radius: 999px;
+		background: #60a5fa;
+		box-shadow: 0 0 18px rgba(96, 165, 250, 0.52);
+	}
+
+	.rpm-limit-strip div {
+		flex: 1 1 130px;
+		min-width: 130px;
+	}
+
+	.deviation-vessel-meta span,
+	.rpm-limit-strip span {
+		display: block;
+		color: #8fa4c2;
+		font-size: 10px;
+		font-weight: 900;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+	}
+
+	.deviation-vessel-meta strong,
+	.rpm-limit-strip strong {
+		display: block;
+		margin-top: 5px;
+		color: var(--text-primary);
+		font-size: 14px;
+		font-weight: 900;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.deviation-vessel-meta strong {
+		font-size: 20px;
+		line-height: 1.1;
+	}
+
+	.deviation-summary-grid {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(170px, 1fr));
+		gap: 8px;
+	}
+
+	.deviation-summary-item {
+		display: flex;
+		align-items: stretch;
+		justify-content: space-between;
+		gap: 12px;
+		min-height: 92px;
+		padding: 12px;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		background:
+			linear-gradient(145deg, rgba(30, 41, 59, 0.62), rgba(15, 23, 42, 0.56)),
+			rgba(15, 23, 42, 0.34);
+	}
+
+	.deviation-summary-item::before {
+		content: '';
+		width: 4px;
+		margin: -12px 0 -12px -12px;
+		flex: 0 0 auto;
+		background: #60a5fa;
+	}
+
+	.deviation-summary-item[data-deviation='jumping_data']::before {
+		background: #38bdf8;
+	}
+
+	.deviation-summary-item[data-deviation='spike_rpm']::before {
+		background: #f59e0b;
+	}
+
+	.deviation-summary-item[data-deviation='outrange_rpm']::before {
+		background: #ef4444;
+	}
+
+	.deviation-summary-item[data-deviation='rpm_blank']::before {
+		background: #a78bfa;
+	}
+
+	.deviation-summary-item span {
+		display: block;
+		color: var(--text-primary);
+		font-size: 13px;
+		font-weight: 900;
+	}
+
+	.deviation-summary-item p {
+		margin: 6px 0 0;
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 700;
+		line-height: 1.45;
+	}
+
+	.deviation-summary-value {
+		flex: 0 0 auto;
+		display: grid;
+		align-content: center;
+		justify-items: end;
+		text-align: right;
+	}
+
+	.deviation-summary-value strong {
+		color: var(--text-primary);
+		font-size: 28px;
+		line-height: 1;
+		font-weight: 900;
+	}
+
+	.deviation-summary-value small {
+		margin-top: 6px;
+		color: #bfdbfe;
+		font-size: 11px;
+		font-weight: 900;
+		white-space: nowrap;
+	}
+
+	.deviation-table-wrapper {
+		max-height: 320px;
+		overflow: auto;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		background: rgba(15, 23, 42, 0.28);
+	}
+
+	.deviation-table {
+		width: 100%;
+		min-width: 720px;
+		border-collapse: separate;
+		border-spacing: 0;
+		font-size: 12px;
+	}
+
+	.deviation-table th {
+		position: sticky;
+		top: 0;
+		z-index: 2;
+		padding: 10px 12px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+		background: rgba(30, 41, 59, 0.98);
+		color: var(--text-primary);
+		font-size: 11px;
+		font-weight: 900;
+		text-align: left;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+
+	.deviation-table td {
+		padding: 10px 12px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+	}
+
+	.deviation-table tbody tr:nth-child(even) td {
+		background: rgba(30, 41, 59, 0.28);
+	}
+
+	.deviation-type-chip {
+		display: inline-flex;
+		align-items: center;
+		min-height: 24px;
+		padding: 0 9px;
+		border: 1px solid rgba(96, 165, 250, 0.38);
+		background: rgba(37, 99, 235, 0.16);
+		color: #dbeafe;
+		font-size: 10px;
+		font-weight: 900;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		white-space: nowrap;
+	}
+
+	.deviation-type-chip[data-deviation='jumping_data'] {
+		border-color: rgba(56, 189, 248, 0.5);
+		background: rgba(14, 165, 233, 0.14);
+	}
+
+	.deviation-type-chip[data-deviation='spike_rpm'] {
+		border-color: rgba(245, 158, 11, 0.58);
+		background: rgba(245, 158, 11, 0.13);
+		color: #fde68a;
+	}
+
+	.deviation-type-chip[data-deviation='outrange_rpm'] {
+		border-color: rgba(248, 113, 113, 0.54);
+		background: rgba(239, 68, 68, 0.13);
+		color: #fecaca;
+	}
+
+	.deviation-type-chip[data-deviation='rpm_blank'] {
+		border-color: rgba(167, 139, 250, 0.58);
+		background: rgba(124, 58, 237, 0.14);
+		color: #ddd6fe;
+	}
+
 	.section-header {
 		min-height: 54px;
 		padding: 11px 13px;
@@ -2635,6 +3178,11 @@
 		.column-grid {
 			grid-template-columns: repeat(2, minmax(160px, 1fr));
 		}
+
+		.deviation-vessel-meta,
+		.deviation-summary-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
 	}
 
 	@media (max-width: 760px) {
@@ -2673,6 +3221,32 @@
 
 		.column-grid {
 			grid-template-columns: 1fr;
+		}
+
+		.deviation-vessel-meta,
+		.deviation-summary-grid {
+			grid-template-columns: 1fr;
+		}
+
+		.rpm-limit-strip {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.rpm-limit-title {
+			grid-column: 1 / -1;
+			min-height: 26px;
+			padding: 0 2px 8px;
+			border-right: 0;
+			border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+		}
+
+		.rpm-limit-strip div {
+			min-width: 0;
+		}
+
+		.deviation-summary-item {
+			min-height: 76px;
 		}
 
 		.data-log-table-wrapper {

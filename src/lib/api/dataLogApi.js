@@ -59,6 +59,32 @@ export async function getAvailableDataLogColumns({ vesselId }) {
   return response?.data || response;
 }
 
+export async function getDataLogDeviations({
+  vesselId,
+  start,
+  end,
+  timezoneMode = "auto",
+  timezoneOffset = ""
+}) {
+  if (!vesselId) throw new Error("vesselId is required.");
+  if (!start) throw new Error("Start time must be filled in.");
+  if (!end) throw new Error("End time must be filled in.");
+
+  const query = buildQuery({
+    vesselId,
+    start,
+    end,
+    timezoneMode,
+    timezoneOffset: timezoneMode === "manual" ? timezoneOffset : ""
+  });
+
+  const response = await apiRequest(`/data-logs/data-deviation?${query}`, {
+    method: "GET"
+  });
+
+  return response?.data || response;
+}
+
 export function getDataLogExcelUrl({
   vesselId,
   start,
