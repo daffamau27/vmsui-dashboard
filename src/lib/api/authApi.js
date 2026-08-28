@@ -1,3 +1,5 @@
+import { sortByAlpha } from "$lib/utils/alphaSort.js";
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 function safeJsonParse(text) {
@@ -204,15 +206,33 @@ export async function getCurrentUserApi() {
 }
 
 export async function getMyVesselsApi() {
-  return await apiRequest("/users/my-vessels", {
+  const response = await apiRequest("/users/my-vessels", {
     method: "GET"
   });
+
+  if (Array.isArray(response?.data)) {
+    return {
+      ...response,
+      data: sortByAlpha(response.data, getVesselSortName, getVesselCompanyName)
+    };
+  }
+
+  return response;
 }
 
 export async function getMyAssetsApi() {
-  return await apiRequest("/users/my-assets", {
+  const response = await apiRequest("/users/my-assets", {
     method: "GET"
   });
+
+  if (Array.isArray(response?.data)) {
+    return {
+      ...response,
+      data: sortByAlpha(response.data, getAssetSortName, getAssetSortType)
+    };
+  }
+
+  return response;
 }
 
 export async function updateCurrentUserApi(payload) {
@@ -289,4 +309,20 @@ export async function downloadApiFile(path, fileName = "download.xlsx") {
   link.remove();
 
   window.URL.revokeObjectURL(url);
+}
+
+function getVesselSortName(item) {
+  return item?.vesselName || item?.vessel_name || item?.name || item?.deviceName || item?.deviceId || "";
+}
+
+function getVesselCompanyName(item) {
+  return item?.companyName || item?.company_name || item?.company?.name || item?.company?.companyName || "";
+}
+
+function getAssetSortName(item) {
+  return item?.assetName || item?.asset_name || item?.thingsboardName || item?.name || item?.assetId || "";
+}
+
+function getAssetSortType(item) {
+  return item?.assetType || item?.asset_type || item?.type || "";
 }

@@ -24,6 +24,7 @@
 		createCopyableCoordinateHtml,
 		handleCoordinateCopyClick
 	} from '$lib/utils/coordinateClipboard.js';
+	import { matchesSearch, sortByAlpha } from '$lib/utils/alphaSort.js';
 	import 'leaflet/dist/leaflet.css';
 
 	const PAGE_SIZE_OPTIONS = [10, 20, 50];
@@ -1163,16 +1164,19 @@
 	$: filteredPlans = plans.filter((plan) => {
 		const q = search.trim().toLowerCase();
 		if (!q) return true;
-		return (
-			String(plan.id).includes(q) ||
-			String(plan.voyageName || '')
-				.toLowerCase()
-				.includes(q)
-		);
+		return matchesSearch(q, [plan.voyageName]);
 	});
 	$: allowedVesselIdSet = new Set(form.allowedVesselIds.map(Number));
-	$: selectedAllowedVessels = vessels.filter((v) => allowedVesselIdSet.has(Number(v.id)));
-	$: notAllowedVessels = vessels.filter((v) => !allowedVesselIdSet.has(Number(v.id)));
+	$: selectedAllowedVessels = sortByAlpha(
+		vessels.filter((v) => allowedVesselIdSet.has(Number(v.id))),
+		(vessel) => vessel.vesselName,
+		(vessel) => vessel.deviceId
+	);
+	$: notAllowedVessels = sortByAlpha(
+		vessels.filter((v) => !allowedVesselIdSet.has(Number(v.id))),
+		(vessel) => vessel.vesselName,
+		(vessel) => vessel.deviceId
+	);
 	$: selectedAssignPlan = getAssignmentPlan(assignForm.voyagePlanId);
 	$: assignableVessels = getAssignableVessels(assignForm.voyagePlanId);
 	$: if (
@@ -1290,7 +1294,11 @@
 			const rows = await getFleetAssets();
 
 			zones = normalizeMapZonesFromAssets(rows);
-			assets = rows.map(normalizeAsset).filter(Boolean);
+			assets = sortByAlpha(
+				rows.map(normalizeAsset).filter(Boolean),
+				(asset) => asset.assetName,
+				(asset) => asset.assetType
+			);
 
 			console.log('[VOYAGE_PLANS][ASSETS]', assets);
 
@@ -1477,7 +1485,11 @@
 		permissions = collectPermissions(data);
 
 		const accessDetails = data?.vesselAccess?.details || [];
-		vessels = accessDetails.map(normalizeVessel).filter(Boolean);
+		vessels = sortByAlpha(
+			accessDetails.map(normalizeVessel).filter(Boolean),
+			(vessel) => vessel.vesselName,
+			(vessel) => vessel.deviceId
+		);
 	}
 
 	function collectPermissions(user) {
@@ -1717,14 +1729,22 @@
 
 		const allowedIdSet = new Set(allowedIds);
 
-		return vessels.filter((vessel) => allowedIdSet.has(Number(vessel.id)));
+		return sortByAlpha(
+			vessels.filter((vessel) => allowedIdSet.has(Number(vessel.id))),
+			(vessel) => vessel.vesselName,
+			(vessel) => vessel.deviceId
+		);
 	}
 
 	async function loadVessels() {
 		if (vessels.length) return;
 		try {
 			const result = await apiFetch('/users/my-vessels');
-			vessels = (result?.data || []).map(normalizeVessel).filter(Boolean);
+			vessels = sortByAlpha(
+				(result?.data || []).map(normalizeVessel).filter(Boolean),
+				(vessel) => vessel.vesselName,
+				(vessel) => vessel.deviceId
+			);
 		} catch (error) {
 			console.warn('Failed to load my-vessels', error);
 		}

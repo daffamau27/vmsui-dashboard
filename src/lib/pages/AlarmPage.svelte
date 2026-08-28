@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { apiRequest } from "$lib/api/authApi.js";
   import LoadingSkeleton from "$lib/components/LoadingSkeleton.svelte";
+  import { sortByAlpha } from "$lib/utils/alphaSort.js";
 
   let { active = false } = $props();
 
@@ -74,21 +75,24 @@
   );
 
   let vesselOptions = $derived(
-    [...monitorRows, ...eventRows]
-      .map((row) => ({
-        vesselId: row?.vesselId,
-        vesselName:
-          row?.vesselName ||
-          row?.vessel_name ||
-          row?.assetName ||
-          row?.deviceName ||
-          `Vessel ${row?.vesselId}`
-      }))
-      .filter((row) => row.vesselId !== undefined && row.vesselId !== null)
-      .reduce((items, row) => {
-        const exists = items.some((item) => String(item.vesselId) === String(row.vesselId));
-        return exists ? items : [...items, row];
-      }, [])
+    sortByAlpha(
+      [...monitorRows, ...eventRows]
+        .map((row) => ({
+          vesselId: row?.vesselId,
+          vesselName:
+            row?.vesselName ||
+            row?.vessel_name ||
+            row?.assetName ||
+            row?.deviceName ||
+            `Vessel ${row?.vesselId}`
+        }))
+        .filter((row) => row.vesselId !== undefined && row.vesselId !== null)
+        .reduce((items, row) => {
+          const exists = items.some((item) => String(item.vesselId) === String(row.vesselId));
+          return exists ? items : [...items, row];
+        }, []),
+      (vessel) => vessel.vesselName
+    )
   );
 
   function formatDateTime(value) {

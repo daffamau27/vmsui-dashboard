@@ -3,6 +3,7 @@
 	import { activeVesselMenu, setActiveVesselMenu } from '$lib/stores/vesselNavigation.svelte.js';
 	import { apiRequest } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 
 	import VesselDashboardPage from '$lib/pages/vessel/VesselDashboardPage.svelte';
 	import DailyReportPage from '$lib/pages/vessel/DailyReportPage.svelte';
@@ -271,7 +272,11 @@
 
 		const rows = candidates.find((candidate) => Array.isArray(candidate)) || [];
 
-		return rows.map(normalizeVesselForSelector).filter((vessel) => getVesselId(vessel));
+		return sortByAlpha(
+			rows.map(normalizeVesselForSelector).filter((vessel) => getVesselId(vessel)),
+			getVesselDisplayName,
+			getVesselCompanyName
+		);
 	}
 
 	function getVesselDisplayName(vessel) {
@@ -888,7 +893,7 @@
 
 			console.log('[VESSEL_PAGE][LOAD_VESSELS][RESULT]', rows);
 
-			vessels = Array.isArray(rows) ? rows : [];
+			vessels = sortByAlpha(Array.isArray(rows) ? rows : [], getVesselDisplayName, getVesselCompanyName);
 
 			const currentId = $selectedVesselId;
 

@@ -1,4 +1,5 @@
 import { apiRequest, downloadApiFile } from "$lib/api/authApi.js";
+import { sortByAlpha } from "$lib/utils/alphaSort.js";
 
 function unwrap(response) {
   return response?.data || response;
@@ -83,7 +84,7 @@ export async function getAllVesselsAdminApi() {
     method: "GET"
   });
 
-  return unwrap(response);
+  return sortVesselRows(unwrap(response));
 }
 
 export async function createVesselAdminApi(payload) {
@@ -165,7 +166,31 @@ export async function getAllAssetsAdminApi() {
     method: "GET"
   });
 
-  return unwrap(response);
+  return sortAssetRows(unwrap(response));
+}
+
+function sortVesselRows(rows) {
+	return sortByAlpha(Array.isArray(rows) ? rows : [], getVesselSortName, getVesselCompanyName);
+}
+
+function sortAssetRows(rows) {
+	return sortByAlpha(Array.isArray(rows) ? rows : [], getAssetSortName, getAssetSortType);
+}
+
+function getVesselSortName(item) {
+	return item?.vesselName || item?.vessel_name || item?.name || item?.deviceName || item?.deviceId || '';
+}
+
+function getVesselCompanyName(item) {
+	return item?.companyName || item?.company_name || item?.company?.name || item?.company?.companyName || '';
+}
+
+function getAssetSortName(item) {
+	return item?.assetName || item?.asset_name || item?.thingsboardName || item?.name || item?.assetId || '';
+}
+
+function getAssetSortType(item) {
+	return item?.assetType || item?.asset_type || item?.type || '';
 }
 
 export async function getAssetDetailAdminApi(id) {
@@ -306,7 +331,7 @@ export async function getReportingVesselsAdminApi({
     method: "GET"
   });
 
-  return unwrap(response);
+  return sortVesselRows(unwrap(response));
 }
 
 export async function getPeriodicalReportingVesselsAdminApi({
@@ -324,7 +349,7 @@ export async function getPeriodicalReportingVesselsAdminApi({
     method: "GET"
   });
 
-  return unwrap(response);
+  return sortVesselRows(unwrap(response));
 }
 
 export async function saveAutoReportConfigAdminApi(vesselId, payload) {

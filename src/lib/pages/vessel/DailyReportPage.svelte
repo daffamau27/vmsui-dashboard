@@ -28,6 +28,7 @@
 	} from '$lib/utils/coordinateClipboard.js';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
+	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 	
 	let loading = $state(false);
 	let exporting = $state(false);
@@ -2336,7 +2337,9 @@
 		const mode = String(assetAccess?.mode || '').toLowerCase();
 		const rows = Array.isArray(assets) ? assets : [];
 
-		if (mode === 'all') return rows;
+		if (mode === 'all') {
+			return sortByAlpha(rows, getTripAssetSortName, getTripAssetSortType);
+		}
 
 		const details = Array.isArray(assetAccess?.details)
 			? assetAccess.details
@@ -2365,7 +2368,15 @@
 			return keys.length && !keys.some((key) => matchedSourceKeys.has(key));
 		});
 
-		return [...matchedRows, ...fallbackDetails];
+		return sortByAlpha([...matchedRows, ...fallbackDetails], getTripAssetSortName, getTripAssetSortType);
+	}
+
+	function getTripAssetSortName(asset = {}) {
+		return asset?.assetName || asset?.asset_name || asset?.thingsboardName || asset?.name || asset?.assetId || '';
+	}
+
+	function getTripAssetSortType(asset = {}) {
+		return asset?.assetType || asset?.asset_type || asset?.type || '';
 	}
 
 	/**
@@ -2674,7 +2685,13 @@
 	let tripMapPoints = $derived(getTripMapPoints(normalizedReport));
 	let permittedMapAssets = $derived(getPermittedMapAssets(mapAssetRows, currentUser));
 	let mapZones = $derived(normalizeMapZonesFromAssets(permittedMapAssets));
-	let tripMapAssets = $derived(permittedMapAssets.map(normalizeTripAsset).filter(Boolean));
+	let tripMapAssets = $derived(
+		sortByAlpha(
+			permittedMapAssets.map(normalizeTripAsset).filter(Boolean),
+			getTripAssetSortName,
+			getTripAssetSortType
+		)
+	);
 	let tripAssetLegendTypes = $derived(getTripAssetLegendTypes(tripMapAssets));
 
 	let vesselName = $derived(
@@ -3628,7 +3645,11 @@
 	async function loadMapAssets() {
 		try {
 			const assets = await getFleetAssets();
-			mapAssetRows = Array.isArray(assets) ? assets : [];
+			mapAssetRows = sortByAlpha(
+				Array.isArray(assets) ? assets : [],
+				getTripAssetSortName,
+				getTripAssetSortType
+			);
 		} catch (err) {
 			console.error('[DAILY_MAP_ASSETS_ERROR]', err);
 			mapAssetRows = [];

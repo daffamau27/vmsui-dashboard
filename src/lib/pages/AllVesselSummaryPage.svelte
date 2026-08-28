@@ -4,6 +4,7 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
+	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 
 	const TIME_RANGE_PRESETS = [
 		{ id: 'midnight', label: '00:00 - 06:00', startTime: '00:00', endTime: '06:00' },
@@ -267,7 +268,11 @@
 	let selectedColumnCount = $derived(visibleColumnIds.length);
 
 	let filteredDevices = $derived(
-		devices.filter((device) => device.name.toLowerCase().includes(vesselSearch.toLowerCase()))
+		sortByAlpha(
+			devices.filter((device) => device.name.toLowerCase().includes(vesselSearch.toLowerCase())),
+			(device) => device.name,
+			(device) => device.companyName
+		)
 	);
 
 	let selectedDevices = $derived(devices.filter((device) => selectedDeviceIds.includes(device.id)));
@@ -642,15 +647,16 @@
 			console.log('[ALL_VESSEL][LOAD_VESSELS][RESULT]', rows);
 
 			devices = Array.isArray(rows)
-				? rows.map((item) => ({
+				? sortByAlpha(rows.map((item) => ({
 						id: String(item.id),
 						vesselId: item.id,
 						deviceId: item.deviceId || '',
 						name: item.vesselName || '-',
 						vesselName: item.vesselName || '-',
+						companyName: item.companyName || '',
 						engines: item.engines || [],
 						raw: item
-					}))
+					})), (device) => device.name, (device) => device.companyName)
 				: [];
 
 			const availableDeviceIds = new Set(devices.map((device) => device.id));

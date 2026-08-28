@@ -73,8 +73,8 @@
 	const tableConfigs = [
 		{
 			key: 'per_engine_system',
-			title: 'Per Engine - System / FMS',
-			description: 'Fuel usage from system/FMS basis.',
+			title: 'Per Engine - System',
+			description: 'Fuel usage from system basis.',
 			permission: 'view_fuel_fms',
 			columns: [
 				{ label: 'Engine', field: 'engine', align: 'left' },

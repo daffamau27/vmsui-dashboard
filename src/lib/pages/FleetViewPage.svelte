@@ -20,6 +20,7 @@
 		createCopyableCoordinateHtml,
 		handleCoordinateCopyClick
 	} from '$lib/utils/coordinateClipboard.js';
+	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 
 	let { active = false } = $props();
 
@@ -530,18 +531,22 @@
 	}
 
 	let filteredVessels = $derived(
-		vesselData.filter((v) => {
-			const keyword = search.toLowerCase().trim();
-			const name = String(v.name || '').toLowerCase();
-			const company = String(v.companyName || '').toLowerCase();
+		sortByAlpha(
+			vesselData.filter((v) => {
+				const keyword = search.toLowerCase().trim();
+				const name = String(v.name || '').toLowerCase();
+				const company = String(v.companyName || '').toLowerCase();
 
-			const matchSearch = !keyword || name.includes(keyword) || company.includes(keyword);
+				const matchSearch = !keyword || name.includes(keyword) || company.includes(keyword);
 
-			if (statusFilter === 'online') return matchSearch && v.online;
-			if (statusFilter === 'offline') return matchSearch && !v.online;
+				if (statusFilter === 'online') return matchSearch && v.online;
+				if (statusFilter === 'offline') return matchSearch && !v.online;
 
-			return matchSearch;
-		})
+				return matchSearch;
+			}),
+			(vessel) => vessel.name || vessel.vesselName,
+			(vessel) => vessel.companyName
+		)
 	);
 
 	let selectedVessel = $derived(
@@ -2500,7 +2505,11 @@
 		try {
 			const vessels = await getFleetVessels({});
 
-			const normalizedVessels = Array.isArray(vessels) ? vessels.map(normalizeFleetVessel) : [];
+			const normalizedVessels = sortByAlpha(
+				Array.isArray(vessels) ? vessels.map(normalizeFleetVessel) : [],
+				(vessel) => vessel.name || vessel.vesselName,
+				(vessel) => vessel.companyName
+			);
 
 			vesselData = normalizedVessels;
 			fleetError = '';
@@ -2566,17 +2575,21 @@
 			const assets = await getFleetAssets();
 
 			zoneData = normalizeMapZonesFromAssets(assets);
-			assetData = assets.map(normalizeFleetAsset).filter((asset) => {
-				if (!asset) return false;
+			assetData = sortByAlpha(
+				assets.map(normalizeFleetAsset).filter((asset) => {
+					if (!asset) return false;
 
-				const lat = Number(asset.lat ?? asset.latitude);
-				const lng = Number(asset.lng ?? asset.longitude);
+					const lat = Number(asset.lat ?? asset.latitude);
+					const lng = Number(asset.lng ?? asset.longitude);
 
-				if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
-				if (lat === 0 && lng === 0) return false;
+					if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+					if (lat === 0 && lng === 0) return false;
 
-				return true;
-			});
+					return true;
+				}),
+				(asset) => asset.assetName || asset.name,
+				(asset) => asset.assetType
+			);
 
 			if (map && L) {
 				rebuildZoneLayer();

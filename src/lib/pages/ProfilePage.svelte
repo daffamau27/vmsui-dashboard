@@ -9,6 +9,7 @@
 	} from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import AuditLogPage from '$lib/pages/AuditLogPage.svelte';
+	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 
 	let loading = true;
 	let savingProfile = false;
@@ -59,8 +60,16 @@
 			]);
 
 			currentUser = userResponse?.data || null;
-			vessels = Array.isArray(vesselResponse?.data) ? vesselResponse.data : [];
-			assets = Array.isArray(assetResponse?.data) ? assetResponse.data : [];
+			vessels = sortByAlpha(
+				Array.isArray(vesselResponse?.data) ? vesselResponse.data : [],
+				(vessel) => vessel?.vesselName || vessel?.name || vessel?.deviceName,
+				(vessel) => vessel?.companyName
+			);
+			assets = sortByAlpha(
+				Array.isArray(assetResponse?.data) ? assetResponse.data : [],
+				(asset) => asset?.assetName || asset?.name || asset?.thingsboardName || asset?.assetId,
+				(asset) => asset?.assetType || asset?.type
+			);
 
 			syncProfileForm(currentUser);
 		} catch (error) {

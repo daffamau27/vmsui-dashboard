@@ -27,6 +27,7 @@
     createCopyableCoordinateHtml,
     handleCoordinateCopyClick
   } from "$lib/utils/coordinateClipboard.js";
+  import { sortByAlpha } from "$lib/utils/alphaSort.js";
 
   let loading = $state(false);
   let error = $state("");
@@ -1885,7 +1886,11 @@
     try {
       const assets = await getFleetAssets();
       dashboardZones = normalizeMapZonesFromAssets(assets);
-      dashboardAssets = assets.map(normalizeDashboardAsset).filter(Boolean);
+      dashboardAssets = sortByAlpha(
+        assets.map(normalizeDashboardAsset).filter(Boolean),
+        (asset) => asset.assetName,
+        (asset) => asset.assetType
+      );
       rebuildDashboardZoneLayer();
       buildDashboardAssetMarkers();
       return dashboardAssets;

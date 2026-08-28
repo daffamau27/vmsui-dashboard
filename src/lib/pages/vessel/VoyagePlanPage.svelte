@@ -24,6 +24,7 @@
 		createCopyableCoordinateHtml,
 		handleCoordinateCopyClick
 	} from '$lib/utils/coordinateClipboard.js';
+	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 
 	const PAGE_SIZE_OPTIONS = [10, 20, 50];
 	const ASSET_LEGEND_TYPES = ['anchor', 'buoy', 'dock', 'shipyard', 'mess', 'office', 'fso', 'rig', 'whp'];
@@ -426,7 +427,11 @@
 			const rows = await getFleetAssets();
 
 			zones = normalizeMapZonesFromAssets(rows);
-			assets = rows.map(normalizeAsset).filter(Boolean);
+			assets = sortByAlpha(
+				rows.map(normalizeAsset).filter(Boolean),
+				(asset) => asset.assetName,
+				(asset) => asset.assetType
+			);
 
 			console.log('[VOYAGE_PLAN_VESSEL][ASSETS]', assets);
 
@@ -515,7 +520,11 @@
 		const accessDetails = Array.isArray(user?.vesselAccess?.details)
 			? user.vesselAccess.details
 			: [];
-		vessels = accessDetails.map(normalizeVessel).filter(Boolean);
+		vessels = sortByAlpha(
+			accessDetails.map(normalizeVessel).filter(Boolean),
+			(vessel) => vessel.vesselName,
+			(vessel) => vessel.deviceId
+		);
 
 		if (!vessels.length) {
 			await loadFallbackVessels();
@@ -525,7 +534,11 @@
 	async function loadFallbackVessels() {
 		try {
 			const result = await apiFetch('/users/my-vessels', { method: 'GET' });
-			vessels = (result?.data || []).map(normalizeVessel).filter(Boolean);
+			vessels = sortByAlpha(
+				(result?.data || []).map(normalizeVessel).filter(Boolean),
+				(vessel) => vessel.vesselName,
+				(vessel) => vessel.deviceId
+			);
 		} catch (error) {
 			console.warn('[VOYAGE_PLAN_VESSEL][LOAD_VESSELS_ERROR]', error);
 		}

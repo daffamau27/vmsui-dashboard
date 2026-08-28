@@ -1,4 +1,5 @@
 import { apiRequest } from "$lib/api/authApi.js";
+import { sortByAlpha } from "$lib/utils/alphaSort.js";
 
 function toNumber(value, fallback = 0) {
   const number = Number(value);
@@ -75,10 +76,9 @@ function normalizeFleetVessel(item) {
   };
 }
 
-export async function getFleetVessels({ search = '', status = '' } = {}) {
+export async function getFleetVessels({ status = '' } = {}) {
 	const params = new URLSearchParams();
 
-	if (search) params.set('search', search);
 	if (status && status !== 'all') params.set('status', status);
 
 	const query = params.toString();
@@ -91,7 +91,7 @@ export async function getFleetVessels({ search = '', status = '' } = {}) {
 		}
 	});
 
-	return response?.data ?? [];
+	return sortByAlpha(response?.data ?? [], getVesselSortName, (item) => item?.companyName);
 }
 
 function normalizeLiveVessel(item) {
@@ -195,7 +195,7 @@ export async function getFleetVesselsWithEngines() {
     })
   );
 
-  return rows;
+  return sortByAlpha(rows, getVesselSortName, (item) => item?.companyName);
 }
 
 export async function getFleetAssets() {
@@ -206,5 +206,17 @@ export async function getFleetAssets() {
 		}
 	});
 
-	return response?.data ?? [];
+	return sortByAlpha(response?.data ?? [], getAssetSortName, getAssetSortType);
+}
+
+function getVesselSortName(item) {
+	return item?.vesselName || item?.name || item?.deviceName || item?.deviceId || '';
+}
+
+function getAssetSortName(item) {
+	return item?.assetName || item?.thingsboardName || item?.name || item?.assetId || '';
+}
+
+function getAssetSortType(item) {
+	return item?.assetType || item?.asset_type || item?.type || '';
 }

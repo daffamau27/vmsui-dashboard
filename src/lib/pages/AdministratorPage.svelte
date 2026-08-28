@@ -6,6 +6,7 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
+	import { matchesSearch, sortByAlpha } from '$lib/utils/alphaSort.js';
 	import {
 		getPermissionCatalogApi,
 		getAllUsersApi,
@@ -712,21 +713,19 @@
 		return getVesselDisplayName(vessel || { id });
 	}
 
-	$: telegramVesselOptions = (vessels.length ? vessels : reportingVessels).map((vessel) => ({
+	$: telegramVesselOptions = sortByAlpha((vessels.length ? vessels : reportingVessels).map((vessel) => ({
 		id: Number(vessel?.id),
 		label: getVesselDisplayName(vessel),
 		sublabel: getVesselDeviceLabel(vessel),
 		status: vessel?.status || ''
-	})).filter((vessel) => Number.isFinite(vessel.id) && vessel.id > 0);
+	})).filter((vessel) => Number.isFinite(vessel.id) && vessel.id > 0), (vessel) => vessel.label, (vessel) => vessel.sublabel);
 
 	$: filteredTelegramVesselOptions = telegramVesselOptions.filter((vessel) => {
 		const keyword = telegramVesselSearch.trim().toLowerCase();
 
 		if (!keyword) return true;
 
-		return [vessel.id ? String(vessel.id) : '', vessel.label, vessel.sublabel, vessel.status]
-			.filter(Boolean)
-			.some((value) => String(value).toLowerCase().includes(keyword));
+		return matchesSearch(keyword, [vessel.label, vessel.status]);
 	});
 
 	$: filteredReportingAssignableUsers = reportingAssignableUsers.filter((user) => {
@@ -734,10 +733,30 @@
 
 		if (!keyword) return true;
 
-		return [user?.fullName, user?.name, user?.username, user?.email, user?.id ? String(user.id) : '']
-			.filter(Boolean)
-			.some((value) => String(value).toLowerCase().includes(keyword));
+		return matchesSearch(keyword, [user?.fullName, user?.name, user?.username, user?.email]);
 	});
+
+	$: filteredReportingVessels = sortByAlpha(
+		reportingVessels.filter((vessel) => {
+			const keyword = String(reportingFilters.search || '').trim().toLowerCase();
+			if (!keyword) return true;
+
+			const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
+
+			return matchesSearch(keyword, [
+				vessel?.vesselName,
+				vessel?.vessel_name,
+				vessel?.name,
+				vessel?.companyName,
+				vessel?.company_name,
+				company?.name,
+				company?.companyName,
+				vessel?.status
+			]);
+		}),
+		getVesselDisplayName,
+		(vessel) => vessel?.companyName || vessel?.company_name || getVesselCompanyLabel(vessel)
+	);
 
 	function nullableNumber(value) {
 		const text = String(value ?? '').trim();
@@ -753,10 +772,13 @@
 		reportingVesselsLoading = true;
 
 		try {
-			reportingVessels =
+			reportingVessels = sortByAlpha(
 				reportingMode === 'periodical'
-					? await getPeriodicalReportingVesselsAdminApi(reportingFilters)
-					: await getReportingVesselsAdminApi(reportingFilters);
+					? await getPeriodicalReportingVesselsAdminApi({ ...reportingFilters, search: '' })
+					: await getReportingVesselsAdminApi({ ...reportingFilters, search: '' }),
+				getVesselDisplayName,
+				getVesselDeviceLabel
+			);
 
 			if (selectedReportingVessel?.id) {
 				const refreshed = reportingVessels.find(
@@ -1549,18 +1571,18 @@
 		if (!keyword) return true;
 
 		return [
-			getCurveId(curve),
-			curve?.vessel_id,
 			curve?.vessel_name,
 			curve?.curve_type,
-			curve?.curve_name,
-			curve?.meta?.source_file_path
+			curve?.curve_name
 		]
 			.filter(Boolean)
 			.some((value) => String(value).toLowerCase().includes(keyword));
 	});
 
-	$: filteredEngineCurveImportVessels = vessels.filter((vessel) => {
+	$: filteredEngineCurveImportVessels = sortByAlpha(vessels, getVesselDisplayName, (vessel) => {
+		const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
+		return getCompanyDisplayName(company);
+	}).filter((vessel) => {
 		const keyword = searchEngineCurveImportVessel.trim().toLowerCase();
 		const selectedId = String(engineCurveForm.vesselId || '');
 		const vesselId = String(vessel?.id || '');
@@ -1570,12 +1592,13 @@
 
 		const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
 
-		return [
-			getVesselDisplayName(vessel),
-			getCompanyDisplayName(company)
-		]
-			.filter(Boolean)
-			.some((value) => String(value).toLowerCase().includes(keyword));
+		return matchesSearch(keyword, [
+			vessel?.vesselName,
+			vessel?.vessel_name,
+			vessel?.name,
+			company?.name,
+			company?.companyName
+		]);
 	});
 
 	$: selectedEngineCurveImportVessel =
@@ -1636,20 +1659,12 @@
 			.join(' ');
 	}
 
-	$: filteredAssets = assets.filter((asset) => {
+	$: filteredAssets = sortByAlpha(assets, (asset) => asset?.assetName || asset?.thingsboardName || asset?.assetId, getAssetType).filter((asset) => {
 		const keyword = searchAsset.trim().toLowerCase();
 
 		if (!keyword) return true;
 
-		return [
-			asset?.id ? String(asset.id) : '',
-			asset?.assetId,
-			asset?.assetName,
-			getAssetType(asset),
-			asset?.thingsboardName
-		]
-			.filter(Boolean)
-			.some((value) => String(value).toLowerCase().includes(keyword));
+		return matchesSearch(keyword, [asset?.assetName, getAssetType(asset)]);
 	});
 
 	function createEmptyVesselForm() {
@@ -1664,45 +1679,45 @@
 
 	let vesselForm = createEmptyVesselForm();
 
-	$: filteredVessels = vessels.filter((vessel) => {
+	$: filteredVessels = sortByAlpha(vessels, getVesselDisplayName, (vessel) => {
+		const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
+		return getCompanyDisplayName(company);
+	}).filter((vessel) => {
 		const keyword = searchVessel.trim().toLowerCase();
 
 		if (!keyword) return true;
 
 		const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
 
-		return [
-			vessel?.id ? String(vessel.id) : '',
-			vessel?.deviceId,
+		return matchesSearch(keyword, [
 			vessel?.vesselName,
+			vessel?.vessel_name,
+			vessel?.name,
 			getFuelConsumptionSourceLabel(vessel),
 			getFuelConsumptionSourceValue(vessel),
-			vessel?.companyId ? String(vessel.companyId) : '',
 			company?.name,
-			getCompanyThingsboardId(company),
+			company?.companyName,
 			getVesselHireLabel(vessel)
-		]
-			.filter(Boolean)
-			.some((value) => String(value).toLowerCase().includes(keyword));
+		]);
 	});
 
-	$: filteredCctvVessels = vessels.filter((vessel) => {
+	$: filteredCctvVessels = sortByAlpha(vessels, getVesselDisplayName, (vessel) => {
+		const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
+		return getCompanyDisplayName(company);
+	}).filter((vessel) => {
 		const keyword = cctvSearchVessel.trim().toLowerCase();
 
 		if (!keyword) return true;
 
 		const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
 
-		return [
-			vessel?.id ? String(vessel.id) : '',
-			vessel?.deviceId,
+		return matchesSearch(keyword, [
 			vessel?.vesselName,
-			getVesselDisplayName(vessel),
-			getVesselDeviceLabel(vessel),
-			getCompanyDisplayName(company)
-		]
-			.filter(Boolean)
-			.some((value) => String(value).toLowerCase().includes(keyword));
+			vessel?.vessel_name,
+			vessel?.name,
+			company?.name,
+			company?.companyName
+		]);
 	});
 
 	$: if (activeAdminTab === 'cctv-config' && !cctvSelectedVessel && vessels.length && !cctvConfigLoading) {
@@ -1714,13 +1729,7 @@
 
 		if (!keyword) return true;
 
-		return [
-			company?.id ? String(company.id) : '',
-			getCompanyDisplayName(company),
-			getCompanyThingsboardId(company)
-		]
-			.filter(Boolean)
-			.some((value) => String(value).toLowerCase().includes(keyword));
+		return matchesSearch(keyword, [company?.name, company?.companyName]);
 	});
 
 	let assetOptions = [];
@@ -1821,25 +1830,21 @@
 
 		if (!keyword) return true;
 
-		return [user?.name, user?.username, user?.email, user?.id ? String(user.id) : '']
-			.filter(Boolean)
-			.some((value) => String(value).toLowerCase().includes(keyword));
+		return matchesSearch(keyword, [user?.name, user?.username, user?.email]);
 	});
 
 	function matchAccessOption(option, keyword = '') {
 		if (!keyword) return true;
 
-		return [option?.id ? String(option.id) : '', option?.label, option?.sublabel]
-			.filter(Boolean)
-			.some((value) => String(value).toLowerCase().includes(keyword));
+		return matchesSearch(keyword, option?.searchValues || [option?.label]);
 	}
 
 	$: assetAccessKeyword = searchUserAssetAccess.trim().toLowerCase();
 	$: vesselAccessKeyword = searchUserVesselAccess.trim().toLowerCase();
-	$: filteredAssetOptions = assetOptions.filter((asset) =>
+	$: filteredAssetOptions = sortByAlpha(assetOptions, (asset) => asset.label, (asset) => asset.sublabel).filter((asset) =>
 		matchAccessOption(asset, assetAccessKeyword)
 	);
-	$: filteredVesselOptions = vesselOptions.filter((vessel) =>
+	$: filteredVesselOptions = sortByAlpha(vesselOptions, (vessel) => vessel.label, (vessel) => vessel.sublabel).filter((vessel) =>
 		matchAccessOption(vessel, vesselAccessKeyword)
 	);
 
@@ -1902,7 +1907,7 @@
 			const assetDetails = data?.assetAccess?.details || [];
 			const vesselDetails = data?.vesselAccess?.details || [];
 
-			assetOptions = assetDetails.map((asset) => ({
+			assetOptions = sortByAlpha(assetDetails.map((asset) => ({
 				id: Number(asset.id),
 				label: asset.assetName || asset.thingsboardName || asset.assetId || `Asset ${asset.id}`,
 				sublabel: [
@@ -1910,14 +1915,16 @@
 					asset.thingsboardName || asset.assetId || ''
 				]
 					.filter(Boolean)
-					.join(' • ')
-			}));
+					.join(' • '),
+				searchValues: [asset.assetName, asset.asset_name, formatAssetType(getAssetType(asset))]
+			})), (asset) => asset.label, (asset) => asset.sublabel);
 
-			vesselOptions = vesselDetails.map((vessel) => ({
+			vesselOptions = sortByAlpha(vesselDetails.map((vessel) => ({
 				id: Number(vessel.id),
 				label: vessel.vesselName || vessel.deviceName || vessel.deviceId || `Vessel ${vessel.id}`,
-				sublabel: vessel.deviceName || vessel.deviceId || ''
-			}));
+				sublabel: vessel.deviceName || vessel.deviceId || '',
+				searchValues: [vessel.vesselName, vessel.vessel_name, vessel.name]
+			})), (vessel) => vessel.label, (vessel) => vessel.sublabel);
 		} catch (error) {
 			currentUser = null;
 			assetOptions = [];
@@ -1976,11 +1983,12 @@
 		try {
 			vessels = await getAllVesselsAdminApi();
 
-			vesselOptions = vessels.map((vessel) => ({
+			vesselOptions = sortByAlpha(vessels.map((vessel) => ({
 				id: Number(vessel.id),
 				label: vessel.vesselName || vessel.deviceName || vessel.deviceId || `Vessel ${vessel.id}`,
-				sublabel: vessel.deviceId || ''
-			}));
+				sublabel: vessel.deviceId || '',
+				searchValues: [vessel.vesselName, vessel.vessel_name, vessel.name, getVesselCompanyLabel(vessel)]
+			})), (vessel) => vessel.label, (vessel) => vessel.sublabel);
 		} finally {
 			vesselsLoading = false;
 		}
@@ -2391,8 +2399,10 @@
 					asset.assetId || asset.thingsboardName || ''
 				]
 					.filter(Boolean)
-					.join(' • ')
+					.join(' • '),
+				searchValues: [asset.assetName, asset.asset_name, formatAssetType(getAssetType(asset))]
 			}));
+			assetOptions = sortByAlpha(assetOptions, (asset) => asset.label, (asset) => asset.sublabel);
 		} finally {
 			assetsLoading = false;
 		}
@@ -3420,7 +3430,7 @@
 										<input
 											type="search"
 											bind:value={searchUserAssetAccess}
-											placeholder="Search asset name, ID, type..."
+											placeholder="Search asset name or type..."
 										/>
 										<span>{filteredAssetOptions.length} of {assetOptions.length}</span>
 									</div>
@@ -3473,7 +3483,7 @@
 										<input
 											type="search"
 											bind:value={searchUserVesselAccess}
-											placeholder="Search vessel name, ID, device..."
+											placeholder="Search vessel or company name..."
 										/>
 										<span>{filteredVesselOptions.length} of {vesselOptions.length}</span>
 									</div>
@@ -3642,7 +3652,7 @@
 						class="search-input"
 						type="search"
 						bind:value={searchVessel}
-						placeholder="Search vessel, device ID, company name..."
+						placeholder="Search vessel or company name..."
 					/>
 
 					<div class="vessel-list">
@@ -3828,7 +3838,7 @@
 						class="search-input"
 						type="search"
 						bind:value={searchAsset}
-						placeholder="Search asset name, asset ID, type..."
+						placeholder="Search asset name or type..."
 					/>
 
 					<div class="asset-list">
@@ -4284,10 +4294,10 @@
 					<div class="reporting-vessel-list">
 						{#if reportingVesselsLoading}
 							<LoadingSkeleton label="Loading reporting vessels" variant="admin-entity-list" rows={6} compact />
-						{:else if reportingVessels.length === 0}
+						{:else if filteredReportingVessels.length === 0}
 							<div class="empty-box">Reporting vessel not found.</div>
 						{:else}
-							{#each reportingVessels as vessel}
+							{#each filteredReportingVessels as vessel}
 								<button
 									type="button"
 									class:selected-user={selectedReportingVessel?.id === vessel.id}
@@ -4817,7 +4827,7 @@
 						class="search-input"
 						type="search"
 						bind:value={cctvSearchVessel}
-						placeholder="Search vessel, device ID..."
+						placeholder="Search vessel or company name..."
 					/>
 
 					<div class="cctv-vessel-list">
@@ -4983,7 +4993,7 @@
 					<div class="panel-title-row">
 						<div>
 							<h2>Alarm Vessels</h2>
-							<p>{reportingVessels.length} vessel</p>
+							<p>{filteredReportingVessels.length} of {reportingVessels.length} vessel</p>
 						</div>
 
 						{#if reportingVesselsLoading}
@@ -5012,10 +5022,10 @@
 					<div class="reporting-vessel-list">
 						{#if reportingVesselsLoading}
 							<LoadingSkeleton label="Loading alarm vessels" variant="admin-entity-list" rows={6} compact />
-						{:else if reportingVessels.length === 0}
+						{:else if filteredReportingVessels.length === 0}
 							<div class="empty-box">Alarm vessel not found.</div>
 						{:else}
-							{#each reportingVessels as vessel}
+							{#each filteredReportingVessels as vessel}
 								<button
 									type="button"
 									class:selected-user={selectedReportingVessel?.id === vessel.id}
