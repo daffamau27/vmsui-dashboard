@@ -2,6 +2,7 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { activeVesselMenu, setActiveVesselMenu } from '$lib/stores/vesselNavigation.svelte.js';
 	import { apiRequest } from '$lib/api/authApi.js';
+	import { updateVesselHireStatusAdminApi as updateVesselHireStatusApi } from '$lib/api/administratorApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 
@@ -37,6 +38,8 @@
 	let vessels = $state([]);
 	let vesselLoading = $state(false);
 	let vesselError = $state('');
+	let hireStatusLoading = $state(false);
+	let hireStatusError = $state('');
 
 	let permissionLoading = $state(true);
 	let permissionMode = $state('selected');
@@ -144,6 +147,18 @@
 		$selectedVesselInfo?.vesselName || $selectedVesselInfo?.name || 'Select Vessel'
 	);
 
+	let selectedVesselRecord = $derived(
+		vessels.find(
+			(vessel) =>
+				Number(getVesselId(vessel)) === Number($selectedVesselId || getVesselId($selectedVesselInfo))
+		) ||
+			$selectedVesselInfo ||
+			null
+	);
+
+	let selectedHireIsOn = $derived(isOnHireStatus(getVesselHireRawValue(selectedVesselRecord)));
+	let selectedHireLabel = $derived(selectedHireIsOn ? 'On Hire' : 'Off Hire');
+
 	let vesselPageKey = $derived(
 		String($selectedVesselId || getVesselId($selectedVesselInfo) || 'no-vessel')
 	);
@@ -204,6 +219,46 @@
 		return vessel?.vesselId || vessel?.id || vessel?.vessel_id || vessel?.dbId || null;
 	}
 
+	function getVesselHireRawValue(vessel = {}) {
+		const source = vessel?.vessel || vessel?.raw?.vessel || vessel;
+
+		return (
+			source?.hireStatus ??
+			source?.hire_status ??
+			source?.onHire ??
+			source?.on_hire ??
+			source?.isOnHire ??
+			source?.is_on_hire ??
+			vessel?.hireStatus ??
+			vessel?.hire_status ??
+			vessel?.onHire ??
+			vessel?.on_hire ??
+			vessel?.isOnHire ??
+			vessel?.is_on_hire ??
+			vessel?.raw?.hireStatus ??
+			vessel?.raw?.hire_status ??
+			vessel?.raw?.onHire ??
+			vessel?.raw?.on_hire ??
+			false
+		);
+	}
+
+	function isOnHireStatus(value) {
+		if (typeof value === 'boolean') return value;
+		if (typeof value === 'number') return value === 1;
+
+		const normalized = String(value ?? '')
+			.trim()
+			.toLowerCase()
+			.replace(/[_-]+/g, ' ');
+
+		return ['true', '1', 'on', 'on hire', 'onhire', 'active'].includes(normalized);
+	}
+
+	function formatHireStatusValue(value) {
+		return isOnHireStatus(value) ? 'On Hire' : 'Off Hire';
+	}
+
 	function normalizeVesselForSelector(item = {}) {
 		const source = item?.vessel || item?.raw?.vessel || item;
 		const vesselId =
@@ -237,6 +292,7 @@
 			item?.company?.name ||
 			item?.company?.companyName ||
 			'-';
+		const hireStatus = formatHireStatusValue(getVesselHireRawValue({ ...item, ...source }));
 
 		return {
 			...item,
@@ -249,6 +305,8 @@
 			deviceName: source?.deviceName || item?.deviceName || vesselName,
 			deviceId: source?.deviceId || source?.device_id || item?.deviceId || item?.device_id || '',
 			companyName,
+			hireStatus,
+			hire_status: hireStatus,
 			timezone: source?.timezone || item?.timezone || item?.timezoneOffset || item?.timezone_offset || '',
 			engines: Array.isArray(source?.engines)
 				? source.engines
@@ -916,6 +974,44 @@
 		}
 	}
 
+	async function toggleSelectedVesselHireStatus() {
+		const vesselId = getVesselId(selectedVesselRecord) || $selectedVesselId;
+
+		if (!vesselId || hireStatusLoading) return;
+
+		const nextHireStatus = !selectedHireIsOn;
+		hireStatusLoading = true;
+		hireStatusError = '';
+
+		try {
+			await updateVesselHireStatusApi(vesselId, nextHireStatus);
+
+			const nextLabel = nextHireStatus ? 'On Hire' : 'Off Hire';
+			const updateVessel = (vessel) => ({
+				...vessel,
+				hireStatus: nextLabel,
+				hire_status: nextLabel,
+				onHire: nextHireStatus,
+				on_hire: nextHireStatus,
+				isOnHire: nextHireStatus,
+				is_on_hire: nextHireStatus
+			});
+
+			const updatedSelectedVessel = updateVessel(selectedVesselRecord || {});
+
+			vessels = vessels.map((vessel) =>
+				Number(getVesselId(vessel)) === Number(vesselId) ? updateVessel(vessel) : vessel
+			);
+
+			setSelectedVessel(updatedSelectedVessel);
+		} catch (error) {
+			console.error('[VESSEL_PAGE][HIRE_STATUS_UPDATE][ERROR]', error);
+			hireStatusError = error?.message || 'Failed to update hire status.';
+		} finally {
+			hireStatusLoading = false;
+		}
+	}
+
 	function selectVesselMenu(key) {
 		if (!isPageAllowed(key)) return;
 
@@ -1040,6 +1136,25 @@
 					<strong>{status.online ? 'Online' : 'Offline'}</strong>
 				</span>
 			</div>
+
+			<button
+				type="button"
+				class="hire-status-toggle"
+				class:on-hire={selectedHireIsOn}
+				class:off-hire={!selectedHireIsOn}
+				onclick={toggleSelectedVesselHireStatus}
+				disabled={!selectedVesselRecord || hireStatusLoading}
+				aria-pressed={selectedHireIsOn}
+				title={hireStatusError || `Change to ${selectedHireIsOn ? 'Off Hire' : 'On Hire'}`}
+			>
+				<span class="hire-toggle-track" aria-hidden="true">
+					<span></span>
+				</span>
+				<span class="hire-toggle-copy">
+					<small>Hire Status</small>
+					<strong>{hireStatusLoading ? 'Updating...' : selectedHireLabel}</strong>
+				</span>
+			</button>
 		</div>
 
 		<div class="vessel-dropdown">
@@ -1127,11 +1242,11 @@
 
 	<main class="vessel-content">
 		{#if permissionLoading}
-			<section class="vessel-page active-vessel-page">
-				<div class="no-access-card">
-					<LoadingSkeleton label="Loading vessel access" variant="card" rows={3} />
-				</div>
-			</section>
+			<div class="loading-screen">
+				<div class="loading-brand">⚓</div>
+				<div class="loading-spinner" aria-hidden="true"></div>
+				<span>Initializing...</span>
+			</div>
 		{:else if !visibleVesselMenus.length}
 			<section class="vessel-page active-vessel-page">
 				<div class="no-access-card">
@@ -1200,6 +1315,34 @@
 </section>
 
 <style>
+	.loading-screen {
+		width: 100vw;
+		height: 100vh;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		place-content: center;
+		justify-items: center;
+		gap: 14px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		font-family:
+			'Plus Jakarta Sans',
+			ui-sans-serif,
+			system-ui,
+			-apple-system,
+			BlinkMacSystemFont,
+			'Segoe UI',
+			sans-serif;
+		background:
+			radial-gradient(circle at 35% 25%, rgba(59, 130, 246, 0.16), transparent 28%),
+			var(--color-base);
+		font-weight: var(--font-weight-body);
+	}
+
 	.vessel-shell {
 		width: 100%;
 		height: 100%;
@@ -1817,9 +1960,10 @@
 
 	/* Vessel workspace navigation */
 	.vessel-topbar {
-		height: 58px;
-		min-height: 58px;
-		padding: 0 10px;
+		--vessel-topbar-item-height: 52px;
+		height: 62px;
+		min-height: 62px;
+		padding: 0 12px;
 		gap: 8px;
 		background: rgba(10, 14, 26, 0.96);
 		border-bottom: 1px solid var(--color-border);
@@ -1829,8 +1973,11 @@
 
 	.topbar-left {
 		flex: 1 1 auto;
-		gap: 6px;
+		display: flex;
+		align-items: center;
+		gap: 8px;
 		overflow: visible;
+		min-width: 0;
 	}
 
 	.dropdown {
@@ -1839,18 +1986,29 @@
 
 	.dropdown,
 	.vessel-dropdown {
-		height: auto;
+		height: var(--vessel-topbar-item-height);
 		flex: 0 0 auto;
+		display: flex;
+		align-items: center;
 	}
 
 	.dropdown-button,
-	.vessel-selector {
-		height: 42px;
-		border: 1px solid rgba(255, 255, 255, 0.08);
-		border-radius: 12px;
-		background: rgba(255, 255, 255, 0.04);
+	.vessel-selector,
+	.topbar-item,
+	.topbar-table,
+	.hire-status-toggle {
+		height: var(--vessel-topbar-item-height);
+		min-height: var(--vessel-topbar-item-height);
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 13px;
+		background:
+			linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
 		color: var(--text-primary);
-		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+		box-shadow:
+			inset 0 1px 0 rgba(255, 255, 255, 0.045),
+			0 10px 24px rgba(2, 6, 23, 0.16);
+		backdrop-filter: blur(14px) saturate(1.2);
 		transition:
 			border-color 120ms ease,
 			background 120ms ease,
@@ -1861,13 +2019,39 @@
 		min-width: 180px;
 		padding: 0 11px;
 		border-color: rgba(59, 130, 246, 0.24);
-		background: rgba(59, 130, 246, 0.09);
+		background:
+			linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+	}
+
+	.topbar-table {
+		margin-left: 0;
+		overflow: hidden;
+	}
+
+	.telemetry-count-card {
+		border-color: rgba(96, 165, 250, 0.3);
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.16), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+	}
+
+	.sd-card-card {
+		border-color: rgba(20, 184, 166, 0.28);
+		background:
+			linear-gradient(135deg, rgba(20, 184, 166, 0.12), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
 	}
 
 	.dropdown-button:hover,
-	.vessel-selector:hover {
+	.vessel-selector:hover,
+	.hire-status-toggle:hover:not(:disabled),
+	.topbar-item:hover,
+	.topbar-table:hover {
 		border-color: rgba(59, 130, 246, 0.4);
-		background: rgba(59, 130, 246, 0.14);
+		background:
+			linear-gradient(135deg, rgba(59, 130, 246, 0.14), rgba(15, 23, 42, 0.2)),
+			rgba(15, 23, 42, 0.68);
 		transform: translateY(-1px);
 	}
 
@@ -1942,13 +2126,9 @@
 	}
 
 	.topbar-item {
-		height: 42px;
 		min-width: 78px;
 		padding: 0 10px;
 		gap: 7px;
-		border: 1px solid rgba(255, 255, 255, 0.065);
-		border-radius: 11px;
-		background: rgba(255, 255, 255, 0.028);
 		color: var(--text-secondary);
 	}
 
@@ -1983,11 +2163,11 @@
 	}
 
 	.online-box {
-		height: 52px;
-		min-height: 52px;
 		min-width: 96px;
 		border-color: rgba(16, 185, 129, 0.18);
-		background: rgba(16, 185, 129, 0.08);
+		background:
+			linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
 		color: #34d399;
 	}
 
@@ -1997,11 +2177,119 @@
 
 	.offline-box {
 		border-color: rgba(239, 68, 68, 0.18);
-		background: rgba(239, 68, 68, 0.08);
+		background:
+			linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
 	}
 
 	.offline-box .status-copy strong {
 		color: #f87171;
+	}
+
+	.hire-status-toggle {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: flex-start;
+		gap: 9px;
+		margin-left: auto;
+		min-width: 140px;
+		padding: 0 12px;
+		border: 1px solid rgba(245, 158, 11, 0.28);
+		background:
+			linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+		color: #fbbf24;
+		cursor: pointer;
+	}
+
+	.hire-status-toggle:hover:not(:disabled) {
+		border-color: rgba(245, 158, 11, 0.42);
+		background:
+			linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(15, 23, 42, 0.2)),
+			rgba(15, 23, 42, 0.68);
+	}
+
+	.hire-status-toggle.on-hire {
+		border-color: rgba(16, 185, 129, 0.3);
+		background:
+			linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+		color: #34d399;
+	}
+
+	.hire-status-toggle.on-hire:hover:not(:disabled) {
+		border-color: rgba(16, 185, 129, 0.42);
+		background:
+			linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(15, 23, 42, 0.2)),
+			rgba(15, 23, 42, 0.68);
+	}
+
+	.hire-status-toggle:disabled {
+		cursor: progress;
+		opacity: 0.64;
+	}
+
+	.hire-toggle-track {
+		display: flex;
+		align-items: center;
+		width: 38px;
+		height: 20px;
+		padding: 2px;
+		border: 1px solid rgba(245, 158, 11, 0.32);
+		border-radius: 999px;
+		background: rgba(245, 158, 11, 0.18);
+		flex: 0 0 auto;
+	}
+
+	.hire-toggle-track span {
+		width: 14px;
+		height: 14px;
+		border-radius: 999px;
+		background: #f59e0b;
+		box-shadow: 0 0 12px rgba(245, 158, 11, 0.45);
+		transform: translateX(0);
+		transition:
+			transform 180ms ease,
+			background 180ms ease,
+			box-shadow 180ms ease;
+	}
+
+	.hire-status-toggle.on-hire .hire-toggle-track {
+		border-color: rgba(16, 185, 129, 0.36);
+		background: rgba(16, 185, 129, 0.18);
+	}
+
+	.hire-status-toggle.on-hire .hire-toggle-track span {
+		background: #22c55e;
+		box-shadow: 0 0 12px rgba(34, 197, 94, 0.48);
+		transform: translateX(18px);
+	}
+
+	.hire-toggle-copy {
+		min-width: 0;
+		display: grid;
+		gap: 3px;
+		text-align: left;
+	}
+
+	.hire-toggle-copy small {
+		color: var(--text-muted);
+		font-size: 8px;
+		font-weight: 800;
+		letter-spacing: 0.08em;
+		line-height: 1.1;
+		text-transform: uppercase;
+	}
+
+	.hire-toggle-copy strong {
+		overflow: hidden;
+		color: currentColor;
+		font-size: 12px;
+		font-weight: 800;
+		line-height: 1.15;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.dot {
@@ -2251,8 +2539,9 @@
 
 	@media (max-width: 900px) {
 		.vessel-topbar {
-			height: 54px;
-			min-height: 54px;
+			--vessel-topbar-item-height: 48px;
+			height: 56px;
+			min-height: 56px;
 			overflow-x: auto;
 			overflow-y: hidden;
 			scrollbar-width: none;
@@ -2274,13 +2563,16 @@
 
 		.dropdown-button,
 		.vessel-selector,
-		.topbar-item {
-			height: 38px;
+		.topbar-item,
+		.topbar-table,
+		.hire-status-toggle {
+			height: var(--vessel-topbar-item-height);
+			min-height: var(--vessel-topbar-item-height);
 		}
 
-		.online-box {
-			height: 52px;
-			min-height: 52px;
+		.hire-status-toggle {
+			margin-left: 0;
+			min-width: 128px;
 		}
 
 		.dropdown-button {
@@ -2330,20 +2622,25 @@
 
 	@media (max-width: 560px) {
 		.vessel-topbar {
-			height: 50px;
-			min-height: 50px;
+			--vessel-topbar-item-height: 44px;
+			height: 52px;
+			min-height: 52px;
 			padding-inline: 6px;
 		}
 
 		.dropdown-button,
 		.vessel-selector,
-		.topbar-item {
-			height: 36px;
+		.topbar-item,
+		.topbar-table,
+		.hire-status-toggle {
+			height: var(--vessel-topbar-item-height);
+			min-height: var(--vessel-topbar-item-height);
 		}
 
-		.online-box {
-			height: 52px;
-			min-height: 52px;
+		.hire-status-toggle {
+			margin-left: 0;
+			min-width: 108px;
+			padding-inline: 8px;
 		}
 
 		.dropdown-button {
@@ -2360,6 +2657,18 @@
 		.selector-copy small,
 		.status-copy small {
 			display: none;
+		}
+
+		.hire-toggle-copy small {
+			display: none;
+		}
+
+		.hire-toggle-track {
+			width: 34px;
+		}
+
+		.hire-status-toggle.on-hire .hire-toggle-track span {
+			transform: translateX(14px);
 		}
 
 		.topbar-item {

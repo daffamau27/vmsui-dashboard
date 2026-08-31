@@ -18,7 +18,6 @@
 		getAllVesselsAdminApi,
 		createVesselAdminApi,
 		updateVesselAdminApi,
-		updateVesselHireStatusAdminApi,
 		deleteVesselAdminApi,
 		getCctvConfigAdminApi,
 		updateCctvConfigAdminApi,
@@ -453,10 +452,6 @@
 		}
 
 		return Boolean(value);
-	}
-
-	function getVesselHireValue(vessel) {
-		return getVesselHireStatus(vessel) ? 'true' : 'false';
 	}
 
 	function getVesselHireLabel(vesselOrValue) {
@@ -1672,8 +1667,7 @@
 			deviceId: '',
 			vesselName: '',
 			companyId: '',
-			fuelConsumptionSource: 'fm',
-			hireStatus: 'false'
+			fuelConsumptionSource: 'fm'
 		};
 	}
 
@@ -2265,8 +2259,7 @@
 			deviceId: vessel?.deviceId || '',
 			vesselName: vessel?.vesselName || '',
 			companyId: vessel?.companyId ?? '',
-			fuelConsumptionSource: getFuelConsumptionSourceValue(vessel),
-			hireStatus: getVesselHireValue(vessel)
+			fuelConsumptionSource: getFuelConsumptionSourceValue(vessel)
 		};
 
 		clearAlert();
@@ -2295,10 +2288,6 @@
 		};
 	}
 
-	function buildVesselHirePayload() {
-		return vesselForm.hireStatus === 'true';
-	}
-
 	async function saveVessel() {
 		clearAlert();
 
@@ -2313,15 +2302,10 @@
 
 		try {
 			const payload = buildVesselPayload();
-			const hireStatus = buildVesselHirePayload();
 
 			if (vesselMode === 'create') {
 				const created = await createVesselAdminApi(payload);
 				const createdId = created?.id;
-
-				if (createdId && hireStatus) {
-					await updateVesselHireStatusAdminApi(createdId, hireStatus);
-				}
 
 				showAlert(
 					'success',
@@ -2333,11 +2317,6 @@
 				openEditVesselForm(refreshed);
 			} else if (selectedVessel?.id) {
 				const updated = await updateVesselAdminApi(selectedVessel.id, payload);
-				const currentHireStatus = getVesselHireStatus(selectedVessel);
-
-				if (currentHireStatus !== hireStatus) {
-					await updateVesselHireStatusAdminApi(selectedVessel.id, hireStatus);
-				}
 
 				showAlert(
 					'success',
@@ -3753,14 +3732,6 @@
 									{/each}
 								</select>
 								<small class="field-help">Saved as <code>fuelConsumptionSource</code> on <code>/vessels</code>.</small>
-							</label>
-
-							<label>
-								<span>Hire Status</span>
-								<select bind:value={vesselForm.hireStatus}>
-									<option value="true">On Hire</option>
-									<option value="false">Off Hire</option>
-								</select>
 							</label>
 						</div>
 

@@ -1750,42 +1750,42 @@
 					{dataDeviationTotalCount}
 					{dataDeviationTotalCount === 1 ? 'event' : 'events'}
 				</strong>
-			</div>
+				</div>
 
-			{#if dataDeviationLoading && !dataDeviation}
-				<div class="deviation-loading">Loading data deviation...</div>
-			{:else if dataDeviationError}
-				<div class="status-box error-box">{dataDeviationError}</div>
-			{:else if dataDeviation}
+				{#if dataDeviationLoading && !dataDeviation}
+					<div class="deviation-loading">Loading data deviation...</div>
+				{:else if dataDeviationError}
+					<div class="status-box error-box">{dataDeviationError}</div>
+				{:else if dataDeviation}
 				<div class="deviation-overview">
-					<div class="deviation-vessel-meta">
-						<div>
+					<div class="deviation-metric-band">
+						<article class="deviation-total-card">
 							<span>Total Duration</span>
 							<strong>{formatDeviationDuration(dataDeviationTotalDuration)}</strong>
-						</div>
-					</div>
+						</article>
 
-					{#if normalizedDeviationData?.rpm_limits}
-						<div class="rpm-limit-strip" aria-label="RPM deviation limits">
-							<span class="rpm-limit-title">RPM Limits</span>
-							<div>
-								<span>Low RPM</span>
-								<strong>{formatValue(normalizedDeviationData.rpm_limits.low)}</strong>
+						{#if normalizedDeviationData?.rpm_limits}
+							<div class="rpm-limit-strip" aria-label="RPM deviation limits">
+								<span class="rpm-limit-title">RPM Limits</span>
+								<div>
+									<span>Low RPM</span>
+									<strong>{formatValue(normalizedDeviationData.rpm_limits.low)}</strong>
+								</div>
+								<div>
+									<span>High RPM</span>
+									<strong>{formatValue(normalizedDeviationData.rpm_limits.high)}</strong>
+								</div>
+								<div>
+									<span>Lower Limit</span>
+									<strong>{formatValue(normalizedDeviationData.rpm_limits.lower_limit)}</strong>
+								</div>
+								<div>
+									<span>Upper Limit</span>
+									<strong>{formatValue(normalizedDeviationData.rpm_limits.upper_limit)}</strong>
+								</div>
 							</div>
-							<div>
-								<span>High RPM</span>
-								<strong>{formatValue(normalizedDeviationData.rpm_limits.high)}</strong>
-							</div>
-							<div>
-								<span>Lower Limit</span>
-								<strong>{formatValue(normalizedDeviationData.rpm_limits.lower_limit)}</strong>
-							</div>
-							<div>
-								<span>Upper Limit</span>
-								<strong>{formatValue(normalizedDeviationData.rpm_limits.upper_limit)}</strong>
-							</div>
-						</div>
-					{/if}
+						{/if}
+					</div>
 
 					<div class="deviation-summary-grid">
 						{#each dataDeviationCategories as item}
@@ -2732,14 +2732,16 @@
 		background: rgba(15, 23, 42, 0.26);
 	}
 
-	.deviation-vessel-meta {
+	.deviation-metric-band {
 		display: grid;
-		grid-template-columns: minmax(180px, 260px);
-		gap: 8px;
+		grid-template-columns: minmax(220px, 0.34fr) minmax(0, 1fr);
+		gap: 10px;
+		align-items: stretch;
 	}
 
 	.rpm-limit-strip {
-		display: flex;
+		display: grid;
+		grid-template-columns: 126px repeat(4, minmax(100px, 1fr));
 		align-items: stretch;
 		gap: 8px;
 		padding: 10px;
@@ -2751,7 +2753,6 @@
 	}
 
 	.rpm-limit-title {
-		flex: 0 0 116px;
 		display: grid;
 		place-items: center start;
 		padding: 0 12px;
@@ -2763,7 +2764,6 @@
 		text-transform: uppercase !important;
 	}
 
-	.deviation-vessel-meta div,
 	.rpm-limit-strip div {
 		min-width: 0;
 		padding: 9px 12px;
@@ -2773,35 +2773,36 @@
 			rgba(15, 23, 42, 0.32);
 	}
 
-	.deviation-vessel-meta div {
+	.deviation-total-card {
 		position: relative;
-		min-height: 64px;
-		padding: 12px 14px;
-		border-color: rgba(96, 165, 250, 0.22);
+		display: grid;
+		align-content: center;
+		min-height: 78px;
+		padding: 14px 16px;
+		border: 1px solid rgba(96, 165, 250, 0.3);
 		background:
-			linear-gradient(135deg, rgba(37, 99, 235, 0.18), rgba(14, 165, 233, 0.05)),
-			rgba(15, 23, 42, 0.52);
-		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+			radial-gradient(circle at right top, rgba(96, 165, 250, 0.34), transparent 34%),
+			linear-gradient(135deg, rgba(37, 99, 235, 0.18), rgba(14, 165, 233, 0.06)),
+			rgba(15, 23, 42, 0.58);
+		box-shadow:
+			inset 0 1px 0 rgba(255, 255, 255, 0.05),
+			0 10px 24px rgba(2, 6, 23, 0.18);
+		overflow: hidden;
 	}
 
-	.deviation-vessel-meta div::after {
+	.deviation-total-card::before {
 		content: '';
 		position: absolute;
-		right: 12px;
-		top: 12px;
-		width: 8px;
-		height: 8px;
-		border-radius: 999px;
-		background: #60a5fa;
-		box-shadow: 0 0 18px rgba(96, 165, 250, 0.52);
+		inset: 0 auto 0 0;
+		width: 4px;
+		background: linear-gradient(180deg, #60a5fa, #22d3ee);
 	}
 
 	.rpm-limit-strip div {
-		flex: 1 1 130px;
-		min-width: 130px;
+		min-width: 100px;
 	}
 
-	.deviation-vessel-meta span,
+	.deviation-total-card span,
 	.rpm-limit-strip span {
 		display: block;
 		color: #8fa4c2;
@@ -2811,7 +2812,7 @@
 		text-transform: uppercase;
 	}
 
-	.deviation-vessel-meta strong,
+	.deviation-total-card strong,
 	.rpm-limit-strip strong {
 		display: block;
 		margin-top: 5px;
@@ -2823,7 +2824,7 @@
 		white-space: nowrap;
 	}
 
-	.deviation-vessel-meta strong {
+	.deviation-total-card strong {
 		font-size: 20px;
 		line-height: 1.1;
 	}
@@ -3179,9 +3180,21 @@
 			grid-template-columns: repeat(2, minmax(160px, 1fr));
 		}
 
-		.deviation-vessel-meta,
+		.deviation-metric-band,
 		.deviation-summary-grid {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.rpm-limit-strip {
+			grid-template-columns: 1fr 1fr;
+		}
+
+		.rpm-limit-title {
+			grid-column: 1 / -1;
+			min-height: 26px;
+			padding: 0 2px 8px;
+			border-right: 0;
+			border-bottom: 1px solid rgba(148, 163, 184, 0.18);
 		}
 	}
 
@@ -3223,7 +3236,7 @@
 			grid-template-columns: 1fr;
 		}
 
-		.deviation-vessel-meta,
+		.deviation-metric-band,
 		.deviation-summary-grid {
 			grid-template-columns: 1fr;
 		}

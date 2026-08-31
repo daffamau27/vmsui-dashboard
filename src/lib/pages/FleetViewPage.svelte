@@ -181,6 +181,8 @@
 			vesselName: vessel.vesselName ?? vessel.name ?? '-',
 			lat: vessel.latitude ?? vessel.lat,
 			lng: vessel.longitude ?? vessel.lng,
+			fleetLatitude: vessel.fleetLatitude ?? vessel.latitude ?? vessel.lat,
+			fleetLongitude: vessel.fleetLongitude ?? vessel.longitude ?? vessel.lng,
 			speed: vessel.speed ?? '-',
 			heading: vessel.heading ?? 0,
 			online: Boolean(vessel.online),
@@ -399,8 +401,39 @@
 			vesselId: normalizedLiveDetail.vesselId ?? normalizedVessel.vesselId,
 			name: normalizedLiveDetail.name ?? normalizedVessel.name,
 			vesselName: normalizedLiveDetail.vesselName ?? normalizedVessel.vesselName,
+			fleetLatitude: normalizedVessel.fleetLatitude ?? normalizedLiveDetail.fleetLatitude,
+			fleetLongitude: normalizedVessel.fleetLongitude ?? normalizedLiveDetail.fleetLongitude,
 			engines: liveEngines,
 			liveEngines
+		};
+	}
+
+	function getFleetVesselLatLng(vessel = {}) {
+		const lat = Number(vessel.fleetLatitude ?? vessel.latitude ?? vessel.lat);
+		const lng = Number(vessel.fleetLongitude ?? vessel.longitude ?? vessel.lng);
+
+		if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+		if (lat === 0 && lng === 0) return null;
+
+		return { lat, lng };
+	}
+
+	function mergeFleetRefreshVessel(previousVessel, incomingVessel) {
+		const previous = normalizeFleetVessel(previousVessel || {});
+		const incoming = normalizeFleetVessel(incomingVessel || {});
+		const hasIncomingEngines = Array.isArray(incoming.engines) && incoming.engines.length > 0;
+		const previousLiveEngines = Array.isArray(previous.liveEngines) ? previous.liveEngines : [];
+
+		return {
+			...previous,
+			...incoming,
+			weather: incoming.weather ?? previous.weather,
+			oceanCurrent: incoming.oceanCurrent ?? previous.oceanCurrent,
+			voyageProgress: incoming.voyageProgress ?? previous.voyageProgress,
+			fleetLatitude: incoming.fleetLatitude ?? previous.fleetLatitude,
+			fleetLongitude: incoming.fleetLongitude ?? previous.fleetLongitude,
+			engines: hasIncomingEngines ? incoming.engines : previous.engines,
+			liveEngines: hasIncomingEngines ? incoming.engines : previousLiveEngines
 		};
 	}
 
@@ -1804,11 +1837,9 @@
 		return sourceVessels
 			.map((vessel) => {
 				const currentWeather = getCurrentWeather(vessel) || vessel?.weather || {};
-				const lat = Number(vessel.lat ?? vessel.latitude);
-				const lng = Number(vessel.lng ?? vessel.longitude);
+				const fleetPosition = getFleetVesselLatLng(vessel);
 
-				if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-				if (lat === 0 && lng === 0) return null;
+				if (!fleetPosition) return null;
 
 				const windFromDeg = normalizeWindDirectionDegrees(
 					currentWeather.wind_degree ??
@@ -1820,13 +1851,11 @@
 						vessel.wind_degree ??
 						vessel.wind_deg ??
 						vessel.wind_dir
-				);
-
-				if (windFromDeg === null) return null;
+				) ?? 110;
 
 				return {
-					lat,
-					lng,
+					lat: fleetPosition.lat,
+					lng: fleetPosition.lng,
 					// weather wind direction umumnya menunjukkan arah asal angin.
 					// Particles move toward the wind direction.
 					directionToDeg: (windFromDeg + 180) % 360,
@@ -1857,23 +1886,26 @@
 
 		return sourceVessels
 			.map((vessel) => {
-				const current = getSeaCurrentData(vessel);
-				const lat = Number(vessel.lat ?? vessel.latitude);
-				const lng = Number(vessel.lng ?? vessel.longitude);
+				const current = getSeaCurrentData(vessel) || {};
+				const fleetPosition = getFleetVesselLatLng(vessel);
 
-				if (!current) return null;
-				if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-				if (lat === 0 && lng === 0) return null;
+				if (!fleetPosition) return null;
 
 				const directionToDeg = normalizeWindDirectionDegrees(
-					current.direction_to_deg ?? current.direction_to
-				);
-
-				if (directionToDeg === null) return null;
+					current.direction_to_deg ??
+						current.directionToDeg ??
+						current.current_direction_to_deg ??
+						current.direction_to ??
+						current.directionTo ??
+						vessel.current_direction_to_deg ??
+						vessel.currentDirectionToDeg ??
+						vessel.current_direction_to ??
+						vessel.currentDirectionTo
+				) ?? 105;
 
 				return {
-					lat,
-					lng,
+					lat: fleetPosition.lat,
+					lng: fleetPosition.lng,
 					directionToDeg,
 					speedKt: getSeaCurrentSpeedKt(current)
 				};
@@ -2504,9 +2536,18 @@
 
 		try {
 			const vessels = await getFleetVessels({});
+			const previousVesselMap = new Map(
+				vesselData.map((item) => [String(item.id ?? item.vesselId), item])
+			);
 
 			const normalizedVessels = sortByAlpha(
-				Array.isArray(vessels) ? vessels.map(normalizeFleetVessel) : [],
+				Array.isArray(vessels)
+					? vessels.map((vessel) => {
+							const normalized = normalizeFleetVessel(vessel);
+							const previous = previousVesselMap.get(String(normalized.id ?? normalized.vesselId));
+							return previous ? mergeFleetRefreshVessel(previous, normalized) : normalized;
+						})
+					: [],
 				(vessel) => vessel.name || vessel.vesselName,
 				(vessel) => vessel.companyName
 			);
@@ -2532,6 +2573,16 @@
 
 			if (map && L) {
 				buildMarkers();
+
+				if (showWindParticles) {
+					seedWindParticles(true);
+					drawWindParticles();
+				}
+
+				if (showCurrentParticles) {
+					seedCurrentParticles(true);
+					drawCurrentParticles();
+				}
 
 				if (shouldRestoreActivePopup) {
 					setTimeout(() => {
@@ -2676,33 +2727,6 @@
 			console.error('[FLEET_VIEW_LIVE_DETAIL_ERROR]', error);
 			return null;
 		}
-	}
-
-	async function loadLiveDetailsForAllVessels(vessels = [], batchSize = 5) {
-		if (!Array.isArray(vessels) || !vessels.length) return vessels;
-
-		const results = [];
-
-		for (let i = 0; i < vessels.length; i += batchSize) {
-			const batch = vessels.slice(i, i + batchSize);
-
-			const batchResults = await Promise.all(
-				batch.map(async (vessel) => {
-					try {
-						const liveDetail = await getFleetVesselLiveDetail(vessel.vesselId || vessel.id);
-
-						return mergeVesselWithLiveDetail(vessel, liveDetail);
-					} catch (error) {
-						console.error('[FLEET_VIEW][LIVE_DETAIL_PRELOAD_ERROR]', vessel, error);
-						return vessel;
-					}
-				})
-			);
-
-			results.push(...batchResults);
-		}
-
-		return results;
 	}
 
 	function startFleetAutoRefresh() {
@@ -4629,9 +4653,10 @@
 
 	.fleet-sidebar {
 		position: absolute;
-		top: 0;
+		top: 5px;
 		left: var(--fleet-main-sidebar-offset);
 		z-index: 900;
+		height: calc(100vh - 10px);
 		width: var(--fleet-sidebar-width);
 		display: flex;
 		flex-direction: column;
