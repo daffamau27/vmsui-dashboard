@@ -233,15 +233,60 @@
 		});
 	}
 
-	function formatCctvSnapshotTime(value) {
+	function padDatePart(value) {
+		return String(value ?? '').padStart(2, '0');
+	}
+
+	function normalizeUtcOffsetLabel(value) {
+		const match = String(value ?? '').match(/UTC\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?/i);
+		if (!match) return '';
+
+		const sign = match[1];
+		const hour = Number(match[2]);
+		const minute = Number(match[3] || 0);
+
+		if (!Number.isFinite(hour) || !Number.isFinite(minute)) return '';
+		return minute > 0 ? `UTC${sign}${hour}:${padDatePart(minute)}` : `UTC${sign}${hour}`;
+	}
+
+	function formatCctvSnapshotTime(value, timestampValue = null) {
 		if (!value) return '';
 
+		if (typeof value === 'string') {
+			const text = value.trim();
+			const localMatch = text.match(
+				/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?.*?(UTC\s*[+-]\s*\d{1,2}(?::?\d{2})?)/i
+			);
+
+			if (localMatch) {
+				const [, day, month, year, hour, minute, second = '00', utcText] = localMatch;
+				const utcLabel = normalizeUtcOffsetLabel(utcText);
+
+				return `${padDatePart(day)}/${padDatePart(month)}/${year} ${padDatePart(hour)}:${padDatePart(minute)}:${padDatePart(second)}${utcLabel ? ` (${utcLabel})` : ''}`;
+			}
+		}
+
 		const date = new Date(value);
-		if (Number.isNaN(date.getTime())) return String(value);
+		if (Number.isNaN(date.getTime())) {
+			const timestamp = Number(timestampValue);
+			if (!Number.isFinite(timestamp)) return String(value);
+
+			const timestampDate = new Date(timestamp);
+			if (Number.isNaN(timestampDate.getTime())) return String(value);
+
+			return timestampDate.toLocaleString('id-ID', {
+				day: '2-digit',
+				month: '2-digit',
+				year: 'numeric',
+				hour: '2-digit',
+				minute: '2-digit',
+				second: '2-digit'
+			});
+		}
 
 		return date.toLocaleString('id-ID', {
 			day: '2-digit',
-			month: 'short',
+			month: '2-digit',
 			year: 'numeric',
 			hour: '2-digit',
 			minute: '2-digit',
@@ -310,7 +355,7 @@
 				item?.url ||
 				item?.streamUrl ||
 				'';
-			const capturedAt = item?.captured_at || item?.capturedAt || item?.updatedAt || '';
+			const capturedAt = item?.captured_at || item?.capturedAt || item?.updatedAt || item?.timestamp || '';
 			const fileSize = Number(item?.file_size ?? item?.fileSize);
 			const name = item?.camera_name || item?.cameraName || item?.name || `CCTV ${index + 1}`;
 
@@ -324,7 +369,7 @@
 				location: item?.location || item?.position || item?.file_path || item?.filePath || '-',
 				url: snapshotUrl,
 				capturedAt,
-				capturedAtText: formatCctvSnapshotTime(capturedAt),
+				capturedAtText: formatCctvSnapshotTime(capturedAt, item?.timestamp),
 				fileSizeText: formatCctvFileSize(fileSize),
 				online: Boolean(snapshotUrl)
 			};
