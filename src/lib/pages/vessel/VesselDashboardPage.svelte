@@ -341,6 +341,16 @@
     return number.toFixed(digits);
   }
 
+  function getVesselHeading(data, vessel) {
+    return toNumber(
+      data?.course ??
+        data?.heading ??
+        vessel?.course ??
+        vessel?.heading,
+      null
+    );
+  }
+
   function escapeHtml(value) {
     return String(value ?? "")
       .replace(/&/g, "&amp;")
@@ -493,7 +503,7 @@
         currentVessel?.longitude,
       null
     ),
-    heading: toNumber(dashboardData?.heading ?? currentVessel?.heading, null),
+    heading: getVesselHeading(dashboardData, currentVessel),
 
     online: formatOnlineStatus(
       dashboardData?.online ?? currentVessel?.online,
@@ -2303,6 +2313,11 @@
         <article class="compact-info-card highlight">
           <span class="info-label">Current Speed</span>
           <strong>{vesselInfo.currentSpeed}</strong>
+        </article>
+
+        <article class="compact-info-card">
+          <span class="info-label">Heading</span>
+          <strong>{vesselInfo.heading === null ? "-" : `${formatNumber(vesselInfo.heading, 1, "-")}°`}</strong>
         </article>
 
         <article class="compact-info-card">
