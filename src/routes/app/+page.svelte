@@ -8,6 +8,18 @@
   import AlarmPage from "$lib/pages/AlarmPage.svelte";
   import VoyagePlansPage from "$lib/pages/VoyagePlansPage.svelte";
   import AdministratorPage from "$lib/pages/AdministratorPage.svelte";
+
+  /** @type {Record<string, boolean>} */
+  let mountedPages = {
+    "fleet-view": true
+  };
+
+  $: if ($activeMenu && !mountedPages[$activeMenu]) {
+    mountedPages = {
+      ...mountedPages,
+      [$activeMenu]: true
+    };
+  }
 </script>
 
 <main class="app-content">
@@ -15,49 +27,63 @@
     class="keep-page scroll-page"
     class:active-page={$activeMenu === "profile"}
   >
-    <ProfilePage />
+    {#if mountedPages["profile"]}
+      <ProfilePage />
+    {/if}
   </section>
 
   <section
     class="keep-page no-scroll-page"
     class:active-page={$activeMenu === "fleet-view"}
   >
-    <FleetViewPage active={$activeMenu === "fleet-view"} />
+    {#if mountedPages["fleet-view"]}
+      <FleetViewPage active={$activeMenu === "fleet-view"} />
+    {/if}
   </section>
 
   <section
     class="keep-page no-scroll-page"
     class:active-page={$activeMenu === "vessel"}
   >
-    <VesselPage active={$activeMenu === "vessel"} />
+    {#if mountedPages["vessel"]}
+      <VesselPage active={$activeMenu === "vessel"} />
+    {/if}
   </section>
 
   <section
     class="keep-page scroll-page"
     class:active-page={$activeMenu === "all-vessel-summary"}
   >
-    <AllVesselSummaryPage />
+    {#if mountedPages["all-vessel-summary"]}
+      <AllVesselSummaryPage />
+    {/if}
   </section>
 
   <section
     class="keep-page scroll-page"
     class:active-page={$activeMenu === "alarm"}
   >
-    <AlarmPage />
+    {#if mountedPages["alarm"]}
+      <AlarmPage />
+    {/if}
   </section>
 
   <section
     class="keep-page no-scroll-page"
     class:active-page={$activeMenu === "voyage-plans"}
   >
-    <VoyagePlansPage />
+    {#if mountedPages["voyage-plans"]}
+      <VoyagePlansPage />
+    {/if}
   </section>
 
   <section
     class="keep-page no-scroll-page"
     class:active-page={$activeMenu === "administrator"}
   >
-    <AdministratorPage />
+    {#if mountedPages["administrator"]}
+      <AdministratorPage />
+    {/if}
   </section>
 </main>
 

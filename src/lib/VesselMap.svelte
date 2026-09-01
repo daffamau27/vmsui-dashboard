@@ -2,8 +2,9 @@
   import { onMount, onDestroy, tick } from "svelte";
   import { browser } from "$app/environment";
   import { getFleetAssets } from "$lib/api/fleetApi.js";
-  import { VMS_TILE_URL, VMS_TILE_OPTIONS } from "$lib/mapStyle.js";
+  import { addMapTileLayer } from "$lib/mapStyle.js";
   import { addLeafletZoomAndScale } from "$lib/utils/leafletControls.js";
+  import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from "$lib/utils/assetIcons.js";
   import { addMapZonesToLeafletMap, normalizeMapZonesFromAssets } from "$lib/utils/mapZones.js";
   import {
     createCopyableCoordinateHtml,
@@ -34,9 +35,35 @@
   let L = null;
   let isMounted = false;
   let mapZones = $state([]);
+  let mapAssets = $state([]);
+  let assetLegendItems = $derived.by(() => {
+    const seenTypes = new Set();
 
-  let traceLayerGroup = null;
+    return mapAssets
+      .map((asset) => {
+        const typeValue = String(getAssetTypeValue(asset) || "asset").trim().toLowerCase();
+        const key = typeValue || "asset";
+
+        if (seenTypes.has(key)) return null;
+        seenTypes.add(key);
+
+        return {
+          key,
+          label: getAssetTypeLabel(asset),
+          iconUrl: getAssetIconUrl(asset)
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.label.localeCompare(b.label));
+  });
+
+  let traceBaseLayerGroup = null;
+  let traceProgressLayerGroup = null;
+  let traceMarkerLayerGroup = null;
   let zoneLayerGroup = null;
+  let assetMarkerLayerGroup = null;
+  let lastDrawnTraceSignature = "";
+  let lastProgressTraceIndex = -1;
 
   const TRACE_SPEED_RANGES = [
     { label: "0–1 kn", min: 0, max: 1, color: "#9ca3af" },
@@ -49,6 +76,40 @@
   function toNumber(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function normalizeMapAsset(asset = {}) {
+    const coordinates = asset?.coordinates ?? asset?.polygon ?? asset?.boundary;
+    const type = String(asset?.assetType ?? asset?.asset_type ?? asset?.type ?? "").trim().toLowerCase();
+
+    if (type === "zone" || (Array.isArray(coordinates) && coordinates.length >= 3)) return null;
+
+    const latitudeValue = toNumber(asset?.latitude ?? asset?.lat, NaN);
+    const longitudeValue = toNumber(asset?.longitude ?? asset?.lng ?? asset?.lon, NaN);
+
+    if (!Number.isFinite(latitudeValue) || !Number.isFinite(longitudeValue)) return null;
+    if (latitudeValue === 0 && longitudeValue === 0) return null;
+
+    const id = asset?.id ?? asset?.assetId ?? asset?.asset_id ?? `${latitudeValue},${longitudeValue}`;
+
+    return {
+      ...asset,
+      id,
+      assetId: asset?.assetId ?? asset?.asset_id ?? id,
+      assetName: asset?.assetName ?? asset?.asset_name ?? asset?.name ?? `Asset ${id}`,
+      assetType: getAssetTypeValue(asset),
+      latitude: latitudeValue,
+      longitude: longitudeValue
+    };
   }
 
   function getPointLat(point) {
@@ -145,12 +206,22 @@ function getTraceSpeedColor(speed) {
   return TRACE_SPEED_RANGES[4].color;
 }
 
-function drawColoredTraceSegments(points, { untilIndex = points.length - 1, weight = 4, opacity = 0.55 } = {}) {
-  if (!L || !traceLayerGroup || !Array.isArray(points) || points.length < 2) return;
+function drawColoredTraceSegments(
+  points,
+  {
+    layerGroup = traceBaseLayerGroup,
+    fromIndex = 1,
+    untilIndex = points.length - 1,
+    weight = 4,
+    opacity = 0.55
+  } = {}
+) {
+  if (!L || !layerGroup || !Array.isArray(points) || points.length < 2) return;
 
-  const lastIndex = Math.max(1, Math.min(untilIndex, points.length - 1));
+  const firstIndex = Math.max(1, Math.min(fromIndex, points.length - 1));
+  const lastIndex = Math.max(firstIndex, Math.min(untilIndex, points.length - 1));
 
-  for (let index = 1; index <= lastIndex; index += 1) {
+  for (let index = firstIndex; index <= lastIndex; index += 1) {
     const previous = points[index - 1];
     const current = points[index];
     const segmentSpeed = current?.speed ?? previous?.speed ?? 0;
@@ -161,7 +232,7 @@ function drawColoredTraceSegments(points, { untilIndex = points.length - 1, weig
       opacity,
       lineCap: "round",
       lineJoin: "round"
-    }).addTo(traceLayerGroup);
+    }).addTo(layerGroup);
   }
 }
 
@@ -235,6 +306,59 @@ function resetTraceFitIfNeeded() {
     });
   }
 
+  function createAssetMarkerIcon(asset) {
+    const typeLabel = getAssetTypeLabel(asset);
+
+    return L.divIcon({
+      className: "vessel-map-asset-icon",
+      html: `
+        <img
+          class="vessel-map-asset-marker"
+          src="${getAssetIconUrl(asset)}"
+          alt="${escapeHtml(typeLabel)} asset"
+          title="${escapeHtml(asset.assetName)}"
+        />
+      `,
+      iconSize: [34, 34],
+      iconAnchor: [17, 17],
+      popupAnchor: [0, -18]
+    });
+  }
+
+  function createAssetPopupHtml(asset) {
+    const typeLabel = getAssetTypeLabel(asset);
+    const formattedLatitude = toNumber(asset.latitude, 0).toFixed(6);
+    const formattedLongitude = toNumber(asset.longitude, 0).toFixed(6);
+
+    return `
+      <div class="vessel-map-asset-popup">
+        <div class="asset-popup-head">
+          <img src="${getAssetIconUrl(asset)}" alt="${escapeHtml(typeLabel)} icon" />
+          <div>
+            <span>Fleet asset</span>
+            <strong>${escapeHtml(asset.assetName)}</strong>
+          </div>
+          <em>${escapeHtml(typeLabel)}</em>
+        </div>
+
+        <div class="asset-popup-grid">
+          <div>
+            <span>Asset ID</span>
+            <strong>${escapeHtml(asset.assetId ?? asset.id ?? "-")}</strong>
+          </div>
+          <div>
+            <span>Latitude</span>
+            ${createCopyableCoordinateHtml(formattedLatitude, "asset latitude")}
+          </div>
+          <div>
+            <span>Longitude</span>
+            ${createCopyableCoordinateHtml(formattedLongitude, "asset longitude")}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   function createPopupHtml() {
     const [currentLatitude, currentLongitude] = getPosition();
     const formattedLatitude = toNumber(currentLatitude, 0).toFixed(6);
@@ -286,66 +410,107 @@ function resetTraceFitIfNeeded() {
     return null;
   }
 
+function ensureTraceLayers() {
+  if (!map || !L) return;
+
+  if (!traceBaseLayerGroup) traceBaseLayerGroup = L.layerGroup().addTo(map);
+  if (!traceProgressLayerGroup) traceProgressLayerGroup = L.layerGroup().addTo(map);
+  if (!traceMarkerLayerGroup) traceMarkerLayerGroup = L.layerGroup().addTo(map);
+}
+
+function clearTraceLayers() {
+  traceBaseLayerGroup?.clearLayers();
+  traceProgressLayerGroup?.clearLayers();
+  traceMarkerLayerGroup?.clearLayers();
+}
+
     function drawTraceLine() {
     if (!map || !L) return;
 
-    if (!traceLayerGroup) {
-        traceLayerGroup = L.layerGroup().addTo(map);
+    ensureTraceLayers();
+
+    if (!showTraceLine) {
+      clearTraceLayers();
+      lastDrawnTraceSignature = "";
+      lastProgressTraceIndex = -1;
+      return;
     }
 
-    traceLayerGroup.clearLayers();
-
-    if (!showTraceLine) return;
+    const traceSignature = getTraceSignature();
+    const needsBaseRedraw = traceSignature !== lastDrawnTraceSignature;
 
     const validPoints = getValidTracePoints();
     const latLngs = validPoints.map((item) => item.latLng);
 
-    console.log("[VESSEL_MAP_TRACE_LATLNGS]", latLngs.length);
-
-    if (latLngs.length < 2) return;
+    if (latLngs.length < 2) {
+      clearTraceLayers();
+      lastDrawnTraceSignature = traceSignature;
+      lastProgressTraceIndex = -1;
+      return;
+    }
 
     const passedIndex = Math.max(
       0,
       validPoints.findLastIndex((item) => item.originalIndex <= activeIndex)
     );
 
-    drawColoredTraceSegments(validPoints, {
-      untilIndex: validPoints.length - 1,
-      weight: 4,
-      opacity: 0.48
-    });
+    if (needsBaseRedraw) {
+      traceBaseLayerGroup.clearLayers();
+      traceMarkerLayerGroup.clearLayers();
+      traceProgressLayerGroup.clearLayers();
+      lastProgressTraceIndex = -1;
 
-    drawColoredTraceSegments(validPoints, {
-      untilIndex: passedIndex,
-      weight: 6,
-      opacity: 0.98
-    });
+      drawColoredTraceSegments(validPoints, {
+        layerGroup: traceBaseLayerGroup,
+        untilIndex: validPoints.length - 1,
+        weight: 4,
+        opacity: 0.58
+      });
 
-    L.marker(latLngs[0], {
+      L.marker(latLngs[0], {
         icon: createStartIcon(),
         zIndexOffset: 800
-    })
+      })
         .bindPopup("Start")
-        .addTo(traceLayerGroup);
+        .addTo(traceMarkerLayerGroup);
 
-    L.marker(latLngs[latLngs.length - 1], {
+      L.marker(latLngs[latLngs.length - 1], {
         icon: createFinishIcon(),
         zIndexOffset: 800
-    })
+      })
         .bindPopup("Finish")
-        .addTo(traceLayerGroup);
+        .addTo(traceMarkerLayerGroup);
 
-    const pointStep = Math.max(1, Math.floor(latLngs.length / 80));
+      const pointStep = Math.max(1, Math.floor(latLngs.length / 80));
 
-    latLngs.forEach((latLng, index) => {
+      latLngs.forEach((latLng, index) => {
         if (index !== 0 && index !== latLngs.length - 1 && index % pointStep === 0) {
-        L.marker(latLng, {
+          L.marker(latLng, {
             icon: createTracePointIcon(validPoints[index]?.speed),
             interactive: false,
             zIndexOffset: 400
-        }).addTo(traceLayerGroup);
+          }).addTo(traceMarkerLayerGroup);
         }
-    });
+      });
+
+      lastDrawnTraceSignature = traceSignature;
+    }
+
+    if (passedIndex !== lastProgressTraceIndex) {
+      traceProgressLayerGroup.clearLayers();
+
+      if (passedIndex > 0) {
+        drawColoredTraceSegments(validPoints, {
+          layerGroup: traceProgressLayerGroup,
+          fromIndex: Math.max(1, passedIndex - 10),
+          untilIndex: passedIndex,
+          weight: 7,
+          opacity: 0.98
+        });
+      }
+
+      lastProgressTraceIndex = passedIndex;
+    }
     }
 
 function fitTraceBoundsOnce() {
@@ -440,17 +605,49 @@ function rebuildZoneLayer() {
   });
 }
 
-async function loadMapZones() {
+function rebuildAssetMarkerLayer() {
+  if (!map || !L) return;
+
+  if (!assetMarkerLayerGroup) {
+    assetMarkerLayerGroup = L.layerGroup().addTo(map);
+  }
+
+  assetMarkerLayerGroup.clearLayers();
+
+  mapAssets.forEach((asset) => {
+    L.marker([asset.latitude, asset.longitude], {
+      icon: createAssetMarkerIcon(asset),
+      zIndexOffset: 520
+    })
+      .bindTooltip(escapeHtml(asset.assetName), {
+        direction: "top",
+        className: "vessel-map-asset-tooltip"
+      })
+      .bindPopup(createAssetPopupHtml(asset), {
+        closeButton: true,
+        autoPan: true,
+        maxWidth: 300,
+        className: "vessel-map-asset-popup-wrapper"
+      })
+      .addTo(assetMarkerLayerGroup);
+  });
+}
+
+async function loadMapAssetsAndZones() {
   try {
     const assets = await getFleetAssets();
     if (!isMounted) return;
 
     mapZones = normalizeMapZonesFromAssets(assets);
+    mapAssets = (Array.isArray(assets) ? assets : []).map(normalizeMapAsset).filter(Boolean);
     rebuildZoneLayer();
+    rebuildAssetMarkerLayer();
   } catch (error) {
-    console.error("[VESSEL_MAP_ZONES_ERROR]", error);
+    console.error("[VESSEL_MAP_ASSETS_ERROR]", error);
     mapZones = [];
+    mapAssets = [];
     rebuildZoneLayer();
+    rebuildAssetMarkerLayer();
   }
 }
 
@@ -478,14 +675,14 @@ async function loadMapZones() {
       attributionControl: false
     }).setView([lat, lng], zoom);
 
-    L.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(map);
+    addMapTileLayer(L, map);
     addLeafletZoomAndScale(L, map);
 
     rebuildZoneLayer();
-    traceLayerGroup = L.layerGroup().addTo(map);
+    ensureTraceLayers();
     container.addEventListener("click", handleCoordinateCopyClick, true);
 
-    loadMapZones();
+    loadMapAssetsAndZones();
     refreshMap();
 
     setTimeout(() => {
@@ -504,7 +701,6 @@ $effect(() => {
   zoom;
   tracePoints;
   activeIndex;
-  renderKey;
   showTraceLine;
   followActivePoint;
 
@@ -516,16 +712,34 @@ $effect(() => {
   onDestroy(() => {
     isMounted = false;
 
-    if (traceLayerGroup) {
-      traceLayerGroup.clearLayers();
-      traceLayerGroup.remove();
-      traceLayerGroup = null;
+    if (traceBaseLayerGroup) {
+      traceBaseLayerGroup.clearLayers();
+      traceBaseLayerGroup.remove();
+      traceBaseLayerGroup = null;
+    }
+
+    if (traceProgressLayerGroup) {
+      traceProgressLayerGroup.clearLayers();
+      traceProgressLayerGroup.remove();
+      traceProgressLayerGroup = null;
+    }
+
+    if (traceMarkerLayerGroup) {
+      traceMarkerLayerGroup.clearLayers();
+      traceMarkerLayerGroup.remove();
+      traceMarkerLayerGroup = null;
     }
 
     if (zoneLayerGroup) {
       zoneLayerGroup.clearLayers();
       zoneLayerGroup.remove();
       zoneLayerGroup = null;
+    }
+
+    if (assetMarkerLayerGroup) {
+      assetMarkerLayerGroup.clearLayers();
+      assetMarkerLayerGroup.remove();
+      assetMarkerLayerGroup = null;
     }
 
     if (marker) {
@@ -556,17 +770,40 @@ $effect(() => {
       {/each}
     </div>
   {/if}
-  <div class="vessel-map-zone-legend" aria-label="Zone legend">
-    {#each mapZones as zone}
-      <span>
-        <i
-          style={`--zone-color: ${zone.color}; --zone-fill: ${zone.fillColor};`}
-          aria-hidden="true"
-        ></i>
-        {zone.name}
-      </span>
-    {/each}
-  </div>
+  {#if mapZones.length || assetLegendItems.length}
+    <div class="vessel-map-map-legend" aria-label="Map legend">
+      {#if assetLegendItems.length}
+        <div class="legend-group">
+          <span class="legend-title">Assets</span>
+          <div class="legend-items asset-items">
+            {#each assetLegendItems as asset}
+              <span>
+                <img src={asset.iconUrl} alt="" aria-hidden="true" />
+                {asset.label}
+              </span>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      {#if mapZones.length}
+        <div class="legend-group">
+          <span class="legend-title">Zones</span>
+          <div class="legend-items zone-items">
+            {#each mapZones as zone}
+              <span>
+                <i
+                  style={`--zone-color: ${zone.color}; --zone-fill: ${zone.fillColor};`}
+                  aria-hidden="true"
+                ></i>
+                {zone.name}
+              </span>
+            {/each}
+          </div>
+        </div>
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -584,27 +821,47 @@ $effect(() => {
     background: var(--color-accent-muted);
   }
 
-  .vessel-map-zone-legend {
+  .vessel-map-map-legend {
     position: absolute;
     left: 10px;
     bottom: 10px;
     z-index: 720;
+    display: grid;
+    gap: 8px;
+    width: min(360px, calc(100% - 20px));
+    max-height: min(42%, 220px);
+    padding: 8px;
+    border: 1px solid rgba(96, 165, 250, 0.24);
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.7);
+    color: #e2e8f0;
+    box-shadow: 0 12px 26px rgba(15, 23, 42, 0.24);
+    backdrop-filter: blur(10px);
+    pointer-events: none;
+    overflow: auto;
+  }
+
+  .legend-group {
+    display: grid;
+    gap: 5px;
+  }
+
+  .legend-title {
+    color: #9fb4d2;
+    font-size: 9px;
+    font-weight: 850;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .legend-items {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 6px;
-    max-width: calc(100% - 20px);
-    padding: 6px 8px;
-    border: 1px solid rgba(96, 165, 250, 0.24);
-    border-radius: 10px;
-    background: rgba(15, 23, 42, 0.76);
-    color: #e2e8f0;
-    box-shadow: 0 12px 26px rgba(15, 23, 42, 0.24);
-    backdrop-filter: blur(8px);
-    pointer-events: none;
+    gap: 6px 10px;
   }
 
-  .vessel-map-zone-legend span {
+  .legend-items span {
     display: inline-flex;
     align-items: center;
     gap: 5px;
@@ -613,12 +870,43 @@ $effect(() => {
     white-space: nowrap;
   }
 
-  .vessel-map-zone-legend i {
+  .asset-items img {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+    filter:
+      drop-shadow(0 0 2px rgba(255, 255, 255, 0.86))
+      drop-shadow(0 3px 5px rgba(15, 23, 42, 0.24));
+  }
+
+  .zone-items i {
     width: 20px;
     height: 14px;
     border: 2px dashed var(--zone-color, #38bdf8);
     border-radius: 5px;
     background: color-mix(in srgb, var(--zone-fill, #0ea5e9) 24%, transparent);
+  }
+
+  @media (max-width: 760px) {
+    .vessel-map-map-legend {
+      width: min(280px, calc(100% - 20px));
+      max-height: 156px;
+      padding: 7px;
+      gap: 6px;
+    }
+
+    .legend-items {
+      gap: 5px 8px;
+    }
+
+    .legend-items span {
+      font-size: 9px;
+    }
+
+    .asset-items img {
+      width: 16px;
+      height: 16px;
+    }
   }
 
   .trace-speed-legend {
@@ -718,6 +1006,139 @@ $effect(() => {
     filter:
       drop-shadow(0 0 4px rgba(255, 255, 255, 0.92))
       drop-shadow(0 8px 14px rgba(15, 23, 42, 0.28));
+  }
+
+  :global(.vessel-map-asset-icon) {
+    background: transparent;
+    border: none;
+  }
+
+  :global(.vessel-map-asset-marker) {
+    width: 34px;
+    height: 34px;
+    object-fit: contain;
+    display: block;
+    filter:
+      drop-shadow(0 0 3px rgba(255, 255, 255, 0.92))
+      drop-shadow(0 6px 10px rgba(15, 23, 42, 0.28));
+  }
+
+  :global(.vessel-map-asset-tooltip) {
+    border: 1px solid rgba(245, 158, 11, 0.28);
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.88);
+    color: #f8fafc;
+    font-size: 10px;
+    font-weight: 800;
+    box-shadow: 0 10px 20px rgba(15, 23, 42, 0.28);
+  }
+
+  :global(.vessel-map-asset-popup-wrapper .leaflet-popup-content-wrapper) {
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 16px;
+    background: rgba(15, 23, 42, 0.94);
+    color: #f8fafc;
+    box-shadow: 0 18px 36px rgba(15, 23, 42, 0.36);
+    overflow: hidden;
+  }
+
+  :global(.vessel-map-asset-popup-wrapper .leaflet-popup-content) {
+    margin: 0;
+    width: 260px !important;
+  }
+
+  :global(.vessel-map-asset-popup-wrapper .leaflet-popup-tip) {
+    background: rgba(15, 23, 42, 0.94);
+  }
+
+  :global(.vessel-map-asset-popup) {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  :global(.vessel-map-asset-popup .asset-popup-head) {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    gap: 9px;
+    align-items: center;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  }
+
+  :global(.vessel-map-asset-popup .asset-popup-head img) {
+    width: 30px;
+    height: 30px;
+    object-fit: contain;
+  }
+
+  :global(.vessel-map-asset-popup .asset-popup-head span),
+  :global(.vessel-map-asset-popup .asset-popup-grid span) {
+    display: block;
+    color: #9fb4d2;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  :global(.vessel-map-asset-popup .asset-popup-head strong) {
+    display: block;
+    margin-top: 2px;
+    color: #f8fafc;
+    font-size: 14px;
+    font-weight: 850;
+    line-height: 1.15;
+  }
+
+  :global(.vessel-map-asset-popup .asset-popup-head em) {
+    padding: 5px 8px;
+    border: 1px solid rgba(245, 158, 11, 0.36);
+    border-radius: 999px;
+    background: rgba(245, 158, 11, 0.13);
+    color: #fbbf24;
+    font-size: 10px;
+    font-style: normal;
+    font-weight: 850;
+    text-transform: uppercase;
+  }
+
+  :global(.vessel-map-asset-popup .asset-popup-grid) {
+    display: grid;
+    gap: 8px;
+  }
+
+  :global(.vessel-map-asset-popup .asset-popup-grid > div) {
+    display: grid;
+    gap: 4px;
+    padding: 8px 10px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.42);
+  }
+
+  :global(.vessel-map-asset-popup .asset-popup-grid strong) {
+    color: #f8fafc;
+    font-size: 13px;
+    font-weight: 850;
+  }
+
+  :global(.vessel-map-asset-popup .coordinate-copy-inline) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: #f8fafc;
+  }
+
+  :global(.vessel-map-asset-popup .coordinate-copy-button) {
+    width: 24px;
+    height: 24px;
+    border: 1px solid rgba(96, 165, 250, 0.42);
+    border-radius: 8px;
+    background: rgba(37, 99, 235, 0.2);
+    color: #bfdbfe;
+    cursor: pointer;
   }
 
   :global(.trace-start-icon),

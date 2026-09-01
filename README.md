@@ -1,65 +1,103 @@
-# Svelte library
+# VMS Dashboard
 
-Everything you need to build a Svelte library, powered by [`sv`](https://npmjs.com/package/sv).
+Frontend dashboard untuk Vessel Monitoring System: Fleet View, vessel dashboard, report, trace playback, voyage plan, alarm, fuel management, CCTV snapshot, profile, dan administrator tools.
 
-Read more about creating a library [in the docs](https://svelte.dev/docs/kit/packaging).
+Dokumentasi lengkap ada di:
 
-## Creating a project
+[docs/PROJECT_DOCUMENTATION.md](docs/PROJECT_DOCUMENTATION.md)
 
-If you're seeing this, you've probably already done this step. Congrats!
+## Quick Start
 
-```sh
-# create a new project in the current directory
-npx sv create
-
-# create a new project in my-app
-npx sv create my-app
-```
-
-To recreate this project with the same configuration:
-
-```sh
-# recreate this project
-npx sv@0.15.3 create --template library --types jsdoc --add tailwindcss="plugins:typography,forms" prettier eslint vitest="usages:unit,component" --install npm vms-dashboard-new
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
+```bash
+npm install
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
 ```
 
-Everything inside `src/lib` is part of your library, everything inside `src/routes` can be used as a showcase or preview app.
+Dev server:
 
-## Building
-
-To build your library:
-
-```sh
-npm pack
+```text
+http://localhost:5173
 ```
 
-To create a production version of your showcase app:
+## Environment
 
-```sh
-npm run build
+Buat `.env`:
+
+```env
+VITE_API_BASE_URL=https://apitest.semar.biz.id/api/v1
 ```
 
-You can preview the production build with `npm run preview`.
+## Script Utama
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+| Command | Fungsi |
+| --- | --- |
+| `npm run dev` | Jalankan dev server |
+| `npm run build` | Build production |
+| `npm run preview` | Preview build |
+| `npm run check` | Svelte check |
+| `npm run lint` | Prettier check + ESLint |
+| `npm run format` | Format project |
+| `npm run test` | Unit test |
 
-## Publishing
+## Docker
 
-Go into the `package.json` and give your package the desired name through the `"name"` option. Also consider adding a `"license"` field and point it to a `LICENSE` file which you can create from a template (one popular option is the [MIT license](https://opensource.org/license/mit/)).
+Build:
 
-To publish your library to [npm](https://www.npmjs.com):
-
-```sh
-npm publish
+```bash
+docker build \
+  --build-arg VITE_API_BASE_URL=https://apitest.semar.biz.id/api/v1 \
+  -t vms-dashboard:staging .
 ```
+
+Run:
+
+```bash
+docker run --rm -p 8082:8082 \
+  -e NODE_ENV=production \
+  -e HOST=0.0.0.0 \
+  -e PORT=8082 \
+  vms-dashboard:staging
+```
+
+Atau:
+
+```bash
+docker compose up -d --build
+```
+
+## CI
+
+GitHub Actions tersedia untuk build Docker image dan push ke GHCR:
+
+- `.github/workflows/deploy-staging.yml`
+- `.github/workflows/deploy-production.yml`
+
+Flow:
+
+```text
+push -> npm build -> docker build -> push GHCR
+```
+
+## Struktur Singkat
+
+```text
+src/routes/+page.svelte          Login page
+src/routes/app/+page.svelte      Main workspace
+src/routes/layout.css            Global style
+src/lib/Sidebar.svelte           Main sidebar
+src/lib/pages/FleetViewPage.svelte
+src/lib/pages/VesselPage.svelte
+src/lib/pages/VoyagePlansPage.svelte
+src/lib/pages/AdministratorPage.svelte
+src/lib/pages/vessel/*           Vessel sub-pages
+src/lib/api/*                    API wrappers
+src/lib/utils/*                  Map/asset/coordinate helpers
+static/assets                    Static icons, logo, map markers
+```
+
+## Catatan
+
+- Base map memakai CARTO Voyager/OpenStreetMap.
+- Auth memakai JWT bearer token di `localStorage`.
+- Page yang memiliki filter tanggal/waktu/range umumnya tidak auto-load sebelum user klik Load.
+- Fleet View adalah page awal setelah login.

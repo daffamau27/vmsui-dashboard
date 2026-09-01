@@ -1,5 +1,5 @@
-@import 'tailwindcss';
 @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap");
+@import 'tailwindcss';
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
@@ -919,6 +919,101 @@ body .app-content :is(.status-box.loading-box, .selected-pill, .option-chip.sele
   color: var(--text-accent) !important;
 }
 
+/* Vessel pages use a sharper, consistent component language. Keep the
+   surrounding marine UI dark and structured, but remove rounded corners from
+   cards, panels, controls, tables, and form fields inside VesselPage routes. */
+body .app-content :is(
+  .vessel-page,
+  .dashboard-content,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .data-log-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page,
+  .single-line-page
+) :is(
+  [class$="-card"],
+  [class*="-card "],
+  [class$="-panel"],
+  [class*="-panel "],
+  [class$="-section"],
+  [class*="-section "],
+  [class$="-box"],
+  [class*="-box "],
+  [class$="-item"],
+  [class*="-item "],
+  [class$="-row"],
+  [class*="-row "],
+  [class$="-wrap"],
+  [class*="-wrap "],
+  [class$="-wrapper"],
+  [class*="-wrapper "],
+  [class$="-table"],
+  [class*="-table "],
+  [class$="-control"],
+  [class*="-control "],
+  [class$="-button"],
+  [class*="-button "],
+  [class$="-btn"],
+  [class*="-btn "],
+  [class$="-pill"],
+  [class*="-pill "],
+  [class$="-chip"],
+  [class*="-chip "],
+  .panel,
+  .table-wrapper,
+  .table-wrap,
+  .route-table-wrap,
+  .range-table-wrap,
+  .data-log-table-wrapper,
+  .monthly-table-wrapper,
+  .event-table-wrapper,
+  .high-rpm-table-wrapper,
+  .low-speed-table-wrapper,
+  .leaflet-popup-content-wrapper,
+  .leaflet-popup-tip,
+  button,
+  input,
+  select,
+  textarea,
+  table,
+  th,
+  td
+) {
+  border-radius: 0 !important;
+}
+
+/* Dots and vessel/map symbols must stay round/correct because they communicate
+   status or heading rather than acting as rectangular UI components. */
+body .app-content :is(
+  .vessel-page,
+  .dashboard-content,
+  .daily-page,
+  .monthly-page,
+  .periodical-page,
+  .data-log-page,
+  .fuel-management-page,
+  .voyage-vessel-page,
+  .trace-page,
+  .single-line-page
+) :is(
+  .status-dot,
+  .chip-dot,
+  .legend-dot,
+  .online-dot,
+  .offline-dot,
+  .connection-dot,
+  .gps-dot,
+  .point-marker,
+  .marker-dot,
+  .sld-status-dot,
+  .leaflet-marker-icon
+) {
+  border-radius: 999px !important;
+}
+
 body .app-content :is(
   .administrator-page,
   .fleet-page,
@@ -1081,12 +1176,14 @@ body .app-content .vms-map-controls .leaflet-control-scale-line::before {
 }
 
 body .app-content .vms-map-controls .vms-scale-control {
+  width: auto;
+  height: 34px;
   min-height: 34px;
-  min-width: 124px;
+  min-width: 156px;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 6px 5px 9px;
+  justify-content: center;
+  padding: 4px 10px;
   border: 1px solid rgba(255, 255, 255, 0.12) !important;
   border-radius: 12px !important;
   background: rgba(15, 23, 42, 0.82) !important;
@@ -1095,80 +1192,151 @@ body .app-content .vms-map-controls .vms-scale-control {
   backdrop-filter: blur(12px);
 }
 
-body .app-content .vms-map-controls .vms-scale-control__bar {
-  min-width: 36px;
-  max-width: 112px;
-  display: inline-flex;
-  align-items: center;
-  padding-bottom: 3px;
-  border-bottom: 2px solid rgba(147, 197, 253, 0.95);
+body .app-content .vms-map-controls .vms-scale-control__ruler {
+  position: relative;
+  width: 132px;
+  min-width: 76px;
+  height: 26px;
   transition: width 0.16s ease;
 }
 
+body .app-content .vms-map-controls .vms-scale-control__bar {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  display: block;
+  min-width: 36px;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.92);
+  box-shadow: 0 0 9px rgba(255, 255, 255, 0.18);
+  transform: translateY(-50%);
+}
+
+body .app-content .vms-map-controls .vms-scale-control__tick {
+  position: absolute;
+  width: 2px;
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(226, 232, 240, 0.95);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.16);
+  transition: left 0.16s ease;
+}
+
+body .app-content .vms-map-controls .vms-scale-control__tick--metric {
+  bottom: 0;
+  transform: translateX(-1px);
+}
+
+body .app-content .vms-map-controls .vms-scale-control__tick--nautical {
+  top: 0;
+  transform: translateX(-1px);
+}
+
 body .app-content .vms-map-controls .vms-scale-control__label {
+  position: absolute;
+  transform: translateX(-50%);
   white-space: nowrap;
   color: #eaf2ff;
   font-family: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  min-width: 46px;
+  text-align: center;
+  text-shadow: 0 1px 8px rgba(15, 23, 42, 0.7);
+}
+
+body .app-content .vms-map-controls .vms-scale-control__label--metric {
+  top: 0;
+}
+
+body .app-content .vms-map-controls .vms-scale-control__label--nautical {
+  bottom: 0;
+}
+
+body .app-content .vms-map-controls .vms-map-source-control {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 5px 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 12px !important;
+  background: rgba(15, 23, 42, 0.82) !important;
+  box-shadow: var(--shadow-md) !important;
+  color: #eaf2ff !important;
+  backdrop-filter: blur(12px);
+}
+
+body .app-content .vms-map-controls .vms-map-source-control__label {
+  color: #93c5fd;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+body .app-content .vms-map-controls .vms-map-source-control__options {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: repeat(var(--map-source-count, 2), minmax(58px, 1fr));
+  gap: 2px;
+  padding: 2px;
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.28);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+body .app-content .vms-map-controls .vms-map-source-control__thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  z-index: 0;
+  width: calc((100% - 4px - (var(--map-source-gap-count, 1) * 2px)) / var(--map-source-count, 2));
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.94), rgba(14, 165, 233, 0.84));
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.28);
+  transform: translateX(calc(var(--map-source-index, 0) * (100% + 2px)));
+  transition:
+    transform 0.24s cubic-bezier(0.2, 0.9, 0.2, 1),
+    width 0.2s ease;
+  pointer-events: none;
+}
+
+body .app-content .vms-map-controls .vms-map-source-control__button {
+  position: relative;
+  z-index: 1;
+  height: 24px;
+  min-width: 58px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #aebbd0;
+  font: inherit;
   font-size: 10px;
   font-weight: 800;
   line-height: 1;
-}
-
-body .app-content .vms-map-controls .vms-scale-control__unit {
-  width: 46px;
-  height: 23px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgba(96, 165, 250, 0.38);
-  border-radius: 8px;
-  background: rgba(37, 99, 235, 0.18);
-  color: #bfdbfe;
-  font-family: inherit;
-  font-size: 8.5px;
-  font-weight: 900;
-  line-height: 1;
   cursor: pointer;
-  outline: none;
-  padding: 0 17px 0 7px;
-  appearance: none;
-  background-image:
-    linear-gradient(45deg, transparent 50%, #bfdbfe 50%),
-    linear-gradient(135deg, #bfdbfe 50%, transparent 50%);
-  background-position:
-    calc(100% - 10px) 9px,
-    calc(100% - 6px) 9px;
-  background-size: 4px 4px, 4px 4px;
-  background-repeat: no-repeat;
   transition:
-    background 0.16s ease,
-    border-color 0.16s ease,
     color 0.16s ease,
     transform 0.16s ease;
 }
 
-body .app-content .vms-map-controls .vms-scale-control__unit:hover {
-  border-color: rgba(147, 197, 253, 0.72);
-  background: rgba(37, 99, 235, 0.34);
-  background-image:
-    linear-gradient(45deg, transparent 50%, #ffffff 50%),
-    linear-gradient(135deg, #ffffff 50%, transparent 50%);
-  background-position:
-    calc(100% - 10px) 9px,
-    calc(100% - 6px) 9px;
-  background-size: 4px 4px, 4px 4px;
-  background-repeat: no-repeat;
+body .app-content .vms-map-controls .vms-map-source-control__button:hover {
   color: #ffffff;
 }
 
-body .app-content .vms-map-controls .vms-scale-control__unit:focus-visible {
-  border-color: rgba(147, 197, 253, 0.86);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.24);
+body .app-content .vms-map-controls .vms-map-source-control__button.active {
+  color: #ffffff;
 }
 
-body .app-content .vms-map-controls .vms-scale-control__unit option {
-  background: #111827;
-  color: #f8fafc;
+body .app-content .vms-map-controls .vms-map-source-control__button:active {
+  transform: scale(0.96);
 }
 
 /* Keep native select menus readable across all dark dashboard pages. */
@@ -1434,8 +1602,99 @@ body .app-content .fleet-page :is(
     font-size: 12px !important;
   }
 
-  body .app-content .dashboard-content .dashboard-map-popup-row strong {
+body .app-content .dashboard-content .dashboard-map-popup-row strong {
     font-size: 13px !important;
+  }
+}
+
+.load-required-area {
+  position: relative;
+  min-height: 430px;
+  margin-top: 12px;
+}
+
+.load-required-area.is-locked > :not(.load-required-overlay) {
+  pointer-events: none;
+  user-select: none;
+  filter: blur(1px);
+  opacity: 0.32;
+}
+
+.load-required-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  display: grid;
+  place-items: start center;
+  padding: clamp(32px, 5vh, 72px) 18px 24px;
+  border: 1px solid rgba(147, 197, 253, 0.16);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 50% 12%, rgba(37, 99, 235, 0.18), transparent 34%),
+    linear-gradient(180deg, rgba(10, 14, 26, 0.64), rgba(10, 14, 26, 0.88));
+  backdrop-filter: blur(9px);
+  -webkit-backdrop-filter: blur(9px);
+}
+
+.load-required-card {
+  width: min(520px, 100%);
+  padding: 28px;
+  border: 1px solid rgba(147, 197, 253, 0.24);
+  border-radius: 22px;
+  background: rgba(15, 23, 42, 0.88);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  text-align: center;
+}
+
+.load-required-icon {
+  display: inline-grid;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 14px;
+  place-items: center;
+  border: 1px solid rgba(96, 165, 250, 0.38);
+  border-radius: 16px;
+  background: rgba(37, 99, 235, 0.22);
+  color: #bfdbfe;
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.load-required-card h2 {
+  margin: 6px 0 8px;
+  color: #f8fafc;
+  font-size: clamp(22px, 2vw, 30px);
+  letter-spacing: -0.03em;
+}
+
+.load-required-card p {
+  margin: 0;
+  color: #aab8cc;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.load-required-card strong {
+  color: #dbeafe;
+}
+
+.trace-load-required-area {
+  min-height: 620px;
+}
+
+@media (max-width: 768px) {
+  .load-required-area {
+    min-height: 360px;
+  }
+
+  .load-required-overlay {
+    padding: 26px 12px 18px;
+    border-radius: 14px;
+  }
+
+  .load-required-card {
+    padding: 22px 18px;
+    border-radius: 18px;
   }
 }
 

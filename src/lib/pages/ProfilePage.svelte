@@ -9,6 +9,7 @@
 	} from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import AuditLogPage from '$lib/pages/AuditLogPage.svelte';
+	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 
 	let loading = true;
 	let savingProfile = false;
@@ -59,8 +60,16 @@
 			]);
 
 			currentUser = userResponse?.data || null;
-			vessels = Array.isArray(vesselResponse?.data) ? vesselResponse.data : [];
-			assets = Array.isArray(assetResponse?.data) ? assetResponse.data : [];
+			vessels = sortByAlpha(
+				Array.isArray(vesselResponse?.data) ? vesselResponse.data : [],
+				(vessel) => vessel?.vesselName || vessel?.name || vessel?.deviceName,
+				(vessel) => vessel?.companyName
+			);
+			assets = sortByAlpha(
+				Array.isArray(assetResponse?.data) ? assetResponse.data : [],
+				(asset) => asset?.assetName || asset?.name || asset?.thingsboardName || asset?.assetId,
+				(asset) => asset?.assetType || asset?.type
+			);
 
 			syncProfileForm(currentUser);
 		} catch (error) {
@@ -369,8 +378,6 @@
 									<div class="access-icon vessel-icon">V</div>
 									<div>
 										<strong>{vessel.vesselName || vessel.deviceName || '-'}</strong>
-										<p>{vessel.deviceName || '-'} · ID: {vessel.id}</p>
-										<small>{vessel.deviceId || '-'}</small>
 									</div>
 								</div>
 							{/each}
@@ -397,8 +404,6 @@
 									<div class="access-icon asset-icon">A</div>
 									<div>
 										<strong>{asset.assetName || asset.thingsboardName || '-'}</strong>
-										<p>{asset.thingsboardName || '-'}</p>
-										<small>{asset.assetId || '-'}</small>
 									</div>
 								</div>
 							{/each}

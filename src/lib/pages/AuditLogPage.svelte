@@ -597,10 +597,10 @@
 				<button type="button" class="close-btn" onclick={closeDetail}> × </button>
 			</div>
 
-			{#if detailLoading}
-				<LoadingSkeleton label="Loading audit detail" variant="audit-log-detail" />
-			{:else if selectedDetail}
-				<div class="detail-body">
+			<div class="detail-body">
+				{#if detailLoading}
+					<LoadingSkeleton label="Loading audit detail" variant="audit-log-detail" />
+				{:else if selectedDetail}
 					<div class="detail-grid">
 						<div>
 							<span>Audit ID</span>
@@ -654,8 +654,8 @@
 							<div class="empty-box">No change details are available.</div>
 						{/if}
 					</div>
-				</div>
-			{/if}
+				{/if}
+			</div>
 		</section>
 	</div>
 {/if}
@@ -1051,13 +1051,19 @@
 	.detail-modal {
 		width: min(780px, 100%);
 		max-height: 90vh;
-		overflow: auto;
+		overflow: hidden;
+		display: flex;
+		flex-direction: column;
 		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		box-shadow: 0 24px 80px rgba(15, 23, 42, 0.22);
 	}
 
 	.detail-header {
+		position: sticky;
+		top: 0;
+		z-index: 5;
+		flex: 0 0 auto;
 		min-height: 58px;
 		padding: 12px 14px;
 		display: flex;
@@ -1066,6 +1072,7 @@
 		gap: 12px;
 		border-bottom: 1px solid #e5edf5;
 		background: var(--color-surface);
+		box-shadow: 0 10px 24px rgba(2, 6, 23, 0.12);
 	}
 
 	.detail-header h2 {
@@ -1088,6 +1095,8 @@
 	}
 
 	.detail-body {
+		min-height: 0;
+		overflow: auto;
 		display: grid;
 		gap: 14px;
 		padding: 14px;

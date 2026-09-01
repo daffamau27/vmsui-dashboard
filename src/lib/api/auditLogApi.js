@@ -1,4 +1,5 @@
 import { apiRequest } from "$lib/api/authApi.js";
+import { getApiBaseUrl } from "$lib/runtimeConfig.js";
 
 export async function getMyAuditLogs({ page = 1, pageSize = 20 } = {}) {
   const params = new URLSearchParams({
@@ -36,7 +37,7 @@ export async function getAuditLogDetail(id) {
 }
 
 export async function exportMyAuditLogsCsv({ startDate, endDate } = {}) {
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+  const apiBaseUrl = await getApiBaseUrl();
 
   const params = new URLSearchParams();
 
@@ -73,7 +74,7 @@ export async function exportMyAuditLogsCsv({ startDate, endDate } = {}) {
   }
 
   const query = params.toString();
-  const url = `${API_BASE_URL}/audit-logs/my/export-csv${query ? `?${query}` : ""}`;
+  const url = `${apiBaseUrl}/audit-logs/my/export-csv${query ? `?${query}` : ""}`;
 
   const response = await fetch(url, {
     method: "GET",

@@ -1,8 +1,10 @@
 <script>
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
 	import { activeVesselMenu, setActiveVesselMenu } from '$lib/stores/vesselNavigation.svelte.js';
 	import { apiRequest } from '$lib/api/authApi.js';
+	import { updateVesselHireStatusAdminApi as updateVesselHireStatusApi } from '$lib/api/administratorApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 
 	import VesselDashboardPage from '$lib/pages/vessel/VesselDashboardPage.svelte';
 	import DailyReportPage from '$lib/pages/vessel/DailyReportPage.svelte';
@@ -12,8 +14,9 @@
 	import TracePage from '$lib/pages/vessel/TracePage.svelte';
 	import DataLogPage from '$lib/pages/vessel/DataLogPage.svelte';
 	import FuelManagementPage from '$lib/pages/vessel/FuelManagementPage.svelte';
+	import SingleLineDiagramPage from '$lib/pages/vessel/SingleLineDiagramPage.svelte';
 
-	import { getFleetVesselsWithEngines } from '$lib/api/fleetApi.js';
+	import { getMyVesselsApi } from '$lib/api/authApi.js';
 	import {
 		selectedVesselId,
 		selectedVesselInfo,
@@ -28,10 +31,15 @@
 	let menuOpen = $state(false);
 	let vesselDropdownOpen = $state(false);
 	let vesselSearch = $state('');
+	let focusedVesselIndex = $state(-1);
+	let vesselMenuElement = $state(null);
+	let vesselSearchInputElement = $state(null);
 
 	let vessels = $state([]);
 	let vesselLoading = $state(false);
 	let vesselError = $state('');
+	let hireStatusLoading = $state(false);
+	let hireStatusError = $state('');
 
 	let permissionLoading = $state(true);
 	let permissionMode = $state('selected');
@@ -83,6 +91,11 @@
 			label: 'Fuel Management',
 			key: 'fuel-management',
 			permissions: ['access_fuel_management']
+		},
+		{
+			label: 'Single Line Diagram',
+			key: 'single-line-diagram',
+			permissions: ['access_single_line']
 		}
 	];
 
@@ -132,6 +145,30 @@
 
 	let selectedVessel = $derived(
 		$selectedVesselInfo?.vesselName || $selectedVesselInfo?.name || 'Select Vessel'
+	);
+
+	let selectedVesselRecord = $derived(
+		vessels.find(
+			(vessel) =>
+				Number(getVesselId(vessel)) === Number($selectedVesselId || getVesselId($selectedVesselInfo))
+		) ||
+			$selectedVesselInfo ||
+			null
+	);
+
+	let selectedHireIsOn = $derived(isOnHireStatus(getVesselHireRawValue(selectedVesselRecord)));
+	let selectedHireLabel = $derived(selectedHireIsOn ? 'On Hire' : 'Off Hire');
+	let canManageHireStatus = $derived(hasPermission(['manage_hire_status']));
+	let hireStatusToggleTitle = $derived(
+		permissionLoading
+			? 'Loading hire status permission...'
+			: !canManageHireStatus
+				? 'Requires manage_hire_status permission'
+				: hireStatusError || `Change to ${selectedHireIsOn ? 'Off Hire' : 'On Hire'}`
+	);
+
+	let vesselPageKey = $derived(
+		String($selectedVesselId || getVesselId($selectedVesselInfo) || 'no-vessel')
 	);
 
 	let latestStatusInterval = null;
@@ -190,23 +227,322 @@
 		return vessel?.vesselId || vessel?.id || vessel?.vessel_id || vessel?.dbId || null;
 	}
 
+	function getVesselHireRawValue(vessel = {}) {
+		const source = vessel?.vessel || vessel?.raw?.vessel || vessel;
+
+		return (
+			source?.hireStatus ??
+			source?.hire_status ??
+			source?.onHire ??
+			source?.on_hire ??
+			source?.isOnHire ??
+			source?.is_on_hire ??
+			vessel?.hireStatus ??
+			vessel?.hire_status ??
+			vessel?.onHire ??
+			vessel?.on_hire ??
+			vessel?.isOnHire ??
+			vessel?.is_on_hire ??
+			vessel?.raw?.hireStatus ??
+			vessel?.raw?.hire_status ??
+			vessel?.raw?.onHire ??
+			vessel?.raw?.on_hire ??
+			false
+		);
+	}
+
+	function isOnHireStatus(value) {
+		if (typeof value === 'boolean') return value;
+		if (typeof value === 'number') return value === 1;
+
+		const normalized = String(value ?? '')
+			.trim()
+			.toLowerCase()
+			.replace(/[_-]+/g, ' ');
+
+		return ['true', '1', 'on', 'on hire', 'onhire', 'active'].includes(normalized);
+	}
+
+	function formatHireStatusValue(value) {
+		return isOnHireStatus(value) ? 'On Hire' : 'Off Hire';
+	}
+
+	function normalizeVesselForSelector(item = {}) {
+		const source = item?.vessel || item?.raw?.vessel || item;
+		const vesselId =
+			source?.id ??
+			source?.vesselId ??
+			source?.vessel_id ??
+			item?.id ??
+			item?.vesselId ??
+			item?.vessel_id ??
+			item?.dbId ??
+			null;
+
+		const vesselName =
+			source?.vesselName ||
+			source?.vessel_name ||
+			source?.name ||
+			source?.deviceName ||
+			item?.vesselName ||
+			item?.vessel_name ||
+			item?.name ||
+			item?.deviceName ||
+			(vesselId ? `Vessel ${vesselId}` : 'Vessel');
+
+		const companyName =
+			source?.companyName ||
+			source?.company_name ||
+			source?.company?.name ||
+			source?.company?.companyName ||
+			item?.companyName ||
+			item?.company_name ||
+			item?.company?.name ||
+			item?.company?.companyName ||
+			'-';
+		const hireStatus = formatHireStatusValue(getVesselHireRawValue({ ...item, ...source }));
+
+		return {
+			...item,
+			...source,
+			id: vesselId,
+			vesselId,
+			dbId: vesselId,
+			name: vesselName,
+			vesselName,
+			deviceName: source?.deviceName || item?.deviceName || vesselName,
+			deviceId: source?.deviceId || source?.device_id || item?.deviceId || item?.device_id || '',
+			companyName,
+			hireStatus,
+			hire_status: hireStatus,
+			timezone: source?.timezone || item?.timezone || item?.timezoneOffset || item?.timezone_offset || '',
+			engines: Array.isArray(source?.engines)
+				? source.engines
+				: Array.isArray(item?.engines)
+					? item.engines
+					: [],
+			raw: item
+		};
+	}
+
+	function extractVesselsFromResponse(response) {
+		const data = response?.data ?? response;
+		const candidates = [
+			data,
+			data?.items,
+			data?.vessels,
+			data?.data,
+			data?.data?.items,
+			data?.data?.vessels
+		];
+
+		const rows = candidates.find((candidate) => Array.isArray(candidate)) || [];
+
+		return sortByAlpha(
+			rows.map(normalizeVesselForSelector).filter((vessel) => getVesselId(vessel)),
+			getVesselDisplayName,
+			getVesselCompanyName
+		);
+	}
+
+	function getVesselDisplayName(vessel) {
+		return (
+			vessel?.vesselName ||
+			vessel?.vessel_name ||
+			vessel?.name ||
+			vessel?.deviceName ||
+			vessel?.raw?.vesselName ||
+			vessel?.raw?.vessel_name ||
+			vessel?.raw?.vessel?.vesselName ||
+			vessel?.raw?.vessel?.vessel_name ||
+			''
+		);
+	}
+
+	function getVesselCompanyName(vessel) {
+		return (
+			vessel?.companyName ||
+			vessel?.company_name ||
+			vessel?.company?.name ||
+			vessel?.company?.companyName ||
+			vessel?.raw?.companyName ||
+			vessel?.raw?.company_name ||
+			vessel?.raw?.company?.name ||
+			vessel?.raw?.company?.companyName ||
+			vessel?.raw?.vessel?.companyName ||
+			vessel?.raw?.vessel?.company_name ||
+			vessel?.raw?.vessel?.company?.name ||
+			vessel?.raw?.vessel?.company?.companyName ||
+			vessel?.raw?.detail?.companyName ||
+			vessel?.raw?.detail?.company_name ||
+			vessel?.raw?.detail?.company?.name ||
+			vessel?.raw?.detail?.company?.companyName ||
+			''
+		);
+	}
+
 	let filteredVessels = $derived(
 		vessels.filter((vessel) => {
 			const keyword = vesselSearch.trim().toLowerCase();
 			if (!keyword) return true;
 
 			return [
-				vessel?.vesselName,
-				vessel?.name,
-				vessel?.companyName,
-				vessel?.deviceName,
-				vessel?.deviceId,
-				getVesselId(vessel)
+				getVesselDisplayName(vessel),
+				getVesselCompanyName(vessel)
 			]
 				.filter(Boolean)
 				.some((value) => String(value).toLowerCase().includes(keyword));
 		})
 	);
+
+	function getActiveVesselIndex(list = filteredVessels) {
+		if (!Array.isArray(list) || list.length === 0) return -1;
+
+		const selectedId = $selectedVesselId || getVesselId($selectedVesselInfo);
+		if (!selectedId) return 0;
+
+		const selectedIndex = list.findIndex(
+			(vessel) => Number(getVesselId(vessel)) === Number(selectedId)
+		);
+
+		return selectedIndex >= 0 ? selectedIndex : 0;
+	}
+
+	async function scrollVesselOptionIntoView(index = focusedVesselIndex, block = 'nearest') {
+		if (!vesselDropdownOpen || index < 0) return;
+
+		await tick();
+
+		const option = vesselMenuElement?.querySelector?.(
+			`[data-vessel-option-index="${index}"]`
+		);
+
+		option?.scrollIntoView?.({
+			block,
+			inline: 'nearest',
+			behavior: 'smooth'
+		});
+	}
+
+	async function prepareVesselDropdown({ focusSearch = false, scrollBlock = 'center' } = {}) {
+		await tick();
+
+		focusedVesselIndex = getActiveVesselIndex();
+		await scrollVesselOptionIntoView(focusedVesselIndex, scrollBlock);
+
+		if (focusSearch) {
+			await tick();
+			vesselSearchInputElement?.focus?.();
+		}
+	}
+
+	function openVesselDropdown({ focusSearch = true } = {}) {
+		vesselDropdownOpen = true;
+		void prepareVesselDropdown({ focusSearch });
+	}
+
+	function toggleVesselDropdown() {
+		if (vesselDropdownOpen) {
+			vesselDropdownOpen = false;
+			return;
+		}
+
+		openVesselDropdown();
+	}
+
+	function moveFocusedVessel(nextIndex) {
+		if (!filteredVessels.length) {
+			focusedVesselIndex = -1;
+			return;
+		}
+
+		const maxIndex = filteredVessels.length - 1;
+		focusedVesselIndex = Math.max(0, Math.min(maxIndex, nextIndex));
+		void scrollVesselOptionIntoView(focusedVesselIndex);
+	}
+
+	function handleVesselSelectorKeydown(event) {
+		if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+			event.preventDefault();
+			openVesselDropdown();
+		}
+	}
+
+	function handleVesselDropdownKeydown(event) {
+		if (!vesselDropdownOpen) return;
+
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			vesselDropdownOpen = false;
+			return;
+		}
+
+		if (!filteredVessels.length) return;
+
+		const currentIndex =
+			focusedVesselIndex >= 0 ? focusedVesselIndex : getActiveVesselIndex(filteredVessels);
+
+		if (event.key === 'ArrowDown') {
+			event.preventDefault();
+			moveFocusedVessel(currentIndex + 1);
+			return;
+		}
+
+		if (event.key === 'ArrowUp') {
+			event.preventDefault();
+			moveFocusedVessel(currentIndex - 1);
+			return;
+		}
+
+		if (event.key === 'Home') {
+			event.preventDefault();
+			moveFocusedVessel(0);
+			return;
+		}
+
+		if (event.key === 'End') {
+			event.preventDefault();
+			moveFocusedVessel(filteredVessels.length - 1);
+			return;
+		}
+
+		if (event.key === 'PageDown') {
+			event.preventDefault();
+			moveFocusedVessel(currentIndex + 6);
+			return;
+		}
+
+		if (event.key === 'PageUp') {
+			event.preventDefault();
+			moveFocusedVessel(currentIndex - 6);
+			return;
+		}
+
+		if (event.key === 'Enter') {
+			event.preventDefault();
+			const vessel = filteredVessels[currentIndex];
+			if (vessel) selectVessel(vessel);
+		}
+	}
+
+	function handleVesselSearchKeydown(event) {
+		handleVesselDropdownKeydown(event);
+
+		if (
+			[
+				'ArrowDown',
+				'ArrowUp',
+				'Home',
+				'End',
+				'PageDown',
+				'PageUp',
+				'Enter',
+				'Escape'
+			].includes(event.key)
+		) {
+			event.stopPropagation();
+		}
+	}
 
 	function formatNumber(value) {
 		const number = Number(value);
@@ -463,6 +799,29 @@
 		}, 30000);
 	}
 
+	function resetVesselScopedUiState() {
+		pageStatusMap = {};
+		todayDataReceived = '-';
+		todayDataReceivedStats = { received: '-', total: 1440 };
+		latestVesselStatus = {
+			queue: '-',
+			sdcard: '-',
+			sdCardAvailable: false,
+			sdCardUsed: '-',
+			sdCardCapacity: '-',
+			online: false
+		};
+
+		latestStatusRequestId += 1;
+		todayDataReceivedRequestId += 1;
+
+		const activeKey = $activeVesselMenu;
+		mountedPages = {
+			dashboard: true,
+			...(activeKey && activeKey !== 'dashboard' ? { [activeKey]: true } : {})
+		};
+	}
+
 	function isPageActive(key) {
 		return active && $activeVesselMenu === key;
 	}
@@ -538,7 +897,27 @@
 		if (String(vesselId) === String(lastLatestStatusVesselId)) return;
 
 		lastLatestStatusVesselId = vesselId;
+		resetVesselScopedUiState();
 		startLatestStatusPolling(vesselId);
+	});
+
+	$effect(() => {
+		if (!vesselDropdownOpen) {
+			focusedVesselIndex = -1;
+			return;
+		}
+
+		const searchKey = vesselSearch;
+		const vesselCount = filteredVessels.length;
+		const selectedId = $selectedVesselId || getVesselId($selectedVesselInfo);
+
+		searchKey;
+		vesselCount;
+		selectedId;
+
+		const nextFocusedIndex = getActiveVesselIndex(filteredVessels);
+		focusedVesselIndex = nextFocusedIndex;
+		void scrollVesselOptionIntoView(nextFocusedIndex, 'nearest');
 	});
 
 	async function loadCurrentUserPermissions() {
@@ -575,11 +954,12 @@
 		try {
 			console.log('[VESSEL_PAGE][LOAD_VESSELS][START]');
 
-			const rows = await getFleetVesselsWithEngines();
+			const response = await getMyVesselsApi();
+			const rows = extractVesselsFromResponse(response);
 
 			console.log('[VESSEL_PAGE][LOAD_VESSELS][RESULT]', rows);
 
-			vessels = Array.isArray(rows) ? rows : [];
+			vessels = sortByAlpha(Array.isArray(rows) ? rows : [], getVesselDisplayName, getVesselCompanyName);
 
 			const currentId = $selectedVesselId;
 
@@ -588,12 +968,10 @@
 				const selected = found || vessels[0];
 
 				setSelectedVessel(selected);
-				startLatestStatusPolling(getVesselId(selected));
 			} else if (vessels.length) {
 				const selected = vessels[0];
 
 				setSelectedVessel(selected);
-				startLatestStatusPolling(getVesselId(selected));
 			}
 		} catch (err) {
 			console.error('[VESSEL_PAGE][LOAD_VESSELS][ERROR]', err);
@@ -601,6 +979,48 @@
 			vessels = [];
 		} finally {
 			vesselLoading = false;
+		}
+	}
+
+	async function toggleSelectedVesselHireStatus() {
+		const vesselId = getVesselId(selectedVesselRecord) || $selectedVesselId;
+
+		if (!vesselId || hireStatusLoading) return;
+		if (!canManageHireStatus) {
+			hireStatusError = 'This account does not have the manage_hire_status permission.';
+			return;
+		}
+
+		const nextHireStatus = !selectedHireIsOn;
+		hireStatusLoading = true;
+		hireStatusError = '';
+
+		try {
+			await updateVesselHireStatusApi(vesselId, nextHireStatus);
+
+			const nextLabel = nextHireStatus ? 'On Hire' : 'Off Hire';
+			const updateVessel = (vessel) => ({
+				...vessel,
+				hireStatus: nextLabel,
+				hire_status: nextLabel,
+				onHire: nextHireStatus,
+				on_hire: nextHireStatus,
+				isOnHire: nextHireStatus,
+				is_on_hire: nextHireStatus
+			});
+
+			const updatedSelectedVessel = updateVessel(selectedVesselRecord || {});
+
+			vessels = vessels.map((vessel) =>
+				Number(getVesselId(vessel)) === Number(vesselId) ? updateVessel(vessel) : vessel
+			);
+
+			setSelectedVessel(updatedSelectedVessel);
+		} catch (error) {
+			console.error('[VESSEL_PAGE][HIRE_STATUS_UPDATE][ERROR]', error);
+			hireStatusError = error?.message || 'Failed to update hire status.';
+		} finally {
+			hireStatusLoading = false;
 		}
 	}
 
@@ -617,8 +1037,6 @@
 		vesselSearch = '';
 
 		console.log('[VESSEL_PAGE][VESSEL_SELECTED]', vessel);
-
-		startLatestStatusPolling(getVesselId(vessel));
 	}
 
 	onMount(() => {
@@ -730,24 +1148,66 @@
 					<strong>{status.online ? 'Online' : 'Offline'}</strong>
 				</span>
 			</div>
+
+			{#if canManageHireStatus}
+				<button
+					type="button"
+					class="hire-status-toggle"
+					class:on-hire={selectedHireIsOn}
+					class:off-hire={!selectedHireIsOn}
+					onclick={toggleSelectedVesselHireStatus}
+					disabled={!selectedVesselRecord || hireStatusLoading || permissionLoading}
+					aria-pressed={selectedHireIsOn}
+					title={hireStatusToggleTitle}
+				>
+					<span class="hire-toggle-track" aria-hidden="true">
+						<span></span>
+					</span>
+					<span class="hire-toggle-copy">
+						<small>Hire Status</small>
+						<strong>{hireStatusLoading ? 'Updating...' : selectedHireLabel}</strong>
+					</span>
+				</button>
+			{:else}
+				<div
+					class="hire-status-display"
+					class:on-hire={selectedHireIsOn}
+					class:off-hire={!selectedHireIsOn}
+					role="status"
+					title="Hire status"
+				>
+					<span class="hire-status-dot" aria-hidden="true"></span>
+					<span class="hire-toggle-copy">
+						<small>Hire Status</small>
+						<strong>{selectedHireLabel}</strong>
+					</span>
+				</div>
+			{/if}
 		</div>
 
 		<div class="vessel-dropdown">
 			<button
 				type="button"
 				class="vessel-selector"
-				onclick={() => (vesselDropdownOpen = !vesselDropdownOpen)}
+				onclick={toggleVesselDropdown}
+				onkeydown={handleVesselSelectorKeydown}
 			>
 				<span class="vessel-selector-icon" aria-hidden="true">🚢</span>
 				<span class="selector-copy">
-					<small>Active vessel</small>
 					<strong>{selectedVessel}</strong>
 				</span>
 				<span>▾</span>
 			</button>
 
 			{#if vesselDropdownOpen}
-				<div class="vessel-menu">
+				<div
+					class="vessel-menu"
+					bind:this={vesselMenuElement}
+					onkeydown={handleVesselDropdownKeydown}
+					role="listbox"
+					aria-label="Vessel list"
+					tabindex="-1"
+				>
 					{#if vesselLoading}
 						<div class="vessel-state"><LoadingSkeleton label="Loading vessels" variant="list" rows={4} compact /></div>
 					{:else if vesselError}
@@ -761,6 +1221,8 @@
 								placeholder="Search vessel..."
 								aria-label="Search vessel"
 								bind:value={vesselSearch}
+								bind:this={vesselSearchInputElement}
+								onkeydown={handleVesselSearchKeydown}
 							/>
 							{#if vesselSearch}
 								<button
@@ -776,11 +1238,17 @@
 						{#if filteredVessels.length === 0}
 							<div class="vessel-state">No vessel found.</div>
 						{:else}
-							{#each filteredVessels as vessel}
+							{#each filteredVessels as vessel, index}
 							<button
 								type="button"
 								class="vessel-item"
 								class:active-vessel={Number($selectedVesselId) === Number(getVesselId(vessel))}
+								class:keyboard-active={focusedVesselIndex === index &&
+									Number($selectedVesselId) !== Number(getVesselId(vessel))}
+								data-vessel-option-index={index}
+								role="option"
+								aria-selected={focusedVesselIndex === index}
+								onmouseenter={() => (focusedVesselIndex = index)}
 								onclick={() => selectVessel(vessel)}
 							>
 								<span class="vessel-item-icon" aria-hidden="true">🚢</span>
@@ -802,11 +1270,11 @@
 
 	<main class="vessel-content">
 		{#if permissionLoading}
-			<section class="vessel-page active-vessel-page">
-				<div class="no-access-card">
-					<LoadingSkeleton label="Loading vessel access" variant="card" rows={3} />
-				</div>
-			</section>
+			<div class="loading-screen">
+				<div class="loading-brand">⚓</div>
+				<div class="loading-spinner" aria-hidden="true"></div>
+				<span>Initializing...</span>
+			</div>
 		{:else if !visibleVesselMenus.length}
 			<section class="vessel-page active-vessel-page">
 				<div class="no-access-card">
@@ -815,58 +1283,94 @@
 				</div>
 			</section>
 		{:else}
-			{#if shouldMountPage('dashboard') && isPageAllowed('dashboard')}
-				<section class="vessel-page" class:active-vessel-page={isPageActive('dashboard')}>
-					<VesselDashboardPage active={isPageActive('dashboard')} />
-				</section>
-			{/if}
+			{#key vesselPageKey}
+				{#if shouldMountPage('dashboard') && isPageAllowed('dashboard')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('dashboard')}>
+						<VesselDashboardPage active={isPageActive('dashboard')} />
+					</section>
+				{/if}
 
-			{#if shouldMountPage('daily-report') && isPageAllowed('daily-report')}
-				<section class="vessel-page" class:active-vessel-page={isPageActive('daily-report')}>
-					<DailyReportPage active={isPageActive('daily-report')} />
-				</section>
-			{/if}
+				{#if shouldMountPage('daily-report') && isPageAllowed('daily-report')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('daily-report')}>
+						<DailyReportPage active={isPageActive('daily-report')} />
+					</section>
+				{/if}
 
-			{#if shouldMountPage('monthly-report') && isPageAllowed('monthly-report')}
-				<section class="vessel-page" class:active-vessel-page={isPageActive('monthly-report')}>
-					<MonthlyReportPage active={isPageActive('monthly-report')} />
-				</section>
-			{/if}
+				{#if shouldMountPage('monthly-report') && isPageAllowed('monthly-report')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('monthly-report')}>
+						<MonthlyReportPage active={isPageActive('monthly-report')} />
+					</section>
+				{/if}
 
-			{#if shouldMountPage('periodical-report') && isPageAllowed('periodical-report')}
-				<section class="vessel-page" class:active-vessel-page={isPageActive('periodical-report')}>
-					<PeriodicalReportPage active={isPageActive('periodical-report')} />
-				</section>
-			{/if}
+				{#if shouldMountPage('periodical-report') && isPageAllowed('periodical-report')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('periodical-report')}>
+						<PeriodicalReportPage active={isPageActive('periodical-report')} />
+					</section>
+				{/if}
 
-			{#if shouldMountPage('voyage-plan') && isPageAllowed('voyage-plan')}
-				<section class="vessel-page" class:active-vessel-page={isPageActive('voyage-plan')}>
-					<VoyagePlanPage active={isPageActive('voyage-plan')} />
-				</section>
-			{/if}
+				{#if shouldMountPage('voyage-plan') && isPageAllowed('voyage-plan')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('voyage-plan')}>
+						<VoyagePlanPage active={isPageActive('voyage-plan')} />
+					</section>
+				{/if}
 
-			{#if shouldMountPage('trace') && isPageAllowed('trace')}
-				<section class="vessel-page" class:active-vessel-page={isPageActive('trace')}>
-					<TracePage active={isPageActive('trace')} />
-				</section>
-			{/if}
+				{#if shouldMountPage('trace') && isPageAllowed('trace')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('trace')}>
+						<TracePage active={isPageActive('trace')} />
+					</section>
+				{/if}
 
-			{#if shouldMountPage('data-log') && isPageAllowed('data-log')}
-				<section class="vessel-page" class:active-vessel-page={isPageActive('data-log')}>
-					<DataLogPage active={isPageActive('data-log')} />
-				</section>
-			{/if}
+				{#if shouldMountPage('data-log') && isPageAllowed('data-log')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('data-log')}>
+						<DataLogPage active={isPageActive('data-log')} />
+					</section>
+				{/if}
 
-			{#if shouldMountPage('fuel-management') && isPageAllowed('fuel-management')}
-				<section class="vessel-page" class:active-vessel-page={isPageActive('fuel-management')}>
-					<FuelManagementPage active={isPageActive('fuel-management')} />
-				</section>
-			{/if}
+				{#if shouldMountPage('fuel-management') && isPageAllowed('fuel-management')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('fuel-management')}>
+						<FuelManagementPage active={isPageActive('fuel-management')} />
+					</section>
+				{/if}
+
+				{#if shouldMountPage('single-line-diagram') && isPageAllowed('single-line-diagram')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('single-line-diagram')}>
+						<SingleLineDiagramPage active={isPageActive('single-line-diagram')} />
+					</section>
+				{/if}
+			{/key}
 		{/if}
 	</main>
 </section>
 
 <style>
+	.loading-screen {
+		width: 100vw;
+		height: 100vh;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		place-content: center;
+		justify-items: center;
+		gap: 14px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		font-family:
+			'Plus Jakarta Sans',
+			ui-sans-serif,
+			system-ui,
+			-apple-system,
+			BlinkMacSystemFont,
+			'Segoe UI',
+			sans-serif;
+		background:
+			radial-gradient(circle at 35% 25%, rgba(59, 130, 246, 0.16), transparent 28%),
+			var(--color-base);
+		font-weight: var(--font-weight-body);
+	}
+
 	.vessel-shell {
 		width: 100%;
 		height: 100%;
@@ -1484,9 +1988,10 @@
 
 	/* Vessel workspace navigation */
 	.vessel-topbar {
-		height: 58px;
-		min-height: 58px;
-		padding: 0 10px;
+		--vessel-topbar-item-height: 52px;
+		height: 62px;
+		min-height: 62px;
+		padding: 0 12px;
 		gap: 8px;
 		background: rgba(10, 14, 26, 0.96);
 		border-bottom: 1px solid var(--color-border);
@@ -1496,8 +2001,11 @@
 
 	.topbar-left {
 		flex: 1 1 auto;
-		gap: 6px;
+		display: flex;
+		align-items: center;
+		gap: 8px;
 		overflow: visible;
+		min-width: 0;
 	}
 
 	.dropdown {
@@ -1506,18 +2014,30 @@
 
 	.dropdown,
 	.vessel-dropdown {
-		height: auto;
+		height: var(--vessel-topbar-item-height);
 		flex: 0 0 auto;
+		display: flex;
+		align-items: center;
 	}
 
 	.dropdown-button,
-	.vessel-selector {
-		height: 42px;
-		border: 1px solid rgba(255, 255, 255, 0.08);
-		border-radius: 12px;
-		background: rgba(255, 255, 255, 0.04);
+	.vessel-selector,
+	.topbar-item,
+	.topbar-table,
+	.hire-status-display,
+	.hire-status-toggle {
+		height: var(--vessel-topbar-item-height);
+		min-height: var(--vessel-topbar-item-height);
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 13px;
+		background:
+			linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
 		color: var(--text-primary);
-		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+		box-shadow:
+			inset 0 1px 0 rgba(255, 255, 255, 0.045),
+			0 10px 24px rgba(2, 6, 23, 0.16);
+		backdrop-filter: blur(14px) saturate(1.2);
 		transition:
 			border-color 120ms ease,
 			background 120ms ease,
@@ -1528,13 +2048,39 @@
 		min-width: 180px;
 		padding: 0 11px;
 		border-color: rgba(59, 130, 246, 0.24);
-		background: rgba(59, 130, 246, 0.09);
+		background:
+			linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+	}
+
+	.topbar-table {
+		margin-left: 0;
+		overflow: hidden;
+	}
+
+	.telemetry-count-card {
+		border-color: rgba(96, 165, 250, 0.3);
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.16), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+	}
+
+	.sd-card-card {
+		border-color: rgba(20, 184, 166, 0.28);
+		background:
+			linear-gradient(135deg, rgba(20, 184, 166, 0.12), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
 	}
 
 	.dropdown-button:hover,
-	.vessel-selector:hover {
+	.vessel-selector:hover,
+	.hire-status-toggle:hover:not(:disabled),
+	.topbar-item:hover,
+	.topbar-table:hover {
 		border-color: rgba(59, 130, 246, 0.4);
-		background: rgba(59, 130, 246, 0.14);
+		background:
+			linear-gradient(135deg, rgba(59, 130, 246, 0.14), rgba(15, 23, 42, 0.2)),
+			rgba(15, 23, 42, 0.68);
 		transform: translateY(-1px);
 	}
 
@@ -1590,7 +2136,7 @@
 	.selector-copy strong {
 		overflow: hidden;
 		color: var(--text-primary);
-		font-size: 11px;
+		font-size: 15px;
 		font-weight: 900;
 		line-height: 1.25;
 		text-overflow: ellipsis;
@@ -1609,13 +2155,9 @@
 	}
 
 	.topbar-item {
-		height: 42px;
 		min-width: 78px;
 		padding: 0 10px;
 		gap: 7px;
-		border: 1px solid rgba(255, 255, 255, 0.065);
-		border-radius: 11px;
-		background: rgba(255, 255, 255, 0.028);
 		color: var(--text-secondary);
 	}
 
@@ -1650,11 +2192,11 @@
 	}
 
 	.online-box {
-		height: 52px;
-		min-height: 52px;
 		min-width: 96px;
 		border-color: rgba(16, 185, 129, 0.18);
-		background: rgba(16, 185, 129, 0.08);
+		background:
+			linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
 		color: #34d399;
 	}
 
@@ -1664,11 +2206,159 @@
 
 	.offline-box {
 		border-color: rgba(239, 68, 68, 0.18);
-		background: rgba(239, 68, 68, 0.08);
+		background:
+			linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
 	}
 
 	.offline-box .status-copy strong {
 		color: #f87171;
+	}
+
+	.hire-status-toggle {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: flex-start;
+		gap: 9px;
+		margin-left: auto;
+		min-width: 140px;
+		padding: 0 12px;
+		border: 1px solid rgba(245, 158, 11, 0.28);
+		background:
+			linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+		color: #fbbf24;
+		cursor: pointer;
+	}
+
+	.hire-status-display {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: flex-start;
+		gap: 9px;
+		margin-left: auto;
+		min-width: 126px;
+		padding: 0 12px;
+		border-color: rgba(245, 158, 11, 0.22);
+		background:
+			linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+		color: #fbbf24;
+		cursor: default;
+		user-select: none;
+	}
+
+	.hire-status-display.on-hire {
+		border-color: rgba(16, 185, 129, 0.24);
+		background:
+			linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+		color: #34d399;
+	}
+
+	.hire-status-dot {
+		width: 9px;
+		height: 9px;
+		border-radius: 999px;
+		background: #f59e0b;
+		box-shadow: 0 0 12px rgba(245, 158, 11, 0.42);
+		flex: 0 0 auto;
+	}
+
+	.hire-status-display.on-hire .hire-status-dot {
+		background: #22c55e;
+		box-shadow: 0 0 12px rgba(34, 197, 94, 0.46);
+	}
+
+	.hire-status-toggle:hover:not(:disabled) {
+		border-color: rgba(245, 158, 11, 0.42);
+		background:
+			linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(15, 23, 42, 0.2)),
+			rgba(15, 23, 42, 0.68);
+	}
+
+	.hire-status-toggle.on-hire {
+		border-color: rgba(16, 185, 129, 0.3);
+		background:
+			linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+		color: #34d399;
+	}
+
+	.hire-status-toggle.on-hire:hover:not(:disabled) {
+		border-color: rgba(16, 185, 129, 0.42);
+		background:
+			linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(15, 23, 42, 0.2)),
+			rgba(15, 23, 42, 0.68);
+	}
+
+	.hire-status-toggle:disabled {
+		cursor: progress;
+		opacity: 0.64;
+	}
+
+	.hire-toggle-track {
+		display: flex;
+		align-items: center;
+		width: 38px;
+		height: 20px;
+		padding: 2px;
+		border: 1px solid rgba(245, 158, 11, 0.32);
+		border-radius: 999px;
+		background: rgba(245, 158, 11, 0.18);
+		flex: 0 0 auto;
+	}
+
+	.hire-toggle-track span {
+		width: 14px;
+		height: 14px;
+		border-radius: 999px;
+		background: #f59e0b;
+		box-shadow: 0 0 12px rgba(245, 158, 11, 0.45);
+		transform: translateX(0);
+		transition:
+			transform 180ms ease,
+			background 180ms ease,
+			box-shadow 180ms ease;
+	}
+
+	.hire-status-toggle.on-hire .hire-toggle-track {
+		border-color: rgba(16, 185, 129, 0.36);
+		background: rgba(16, 185, 129, 0.18);
+	}
+
+	.hire-status-toggle.on-hire .hire-toggle-track span {
+		background: #22c55e;
+		box-shadow: 0 0 12px rgba(34, 197, 94, 0.48);
+		transform: translateX(18px);
+	}
+
+	.hire-toggle-copy {
+		min-width: 0;
+		display: grid;
+		gap: 3px;
+		text-align: left;
+	}
+
+	.hire-toggle-copy small {
+		color: var(--text-muted);
+		font-size: 8px;
+		font-weight: 800;
+		letter-spacing: 0.08em;
+		line-height: 1.1;
+		text-transform: uppercase;
+	}
+
+	.hire-toggle-copy strong {
+		overflow: hidden;
+		color: currentColor;
+		font-size: 12px;
+		font-weight: 800;
+		line-height: 1.15;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.dot {
@@ -1818,6 +2508,22 @@
 		color: var(--text-accent);
 	}
 
+	.vessel-item.keyboard-active {
+		border-color: rgba(96, 165, 250, 0.38);
+		background:
+			linear-gradient(90deg, rgba(59, 130, 246, 0.18), rgba(59, 130, 246, 0.08)),
+			rgba(255, 255, 255, 0.045);
+		color: var(--text-primary);
+		box-shadow:
+			inset 3px 0 0 rgba(96, 165, 250, 0.9),
+			0 8px 18px rgba(15, 23, 42, 0.18);
+	}
+
+	.vessel-item.keyboard-active .vessel-item-icon {
+		background: rgba(59, 130, 246, 0.18);
+		color: #93c5fd;
+	}
+
 	.vessel-item-icon {
 		width: 30px;
 		height: 30px;
@@ -1902,8 +2608,9 @@
 
 	@media (max-width: 900px) {
 		.vessel-topbar {
-			height: 54px;
-			min-height: 54px;
+			--vessel-topbar-item-height: 48px;
+			height: 56px;
+			min-height: 56px;
 			overflow-x: auto;
 			overflow-y: hidden;
 			scrollbar-width: none;
@@ -1925,13 +2632,18 @@
 
 		.dropdown-button,
 		.vessel-selector,
-		.topbar-item {
-			height: 38px;
+		.topbar-item,
+		.topbar-table,
+		.hire-status-display,
+		.hire-status-toggle {
+			height: var(--vessel-topbar-item-height);
+			min-height: var(--vessel-topbar-item-height);
 		}
 
-		.online-box {
-			height: 52px;
-			min-height: 52px;
+		.hire-status-display,
+		.hire-status-toggle {
+			margin-left: 0;
+			min-width: 128px;
 		}
 
 		.dropdown-button {
@@ -1981,20 +2693,27 @@
 
 	@media (max-width: 560px) {
 		.vessel-topbar {
-			height: 50px;
-			min-height: 50px;
+			--vessel-topbar-item-height: 44px;
+			height: 52px;
+			min-height: 52px;
 			padding-inline: 6px;
 		}
 
 		.dropdown-button,
 		.vessel-selector,
-		.topbar-item {
-			height: 36px;
+		.topbar-item,
+		.topbar-table,
+		.hire-status-display,
+		.hire-status-toggle {
+			height: var(--vessel-topbar-item-height);
+			min-height: var(--vessel-topbar-item-height);
 		}
 
-		.online-box {
-			height: 52px;
-			min-height: 52px;
+		.hire-status-display,
+		.hire-status-toggle {
+			margin-left: 0;
+			min-width: 108px;
+			padding-inline: 8px;
 		}
 
 		.dropdown-button {
@@ -2011,6 +2730,18 @@
 		.selector-copy small,
 		.status-copy small {
 			display: none;
+		}
+
+		.hire-toggle-copy small {
+			display: none;
+		}
+
+		.hire-toggle-track {
+			width: 34px;
+		}
+
+		.hire-status-toggle.on-hire .hire-toggle-track span {
+			transform: translateX(14px);
 		}
 
 		.topbar-item {

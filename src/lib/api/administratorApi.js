@@ -1,4 +1,5 @@
 import { apiRequest, downloadApiFile } from "$lib/api/authApi.js";
+import { sortByAlpha } from "$lib/utils/alphaSort.js";
 
 function unwrap(response) {
   return response?.data || response;
@@ -83,7 +84,7 @@ export async function getAllVesselsAdminApi() {
     method: "GET"
   });
 
-  return unwrap(response);
+  return sortVesselRows(unwrap(response));
 }
 
 export async function createVesselAdminApi(payload) {
@@ -165,7 +166,31 @@ export async function getAllAssetsAdminApi() {
     method: "GET"
   });
 
-  return unwrap(response);
+  return sortAssetRows(unwrap(response));
+}
+
+function sortVesselRows(rows) {
+	return sortByAlpha(Array.isArray(rows) ? rows : [], getVesselSortName, getVesselCompanyName);
+}
+
+function sortAssetRows(rows) {
+	return sortByAlpha(Array.isArray(rows) ? rows : [], getAssetSortName, getAssetSortType);
+}
+
+function getVesselSortName(item) {
+	return item?.vesselName || item?.vessel_name || item?.name || item?.deviceName || item?.deviceId || '';
+}
+
+function getVesselCompanyName(item) {
+	return item?.companyName || item?.company_name || item?.company?.name || item?.company?.companyName || '';
+}
+
+function getAssetSortName(item) {
+	return item?.assetName || item?.asset_name || item?.thingsboardName || item?.name || item?.assetId || '';
+}
+
+function getAssetSortType(item) {
+	return item?.assetType || item?.asset_type || item?.type || '';
 }
 
 export async function getAssetDetailAdminApi(id) {
@@ -306,7 +331,25 @@ export async function getReportingVesselsAdminApi({
     method: "GET"
   });
 
-  return unwrap(response);
+  return sortVesselRows(unwrap(response));
+}
+
+export async function getPeriodicalReportingVesselsAdminApi({
+  search = "",
+  status = "all",
+  autoReport = "all"
+} = {}) {
+  const params = new URLSearchParams();
+
+  if (search) params.set("search", search);
+  params.set("status", status || "all");
+  params.set("autoReport", autoReport || "all");
+
+  const response = await apiRequest(`/reporting/periodical/vessels?${params.toString()}`, {
+    method: "GET"
+  });
+
+  return sortVesselRows(unwrap(response));
 }
 
 export async function saveAutoReportConfigAdminApi(vesselId, payload) {
@@ -315,6 +358,19 @@ export async function saveAutoReportConfigAdminApi(vesselId, payload) {
   }
 
   const response = await apiRequest(`/reporting/auto-report-configs/${vesselId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+
+  return unwrap(response);
+}
+
+export async function savePeriodicalAutoReportConfigAdminApi(vesselId, payload) {
+  if (!vesselId) {
+    throw new Error("Vessel ID tidak valid.");
+  }
+
+  const response = await apiRequest(`/reporting/periodical/auto-report-configs/${vesselId}`, {
     method: "PUT",
     body: JSON.stringify(payload)
   });
@@ -345,6 +401,51 @@ export async function getReportingAssignableUsersAdminApi(
   return unwrap(response);
 }
 
+export async function downloadReportingPeriodicalReportAdminApi(
+  vesselId,
+  { start, end, timezoneMode = "auto", timezoneOffset = "+00:00", format = "excel" }
+) {
+  if (!vesselId) {
+    throw new Error("Vessel ID tidak valid.");
+  }
+
+  if (!start || !end) {
+    throw new Error("Start dan end report wajib diisi.");
+  }
+
+  const normalizedFormat = format === "pdf" ? "pdf" : "excel";
+  const params = new URLSearchParams({
+    start,
+    end,
+    timezoneMode,
+    format: normalizedFormat
+  });
+
+  if (timezoneMode === "manual" && timezoneOffset) {
+    params.set("timezoneOffset", timezoneOffset);
+  }
+
+  const extension = normalizedFormat === "pdf" ? "pdf" : "xlsx";
+
+  return downloadApiFile(
+    `/reporting/periodical/vessels/${vesselId}/generate-report?${params.toString()}`,
+    `Periodical_Report_Vessel_${vesselId}.${extension}`
+  );
+}
+
+export async function sendReportingPeriodicalReportEmailAdminApi(vesselId, payload) {
+  if (!vesselId) {
+    throw new Error("Vessel ID tidak valid.");
+  }
+
+  const response = await apiRequest(`/reporting/periodical/vessels/${vesselId}/send-report`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+
+  return unwrap(response);
+}
+
 export async function downloadReportingDailyReportAdminApi(
   vesselId,
   { date, timezoneMode = "auto", timezoneOffset = "+00:00" }
@@ -359,9 +460,12 @@ export async function downloadReportingDailyReportAdminApi(
 
   const params = new URLSearchParams({
     date,
-    timezoneMode,
-    timezoneOffset
+    timezoneMode
   });
+
+  if (timezoneMode === "manual" && timezoneOffset) {
+    params.set("timezoneOffset", timezoneOffset);
+  }
 
   return downloadApiFile(
     `/reporting/vessels/${vesselId}/generate-report?${params.toString()}`,

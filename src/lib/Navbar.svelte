@@ -11,6 +11,7 @@
 	import { getDailyReportData } from '$lib/api/dailyReportApi.js';
 	import { pageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 
 	let dropdownOpen = $state(false);
 	let vesselDropdownOpen = $state(false);
@@ -63,6 +64,11 @@
 			label: 'Fuel Management',
 			key: 'fuel-management',
 			permissions: ['access_fuel_management']
+		},
+		{
+			label: 'Single Line Diagram',
+			key: 'single-line-diagram',
+			permissions: ['access_single_line']
 		}
 	];
 
@@ -109,7 +115,11 @@
 				? response.data
 				: [];
 
-		return rows.map(normalizeMyVessel);
+		return sortByAlpha(
+			rows.map(normalizeMyVessel),
+			(vessel) => vessel.vesselName || vessel.name,
+			(vessel) => vessel.companyName
+		);
 	}
 
 	async function loadCurrentUserPermissions() {
@@ -496,7 +506,11 @@
 
 			console.log('[NAVBAR][LOAD_MY_VESSELS][RESULT]', rows);
 
-			vessels = Array.isArray(rows) ? rows : [];
+			vessels = sortByAlpha(
+				Array.isArray(rows) ? rows : [],
+				(vessel) => vessel.vesselName || vessel.name,
+				(vessel) => vessel.companyName
+			);
 
 			const currentId = $selectedVesselId;
 

@@ -4,6 +4,9 @@
 	import { cubicOut } from 'svelte/easing';
 	import { getCurrentUserApi } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
+	import { matchesSearch, sortByAlpha } from '$lib/utils/alphaSort.js';
 	import {
 		getPermissionCatalogApi,
 		getAllUsersApi,
@@ -15,7 +18,6 @@
 		getAllVesselsAdminApi,
 		createVesselAdminApi,
 		updateVesselAdminApi,
-		updateVesselHireStatusAdminApi,
 		deleteVesselAdminApi,
 		getCctvConfigAdminApi,
 		updateCctvConfigAdminApi,
@@ -31,10 +33,14 @@
 		deleteEngineCurveAdminApi,
 		toggleEngineCurveActiveAdminApi,
 		getReportingVesselsAdminApi,
+		getPeriodicalReportingVesselsAdminApi,
 		saveAutoReportConfigAdminApi,
+		savePeriodicalAutoReportConfigAdminApi,
 		getReportingAssignableUsersAdminApi,
 		downloadReportingDailyReportAdminApi,
 		sendReportingDailyReportEmailAdminApi,
+		downloadReportingPeriodicalReportAdminApi,
+		sendReportingPeriodicalReportEmailAdminApi,
 		getAutoReportAuditLogsAdminApi,
 		exportAutoReportAuditLogsCsvAdminApi,
 		getTelegramGroupsAdminApi,
@@ -85,6 +91,12 @@
 	let selectedVessel = null;
 	let vesselMode = 'create';
 	let searchVessel = '';
+	const FUEL_CONSUMPTION_SOURCE_OPTIONS = [
+		{ value: 'fm', label: 'FM' },
+		{ value: 'ecu', label: 'ECU' },
+		{ value: 'ems_internal', label: 'VMS' },
+		{ value: 'ems_external', label: 'EMS' }
+	];
 
 	let cctvSelectedVessel = null;
 	let cctvConfigLoading = false;
@@ -118,6 +130,8 @@
 	let selectedEngineCurveDetail = null;
 	let selectedEngineCurveLoading = false;
 	let searchEngineCurve = '';
+	let searchEngineCurveImportVessel = '';
+	let engineCurveImportVesselDropdownOpen = false;
 	let engineCurveFileInput;
 
 	let reportingVessels = [];
@@ -137,6 +151,7 @@
 		totalPages: 1
 	};
 	let reportingContentSearch = '';
+	let reportingMode = 'daily';
 
 	let globalAuditLogs = [];
 	let globalAuditPagination = {
@@ -247,6 +262,7 @@
 		'view_engine_runtime_table',
 		'view_engine_event_status_history',
 		'view_engine_on_off_chart',
+		'view_clutch_in_chart',
 		'view_fuel_consumption_table',
 		'view_fuel_fod',
 		'view_fuel_ecu',
@@ -268,6 +284,7 @@
 		view_engine_runtime_table: 'Engine Runtime Table',
 		view_engine_event_status_history: 'Engine Event Status History',
 		view_engine_on_off_chart: 'Engine On/Off Chart',
+		view_clutch_in_chart: 'Clutch In Chart',
 		view_fuel_consumption_table: 'Fuel Consumption Table',
 		view_fuel_fod: 'FOD Fuel',
 		view_fuel_ecu: 'ECU Fuel',
@@ -285,9 +302,60 @@
 		view_high_rpm_low_speed_table: 'High RPM Low Speed Table'
 	};
 
+	const PERMISSION_EFFECT_HINTS = {
+		access_dashboard: 'Shows the Vessel Dashboard menu and dashboard page.',
+		access_daily_report: 'Shows the Daily Report menu and daily report page.',
+		access_monthly_report: 'Shows the Monthly Report menu and monthly report page.',
+		access_periodical_report: 'Shows the Periodical Report menu and periodical report page.',
+		access_trace: 'Shows the Trace menu and trace playback page.',
+		access_data_log: 'Shows the Data Log menu, date filters, column picker, table, and export action.',
+		access_fuel_management: 'Shows the Fuel Management menu and fuel operation page.',
+		access_single_line: 'Shows the Single Line Diagram menu and vessel electrical diagram workspace.',
+		access_fleet_view: 'Shows the Fleet View sidebar menu and fleet monitoring map.',
+		access_all_vessel_summary: 'Shows the All Vessel Summary sidebar menu and summary page.',
+		access_voyage_plan_fleet: 'Shows the Voyage Plan Fleet sidebar menu and fleet plan management page.',
+		access_alarm: 'Shows the Alarm sidebar menu and alarm page.',
+		view_voyage_plan_vessel: 'Shows the vessel Voyage Plan menu and active voyage plan map.',
+
+		view_daily_path_map: 'Shows vessel map, route preview, position panels, and daily trip map.',
+		view_engine_runtime_table: 'Shows engine runtime table in Daily Report and reporting content.',
+		view_engine_event_status_history: 'Shows engine status history runtime in Daily Report and reporting content.',
+		view_engine_on_off_chart: 'Shows engine activity compact timeline in Daily Report.',
+		view_clutch_in_chart: 'Shows clutch activity compact timeline under the engine activity chart.',
+		view_engine_rpm_stats_table: 'Shows Engine RPM Stats in Dashboard, Daily Report, and reporting content.',
+		view_speed_stats_table: 'Shows Speed Stats in Dashboard, Daily Report, and reporting content.',
+		view_travel_distance_table: 'Shows Travel Distance summary in Dashboard, Daily Report, and reporting content.',
+		view_fuel_consumption_table: 'Shows Fuel Consumption section/table in Dashboard, Daily Report, and reports.',
+		view_rpm_vs_fuel_chart: 'Shows RPM vs Fuel chart in Daily Report and report output.',
+		view_liter_per_nautical_mile_table: 'Shows Liter per Nautical Mile metric/table in Daily Report.',
+		view_high_rpm_outside_safety_zone_table:
+			'Shows High RPM Outside Safety Zone table in Daily Report.',
+		view_high_rpm_low_speed_table: 'Shows High RPM Low Speed table in Daily Report.',
+
+		view_fuel_fod: 'Shows FOD fuel fields in Dashboard, Daily Report, Data Log, and exports.',
+		view_fuel_ecu: 'Shows ECU fuel fields in Dashboard, Daily Report, Data Log, and exports.',
+		view_fuel_fms: 'Shows FMS fuel fields in Dashboard, Daily Report, Data Log, and exports.',
+		view_fuel_ems_internal: 'Shows VMS fuel fields in Dashboard, Daily Report, Data Log, and exports.',
+		view_fuel_ems_external: 'Shows EMS fuel fields in Dashboard, Daily Report, Data Log, and exports.',
+		view_fuel_engine_maker:
+			'Shows Engine Maker fuel fields in Dashboard, Daily Report, Data Log, and exports.',
+
+		manage_data_log_override:
+			'Enables Data Log Override: download template, import Excel override, and delete override imports.',
+		manage_fuel_rob: 'Enables ROB editing in Fuel Management fuel operation.',
+		manage_fuel_transactions: 'Enables fuel transaction add/edit/delete actions in Fuel Management.',
+		import_fuel_vdor: 'Enables VDOR Excel template/download/import actions in Fuel Management.',
+		manage_voyage_plan_fleet:
+			'Enables create/edit/delete/import actions for Voyage Plan Fleet when the plan is editable.',
+		assign_voyage_plan_fleet: 'Enables assigning voyage plans to allowed vessels.',
+		manage_cctv_config: 'Enables CCTV Config tab actions in Administrator page.'
+	};
+
 	let autoReportForm = {
 		isEnabled: false,
 		sendTime: '08:00',
+		periodicalStartDate: new Date().toISOString().slice(0, 10),
+		periodicalIntervalDays: 7,
 		timezoneMode: 'auto',
 		timezoneOffset: '+07:00',
 		reportSections: [],
@@ -297,6 +365,9 @@
 	};
 
 	let manualReportDate = new Date().toISOString().slice(0, 10);
+	let manualPeriodicalStart = `${new Date().toISOString().slice(0, 10)}T00:00`;
+	let manualPeriodicalEnd = `${new Date().toISOString().slice(0, 10)}T23:59`;
+	let manualPeriodicalFormat = 'excel';
 
 	let engineHealthForm = {
 		isEnabled: false,
@@ -383,10 +454,6 @@
 		return Boolean(value);
 	}
 
-	function getVesselHireValue(vessel) {
-		return getVesselHireStatus(vessel) ? 'true' : 'false';
-	}
-
 	function getVesselHireLabel(vesselOrValue) {
 		const isOnHire =
 			typeof vesselOrValue === 'string'
@@ -394,6 +461,26 @@
 				: getVesselHireStatus(vesselOrValue);
 
 		return isOnHire ? 'On Hire' : 'Off Hire';
+	}
+
+	function getFuelConsumptionSourceValue(vesselOrValue) {
+		const raw =
+			typeof vesselOrValue === 'string'
+				? vesselOrValue
+				: vesselOrValue?.fuelConsumptionSource ??
+					vesselOrValue?.fuel_consumption_source ??
+					vesselOrValue?.fuelConsSource ??
+					vesselOrValue?.fuel_cons_source ??
+					'fm';
+		const normalized = String(raw || 'fm').trim().toLowerCase();
+		const allowedValues = new Set(FUEL_CONSUMPTION_SOURCE_OPTIONS.map((option) => option.value));
+
+		return allowedValues.has(normalized) ? normalized : 'fm';
+	}
+
+	function getFuelConsumptionSourceLabel(vesselOrValue) {
+		const value = getFuelConsumptionSourceValue(vesselOrValue);
+		return FUEL_CONSUMPTION_SOURCE_OPTIONS.find((option) => option.value === value)?.label || value.toUpperCase();
 	}
 
 	function getCompanyDisplayName(company) {
@@ -420,10 +507,9 @@
 
 	function getVesselCompanyLabel(vessel) {
 		const companyId = vessel?.companyId ?? vessel?.company_id;
-		const company = getCompanyById(companyId);
+		const company = vessel?.company || getCompanyById(companyId);
 
-		if (company) return `${getCompanyDisplayName(company)} • ID ${company.id}`;
-		if (companyId) return `Company ID ${companyId}`;
+		if (company) return `${getCompanyDisplayName(company)}`;
 
 		return 'No Company';
 	}
@@ -622,21 +708,19 @@
 		return getVesselDisplayName(vessel || { id });
 	}
 
-	$: telegramVesselOptions = (vessels.length ? vessels : reportingVessels).map((vessel) => ({
+	$: telegramVesselOptions = sortByAlpha((vessels.length ? vessels : reportingVessels).map((vessel) => ({
 		id: Number(vessel?.id),
 		label: getVesselDisplayName(vessel),
 		sublabel: getVesselDeviceLabel(vessel),
 		status: vessel?.status || ''
-	})).filter((vessel) => Number.isFinite(vessel.id) && vessel.id > 0);
+	})).filter((vessel) => Number.isFinite(vessel.id) && vessel.id > 0), (vessel) => vessel.label, (vessel) => vessel.sublabel);
 
 	$: filteredTelegramVesselOptions = telegramVesselOptions.filter((vessel) => {
 		const keyword = telegramVesselSearch.trim().toLowerCase();
 
 		if (!keyword) return true;
 
-		return [vessel.id ? String(vessel.id) : '', vessel.label, vessel.sublabel, vessel.status]
-			.filter(Boolean)
-			.some((value) => String(value).toLowerCase().includes(keyword));
+		return matchesSearch(keyword, [vessel.label, vessel.status]);
 	});
 
 	$: filteredReportingAssignableUsers = reportingAssignableUsers.filter((user) => {
@@ -644,10 +728,30 @@
 
 		if (!keyword) return true;
 
-		return [user?.fullName, user?.name, user?.username, user?.email, user?.id ? String(user.id) : '']
-			.filter(Boolean)
-			.some((value) => String(value).toLowerCase().includes(keyword));
+		return matchesSearch(keyword, [user?.fullName, user?.name, user?.username, user?.email]);
 	});
+
+	$: filteredReportingVessels = sortByAlpha(
+		reportingVessels.filter((vessel) => {
+			const keyword = String(reportingFilters.search || '').trim().toLowerCase();
+			if (!keyword) return true;
+
+			const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
+
+			return matchesSearch(keyword, [
+				vessel?.vesselName,
+				vessel?.vessel_name,
+				vessel?.name,
+				vessel?.companyName,
+				vessel?.company_name,
+				company?.name,
+				company?.companyName,
+				vessel?.status
+			]);
+		}),
+		getVesselDisplayName,
+		(vessel) => vessel?.companyName || vessel?.company_name || getVesselCompanyLabel(vessel)
+	);
 
 	function nullableNumber(value) {
 		const text = String(value ?? '').trim();
@@ -663,7 +767,13 @@
 		reportingVesselsLoading = true;
 
 		try {
-			reportingVessels = await getReportingVesselsAdminApi(reportingFilters);
+			reportingVessels = sortByAlpha(
+				reportingMode === 'periodical'
+					? await getPeriodicalReportingVesselsAdminApi({ ...reportingFilters, search: '' })
+					: await getReportingVesselsAdminApi({ ...reportingFilters, search: '' }),
+				getVesselDisplayName,
+				getVesselDeviceLabel
+			);
 
 			if (selectedReportingVessel?.id) {
 				const refreshed = reportingVessels.find(
@@ -677,6 +787,21 @@
 		} finally {
 			reportingVesselsLoading = false;
 		}
+	}
+
+	function setReportingMode(mode) {
+		if (!['daily', 'periodical'].includes(mode) || reportingMode === mode) return;
+
+		reportingMode = mode;
+		selectedReportingVessel = null;
+		reportingAssignableUsers = [];
+		reportingAssignableSearch = '';
+		clearAlert();
+		loadReportingVessels();
+	}
+
+	function getAutoReportTimezoneLabel() {
+		return getAutoTimezoneLabelFromSources(selectedReportingVessel);
 	}
 
 	async function loadReportingAssignableUsers(vesselId, page = 1) {
@@ -787,13 +912,36 @@
 
 		const autoReport = getAutoReportConfig(vessel);
 		const recipients = autoReport?.recipients || {};
+		const schedule = autoReport?.schedule || {};
 		const engineHealth = getEngineHealthConfig(vessel);
 
 		autoReportForm = {
 			isEnabled: Boolean(autoReport.is_enabled ?? autoReport.isEnabled),
-			sendTime: autoReport.send_time || autoReport.sendTime || '08:00',
-			timezoneMode: autoReport.timezone_mode || autoReport.timezoneMode || 'auto',
-			timezoneOffset: autoReport.timezone_offset || autoReport.timezoneOffset || '+07:00',
+			sendTime: schedule.time || autoReport.send_time || autoReport.sendTime || '08:00',
+			periodicalStartDate:
+				schedule.start_date ||
+				schedule.startDate ||
+				autoReport.start_date ||
+				autoReport.startDate ||
+				new Date().toISOString().slice(0, 10),
+			periodicalIntervalDays:
+				schedule.interval_days ??
+				schedule.intervalDays ??
+				autoReport.interval_days ??
+				autoReport.intervalDays ??
+				7,
+			timezoneMode:
+				schedule.timezone_mode ||
+				schedule.timezoneMode ||
+				autoReport.timezone_mode ||
+				autoReport.timezoneMode ||
+				'auto',
+			timezoneOffset:
+				schedule.timezone_offset ||
+				schedule.timezoneOffset ||
+				autoReport.timezone_offset ||
+				autoReport.timezoneOffset ||
+				'+07:00',
 			reportSections: normalizeReportSections(autoReport),
 			picEmails: normalizeEmailList(recipients.pic),
 			ccEmails: normalizeEmailList(recipients.cc),
@@ -821,7 +969,8 @@
 	}
 
 	function buildAutoReportPayload() {
-		return {
+		const timezoneMode = autoReportForm.timezoneMode || 'auto';
+		const payload = {
 			isEnabled: Boolean(autoReportForm.isEnabled),
 			sendTime: autoReportForm.sendTime || '08:00',
 			recipients: {
@@ -832,9 +981,38 @@
 			reportContent: {
 				sections: [...new Set((autoReportForm.reportSections || []).map(String).filter(Boolean))]
 			},
-			timezoneMode: autoReportForm.timezoneMode || 'auto',
-			timezoneOffset: autoReportForm.timezoneOffset || '+07:00'
+			timezoneMode
 		};
+
+		if (timezoneMode === 'manual') {
+			payload.timezoneOffset = autoReportForm.timezoneOffset || '+07:00';
+		}
+
+		return payload;
+	}
+
+	function buildPeriodicalAutoReportPayload() {
+		const timezoneMode = autoReportForm.timezoneMode || 'auto';
+		const payload = {
+			isEnabled: Boolean(autoReportForm.isEnabled),
+			recipients: {
+				pic: normalizeEmailList(autoReportForm.picEmails),
+				cc: normalizeEmailList(autoReportForm.ccEmails),
+				bcc: normalizeEmailList(autoReportForm.bccEmails)
+			},
+			schedule: {
+				startDate: autoReportForm.periodicalStartDate,
+				intervalDays: Number(autoReportForm.periodicalIntervalDays || 0),
+				time: autoReportForm.sendTime || '08:00',
+				timezoneMode
+			}
+		};
+
+		if (timezoneMode === 'manual') {
+			payload.schedule.timezoneOffset = autoReportForm.timezoneOffset || '+07:00';
+		}
+
+		return payload;
 	}
 
 	function validateAutoReportPayload(payload) {
@@ -846,12 +1024,46 @@
 			return 'Timezone mode must be auto or manual.';
 		}
 
-		if (!/^[+-](0\d|1[0-4]):[0-5]\d$/.test(payload.timezoneOffset || '')) {
+		if (
+			payload.timezoneMode === 'manual' &&
+			!/^[+-](0\d|1[0-4]):[0-5]\d$/.test(payload.timezoneOffset || '')
+		) {
 			return 'Timezone offset must use the format +07:00, -03:00, up to +14:00.';
 		}
 
 		if (payload.isEnabled && payload.recipients.pic.length === 0) {
 			return 'At least 1 PIC recipient is required when auto-report is enabled.';
+		}
+
+		return null;
+	}
+
+	function validatePeriodicalAutoReportPayload(payload) {
+		if (!payload.schedule.startDate) {
+			return 'Periodical report start date is required.';
+		}
+
+		if (!Number.isInteger(payload.schedule.intervalDays) || payload.schedule.intervalDays < 1) {
+			return 'Interval days must be at least 1 day.';
+		}
+
+		if (!/^\d{2}:\d{2}$/.test(payload.schedule.time || '')) {
+			return 'Schedule time format must be HH:mm, for example 08:00.';
+		}
+
+		if (!['auto', 'manual'].includes(payload.schedule.timezoneMode)) {
+			return 'Timezone mode must be auto or manual.';
+		}
+
+		if (
+			payload.schedule.timezoneMode === 'manual' &&
+			!/^[+-](0\d|1[0-4]):[0-5]\d$/.test(payload.schedule.timezoneOffset || '')
+		) {
+			return 'Timezone offset must use the format +07:00, -03:00, up to +14:00.';
+		}
+
+		if (payload.isEnabled && payload.recipients.pic.length === 0) {
+			return 'At least 1 PIC recipient is required when periodical auto-report is enabled.';
 		}
 
 		return null;
@@ -863,8 +1075,11 @@
 			return;
 		}
 
-		const payload = buildAutoReportPayload();
-		const errorMessage = validateAutoReportPayload(payload);
+		const isPeriodicalMode = reportingMode === 'periodical';
+		const payload = isPeriodicalMode ? buildPeriodicalAutoReportPayload() : buildAutoReportPayload();
+		const errorMessage = isPeriodicalMode
+			? validatePeriodicalAutoReportPayload(payload)
+			: validateAutoReportPayload(payload);
 
 		if (errorMessage) {
 			showAlert('error', errorMessage);
@@ -875,10 +1090,17 @@
 		clearAlert();
 
 		try {
-			const response = await saveAutoReportConfigAdminApi(selectedReportingVessel.id, payload);
+			const response = isPeriodicalMode
+				? await savePeriodicalAutoReportConfigAdminApi(selectedReportingVessel.id, payload)
+				: await saveAutoReportConfigAdminApi(selectedReportingVessel.id, payload);
 			const savedConfig = unwrapApiData(response);
 
-			showAlert('success', 'Auto-report configuration saved successfully.');
+			showAlert(
+				'success',
+				isPeriodicalMode
+					? 'Periodical auto-report configuration saved successfully.'
+					: 'Auto-report configuration saved successfully.'
+			);
 
 			selectedReportingVessel = {
 				...selectedReportingVessel,
@@ -886,11 +1108,20 @@
 					...(selectedReportingVessel.auto_report || {}),
 					...savedConfig,
 					is_enabled: savedConfig?.isEnabled ?? payload.isEnabled,
-					send_time: savedConfig?.sendTime ?? payload.sendTime,
-					timezone_mode: savedConfig?.timezoneMode ?? payload.timezoneMode,
-					timezone_offset: savedConfig?.timezoneOffset ?? payload.timezoneOffset,
+					send_time: isPeriodicalMode
+						? savedConfig?.schedule?.time ?? payload.schedule?.time
+						: savedConfig?.sendTime ?? payload.sendTime,
+					timezone_mode: isPeriodicalMode
+						? savedConfig?.schedule?.timezoneMode ?? payload.schedule?.timezoneMode
+						: savedConfig?.timezoneMode ?? payload.timezoneMode,
+					timezone_offset: isPeriodicalMode
+						? savedConfig?.schedule?.timezoneOffset ??
+							payload.schedule?.timezoneOffset ??
+							autoReportForm.timezoneOffset
+						: savedConfig?.timezoneOffset ?? payload.timezoneOffset ?? autoReportForm.timezoneOffset,
 					recipients: savedConfig?.recipients ?? payload.recipients,
-					report_content: savedConfig?.report_content ?? savedConfig?.reportContent ?? payload.reportContent
+					report_content: savedConfig?.report_content ?? savedConfig?.reportContent ?? payload.reportContent,
+					schedule: isPeriodicalMode ? savedConfig?.schedule ?? payload.schedule : savedConfig?.schedule
 				}
 			};
 
@@ -980,6 +1211,100 @@
 			showAlert('success', 'Daily report sent by email successfully.');
 		} catch (error) {
 			showAlert('error', error.message || 'Failed to send daily report email.');
+		} finally {
+			reportingActionLoadingId = null;
+		}
+	}
+
+	function toApiDateTime(value) {
+		if (!value) return '';
+
+		const text = String(value).trim();
+		if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)) return text;
+		if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(text)) {
+			return `${text.replace('T', ' ')}:00`;
+		}
+		if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(text)) {
+			return text.replace('T', ' ');
+		}
+
+		return text;
+	}
+
+	function getManualPeriodicalPayload() {
+		return {
+			start: toApiDateTime(manualPeriodicalStart),
+			end: toApiDateTime(manualPeriodicalEnd),
+			timezoneMode: autoReportForm.timezoneMode || 'auto',
+			timezoneOffset: autoReportForm.timezoneOffset || '+07:00'
+		};
+	}
+
+	function validateManualPeriodicalPayload(payload) {
+		if (!payload.start || !payload.end) {
+			return 'Start and end range are required.';
+		}
+
+		if (new Date(payload.start.replace(' ', 'T')).getTime() > new Date(payload.end.replace(' ', 'T')).getTime()) {
+			return 'Start range must be earlier than end range.';
+		}
+
+		return null;
+	}
+
+	async function downloadManualPeriodicalReport() {
+		if (!selectedReportingVessel?.id) {
+			showAlert('error', 'Please select a vessel first.');
+			return;
+		}
+
+		const payload = getManualPeriodicalPayload();
+		const errorMessage = validateManualPeriodicalPayload(payload);
+
+		if (errorMessage) {
+			showAlert('error', errorMessage);
+			return;
+		}
+
+		reportingActionLoadingId = `periodical-download-${selectedReportingVessel.id}`;
+		clearAlert();
+
+		try {
+			await downloadReportingPeriodicalReportAdminApi(selectedReportingVessel.id, {
+				...payload,
+				format: manualPeriodicalFormat
+			});
+
+			showAlert('success', 'Periodical report downloaded successfully.');
+		} catch (error) {
+			showAlert('error', error.message || 'Failed to download periodical report.');
+		} finally {
+			reportingActionLoadingId = null;
+		}
+	}
+
+	async function sendManualPeriodicalReportEmail() {
+		if (!selectedReportingVessel?.id) {
+			showAlert('error', 'Please select a vessel first.');
+			return;
+		}
+
+		const payload = getManualPeriodicalPayload();
+		const errorMessage = validateManualPeriodicalPayload(payload);
+
+		if (errorMessage) {
+			showAlert('error', errorMessage);
+			return;
+		}
+
+		reportingActionLoadingId = `periodical-send-${selectedReportingVessel.id}`;
+		clearAlert();
+
+		try {
+			await sendReportingPeriodicalReportEmailAdminApi(selectedReportingVessel.id, payload);
+			showAlert('success', 'Periodical report sent by email successfully.');
+		} catch (error) {
+			showAlert('error', error.message || 'Failed to send periodical report email.');
 		} finally {
 			reportingActionLoadingId = null;
 		}
@@ -1241,16 +1566,46 @@
 		if (!keyword) return true;
 
 		return [
-			getCurveId(curve),
-			curve?.vessel_id,
 			curve?.vessel_name,
 			curve?.curve_type,
-			curve?.curve_name,
-			curve?.meta?.source_file_path
+			curve?.curve_name
 		]
 			.filter(Boolean)
 			.some((value) => String(value).toLowerCase().includes(keyword));
 	});
+
+	$: filteredEngineCurveImportVessels = sortByAlpha(vessels, getVesselDisplayName, (vessel) => {
+		const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
+		return getCompanyDisplayName(company);
+	}).filter((vessel) => {
+		const keyword = searchEngineCurveImportVessel.trim().toLowerCase();
+		const selectedId = String(engineCurveForm.vesselId || '');
+		const vesselId = String(vessel?.id || '');
+
+		if (selectedId && vesselId === selectedId) return true;
+		if (!keyword) return true;
+
+		const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
+
+		return matchesSearch(keyword, [
+			vessel?.vesselName,
+			vessel?.vessel_name,
+			vessel?.name,
+			company?.name,
+			company?.companyName
+		]);
+	});
+
+	$: selectedEngineCurveImportVessel =
+		vessels.find((vessel) => Number(vessel?.id) === Number(engineCurveForm.vesselId)) || null;
+
+	function selectEngineCurveImportVessel(vessel) {
+		engineCurveForm = {
+			...engineCurveForm,
+			vesselId: vessel?.id || ''
+		};
+		engineCurveImportVesselDropdownOpen = false;
+	}
 
 	function getCurveId(curve) {
 		return curve?.curve_id || curve?.curveId || curve?.id || '';
@@ -1299,20 +1654,12 @@
 			.join(' ');
 	}
 
-	$: filteredAssets = assets.filter((asset) => {
+	$: filteredAssets = sortByAlpha(assets, (asset) => asset?.assetName || asset?.thingsboardName || asset?.assetId, getAssetType).filter((asset) => {
 		const keyword = searchAsset.trim().toLowerCase();
 
 		if (!keyword) return true;
 
-		return [
-			asset?.id ? String(asset.id) : '',
-			asset?.assetId,
-			asset?.assetName,
-			getAssetType(asset),
-			asset?.thingsboardName
-		]
-			.filter(Boolean)
-			.some((value) => String(value).toLowerCase().includes(keyword));
+		return matchesSearch(keyword, [asset?.assetName, getAssetType(asset)]);
 	});
 
 	function createEmptyVesselForm() {
@@ -1320,49 +1667,51 @@
 			deviceId: '',
 			vesselName: '',
 			companyId: '',
-			hireStatus: 'false'
+			fuelConsumptionSource: 'fm'
 		};
 	}
 
 	let vesselForm = createEmptyVesselForm();
 
-	$: filteredVessels = vessels.filter((vessel) => {
+	$: filteredVessels = sortByAlpha(vessels, getVesselDisplayName, (vessel) => {
+		const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
+		return getCompanyDisplayName(company);
+	}).filter((vessel) => {
 		const keyword = searchVessel.trim().toLowerCase();
 
 		if (!keyword) return true;
 
 		const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
 
-		return [
-			vessel?.id ? String(vessel.id) : '',
-			vessel?.deviceId,
+		return matchesSearch(keyword, [
 			vessel?.vesselName,
-			vessel?.companyId ? String(vessel.companyId) : '',
+			vessel?.vessel_name,
+			vessel?.name,
+			getFuelConsumptionSourceLabel(vessel),
+			getFuelConsumptionSourceValue(vessel),
 			company?.name,
-			getCompanyThingsboardId(company),
+			company?.companyName,
 			getVesselHireLabel(vessel)
-		]
-			.filter(Boolean)
-			.some((value) => String(value).toLowerCase().includes(keyword));
+		]);
 	});
 
-	$: filteredCctvVessels = vessels.filter((vessel) => {
+	$: filteredCctvVessels = sortByAlpha(vessels, getVesselDisplayName, (vessel) => {
+		const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
+		return getCompanyDisplayName(company);
+	}).filter((vessel) => {
 		const keyword = cctvSearchVessel.trim().toLowerCase();
 
 		if (!keyword) return true;
 
 		const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
 
-		return [
-			vessel?.id ? String(vessel.id) : '',
-			vessel?.deviceId,
+		return matchesSearch(keyword, [
 			vessel?.vesselName,
-			getVesselDisplayName(vessel),
-			getVesselDeviceLabel(vessel),
-			getCompanyDisplayName(company)
-		]
-			.filter(Boolean)
-			.some((value) => String(value).toLowerCase().includes(keyword));
+			vessel?.vessel_name,
+			vessel?.name,
+			company?.name,
+			company?.companyName
+		]);
 	});
 
 	$: if (activeAdminTab === 'cctv-config' && !cctvSelectedVessel && vessels.length && !cctvConfigLoading) {
@@ -1374,13 +1723,7 @@
 
 		if (!keyword) return true;
 
-		return [
-			company?.id ? String(company.id) : '',
-			getCompanyDisplayName(company),
-			getCompanyThingsboardId(company)
-		]
-			.filter(Boolean)
-			.some((value) => String(value).toLowerCase().includes(keyword));
+		return matchesSearch(keyword, [company?.name, company?.companyName]);
 	});
 
 	let assetOptions = [];
@@ -1391,6 +1734,8 @@
 
 	let searchUser = '';
 	let searchPermission = '';
+	let searchUserAssetAccess = '';
+	let searchUserVesselAccess = '';
 	let activeModule = 'all';
 	let alert = null;
 
@@ -1479,10 +1824,23 @@
 
 		if (!keyword) return true;
 
-		return [user?.name, user?.username, user?.email, user?.id ? String(user.id) : '']
-			.filter(Boolean)
-			.some((value) => String(value).toLowerCase().includes(keyword));
+		return matchesSearch(keyword, [user?.name, user?.username, user?.email]);
 	});
+
+	function matchAccessOption(option, keyword = '') {
+		if (!keyword) return true;
+
+		return matchesSearch(keyword, option?.searchValues || [option?.label]);
+	}
+
+	$: assetAccessKeyword = searchUserAssetAccess.trim().toLowerCase();
+	$: vesselAccessKeyword = searchUserVesselAccess.trim().toLowerCase();
+	$: filteredAssetOptions = sortByAlpha(assetOptions, (asset) => asset.label, (asset) => asset.sublabel).filter((asset) =>
+		matchAccessOption(asset, assetAccessKeyword)
+	);
+	$: filteredVesselOptions = sortByAlpha(vesselOptions, (vessel) => vessel.label, (vessel) => vessel.sublabel).filter((vessel) =>
+		matchAccessOption(vessel, vesselAccessKeyword)
+	);
 
 	$: activeUsers = users.filter((user) => !user.deletedAt).length;
 	$: inactiveUsers = users.filter((user) => user.deletedAt).length;
@@ -1543,7 +1901,7 @@
 			const assetDetails = data?.assetAccess?.details || [];
 			const vesselDetails = data?.vesselAccess?.details || [];
 
-			assetOptions = assetDetails.map((asset) => ({
+			assetOptions = sortByAlpha(assetDetails.map((asset) => ({
 				id: Number(asset.id),
 				label: asset.assetName || asset.thingsboardName || asset.assetId || `Asset ${asset.id}`,
 				sublabel: [
@@ -1551,14 +1909,16 @@
 					asset.thingsboardName || asset.assetId || ''
 				]
 					.filter(Boolean)
-					.join(' • ')
-			}));
+					.join(' • '),
+				searchValues: [asset.assetName, asset.asset_name, formatAssetType(getAssetType(asset))]
+			})), (asset) => asset.label, (asset) => asset.sublabel);
 
-			vesselOptions = vesselDetails.map((vessel) => ({
+			vesselOptions = sortByAlpha(vesselDetails.map((vessel) => ({
 				id: Number(vessel.id),
 				label: vessel.vesselName || vessel.deviceName || vessel.deviceId || `Vessel ${vessel.id}`,
-				sublabel: vessel.deviceName || vessel.deviceId || ''
-			}));
+				sublabel: vessel.deviceName || vessel.deviceId || '',
+				searchValues: [vessel.vesselName, vessel.vessel_name, vessel.name]
+			})), (vessel) => vessel.label, (vessel) => vessel.sublabel);
 		} catch (error) {
 			currentUser = null;
 			assetOptions = [];
@@ -1617,11 +1977,12 @@
 		try {
 			vessels = await getAllVesselsAdminApi();
 
-			vesselOptions = vessels.map((vessel) => ({
+			vesselOptions = sortByAlpha(vessels.map((vessel) => ({
 				id: Number(vessel.id),
 				label: vessel.vesselName || vessel.deviceName || vessel.deviceId || `Vessel ${vessel.id}`,
-				sublabel: vessel.deviceId || ''
-			}));
+				sublabel: vessel.deviceId || '',
+				searchValues: [vessel.vesselName, vessel.vessel_name, vessel.name, getVesselCompanyLabel(vessel)]
+			})), (vessel) => vessel.label, (vessel) => vessel.sublabel);
 		} finally {
 			vesselsLoading = false;
 		}
@@ -1898,7 +2259,7 @@
 			deviceId: vessel?.deviceId || '',
 			vesselName: vessel?.vesselName || '',
 			companyId: vessel?.companyId ?? '',
-			hireStatus: getVesselHireValue(vessel)
+			fuelConsumptionSource: getFuelConsumptionSourceValue(vessel)
 		};
 
 		clearAlert();
@@ -1922,12 +2283,9 @@
 		return {
 			deviceId: vesselForm.deviceId.trim(),
 			vesselName: vesselForm.vesselName.trim(),
-			companyId: companyIdText ? Number(companyIdText) : null
+			companyId: companyIdText ? Number(companyIdText) : null,
+			fuelConsumptionSource: getFuelConsumptionSourceValue(vesselForm.fuelConsumptionSource)
 		};
-	}
-
-	function buildVesselHirePayload() {
-		return vesselForm.hireStatus === 'true';
 	}
 
 	async function saveVessel() {
@@ -1944,15 +2302,10 @@
 
 		try {
 			const payload = buildVesselPayload();
-			const hireStatus = buildVesselHirePayload();
 
 			if (vesselMode === 'create') {
 				const created = await createVesselAdminApi(payload);
 				const createdId = created?.id;
-
-				if (createdId && hireStatus) {
-					await updateVesselHireStatusAdminApi(createdId, hireStatus);
-				}
 
 				showAlert(
 					'success',
@@ -1964,11 +2317,6 @@
 				openEditVesselForm(refreshed);
 			} else if (selectedVessel?.id) {
 				const updated = await updateVesselAdminApi(selectedVessel.id, payload);
-				const currentHireStatus = getVesselHireStatus(selectedVessel);
-
-				if (currentHireStatus !== hireStatus) {
-					await updateVesselHireStatusAdminApi(selectedVessel.id, hireStatus);
-				}
 
 				showAlert(
 					'success',
@@ -2030,8 +2378,10 @@
 					asset.assetId || asset.thingsboardName || ''
 				]
 					.filter(Boolean)
-					.join(' • ')
+					.join(' • '),
+				searchValues: [asset.assetName, asset.asset_name, formatAssetType(getAssetType(asset))]
 			}));
+			assetOptions = sortByAlpha(assetOptions, (asset) => asset.label, (asset) => asset.sublabel);
 		} finally {
 			assetsLoading = false;
 		}
@@ -2159,6 +2509,8 @@
 		selectedEngineCurve = null;
 		selectedEngineCurveDetail = null;
 		engineCurveForm = createEmptyEngineCurveForm();
+		searchEngineCurveImportVessel = '';
+		engineCurveImportVesselDropdownOpen = false;
 
 		if (engineCurveFileInput) {
 			engineCurveFileInput.value = '';
@@ -2345,6 +2697,47 @@
 			.replace(/\b\w/g, (char) => char.toUpperCase());
 	}
 
+	function getPermissionEffect(permission = {}) {
+		const key = String(permission?.key || permission?.permissionKey || '').trim();
+		const moduleLabel = permission?.moduleLabel || prettify(permission?.moduleKey || '');
+		const category = String(permission?.category || '').trim();
+		const tableLabel = permission?.tableLabel || permission?.columnLabel || '';
+
+		if (PERMISSION_EFFECT_HINTS[key]) return PERMISSION_EFFECT_HINTS[key];
+
+		if (REPORT_CONTENT_PERMISSION_KEYS.includes(key) || category === 'report_content') {
+			return `Affects report content visibility${tableLabel ? ` in ${tableLabel}` : ''}.`;
+		}
+
+		if (key.startsWith('access_')) {
+			return `Shows or opens the ${moduleLabel || prettify(key.replace(/^access_/, ''))} feature/page.`;
+		}
+
+		if (key.startsWith('view_')) {
+			return `Shows related data, cards, tables, or charts in ${moduleLabel || 'the selected module'}.`;
+		}
+
+		if (key.startsWith('manage_')) {
+			return `Enables create, update, delete, or configuration actions in ${moduleLabel || 'the selected module'}.`;
+		}
+
+		if (key.startsWith('import_')) {
+			return `Enables Excel/file import actions in ${moduleLabel || 'the selected module'}.`;
+		}
+
+		if (key.startsWith('export_')) {
+			return `Enables export/download actions in ${moduleLabel || 'the selected module'}.`;
+		}
+
+		if (key.startsWith('assign_')) {
+			return `Enables assignment actions in ${moduleLabel || 'the selected module'}.`;
+		}
+
+		return moduleLabel
+			? `Affects access and actions inside ${moduleLabel}.`
+			: 'Affects the related page, section, or action that uses this permission key.';
+	}
+
 	function parseIds(value) {
 		return String(value || '')
 			.split(/[\s,;]+/)
@@ -2388,6 +2781,7 @@
 			permission?.key,
 			permission?.label,
 			permission?.description,
+			getPermissionEffect(permission),
 			permission?.moduleLabel,
 			permission?.moduleKey,
 			permission?.category,
@@ -2402,6 +2796,8 @@
 		mode = 'create';
 		selectedUser = null;
 		form = createEmptyForm();
+		searchUserAssetAccess = '';
+		searchUserVesselAccess = '';
 		clearAlert();
 	}
 
@@ -2417,6 +2813,8 @@
 
 			selectedUser = detail;
 			mode = 'edit';
+			searchUserAssetAccess = '';
+			searchUserVesselAccess = '';
 
 			const assetIds = extractIdsFromAccess(detail?.assetAccess, 'assetIds');
 			const vesselIds = extractIdsFromAccess(detail?.vesselAccess, 'vesselIds');
@@ -2941,17 +3339,19 @@
 							</p>
 						</div>
 
-						{#if selectedUser && mode === 'edit'}
-							<button
-								type="button"
-								class:danger-button={!selectedUser.deletedAt}
-								class:activate-button={selectedUser.deletedAt}
-								on:click={() => toggleUserStatus(selectedUser)}
-								disabled={actionLoadingId === selectedUser.id}
-							>
-								{selectedUser.deletedAt ? 'Activate' : 'Deactivate'}
-							</button>
-						{/if}
+						<div class="editor-toolbar-actions">
+							{#if selectedUser && mode === 'edit'}
+								<button
+									type="button"
+									class:danger-button={!selectedUser.deletedAt}
+									class:activate-button={selectedUser.deletedAt}
+									on:click={() => toggleUserStatus(selectedUser)}
+									disabled={actionLoadingId === selectedUser.id}
+								>
+									{selectedUser.deletedAt ? 'Activate' : 'Deactivate'}
+								</button>
+							{/if}
+						</div>
 					</div>
 
 					{#if selectedUserLoading}
@@ -3005,8 +3405,16 @@
 
 							{#if form.assetAccessMode === 'selected'}
 								{#if assetOptions.length > 0}
+									<div class="access-search-row">
+										<input
+											type="search"
+											bind:value={searchUserAssetAccess}
+											placeholder="Search asset name or type..."
+										/>
+										<span>{filteredAssetOptions.length} of {assetOptions.length}</span>
+									</div>
 									<div class="option-list">
-										{#each assetOptions as asset}
+										{#each filteredAssetOptions as asset}
 											<label class="option-chip">
 												<input
 													type="checkbox"
@@ -3022,6 +3430,9 @@
 											</label>
 										{/each}
 									</div>
+									{#if filteredAssetOptions.length === 0}
+										<div class="muted-box">No asset matches your search.</div>
+									{/if}
 								{:else}
 									<div class="muted-box">
 										Asset list is not available from the current user. Enter the asset ID manually.
@@ -3047,8 +3458,16 @@
 
 							{#if form.vesselAccessMode === 'selected'}
 								{#if vesselOptions.length > 0}
+									<div class="access-search-row">
+										<input
+											type="search"
+											bind:value={searchUserVesselAccess}
+											placeholder="Search vessel or company name..."
+										/>
+										<span>{filteredVesselOptions.length} of {vesselOptions.length}</span>
+									</div>
 									<div class="option-list">
-										{#each vesselOptions as vessel}
+										{#each filteredVesselOptions as vessel}
 											<label class="option-chip">
 												<input
 													type="checkbox"
@@ -3064,6 +3483,9 @@
 											</label>
 										{/each}
 									</div>
+									{#if filteredVesselOptions.length === 0}
+										<div class="muted-box">No vessel matches your search.</div>
+									{/if}
 								{:else}
 									<div class="muted-box">
 										Vessel list is not available from the current user. Enter the vessel ID manually.
@@ -3161,6 +3583,10 @@
 															<strong>{permission.label || permission.key}</strong>
 															<code>{permission.key}</code>
 															<small>{permission.description || '-'}</small>
+															<small class="permission-effect">
+																<b>Affects</b>
+																{getPermissionEffect(permission)}
+															</small>
 														</span>
 
 														<em>{permission.category}</em>
@@ -3205,7 +3631,7 @@
 						class="search-input"
 						type="search"
 						bind:value={searchVessel}
-						placeholder="Search vessel, device ID, company name..."
+						placeholder="Search vessel or company name..."
 					/>
 
 					<div class="vessel-list">
@@ -3229,6 +3655,9 @@
 
 									<div class="vessel-row-meta">
 										<em>{getVesselCompanyLabel(vessel)}</em>
+										<span class="fuel-source-pill">
+											{getFuelConsumptionSourceLabel(vessel)}
+										</span>
 										<span
 											class:on-hire={getVesselHireStatus(vessel)}
 											class:off-hire={!getVesselHireStatus(vessel)}
@@ -3296,24 +3725,13 @@
 							</label>
 
 							<label>
-								<span>Company</span>
-								<select bind:value={vesselForm.companyId} disabled={companiesLoading}>
-									<option value="">No Company</option>
-									{#each companies as company}
-										<option value={String(company.id)}>
-											{getCompanyDisplayName(company)} — ID {company.id}
-										</option>
+								<span>Fuel Cons Source</span>
+								<select bind:value={vesselForm.fuelConsumptionSource}>
+									{#each FUEL_CONSUMPTION_SOURCE_OPTIONS as option}
+										<option value={option.value}>{option.label}</option>
 									{/each}
 								</select>
-								<small class="field-help">Load the company list from GET /companies.</small>
-							</label>
-
-							<label>
-								<span>Hire Status</span>
-								<select bind:value={vesselForm.hireStatus}>
-									<option value="true">On Hire</option>
-									<option value="false">Off Hire</option>
-								</select>
+								<small class="field-help">Saved as <code>fuelConsumptionSource</code> on <code>/vessels</code>.</small>
 							</label>
 						</div>
 
@@ -3353,69 +3771,6 @@
 						</div>
 					</div>
 
-					<section class="company-registry-card">
-						<div class="company-registry-head">
-							<div>
-								<h3>Company Registry</h3>
-								<p>{filteredCompanies.length} of {companies.length} local companies</p>
-							</div>
-
-							<div class="company-actions">
-								<button
-									type="button"
-									class="ghost-button small"
-									on:click={loadCompanies}
-									disabled={companiesLoading}
-								>
-									Refresh
-								</button>
-
-								<button
-									type="button"
-									class="primary-button small"
-									on:click={syncCompanies}
-									disabled={companiesSyncing}
-								>
-									{companiesSyncing ? 'Syncing...' : 'Sync Companies'}
-								</button>
-							</div>
-						</div>
-
-						<input
-							class="search-input"
-							type="search"
-							bind:value={searchCompany}
-							placeholder="Search company name or ThingsBoard ID..."
-						/>
-
-						{#if companiesLoading}
-							<LoadingSkeleton label="Loading companies" variant="admin-compact-list" rows={4} />
-						{:else if filteredCompanies.length === 0}
-							<div class="empty-box">Company not found.</div>
-						{:else}
-							<div class="company-list">
-								{#each filteredCompanies as company}
-									<article class="company-row">
-										<div>
-											<strong>{getCompanyDisplayName(company)}</strong>
-											<span>ID {company.id}</span>
-											<small>{getCompanyThingsboardId(company)}</small>
-										</div>
-
-										<button
-											type="button"
-											class="danger-button small"
-											on:click={() => deleteCompany(company)}
-											disabled={companyActionLoadingId === company.id}
-										>
-											{companyActionLoadingId === company.id ? 'Deleting...' : 'Delete'}
-										</button>
-									</article>
-								{/each}
-							</div>
-						{/if}
-					</section>
-
 					{#if selectedVessel?.engines?.length}
 						<section class="engine-preview-card">
 							<div>
@@ -3454,7 +3809,7 @@
 						class="search-input"
 						type="search"
 						bind:value={searchAsset}
-						placeholder="Search asset name, asset ID, type..."
+						placeholder="Search asset name or type..."
 					/>
 
 					<div class="asset-list">
@@ -3626,17 +3981,77 @@
 
 					<section class="engine-curve-form-card">
 						<div class="form-grid engine-curve-form-grid">
-							<label>
+							<div class="engine-curve-vessel-picker">
 								<span>Vessel</span>
-								<select bind:value={engineCurveForm.vesselId}>
-									<option value="">Select vessel</option>
-									{#each vessels as vessel}
-										<option value={vessel.id}>
-											{vessel.vesselName || `Vessel ${vessel.id}`} — ID {vessel.id}
-										</option>
-									{/each}
-								</select>
-							</label>
+								<div class="engine-curve-vessel-dropdown">
+									<button
+										type="button"
+										class="engine-curve-vessel-selector"
+										class:has-selection={selectedEngineCurveImportVessel}
+										on:click={() => (engineCurveImportVesselDropdownOpen = !engineCurveImportVesselDropdownOpen)}
+									>
+										<span class="selector-copy">
+											<strong>
+												{selectedEngineCurveImportVessel
+													? getVesselDisplayName(selectedEngineCurveImportVessel)
+													: 'Select vessel'}
+											</strong>
+										</span>
+										<span class="selector-chevron">v</span>
+									</button>
+
+									{#if engineCurveImportVesselDropdownOpen}
+										<div class="engine-curve-vessel-menu">
+											<div class="engine-curve-vessel-search-box">
+												<input
+													type="search"
+													placeholder="Search vessel..."
+													aria-label="Search vessel"
+													bind:value={searchEngineCurveImportVessel}
+												/>
+												{#if searchEngineCurveImportVessel}
+													<button
+														type="button"
+														class="engine-curve-vessel-search-clear"
+														aria-label="Clear vessel search"
+														on:click={() => (searchEngineCurveImportVessel = '')}
+													>
+													</button>
+												{/if}
+											</div>
+
+											{#if vesselsLoading}
+												<div class="engine-curve-vessel-state">
+													<LoadingSkeleton label="Loading vessels" variant="list" rows={4} compact />
+												</div>
+											{:else if vessels.length === 0}
+												<div class="engine-curve-vessel-state">No vessels available.</div>
+											{:else if filteredEngineCurveImportVessels.length === 0}
+												<div class="engine-curve-vessel-state">No vessel found.</div>
+											{:else}
+												<div class="engine-curve-vessel-items">
+													{#each filteredEngineCurveImportVessels as vessel}
+														<button
+															type="button"
+															class="engine-curve-vessel-item"
+															class:active-vessel={Number(engineCurveForm.vesselId) === Number(vessel.id)}
+															on:click={() => selectEngineCurveImportVessel(vessel)}
+														>
+															<span class="vessel-item-copy">
+																<strong>{getVesselDisplayName(vessel)}</strong>
+																<small>{getVesselCompanyLabel(vessel)} - ID {vessel.id}</small>
+															</span>
+															{#if Number(engineCurveForm.vesselId) === Number(vessel.id)}
+																<span class="active-check">Selected</span>
+															{/if}
+														</button>
+													{/each}
+												</div>
+											{/if}
+										</div>
+									{/if}
+								</div>
+							</div>
 
 							<label>
 								<span>Curve Type</span>
@@ -3798,7 +4213,7 @@
 					<div class="panel-title-row">
 						<div>
 							<h2>Reporting Vessels</h2>
-							<p>{reportingVessels.length} vessel</p>
+							<p>{reportingMode === 'periodical' ? 'Periodical auto-report' : 'Daily auto-report'} of {reportingVessels.length} vessel</p>
 						</div>
 
 						{#if reportingVesselsLoading}
@@ -3807,6 +4222,23 @@
 					</div>
 
 					<div class="reporting-filter-box">
+						<div class="reporting-mode-switch">
+							<button
+								type="button"
+								class:active-mode={reportingMode === 'daily'}
+								on:click={() => setReportingMode('daily')}
+							>
+								Daily
+							</button>
+							<button
+								type="button"
+								class:active-mode={reportingMode === 'periodical'}
+								on:click={() => setReportingMode('periodical')}
+							>
+								Periodical
+							</button>
+						</div>
+
 						<input
 							type="search"
 							bind:value={reportingFilters.search}
@@ -3833,10 +4265,10 @@
 					<div class="reporting-vessel-list">
 						{#if reportingVesselsLoading}
 							<LoadingSkeleton label="Loading reporting vessels" variant="admin-entity-list" rows={6} compact />
-						{:else if reportingVessels.length === 0}
+						{:else if filteredReportingVessels.length === 0}
 							<div class="empty-box">Reporting vessel not found.</div>
 						{:else}
-							{#each reportingVessels as vessel}
+							{#each filteredReportingVessels as vessel}
 								<button
 									type="button"
 									class:selected-user={selectedReportingVessel?.id === vessel.id}
@@ -3850,7 +4282,13 @@
 									</div>
 
 									<em class:active-reporting={isAutoReportEnabled(vessel)}>
-										{isAutoReportEnabled(vessel) ? 'Auto On' : 'Auto Off'}
+										{isAutoReportEnabled(vessel)
+											? reportingMode === 'periodical'
+												? 'Periodical On'
+												: 'Auto On'
+											: reportingMode === 'periodical'
+												? 'Periodical Off'
+												: 'Auto Off'}
 									</em>
 								</button>
 							{/each}
@@ -3863,7 +4301,8 @@
 						<section class="reporting-empty-card">
 							<h2>Select Vessel</h2>
 							<p>
-								Select a vessel on the left to configure auto-report and manual daily report.
+								Select a vessel on the left to configure
+								{reportingMode === 'periodical' ? 'periodical auto-report' : 'auto-report and manual daily report'}.
 							</p>
 						</section>
 					{:else}
@@ -3880,8 +4319,12 @@
 						<section class="reporting-section-card">
 							<div class="reporting-section-head">
 								<div>
-									<h3>Auto Daily Report Email</h3>
-									<p>Configure recipients, send time, timezone, and auto-report status.</p>
+									<h3>{reportingMode === 'periodical' ? 'Auto Periodical Report Email' : 'Auto Daily Report Email'}</h3>
+									<p>
+										{reportingMode === 'periodical'
+											? 'Configure periodical schedule, recipients, timezone, and auto-report status.'
+											: 'Configure recipients, send time, timezone, and auto-report status.'}
+									</p>
 								</div>
 
 								<label class="switch-line">
@@ -3891,88 +4334,115 @@
 							</div>
 
 							<div class="form-grid reporting-form-grid">
+								{#if reportingMode === 'periodical'}
+									<label>
+										<span>Start Date</span>
+										<input type="date" bind:value={autoReportForm.periodicalStartDate} />
+									</label>
+
+									<label>
+										<span>Interval Days</span>
+										<input
+											type="number"
+											min="1"
+											step="1"
+											bind:value={autoReportForm.periodicalIntervalDays}
+										/>
+									</label>
+								{/if}
+
 								<label>
-									<span>Send Time</span>
+									<span>{reportingMode === 'periodical' ? 'Schedule Time' : 'Send Time'}</span>
 									<input type="time" bind:value={autoReportForm.sendTime} />
 								</label>
 
 								<label>
-									<span>Timezone Mode</span>
+									<span class="field-label-row">
+										Timezone Mode
+										{#if autoReportForm.timezoneMode === 'auto'}
+											<small class="timezone-auto-pill">Auto • {getAutoReportTimezoneLabel()}</small>
+										{/if}
+									</span>
 									<select bind:value={autoReportForm.timezoneMode}>
-										<option value="auto">Auto</option>
-										<option value="manual">Manual</option>
+										{#each TIMEZONE_MODE_OPTIONS as option}
+											<option value={option.value}>{option.label}</option>
+										{/each}
 									</select>
 								</label>
 
-								<label>
-									<span>Timezone Offset</span>
-									<input
-										type="text"
-										bind:value={autoReportForm.timezoneOffset}
-										placeholder="+07:00"
-									/>
-								</label>
-							</div>
-
-							<div class="report-content-card">
-								<div class="report-content-head">
-									<div>
-										<h4>Report Content per Vessel</h4>
-										<p>
-											Choose which daily report sections are included for
-											{getVesselDisplayName(selectedReportingVessel)}.
-										</p>
-									</div>
-
-									<div class="report-content-actions">
-										<span>{autoReportForm.reportSections.length} selected</span>
-										<button type="button" class="ghost-button small" on:click={selectAllReportContentSections}>
-											Select All
-										</button>
-										<button type="button" class="ghost-button small" on:click={clearReportContentSections}>
-											Clear
-										</button>
-									</div>
-								</div>
-
-								<label class="report-content-search">
-									<span>Search Section</span>
-									<input
-										type="search"
-										bind:value={reportingContentSearch}
-										placeholder="Search report section, table, or permission key..."
-									/>
-								</label>
-
-								{#if permissionsLoading}
-									<LoadingSkeleton label="Loading report content catalog" variant="admin-compact-list" rows={4} />
-								{:else if visibleReportContentPermissions.length === 0}
-									<div class="empty-box">No report content section found.</div>
-								{:else}
-									<div class="report-content-list">
-										{#each visibleReportContentPermissions as permission}
-											<label
-												class:report-content-item-checked={hasReportContentSection(permission.key)}
-												class="report-content-item"
-											>
-												<input
-													type="checkbox"
-													checked={hasReportContentSection(permission.key)}
-													on:change={() => toggleReportContentSection(permission.key)}
-												/>
-												<span class="report-content-checkmark" aria-hidden="true"></span>
-												<div>
-													<strong>{permission.label || prettify(permission.key)}</strong>
-													<span class="report-content-meta">
-														{permission.tableLabel || permission.moduleLabel || 'Daily Report'}
-													</span>
-													<small>{permission.description || permission.key}</small>
-												</div>
-											</label>
-										{/each}
-									</div>
+								{#if autoReportForm.timezoneMode === 'manual'}
+									<label>
+										<span>Timezone Offset</span>
+										<select bind:value={autoReportForm.timezoneOffset}>
+											{#each TIMEZONE_OFFSET_OPTIONS as option}
+												<option value={option.value}>{option.label}</option>
+											{/each}
+										</select>
+									</label>
 								{/if}
 							</div>
+
+							{#if reportingMode === 'daily'}
+								<div class="report-content-card">
+									<div class="report-content-head">
+										<div>
+											<h4>Report Content per Vessel</h4>
+											<p>
+												Choose which daily report sections are included for
+												{getVesselDisplayName(selectedReportingVessel)}.
+											</p>
+										</div>
+
+										<div class="report-content-actions">
+											<span>{autoReportForm.reportSections.length} selected</span>
+											<button type="button" class="ghost-button small" on:click={selectAllReportContentSections}>
+												Select All
+											</button>
+											<button type="button" class="ghost-button small" on:click={clearReportContentSections}>
+												Clear
+											</button>
+										</div>
+									</div>
+
+									<label class="report-content-search">
+										<span>Search Section</span>
+										<input
+											type="search"
+											bind:value={reportingContentSearch}
+											placeholder="Search report section, table, or permission key..."
+										/>
+									</label>
+
+									{#if permissionsLoading}
+										<LoadingSkeleton label="Loading report content catalog" variant="admin-compact-list" rows={4} />
+									{:else if visibleReportContentPermissions.length === 0}
+										<div class="empty-box">No report content section found.</div>
+									{:else}
+										<div class="report-content-list">
+											{#each visibleReportContentPermissions as permission}
+												<label
+													class:report-content-item-checked={hasReportContentSection(permission.key)}
+													class="report-content-item"
+												>
+													<input
+														type="checkbox"
+														checked={hasReportContentSection(permission.key)}
+														on:change={() => toggleReportContentSection(permission.key)}
+													/>
+													<span class="report-content-checkmark" aria-hidden="true"></span>
+													<div>
+														<strong>{permission.label || prettify(permission.key)}</strong>
+														<span class="report-content-meta">
+															{permission.tableLabel || permission.moduleLabel || 'Daily Report'}
+														</span>
+														<small>{permission.description || permission.key}</small>
+													</div>
+												</label>
+											{/each}
+										</div>
+									{/if}
+								</div>
+							{/if}
 
 							<div class="recipient-picker-card">
 								<div class="recipient-picker-head">
@@ -4164,44 +4634,97 @@
 									on:click={saveAutoReportConfig}
 									disabled={reportingSaving}
 								>
-									{reportingSaving ? 'Saving...' : 'Save Auto Report'}
+									{reportingSaving
+										? 'Saving...'
+										: reportingMode === 'periodical'
+											? 'Save Periodical Auto Report'
+											: 'Save Auto Report'}
 								</button>
 							</div>
 						</section>
 
-						<section class="reporting-section-card">
-							<div class="reporting-section-head">
-								<div>
-									<h3>Manual Daily Report</h3>
-									<p>Download Excel or send the daily report email manually.</p>
+						{#if reportingMode === 'periodical'}
+							<section class="reporting-section-card">
+								<div class="reporting-section-head">
+									<div>
+										<h3>Manual Periodical Report</h3>
+										<p>Download Excel/PDF or send the configured periodical report email manually.</p>
+									</div>
 								</div>
-							</div>
 
-							<div class="form-grid manual-report-grid">
-								<label>
-									<span>Report Date</span>
-									<input type="date" bind:value={manualReportDate} />
-								</label>
+								<div class="form-grid manual-report-grid periodical-manual-grid">
+									<label>
+										<span>Start</span>
+										<input type="datetime-local" bind:value={manualPeriodicalStart} />
+									</label>
 
-								<button
-									type="button"
-									class="ghost-button"
-									on:click={downloadManualDailyReport}
-									disabled={reportingActionLoadingId === `download-${selectedReportingVessel.id}`}
-								>
-									Download Excel
-								</button>
+									<label>
+										<span>End</span>
+										<input type="datetime-local" bind:value={manualPeriodicalEnd} />
+									</label>
 
-								<button
-									type="button"
-									class="primary-button"
-									on:click={sendManualDailyReportEmail}
-									disabled={reportingActionLoadingId === `send-${selectedReportingVessel.id}`}
-								>
-									Send Email
-								</button>
-							</div>
-						</section>
+									<label>
+										<span>Download Format</span>
+										<select bind:value={manualPeriodicalFormat}>
+											<option value="excel">Excel</option>
+											<option value="pdf">PDF</option>
+										</select>
+									</label>
+
+									<button
+										type="button"
+										class="ghost-button"
+										on:click={downloadManualPeriodicalReport}
+										disabled={reportingActionLoadingId === `periodical-download-${selectedReportingVessel.id}`}
+									>
+										Download Report
+									</button>
+
+									<button
+										type="button"
+										class="primary-button"
+										on:click={sendManualPeriodicalReportEmail}
+										disabled={reportingActionLoadingId === `periodical-send-${selectedReportingVessel.id}`}
+									>
+										Send Email
+									</button>
+								</div>
+							</section>
+						{:else}
+							<section class="reporting-section-card">
+								<div class="reporting-section-head">
+									<div>
+										<h3>Manual Daily Report</h3>
+										<p>Download Excel or send the daily report email manually.</p>
+									</div>
+								</div>
+
+								<div class="form-grid manual-report-grid">
+									<label>
+										<span>Report Date</span>
+										<input type="date" bind:value={manualReportDate} />
+									</label>
+
+									<button
+										type="button"
+										class="ghost-button"
+										on:click={downloadManualDailyReport}
+										disabled={reportingActionLoadingId === `download-${selectedReportingVessel.id}`}
+									>
+										Download Excel
+									</button>
+
+									<button
+										type="button"
+										class="primary-button"
+										on:click={sendManualDailyReportEmail}
+										disabled={reportingActionLoadingId === `send-${selectedReportingVessel.id}`}
+									>
+										Send Email
+									</button>
+								</div>
+							</section>
+						{/if}
 
 						<section class="reporting-section-card">
 							<div class="reporting-section-head">
@@ -4275,7 +4798,7 @@
 						class="search-input"
 						type="search"
 						bind:value={cctvSearchVessel}
-						placeholder="Search vessel, device ID..."
+						placeholder="Search vessel or company name..."
 					/>
 
 					<div class="cctv-vessel-list">
@@ -4441,7 +4964,7 @@
 					<div class="panel-title-row">
 						<div>
 							<h2>Alarm Vessels</h2>
-							<p>{reportingVessels.length} vessel</p>
+							<p>{filteredReportingVessels.length} of {reportingVessels.length} vessel</p>
 						</div>
 
 						{#if reportingVesselsLoading}
@@ -4470,10 +4993,10 @@
 					<div class="reporting-vessel-list">
 						{#if reportingVesselsLoading}
 							<LoadingSkeleton label="Loading alarm vessels" variant="admin-entity-list" rows={6} compact />
-						{:else if reportingVessels.length === 0}
+						{:else if filteredReportingVessels.length === 0}
 							<div class="empty-box">Alarm vessel not found.</div>
 						{:else}
-							{#each reportingVessels as vessel}
+							{#each filteredReportingVessels as vessel}
 								<button
 									type="button"
 									class:selected-user={selectedReportingVessel?.id === vessel.id}
@@ -5376,7 +5899,242 @@
 	}
 
 	.engine-curve-form-grid {
-		grid-template-columns: 1fr 180px 1fr 1fr;
+		grid-template-columns: minmax(240px, 1fr) 180px 1fr 1fr;
+		align-items: start;
+	}
+
+	.engine-curve-vessel-picker {
+		display: grid;
+		gap: 8px;
+		min-width: 0;
+	}
+
+	.engine-curve-vessel-picker > span {
+		display: block;
+		margin-bottom: -2px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 750;
+	}
+
+	.engine-curve-vessel-dropdown {
+		position: relative;
+		min-width: 0;
+	}
+
+	.engine-curve-vessel-selector {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 10px;
+		width: 100%;
+		min-height: 42px;
+		padding: 7px 10px;
+		border: 1px solid rgba(148, 163, 184, 0.28);
+		border-radius: 8px;
+		background: rgba(15, 23, 42, 0.82);
+		color: var(--text-primary);
+		text-align: left;
+		transition:
+			border-color 120ms ease,
+			background 120ms ease,
+			box-shadow 120ms ease;
+	}
+
+	.engine-curve-vessel-selector:hover,
+	.engine-curve-vessel-selector.has-selection {
+		border-color: rgba(96, 165, 250, 0.48);
+		background: rgba(15, 23, 42, 0.92);
+	}
+
+	.engine-curve-vessel-selector:focus {
+		border-color: rgba(96, 165, 250, 0.72);
+		box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+		outline: none;
+	}
+
+	.engine-curve-vessel-selector .selector-copy,
+	.engine-curve-vessel-item .vessel-item-copy {
+		display: block;
+		min-width: 0;
+	}
+
+	.engine-curve-vessel-selector .selector-copy strong,
+	.engine-curve-vessel-item .vessel-item-copy strong {
+		display: block;
+		overflow: hidden;
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 750;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.engine-curve-vessel-selector .selector-copy small,
+	.engine-curve-vessel-item .vessel-item-copy small {
+		display: block;
+		overflow: hidden;
+		margin-top: 2px;
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 600;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.engine-curve-vessel-selector .selector-chevron {
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 800;
+		text-transform: uppercase;
+	}
+
+	.engine-curve-vessel-menu {
+		position: absolute;
+		top: calc(100% + 8px);
+		left: 0;
+		z-index: 100;
+		width: 100%;
+		min-width: 280px;
+		max-height: min(320px, calc(100vh - 180px));
+		overflow-y: auto;
+		padding: 6px;
+		border: 1px solid rgba(148, 163, 184, 0.24);
+		border-radius: 10px;
+		background: #111827;
+		box-shadow: 0 12px 24px rgba(0, 0, 0, 0.34);
+		animation: engineCurveVesselMenuIn 150ms ease;
+	}
+
+	.engine-curve-vessel-search-box {
+		position: sticky;
+		top: 0;
+		z-index: 2;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 5px;
+		margin-bottom: 6px;
+		padding-bottom: 6px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+		background: #111827;
+	}
+
+	.engine-curve-vessel-search-box input {
+		width: 100%;
+		min-width: 0;
+		height: 34px;
+		padding: 0 10px;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		border-radius: 7px;
+		background: rgba(15, 23, 42, 0.9);
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 600;
+		outline: none;
+	}
+
+	.engine-curve-vessel-search-box input::placeholder {
+		color: rgba(148, 163, 184, 0.78);
+	}
+
+	.engine-curve-vessel-search-box input:focus {
+		border-color: rgba(59, 130, 246, 0.58);
+		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+	}
+
+	.engine-curve-vessel-search-clear {
+		display: grid;
+		place-items: center;
+		width: 34px;
+		height: 34px;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		border-radius: 7px;
+		background: rgba(30, 41, 59, 0.72);
+		color: var(--text-secondary);
+		font-size: 0;
+		font-weight: 800;
+		line-height: 1;
+		transition:
+			background 120ms ease,
+			color 120ms ease,
+			border-color 120ms ease;
+	}
+
+	.engine-curve-vessel-search-clear::before {
+		content: 'X';
+		font-size: 11px;
+	}
+
+	.engine-curve-vessel-search-clear:hover {
+		border-color: rgba(96, 165, 250, 0.36);
+		background: rgba(37, 99, 235, 0.18);
+		color: #dbeafe;
+	}
+
+	.engine-curve-vessel-items {
+		display: grid;
+		gap: 2px;
+	}
+
+	.engine-curve-vessel-item {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 8px;
+		width: 100%;
+		min-height: 38px;
+		padding: 7px 8px;
+		border: 1px solid transparent;
+		border-radius: 8px;
+		background: transparent;
+		color: var(--text-secondary);
+		text-align: left;
+		transition:
+			background 120ms ease,
+			color 120ms ease,
+			border-color 120ms ease;
+	}
+
+	.engine-curve-vessel-item:hover {
+		border-color: rgba(96, 165, 250, 0.14);
+		background: rgba(30, 41, 59, 0.62);
+		color: var(--text-primary);
+	}
+
+	.engine-curve-vessel-item.active-vessel {
+		border-color: rgba(96, 165, 250, 0.34);
+		background: rgba(37, 99, 235, 0.14);
+		color: #bfdbfe;
+	}
+
+	.engine-curve-vessel-state {
+		padding: 10px;
+		border-radius: 8px;
+		background: rgba(15, 23, 42, 0.72);
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 650;
+	}
+
+	.engine-curve-vessel-menu .active-check {
+		padding: 2px 6px;
+		border-radius: 6px;
+		background: rgba(37, 99, 235, 0.16);
+		color: #bfdbfe;
+		font-size: 9px;
+		font-weight: 750;
+		letter-spacing: 0.02em;
+	}
+
+	@keyframes engineCurveVesselMenuIn {
+		from {
+			opacity: 0;
+			transform: translateY(-5px) scale(0.985);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0) scale(1);
+		}
 	}
 
 	.checkbox-line {
@@ -5767,6 +6525,25 @@
 		min-width: 0;
 	}
 
+	.fuel-source-pill {
+		display: inline-flex !important;
+		align-items: center;
+		justify-content: center;
+		width: fit-content;
+		margin-top: 0 !important;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 999px;
+		padding: 5px 9px;
+		background: rgba(37, 99, 235, 0.14);
+		color: #bfdbfe !important;
+		font-size: 10px !important;
+		font-weight: 850 !important;
+		line-height: 1;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+
 	.hire-status-pill {
 		display: inline-flex !important;
 		align-items: center;
@@ -5912,6 +6689,29 @@
 		font-weight: 900;
 	}
 
+	.field-label-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.timezone-auto-pill {
+		display: inline-flex;
+		align-items: center;
+		min-height: 18px;
+		padding: 2px 7px;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.1);
+		color: #bfdbfe;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0;
+		text-transform: none;
+		white-space: nowrap;
+	}
+
 	input,
 	textarea,
 	select {
@@ -6035,6 +6835,28 @@
 	.access-head select,
 	.permission-actions select {
 		width: 126px;
+	}
+
+	.access-search-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 10px;
+		margin-bottom: 10px;
+	}
+
+	.access-search-row input {
+		min-width: 0;
+		min-height: 38px;
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.28);
+	}
+
+	.access-search-row span {
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 800;
+		white-space: nowrap;
 	}
 
 	.option-list {
@@ -6201,6 +7023,29 @@
 		line-height: 1.45;
 	}
 
+	.permission-item .permission-effect {
+		display: flex;
+		gap: 7px;
+		align-items: flex-start;
+		width: fit-content;
+		max-width: 100%;
+		margin-top: 8px;
+		border: 1px solid rgba(96, 165, 250, 0.18);
+		border-radius: 10px;
+		padding: 6px 8px;
+		color: #bfdbfe;
+		background: rgba(37, 99, 235, 0.1);
+	}
+
+	.permission-item .permission-effect b {
+		flex: 0 0 auto;
+		color: #60a5fa;
+		font-size: 10px;
+		font-weight: 900;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+	}
+
 	.permission-item em {
 		border-radius: 999px;
 		padding: 4px 8px;
@@ -6257,6 +7102,7 @@
 		margin-top: 14px;
 	}
 
+	.editor-toolbar-actions,
 	.vessel-toolbar-actions,
 	.company-registry-head,
 	.company-actions {
@@ -6266,6 +7112,7 @@
 		flex-wrap: wrap;
 	}
 
+	.editor-toolbar-actions,
 	.vessel-toolbar-actions {
 		justify-content: flex-end;
 	}
@@ -6402,6 +7249,38 @@
 		display: grid;
 		gap: 8px;
 		padding: 0 16px 12px;
+	}
+
+	.reporting-mode-switch {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 6px;
+		padding: 4px;
+		border: 1px solid rgba(96, 165, 250, 0.14);
+		border-radius: 13px;
+		background: rgba(15, 23, 42, 0.42);
+	}
+
+	.reporting-mode-switch button {
+		min-height: 34px;
+		border: 1px solid transparent;
+		border-radius: 10px;
+		background: transparent;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 850;
+		cursor: pointer;
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease,
+			color 0.16s ease;
+	}
+
+	.reporting-mode-switch button:hover,
+	.reporting-mode-switch button.active-mode {
+		border-color: rgba(59, 130, 246, 0.35);
+		background: rgba(37, 99, 235, 0.18);
+		color: var(--text-primary);
 	}
 
 	.reporting-filter-box input,
@@ -7936,6 +8815,23 @@
 		margin-bottom: 14px;
 	}
 
+	.engine-curve-editor-panel {
+		position: relative;
+		z-index: 8;
+		overflow: visible;
+	}
+
+	.engine-curve-form-card {
+		position: relative;
+		z-index: 12;
+		overflow: visible;
+	}
+
+	.engine-curve-detail-card {
+		position: relative;
+		z-index: 1;
+	}
+
 	.panel-title-row h2,
 	.editor-toolbar h2,
 	.global-audit-header h2,
@@ -8340,6 +9236,444 @@
 		.admin-tabs button.active-tab {
 			background: #1d4eda;
 			box-shadow: 0 10px 18px rgba(15, 118, 110, 0.16);
+		}
+	}
+
+	/* =========================================================
+	   Smartphone-friendly Administrator Page refinements
+	   ========================================================= */
+	@media (max-width: 900px) {
+		.administrator-page {
+			width: 100%;
+			min-width: 0;
+			padding: 10px 10px 22px;
+			scroll-padding-top: 10px;
+		}
+
+		.admin-header-card {
+			display: grid;
+			grid-template-columns: 1fr;
+			gap: 12px;
+			padding: 14px;
+		}
+
+		.admin-header-card h1 {
+			font-size: clamp(20px, 6vw, 26px);
+			line-height: 1.12;
+		}
+
+		.admin-header-card p {
+			max-width: none;
+			font-size: 13px;
+			line-height: 1.45;
+		}
+
+		.header-actions,
+		.editor-toolbar-actions,
+		.editor-footer,
+		.permission-actions,
+		.detail-actions,
+		.company-actions,
+		.global-audit-filter-actions,
+		.filter-actions,
+		.module-buttons,
+		.recipient-page-actions,
+		.assignable-pagination {
+			display: grid;
+			grid-template-columns: 1fr;
+			width: 100%;
+			gap: 8px;
+		}
+
+		.admin-tabs {
+			position: sticky;
+			top: 0;
+			z-index: 30;
+			display: flex !important;
+			flex-direction: row !important;
+			align-items: center !important;
+			gap: 6px;
+			margin: 10px -10px 0;
+			padding: 8px 10px;
+			border-left: 0;
+			border-right: 0;
+			overflow-x: auto;
+			overflow-y: hidden;
+			-webkit-overflow-scrolling: touch;
+			scroll-snap-type: x proximity;
+		}
+
+		.admin-tabs::-webkit-scrollbar {
+			height: 4px;
+		}
+
+		.admin-tabs button {
+			flex: 0 0 auto;
+			width: auto !important;
+			min-width: max-content;
+			min-height: 36px;
+			padding: 0 13px;
+			scroll-snap-align: start;
+		}
+
+		.admin-tab-indicator {
+			display: none !important;
+		}
+
+		.admin-tabs button.active-tab {
+			background: #2563eb;
+			color: #ffffff;
+		}
+
+		.summary-grid,
+		.admin-workspace,
+		.vessel-admin-workspace,
+		.asset-admin-workspace,
+		.engine-curve-admin-workspace,
+		.reporting-admin-workspace,
+		.cctv-admin-workspace,
+		.global-audit-workspace,
+		.telegram-layout,
+		.form-grid,
+		.vessel-form-grid,
+		.asset-form-grid,
+		.engine-curve-form-grid,
+		.curve-meta-grid,
+		.reporting-form-grid,
+		.recipient-grid,
+		.manual-recipient-form,
+		.selected-recipient-grid,
+		.health-grid,
+		.telegram-form-grid,
+		.cctv-camera-grid,
+		.global-audit-filter-card,
+		.company-registry-card,
+		.alarm-key-grid,
+		.engine-grid,
+		.access-grid,
+		.permission-filter {
+			grid-template-columns: 1fr !important;
+		}
+
+		.users-panel,
+		.vessel-list-panel,
+		.asset-list-panel,
+		.engine-curve-list-panel,
+		.reporting-vessel-panel,
+		.cctv-vessel-panel,
+		.editor-panel,
+		.vessel-editor-panel,
+		.asset-editor-panel,
+		.engine-curve-editor-panel,
+		.reporting-editor-panel,
+		.cctv-editor-panel,
+		.global-audit-panel {
+			width: 100%;
+			min-width: 0;
+			max-width: 100%;
+			position: static !important;
+			max-height: none !important;
+			overflow: visible;
+		}
+
+		.users-list,
+		.vessel-list,
+		.asset-list,
+		.engine-curve-list,
+		.reporting-vessel-list,
+		.cctv-vessel-list,
+		.audit-log-list,
+		.telegram-list,
+		.company-list,
+		.assignable-user-list,
+		.cctv-camera-list {
+			max-height: min(420px, 52vh);
+			overflow-y: auto;
+			-webkit-overflow-scrolling: touch;
+		}
+
+		.panel-title-row,
+		.editor-toolbar,
+		.global-audit-header,
+		.permission-header,
+		.access-head,
+		.reporting-section-head,
+		.report-content-head,
+		.engine-curve-detail-head,
+		.company-registry-head,
+		.cctv-camera-head,
+		.recipient-picker-head,
+		.telegram-vessel-picker .picker-head {
+			display: grid;
+			grid-template-columns: 1fr;
+			align-items: stretch;
+			gap: 10px;
+			min-height: auto;
+		}
+
+		.editor-panel > :not(.editor-toolbar),
+		.asset-editor-panel > :not(.editor-toolbar),
+		.vessel-editor-panel > :not(.editor-toolbar),
+		.engine-curve-editor-panel > :not(.editor-toolbar),
+		.reporting-editor-panel > :not(.editor-toolbar),
+		.global-audit-panel > :not(.global-audit-header) {
+			margin-left: 10px;
+			margin-right: 10px;
+		}
+
+		.access-card,
+		.permission-panel,
+		.vessel-form-card,
+		.asset-form-card,
+		.engine-preview-card,
+		.engine-curve-form-card,
+		.engine-curve-detail-card,
+		.reporting-empty-card,
+		.reporting-section-card,
+		.global-audit-filter-card,
+		.global-audit-table-card,
+		.telegram-form-card,
+		.company-registry-card,
+		.cctv-config-card,
+		.cctv-camera-card,
+		.muted-box,
+		.empty-box,
+		.vessel-note,
+		.asset-note,
+		.engine-curve-note {
+			padding: 12px;
+			border-radius: 10px;
+		}
+
+		.user-row,
+		.vessel-row,
+		.asset-row,
+		.engine-curve-row,
+		.reporting-vessel-row,
+		.cctv-vessel-row,
+		.telegram-row,
+		.company-row,
+		.audit-log-row,
+		.assignable-user-row {
+			display: grid !important;
+			grid-template-columns: 1fr;
+			align-items: start;
+			gap: 8px;
+			width: 100%;
+			min-width: 0;
+			padding: 12px;
+		}
+
+		.user-main,
+		.vessel-row > div,
+		.asset-row > div,
+		.engine-curve-row > div,
+		.reporting-vessel-row > div,
+		.cctv-vessel-row > div,
+		.telegram-row > div,
+		.company-row > div,
+		.audit-log-row > div {
+			min-width: 0;
+		}
+
+		.user-main strong,
+		.vessel-row strong,
+		.asset-row strong,
+		.engine-curve-row strong,
+		.reporting-vessel-row strong,
+		.cctv-vessel-row strong,
+		.telegram-row strong,
+		.company-row strong,
+		.audit-log-row strong {
+			overflow-wrap: anywhere;
+			line-height: 1.25;
+		}
+
+		.active-badge,
+		.inactive-badge,
+		.action-badge,
+		.vessel-row em,
+		.engine-curve-row em,
+		.reporting-vessel-row em,
+		.cctv-vessel-row em,
+		.telegram-row em {
+			width: fit-content;
+			max-width: 100%;
+		}
+
+		.search-input,
+		.reporting-filter-box input,
+		.reporting-filter-box select,
+		input,
+		textarea,
+		select {
+			width: 100%;
+			max-width: 100%;
+			min-width: 0 !important;
+			font-size: 16px;
+		}
+
+		.search-input {
+			width: calc(100% - 20px);
+			margin: 10px;
+		}
+
+		.primary-button,
+		.ghost-button,
+		.danger-button,
+		.activate-button,
+		.text-button {
+			width: 100%;
+			min-height: 38px;
+			justify-content: center;
+			white-space: normal;
+		}
+
+		.permission-item {
+			grid-template-columns: 22px minmax(0, 1fr);
+			align-items: start;
+			gap: 10px;
+		}
+
+		.permission-item input,
+		.checkbox-line input,
+		.option-chip input,
+		.switch-line input {
+			width: 18px;
+			height: 18px;
+			min-height: 18px;
+			margin-top: 1px;
+			flex: 0 0 auto;
+		}
+
+		.option-chip,
+		.checkbox-line,
+		.switch-line,
+		.boxed-switch {
+			width: 100%;
+			min-height: 38px;
+		}
+
+		.permission-list,
+		.report-content-list,
+		.selected-recipient-list,
+		.option-list {
+			max-height: min(430px, 55vh);
+			overflow-y: auto;
+			-webkit-overflow-scrolling: touch;
+		}
+
+		.global-audit-table-wrap,
+		.range-table-wrap,
+		.table-wrap,
+		.table-wrapper,
+		.engine-table-wrap,
+		.monthly-table-wrapper,
+		.data-log-table-wrapper,
+		.event-table-wrapper,
+		.high-rpm-table-wrapper,
+		.low-speed-table-wrapper {
+			width: 100%;
+			max-width: 100%;
+			overflow-x: auto;
+			-webkit-overflow-scrolling: touch;
+		}
+
+		.global-audit-table-wrap table,
+		.range-table-wrap table,
+		.table-wrap table,
+		.table-wrapper table {
+			min-width: 720px;
+		}
+
+		.engine-curve-vessel-dropdown,
+		.engine-curve-vessel-picker {
+			width: 100%;
+			min-width: 0;
+		}
+
+		.engine-curve-vessel-menu {
+			left: 0;
+			right: 0;
+			width: 100%;
+			max-width: calc(100vw - 40px);
+		}
+
+		.cctv-camera-grid {
+			gap: 8px;
+		}
+
+		.cctv-updated-meta,
+		.field-help,
+		.filter-help,
+		.reporting-empty-card p,
+		.reporting-section-card p {
+			overflow-wrap: anywhere;
+		}
+	}
+
+	@media (max-width: 520px) {
+		.administrator-page {
+			padding: 8px 8px 20px;
+		}
+
+		.admin-tabs {
+			margin-left: -8px;
+			margin-right: -8px;
+			padding-left: 8px;
+			padding-right: 8px;
+		}
+
+		.summary-card {
+			min-height: 78px;
+			padding: 12px;
+		}
+
+		.summary-card strong {
+			font-size: 19px;
+		}
+
+		.panel-title-row,
+		.editor-toolbar,
+		.global-audit-header {
+			padding: 11px 12px;
+		}
+
+		.users-list,
+		.vessel-list,
+		.asset-list,
+		.engine-curve-list,
+		.reporting-vessel-list,
+		.cctv-vessel-list {
+			padding-left: 8px;
+			padding-right: 8px;
+		}
+
+		.editor-panel > :not(.editor-toolbar),
+		.asset-editor-panel > :not(.editor-toolbar),
+		.vessel-editor-panel > :not(.editor-toolbar),
+		.engine-curve-editor-panel > :not(.editor-toolbar),
+		.reporting-editor-panel > :not(.editor-toolbar),
+		.global-audit-panel > :not(.global-audit-header) {
+			margin-left: 8px;
+			margin-right: 8px;
+		}
+
+		.access-card,
+		.permission-panel,
+		.vessel-form-card,
+		.asset-form-card,
+		.engine-preview-card,
+		.engine-curve-form-card,
+		.engine-curve-detail-card,
+		.reporting-section-card,
+		.global-audit-filter-card,
+		.global-audit-table-card,
+		.telegram-form-card,
+		.company-registry-card,
+		.cctv-config-card,
+		.cctv-camera-card {
+			padding: 10px;
 		}
 	}
 

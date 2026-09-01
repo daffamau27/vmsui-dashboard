@@ -2,18 +2,14 @@
 	import { onMount } from 'svelte';
 	import { apiRequest } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
+	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 
 	const TIME_RANGE_PRESETS = [
 		{ id: 'midnight', label: '00:00 - 06:00', startTime: '00:00', endTime: '06:00' },
 		{ id: 'day', label: '06:00 - 18:00', startTime: '06:00', endTime: '18:00' },
 		{ id: 'night', label: '18:00 - 24:00', startTime: '18:00', endTime: '23:59' }
-	];
-
-	const TIMEZONE_OPTIONS = [
-		{ label: 'UTC+7', value: '+07:00' },
-		{ label: 'UTC+8', value: '+08:00' },
-		{ label: 'UTC+9', value: '+09:00' },
-		{ label: 'UTC+0', value: '+00:00' }
 	];
 
 	let devices = $state([]);
@@ -272,7 +268,11 @@
 	let selectedColumnCount = $derived(visibleColumnIds.length);
 
 	let filteredDevices = $derived(
-		devices.filter((device) => device.name.toLowerCase().includes(vesselSearch.toLowerCase()))
+		sortByAlpha(
+			devices.filter((device) => device.name.toLowerCase().includes(vesselSearch.toLowerCase())),
+			(device) => device.name,
+			(device) => device.companyName
+		)
 	);
 
 	let selectedDevices = $derived(devices.filter((device) => selectedDeviceIds.includes(device.id)));
@@ -400,6 +400,10 @@
 				offset: defaultTimezoneOffset
 			}
 		);
+	}
+
+	function getDeviceAutoTimezoneLabel(device = null) {
+		return getAutoTimezoneLabelFromSources(device);
 	}
 
 	function setVesselTimezone(deviceId, field, value) {
@@ -643,38 +647,20 @@
 			console.log('[ALL_VESSEL][LOAD_VESSELS][RESULT]', rows);
 
 			devices = Array.isArray(rows)
-				? rows.map((item) => ({
+				? sortByAlpha(rows.map((item) => ({
 						id: String(item.id),
 						vesselId: item.id,
 						deviceId: item.deviceId || '',
 						name: item.vesselName || '-',
 						vesselName: item.vesselName || '-',
+						companyName: item.companyName || '',
 						engines: item.engines || [],
 						raw: item
-					}))
+					})), (device) => device.name, (device) => device.companyName)
 				: [];
 
-			if (!selectedDeviceIds.length && devices.length) {
-				const firstDeviceId = devices[0].id;
-
-				selectedDeviceIds = [firstDeviceId];
-
-				vesselRanges = {
-					...vesselRanges,
-					[firstDeviceId]: {
-						start: defaultStartDate,
-						end: defaultEndDate
-					}
-				};
-
-				vesselTimezones = {
-					...vesselTimezones,
-					[firstDeviceId]: {
-						mode: defaultTimezoneMode,
-						offset: defaultTimezoneOffset
-					}
-				};
-			}
+			const availableDeviceIds = new Set(devices.map((device) => device.id));
+			selectedDeviceIds = selectedDeviceIds.filter((deviceId) => availableDeviceIds.has(deviceId));
 		} catch (err) {
 			console.error('[ALL_VESSEL][LOAD_VESSELS][ERROR]', err);
 			devicesError = err?.message || 'Failed to load the vessel list from the API.';
@@ -974,7 +960,9 @@
 							</div>
 
 							<span class="request-badge">
-								{defaultTimezoneMode === 'auto' ? 'Auto UTC' : defaultTimezoneOffset}
+								{defaultTimezoneMode === 'auto'
+									? `Auto • ${getDeviceAutoTimezoneLabel()}`
+									: defaultTimezoneOffset}
 							</span>
 						</div>
 
@@ -998,21 +986,29 @@
 							</label>
 
 							<label class="request-field">
-								<span>Default UTC Mode</span>
+								<span class="field-label-row">
+									Default UTC Mode
+									{#if defaultTimezoneMode === 'auto'}
+										<small class="timezone-auto-pill">Auto • {getDeviceAutoTimezoneLabel()}</small>
+									{/if}
+								</span>
 								<select bind:value={defaultTimezoneMode}>
-									<option value="manual">Manual</option>
-									<option value="auto">Auto</option>
-								</select>
-							</label>
-
-							<label class="request-field">
-								<span>Default UTC</span>
-								<select bind:value={defaultTimezoneOffset} disabled={defaultTimezoneMode === 'auto'}>
-									{#each TIMEZONE_OPTIONS as option}
+									{#each TIMEZONE_MODE_OPTIONS as option}
 										<option value={option.value}>{option.label}</option>
 									{/each}
 								</select>
 							</label>
+
+							{#if defaultTimezoneMode === 'manual'}
+								<label class="request-field">
+									<span>Default UTC</span>
+									<select bind:value={defaultTimezoneOffset}>
+										{#each TIMEZONE_OFFSET_OPTIONS as option}
+											<option value={option.value}>{option.label}</option>
+										{/each}
+									</select>
+								</label>
+							{/if}
 						</div>
 
 						<div class="request-presets">
@@ -1060,7 +1056,11 @@
 
 						<div class="request-summary-item">
 							<span>Default UTC</span>
-							<strong>{defaultTimezoneMode === 'auto' ? 'Auto UTC' : defaultTimezoneOffset}</strong>
+							<strong>
+								{defaultTimezoneMode === 'auto'
+									? `Auto • ${getDeviceAutoTimezoneLabel()}`
+									: defaultTimezoneOffset}
+							</strong>
 						</div>
 
 						<div class="request-summary-item">
@@ -1099,7 +1099,7 @@
 
 											<span class="vessel-utc-pill">
 												{getVesselTimezone(device.id).mode === 'auto'
-													? 'Auto UTC'
+													? `Auto • ${getDeviceAutoTimezoneLabel(device)}`
 													: getVesselTimezone(device.id).offset}
 											</span>
 										</div>
@@ -1126,30 +1126,37 @@
 											</label>
 
 											<label class="request-field">
-												<span>UTC Mode</span>
+												<span class="field-label-row">
+													UTC Mode
+													{#if getVesselTimezone(device.id).mode === 'auto'}
+														<small class="timezone-auto-pill">Auto • {getDeviceAutoTimezoneLabel(device)}</small>
+													{/if}
+												</span>
 												<select
 													value={getVesselTimezone(device.id).mode}
 													onchange={(event) =>
 														setVesselTimezone(device.id, 'mode', event.currentTarget.value)}
 												>
-													<option value="manual">Manual</option>
-													<option value="auto">Auto</option>
-												</select>
-											</label>
-
-											<label class="request-field">
-												<span>UTC</span>
-												<select
-													value={getVesselTimezone(device.id).offset}
-													onchange={(event) =>
-														setVesselTimezone(device.id, 'offset', event.currentTarget.value)}
-													disabled={getVesselTimezone(device.id).mode === 'auto'}
-												>
-													{#each TIMEZONE_OPTIONS as option}
+													{#each TIMEZONE_MODE_OPTIONS as option}
 														<option value={option.value}>{option.label}</option>
 													{/each}
 												</select>
 											</label>
+
+											{#if getVesselTimezone(device.id).mode === 'manual'}
+												<label class="request-field">
+													<span>UTC</span>
+													<select
+														value={getVesselTimezone(device.id).offset}
+														onchange={(event) =>
+															setVesselTimezone(device.id, 'offset', event.currentTarget.value)}
+													>
+														{#each TIMEZONE_OFFSET_OPTIONS as option}
+															<option value={option.value}>{option.label}</option>
+														{/each}
+													</select>
+												</label>
+											{/if}
 										</div>
 									</article>
 								{/each}
@@ -1466,7 +1473,9 @@
 	}
 
 	.vessel-panel {
-		min-height: 420px;
+		height: clamp(420px, calc(100vh - 230px), 620px);
+		min-height: 0;
+		align-self: start;
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
@@ -1520,6 +1529,7 @@
 
 	.vessel-list {
 		flex: 1;
+		min-height: 0;
 		overflow: auto;
 		padding: 10px;
 		display: grid;
@@ -1744,6 +1754,29 @@
 		font-weight: 900;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
+	}
+
+	.field-label-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.timezone-auto-pill {
+		display: inline-flex;
+		align-items: center;
+		min-height: 18px;
+		padding: 2px 7px;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.1);
+		color: #bfdbfe;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0;
+		text-transform: none;
+		white-space: nowrap;
 	}
 
 	.request-field input,
@@ -2194,6 +2227,10 @@
 		.filter-grid,
 		.column-groups {
 			grid-template-columns: 1fr;
+		}
+
+		.vessel-panel {
+			height: min(520px, 70vh);
 		}
 
 		.avs-header-card,

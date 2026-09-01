@@ -13,7 +13,10 @@ function buildPeriodicalQuery({
   params.set("start", start);
   params.set("end", end);
   params.set("timezoneMode", timezoneMode || "auto");
-  params.set("timezoneOffset", timezoneOffset || "+07:00");
+
+  if (timezoneMode === "manual" && timezoneOffset) {
+    params.set("timezoneOffset", timezoneOffset);
+  }
 
   return params.toString();
 }

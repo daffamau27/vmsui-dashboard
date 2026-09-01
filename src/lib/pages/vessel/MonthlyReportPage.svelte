@@ -5,6 +5,8 @@
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import { downloadApiFile, apiRequest } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
 
 	let loading = $state(false);
 	let exporting = $state(false);
@@ -16,6 +18,7 @@
 	let endDate = $state('');
 	let timezoneMode = $state('auto');
 	let timezoneOffset = $state('+07:00');
+	let hasLoadedDateRange = $state(false);
 
 	let currentUser = $state(null);
 	let currentUserLoading = $state(false);
@@ -71,19 +74,9 @@
 	}
 
 	let { active = false } = $props();
-
-	let loadedKeys = $state({});
-	let lastLoadedVesselId = $state(null);
-
-	$effect(() => {
-		const vesselId = $selectedVesselId;
-
-		if (!vesselId) return;
-		if (vesselId === lastLoadedVesselId) return;
-
-		lastLoadedVesselId = vesselId;
-		loadMonthlyReport();
-	});
+	let shouldShowDateRangeOverlay = $derived(
+		!hasLoadedDateRange || !reportMonth || !startDate || !endDate
+	);
 
 	function pad(value) {
 		return String(value).padStart(2, '0');
@@ -101,6 +94,118 @@
 		if (!year || !month) return '31';
 
 		return String(new Date(year, month, 0).getDate()).padStart(2, '0');
+	}
+
+	function getMonthParts(monthValue) {
+		const [year, month] = String(monthValue || '')
+			.split('-')
+			.map(Number);
+
+		if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+			return null;
+		}
+
+		return { year, month };
+	}
+
+	function getMaxSelectableDay(monthValue) {
+		const parts = getMonthParts(monthValue);
+		if (!parts) return 31;
+
+		const today = new Date();
+		const selectedMonthIndex = parts.month - 1;
+		const selectedMonthDate = new Date(parts.year, selectedMonthIndex, 1);
+		const currentMonthDate = new Date(today.getFullYear(), today.getMonth(), 1);
+		const lastDay = Number(getLastDayOfMonth(monthValue));
+
+		if (selectedMonthDate > currentMonthDate) return 0;
+
+		if (
+			parts.year === today.getFullYear() &&
+			selectedMonthIndex === today.getMonth()
+		) {
+			return Math.min(lastDay, today.getDate());
+		}
+
+		return lastDay;
+	}
+
+	function getMonthlyRangeLimitText() {
+		if (!reportMonth) return 'Select a month first.';
+
+		const maxDay = getMaxSelectableDay(reportMonth);
+		if (maxDay <= 0) return 'Future month cannot be loaded.';
+
+		const lastDay = Number(getLastDayOfMonth(reportMonth));
+		const isLimitedByToday = maxDay < lastDay;
+
+		return isLimitedByToday
+			? `Available until day ${pad(maxDay)} because the selected month is current month.`
+			: `Available day 01 - ${pad(maxDay)}.`;
+	}
+
+	function normalizeMonthlyDay(value, fallback = 1) {
+		const day = Number(value);
+		return Number.isInteger(day) ? day : fallback;
+	}
+
+	function validateMonthlyRange() {
+		if (!reportMonth) {
+			return { valid: false, message: 'Month is required.' };
+		}
+
+		const maxDay = getMaxSelectableDay(reportMonth);
+		const monthLastDay = Number(getLastDayOfMonth(reportMonth));
+
+		if (maxDay <= 0) {
+			return {
+				valid: false,
+				message: 'Selected month is in the future. Please choose current month or a previous month.'
+			};
+		}
+
+		const start = normalizeMonthlyDay(startDate, 1);
+		const end = normalizeMonthlyDay(endDate, maxDay);
+
+		if (start < 1 || end < 1) {
+			return { valid: false, message: 'Start day and end day must be at least 1.' };
+		}
+
+		if (start > monthLastDay || end > monthLastDay) {
+			return {
+				valid: false,
+				message: `Selected day exceeds the selected month. ${reportMonth} only has ${monthLastDay} days.`
+			};
+		}
+
+		if (start > maxDay || end > maxDay) {
+			return {
+				valid: false,
+				message: `Selected day exceeds available data date. Maximum day for this month is ${pad(maxDay)}.`
+			};
+		}
+
+		if (start > end) {
+			return { valid: false, message: 'Start day cannot be greater than end day.' };
+		}
+
+		return {
+			valid: true,
+			startDate: pad(start),
+			endDate: pad(end)
+		};
+	}
+
+	function syncMonthlyRangeToBounds() {
+		hasLoadedDateRange = false;
+		const maxDay = getMaxSelectableDay(reportMonth);
+		if (maxDay <= 0) return;
+
+		const start = Math.min(Math.max(normalizeMonthlyDay(startDate, 1), 1), maxDay);
+		const end = Math.min(Math.max(normalizeMonthlyDay(endDate, maxDay), 1), maxDay);
+
+		startDate = pad(start);
+		endDate = pad(Math.max(start, end));
 	}
 
 	function normalizeDay(value) {
@@ -238,6 +343,9 @@
 	);
 
 	let normalizedReport = $derived(reportData?.data || reportData || {});
+	let autoTimezoneLabel = $derived(
+		getAutoTimezoneLabelFromSources(normalizedReport, reportData, $selectedVesselInfo)
+	);
 
 	let monthlyRows = $derived(
 		pickArray(
@@ -911,8 +1019,20 @@
 		if (!$selectedVesselId) {
 			error = 'No vessel has been selected from Fleet View.';
 			reportData = null;
+			hasLoadedDateRange = false;
 			return;
 		}
+
+		const rangeValidation = validateMonthlyRange();
+		if (!rangeValidation.valid) {
+			error = rangeValidation.message;
+			reportData = null;
+			hasLoadedDateRange = false;
+			return;
+		}
+
+		startDate = rangeValidation.startDate;
+		endDate = rangeValidation.endDate;
 
 		loading = true;
 		error = '';
@@ -921,13 +1041,14 @@
 			const result = await getMonthlyReportData({
 				vesselId: $selectedVesselId,
 				month: reportMonth,
-				startDate,
-				endDate,
+				startDate: rangeValidation.startDate,
+				endDate: rangeValidation.endDate,
 				timezoneMode,
 				timezoneOffset
 			});
 
 			reportData = result;
+			hasLoadedDateRange = true;
 
 			const payload = result?.data || result || {};
 			const rows = Array.isArray(payload?.details) ? payload.details : [];
@@ -965,6 +1086,7 @@
 			console.error('[MONTHLY_REPORT_ERROR]', err);
 			error = err?.message || 'Failed to load monthly report.';
 			reportData = null;
+			hasLoadedDateRange = false;
 		} finally {
 			loading = false;
 		}
@@ -976,6 +1098,15 @@
 			return;
 		}
 
+		const rangeValidation = validateMonthlyRange();
+		if (!rangeValidation.valid) {
+			error = rangeValidation.message;
+			return;
+		}
+
+		startDate = rangeValidation.startDate;
+		endDate = rangeValidation.endDate;
+
 		exporting = true;
 		error = '';
 
@@ -983,8 +1114,8 @@
 			const url = getMonthlyReportExcelUrl({
 				vesselId: $selectedVesselId,
 				month: reportMonth,
-				startDate,
-				endDate,
+				startDate: rangeValidation.startDate,
+				endDate: rangeValidation.endDate,
 				timezoneMode,
 				timezoneOffset
 			});
@@ -995,7 +1126,7 @@
 
 			await downloadApiFile(
 				url,
-				`Monthly_Report_${safeVesselName}_${reportMonth}_${startDate}-${endDate}.xlsx`
+				`Monthly_Report_${safeVesselName}_${reportMonth}_${rangeValidation.startDate}-${rangeValidation.endDate}.xlsx`
 			);
 		} catch (err) {
 			console.error('[MONTHLY_EXPORT_EXCEL_ERROR]', err);
@@ -1008,7 +1139,7 @@
 	onMount(() => {
 		reportMonth = currentMonth();
 		startDate = '01';
-		endDate = getLastDayOfMonth(reportMonth);
+		endDate = pad(getMaxSelectableDay(reportMonth));
 	});
 
 	$effect(() => {
@@ -1018,27 +1149,11 @@
 		loadCurrentUser();
 	});
 
-	$effect(() => {
-		if (!active) return;
-		if (!$selectedVesselId) return;
-		if (!reportMonth) return;
-
-		const key = `${$selectedVesselId}|${reportMonth}|${startDate}|${endDate}|${timezoneMode}|${timezoneOffset}`;
-
-		if (loadedKeys[key]) return;
-
-		loadedKeys = {
-			...loadedKeys,
-			[key]: true
-		};
-
-		loadMonthlyReport();
-	});
 </script>
 
 <section class="monthly-page">
 	<section class="monthly-header-card">
-		<div>
+		<div class="monthly-header-copy">
 			<div class="page-kicker">Monthly Report</div>
 			<h1>{vesselName}</h1>
 			<p>
@@ -1046,50 +1161,84 @@
 				speed summary.
 			</p>
 		</div>
-	</section>
 
-	<section class="filter-card">
+		<div class="monthly-header-filters">
+			<div class="filter-card">
 		<label>
 			<span>Month</span>
-			<input type="month" bind:value={reportMonth} />
+			<input
+				type="month"
+				bind:value={reportMonth}
+				max={currentMonth()}
+				onchange={syncMonthlyRangeToBounds}
+			/>
 		</label>
 
 		<label>
 			<span>Start Day</span>
-			<input type="text" bind:value={startDate} placeholder="01" />
+			<input
+				type="number"
+				bind:value={startDate}
+				min="1"
+				max={Math.max(getMaxSelectableDay(reportMonth), 1)}
+				placeholder="01"
+				onchange={syncMonthlyRangeToBounds}
+			/>
 		</label>
 
 		<label>
 			<span>End Day</span>
-			<input type="text" bind:value={endDate} placeholder="31" />
+			<input
+				type="number"
+				bind:value={endDate}
+				min="1"
+				max={Math.max(getMaxSelectableDay(reportMonth), 1)}
+				placeholder={getLastDayOfMonth(reportMonth)}
+				onchange={syncMonthlyRangeToBounds}
+			/>
 		</label>
 
 		<label>
-			<span>Timezone Mode</span>
-			<select bind:value={timezoneMode}>
-				<option value="auto">Auto</option>
-				<option value="manual">Manual</option>
+			<span class="field-label-row">
+				Timezone Mode
+				{#if timezoneMode === 'auto'}
+					<small class="timezone-auto-pill">Auto • {autoTimezoneLabel}</small>
+				{/if}
+			</span>
+			<select bind:value={timezoneMode} onchange={() => (hasLoadedDateRange = false)}>
+				{#each TIMEZONE_MODE_OPTIONS as option}
+					<option value={option.value}>{option.label}</option>
+				{/each}
 			</select>
 		</label>
 
 		{#if timezoneMode === 'manual'}
 			<label>
 				<span>Timezone Offset</span>
-				<input type="text" bind:value={timezoneOffset} placeholder="+07:00" />
+				<select bind:value={timezoneOffset} onchange={() => (hasLoadedDateRange = false)}>
+					{#each TIMEZONE_OFFSET_OPTIONS as option}
+						<option value={option.value}>{option.label}</option>
+					{/each}
+				</select>
 			</label>
 		{/if}
 
 		<div class="filter-actions">
-			<button type="button" class="primary-btn" onclick={loadMonthlyReport} disabled={loading}>
+			<button type="button" class="primary-btn" onclick={loadMonthlyReport} disabled={loading || !reportMonth || !startDate || !endDate}>
 				{loading ? 'Loading...' : 'Load Data'}
 			</button>
 
-			<button type="button" class="export-btn" onclick={handleExportExcel} disabled={exporting}>
+			<button type="button" class="export-btn" onclick={handleExportExcel} disabled={exporting || shouldShowDateRangeOverlay}>
 				{exporting ? 'Exporting...' : 'Export Excel'}
 			</button>
 		</div>
+
+		<p class="filter-hint">{getMonthlyRangeLimitText()}</p>
+			</div>
+		</div>
 	</section>
 
+	<div class="load-required-area" class:is-locked={shouldShowDateRangeOverlay}>
 	{#if error}
 		<div class="status-box error-box">{error}</div>
 	{/if}
@@ -1288,15 +1437,23 @@
 		{:else}
 			<div class="empty-box">Monthly report by date is not available yet.</div>
 		{/if}
-	</section>
-
-		{#if hasRawData}
-			<details class="raw-box">
-				<summary>Raw Monthly Report Response</summary>
-				<pre>{JSON.stringify(reportData, null, 2)}</pre>
-			</details>
-		{/if}
+		</section>
 	{/if}
+
+		{#if shouldShowDateRangeOverlay}
+			<div class="load-required-overlay">
+				<div class="load-required-card">
+					<div class="load-required-icon">!</div>
+					<span class="section-kicker">Waiting for date range</span>
+					<h2>Choose a monthly range first</h2>
+					<p>
+						Select month, start day, end day, and timezone above, then click
+						<strong>Load Data</strong> to display the monthly report.
+					</p>
+				</div>
+			</div>
+		{/if}
+	</div>
 </section>
 
 <style>
@@ -1314,7 +1471,6 @@
 	}
 
 	.monthly-header-card,
-	.filter-card,
 	.summary-card,
 	.table-section,
 	.raw-box {
@@ -1325,10 +1481,21 @@
 
 	.monthly-header-card {
 		padding: 14px 16px;
-		display: flex;
+		display: grid;
+		grid-template-columns: minmax(240px, 0.65fr) minmax(650px, 1.35fr);
 		align-items: center;
-		justify-content: space-between;
-		gap: 16px;
+		gap: 18px;
+	}
+
+	.monthly-header-copy {
+		min-width: 0;
+		max-width: 560px;
+	}
+
+	.monthly-header-filters {
+		min-width: 0;
+		display: grid;
+		justify-items: end;
 	}
 
 	.page-kicker,
@@ -1386,12 +1553,26 @@
 	}
 
 	.filter-card {
-		margin-top: 12px;
-		padding: 12px;
-		display: flex;
+		width: 100%;
+		display: grid;
+		grid-template-columns:
+			minmax(140px, 0.9fr)
+			minmax(95px, 0.55fr)
+			minmax(95px, 0.55fr)
+			minmax(175px, 1fr)
+			auto;
 		align-items: end;
 		gap: 10px;
-		flex-wrap: wrap;
+	}
+
+	.filter-card:has(label:nth-of-type(5)) {
+		grid-template-columns:
+			minmax(130px, 0.8fr)
+			minmax(82px, 0.5fr)
+			minmax(82px, 0.5fr)
+			minmax(150px, 0.85fr)
+			minmax(130px, 0.7fr)
+			auto;
 	}
 
 	.filter-card label {
@@ -1406,10 +1587,34 @@
 		text-transform: uppercase;
 	}
 
+	.field-label-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.timezone-auto-pill {
+		display: inline-flex;
+		align-items: center;
+		min-height: 18px;
+		padding: 2px 7px;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.1);
+		color: #bfdbfe;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0;
+		text-transform: none;
+		white-space: nowrap;
+	}
+
 	.filter-card input,
 	.filter-card select {
 		height: 32px;
-		min-width: 130px;
+		width: 100%;
+		min-width: 0;
 		border: 1px solid #cbd5e1;
 		background: var(--color-surface);
 		padding: 0 9px;
@@ -1422,7 +1627,16 @@
 	.filter-actions {
 		display: flex;
 		gap: 8px;
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
+		justify-content: flex-end;
+	}
+
+	.filter-hint {
+		grid-column: 1 / -1;
+		margin: -2px 0 0;
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 600;
 	}
 
 	.primary-btn,
@@ -1656,6 +1870,25 @@
 	}
 
 	@media (max-width: 1100px) {
+		.monthly-header-card {
+			grid-template-columns: 1fr;
+			align-items: start;
+		}
+
+		.monthly-header-filters {
+			justify-items: stretch;
+		}
+
+		.filter-card,
+		.filter-card:has(label:nth-of-type(5)) {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.filter-actions,
+		.filter-hint {
+			grid-column: 1 / -1;
+		}
+
 		.summary-grid {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
@@ -1667,8 +1900,7 @@
 		}
 
 		.monthly-header-card {
-			flex-direction: column;
-			align-items: flex-start;
+			padding: 14px;
 		}
 
 		.header-meta {
@@ -1680,13 +1912,24 @@
 			grid-template-columns: 1fr;
 		}
 
+		.filter-card,
+		.filter-card:has(label:nth-of-type(5)) {
+			grid-template-columns: 1fr;
+		}
+
 		.filter-card input,
 		.filter-card select {
 			min-width: 100%;
 		}
 
 		.filter-actions {
+			grid-column: auto;
+			flex-direction: column;
 			width: 100%;
+		}
+
+		.filter-hint {
+			grid-column: auto;
 		}
 
 		.primary-btn,

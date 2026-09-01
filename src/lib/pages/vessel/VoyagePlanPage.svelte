@@ -9,7 +9,7 @@
 		restoreSelectedVessel
 	} from '$lib/stores/selectedVessel.svelte.js';
 	import 'leaflet/dist/leaflet.css';
-	import { VMS_TILE_URL, VMS_TILE_OPTIONS } from '$lib/mapStyle.js';
+	import { addMapTileLayer } from '$lib/mapStyle.js';
 	import { addLeafletZoomAndScale } from '$lib/utils/leafletControls.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
@@ -24,6 +24,7 @@
 		createCopyableCoordinateHtml,
 		handleCoordinateCopyClick
 	} from '$lib/utils/coordinateClipboard.js';
+	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 
 	const PAGE_SIZE_OPTIONS = [10, 20, 50];
 	const ASSET_LEGEND_TYPES = ['anchor', 'buoy', 'dock', 'shipyard', 'mess', 'office', 'fso', 'rig', 'whp'];
@@ -426,7 +427,11 @@
 			const rows = await getFleetAssets();
 
 			zones = normalizeMapZonesFromAssets(rows);
-			assets = rows.map(normalizeAsset).filter(Boolean);
+			assets = sortByAlpha(
+				rows.map(normalizeAsset).filter(Boolean),
+				(asset) => asset.assetName,
+				(asset) => asset.assetType
+			);
 
 			console.log('[VOYAGE_PLAN_VESSEL][ASSETS]', assets);
 
@@ -515,7 +520,11 @@
 		const accessDetails = Array.isArray(user?.vesselAccess?.details)
 			? user.vesselAccess.details
 			: [];
-		vessels = accessDetails.map(normalizeVessel).filter(Boolean);
+		vessels = sortByAlpha(
+			accessDetails.map(normalizeVessel).filter(Boolean),
+			(vessel) => vessel.vesselName,
+			(vessel) => vessel.deviceId
+		);
 
 		if (!vessels.length) {
 			await loadFallbackVessels();
@@ -525,7 +534,11 @@
 	async function loadFallbackVessels() {
 		try {
 			const result = await apiFetch('/users/my-vessels', { method: 'GET' });
-			vessels = (result?.data || []).map(normalizeVessel).filter(Boolean);
+			vessels = sortByAlpha(
+				(result?.data || []).map(normalizeVessel).filter(Boolean),
+				(vessel) => vessel.vesselName,
+				(vessel) => vessel.deviceId
+			);
 		} catch (error) {
 			console.warn('[VOYAGE_PLAN_VESSEL][LOAD_VESSELS_ERROR]', error);
 		}
@@ -689,8 +702,8 @@
 		if (!vesselId) return;
 
 		try {
-			const [fleetResult, latestStatusResult] = await Promise.allSettled([
-				apiFetch(`/fleet/vessels/${vesselId}`, {
+			const [dashboardResult, latestStatusResult] = await Promise.allSettled([
+				apiFetch(`/dashboard/vessels/${vesselId}`, {
 					method: 'GET',
 					headers: {
 						Accept: 'application/json'
@@ -704,16 +717,19 @@
 				})
 			]);
 
-			const fleetData = fleetResult.status === 'fulfilled' ? fleetResult.value?.data || fleetResult.value : null;
+			const dashboardData =
+				dashboardResult.status === 'fulfilled'
+					? dashboardResult.value?.data || dashboardResult.value
+					: null;
 			const latestStatus =
 				latestStatusResult.status === 'fulfilled'
 					? latestStatusResult.value?.data || latestStatusResult.value
 					: null;
 
 			vesselMapInfo = {
-				...(fleetData || {}),
+				...(dashboardData || {}),
 				latestStatus,
-				rawFleet: fleetData,
+				rawDashboard: dashboardData,
 				rawLatestStatus: latestStatus
 			};
 		} catch (error) {
@@ -1004,7 +1020,7 @@
 				preferCanvas: true
 			});
 
-			leaflet.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(routeMap);
+			addMapTileLayer(leaflet, routeMap);
 			addLeafletZoomAndScale(leaflet, routeMap);
 
 			renderZoneLayer();

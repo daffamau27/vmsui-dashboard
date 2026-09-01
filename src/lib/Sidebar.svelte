@@ -1239,7 +1239,7 @@
 
 		.logout-btn {
 			width: auto;
-			min-width: 72px;
+			min-width: 37px;
 			height: 30px;
 			padding: 0 10px;
 			border: none;

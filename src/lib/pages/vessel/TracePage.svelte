@@ -7,6 +7,8 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
 	import CctvSnapshotImage from '$lib/components/CctvSnapshotImage.svelte';
+	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
 
 	let { active = false } = $props();
 
@@ -22,11 +24,21 @@
 	let playbackClockStartedAtRealMs = 0;
 	let playbackClockStartedAtTraceMs = NaN;
 	let lastPlaybackToggleAt = 0;
+	let playbackSpeedMultiplier = $state(1);
+	let playbackDirection = $state(1);
 
 	let startDateTime = $state('');
 	let endDateTime = $state('');
 	let timezoneMode = $state('auto');
 	let timezoneOffset = $state('+07:00');
+	let activeTimePreset = $state('');
+	let hasLoadedDateRange = $state(false);
+	let shouldShowDateRangeOverlay = $derived(
+		!hasLoadedDateRange || !startDateTime || !endDateTime
+	);
+	let autoTimezoneLabel = $derived(
+		getAutoTimezoneLabelFromSources(traceData, traceData?.data, $selectedVesselInfo)
+	);
 
 	let cctvItems = $state([]);
 	let cctvSnapshotsError = $state('');
@@ -40,6 +52,9 @@
 	const CCTV_BACKGROUND_PAGE_DELAY_MS = 900;
 	const TRACE_MS_PER_REAL_MS = 60;
 	const PLAYBACK_TICK_INTERVAL_MS = 100;
+	const PLAYBACK_SPEED_OPTIONS = [1, 2, 5, 10];
+	const MAX_TRACE_POINT_JUMP_NM = 1000;
+	const MAX_TRACE_POINT_SPEED_KN = 80;
 	const TRACE_DEBUG = false;
 
 	function traceDebug(...args) {
@@ -63,6 +78,73 @@
 
 	function pad(value) {
 		return String(value).padStart(2, '0');
+	}
+
+	const TIME_PRESETS = [
+		{ id: 'today', label: 'Today' },
+		{ id: 'yesterday', label: 'Yesterday' },
+		{ id: 'two-days-before', label: '2 Days before' },
+		{ id: 'one-week', label: 'a Week' },
+		{ id: 'two-weeks', label: '2 Weeks' }
+	];
+
+	function toDatetimeLocalValue(date) {
+		if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+
+		return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+			date.getHours()
+		)}:${pad(date.getMinutes())}`;
+	}
+
+	function startOfLocalDay(date) {
+		return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+	}
+
+	function endOfLocalDay(date) {
+		return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 0, 0);
+	}
+
+	function addLocalDays(date, amount) {
+		const nextDate = new Date(date);
+		nextDate.setDate(nextDate.getDate() + amount);
+		return nextDate;
+	}
+
+	function applyTimePreset(presetId) {
+		const now = new Date();
+		let start = null;
+		let end = null;
+
+		if (presetId === 'today') {
+			start = startOfLocalDay(now);
+			end = startOfLocalDay(addLocalDays(now, 1));
+		} else if (presetId === 'yesterday') {
+			const yesterday = addLocalDays(now, -1);
+			start = startOfLocalDay(yesterday);
+			end = startOfLocalDay(now);
+		} else if (presetId === 'two-days-before') {
+			const twoDaysBefore = addLocalDays(now, -2);
+			start = startOfLocalDay(twoDaysBefore);
+			end = startOfLocalDay(addLocalDays(now, -1));
+		} else if (presetId === 'one-week') {
+			end = startOfLocalDay(now);
+			start = startOfLocalDay(addLocalDays(now, -7));
+		} else if (presetId === 'two-weeks') {
+			end = startOfLocalDay(now);
+			start = startOfLocalDay(addLocalDays(now, -14));
+		}
+
+		if (!start || !end) return;
+
+		activeTimePreset = presetId;
+		startDateTime = toDatetimeLocalValue(start);
+		endDateTime = toDatetimeLocalValue(end);
+		hasLoadedDateRange = false;
+	}
+
+	function clearActiveTimePreset() {
+		activeTimePreset = '';
+		hasLoadedDateRange = false;
 	}
 
 	function toApiDateTime(value) {
@@ -125,7 +207,7 @@
 
 		const rawValue = String(value).trim();
 
-		if (/^\d+$/.test(rawValue)) {
+		if (/^\d+(?:\.\d+)?$/.test(rawValue)) {
 			const number = Number(rawValue);
 			return Number.isFinite(number) ? number : NaN;
 		}
@@ -888,16 +970,173 @@
 		return values.reduce((sum, value) => sum + value, 0) / values.length;
 	}
 
-	function getTracePoints(data) {
-		const candidates =
-			data?.points ||
-			data?.trace ||
-			data?.traces ||
-			data?.coordinates ||
-			data?.path ||
-			data?.rows ||
-			data?.items ||
-			data?.result ||
+	function normalizeOceanCurrent(value) {
+		const ocean = value || {};
+
+		return {
+			speedKph: toNumber(
+				ocean.speed_kph ?? ocean.speedKph ?? ocean.current_speed_kph ?? ocean.currentSpeedKph,
+				NaN
+			),
+			directionTo:
+				ocean.direction_to ??
+				ocean.directionTo ??
+				ocean.current_direction_to ??
+				ocean.currentDirectionTo ??
+				'',
+			directionDeg: toNumber(
+				ocean.direction_to_deg ??
+					ocean.directionToDeg ??
+					ocean.current_direction_to_deg ??
+					ocean.currentDirectionToDeg,
+				NaN
+			)
+		};
+	}
+
+	function normalizeTraceWeather(value) {
+		if (!value) return '-';
+
+		if (typeof value === 'string') return value || '-';
+
+		if (typeof value === 'object') {
+			const condition =
+				value.condition ??
+				value.weather ??
+				value.label ??
+				value.text ??
+				value.current?.condition ??
+				value.current?.weather ??
+				'';
+			const windDirection = value.wind_dir_deg ?? value.windDirDeg ?? value.wind_direction_deg;
+			const windText =
+				Number.isFinite(Number(windDirection))
+					? `${formatNumber(windDirection, 0, '0')}°`
+					: value.wind_dir ?? value.windDir ?? value.wind_direction ?? '';
+
+			return [condition, windText ? `Wind ${windText}` : ''].filter(Boolean).join(' • ') || '-';
+		}
+
+		return String(value);
+	}
+
+	function formatOceanCurrent(ocean = {}) {
+		const speed = Number(ocean?.speedKph);
+		const degree = Number(ocean?.directionDeg);
+		const direction = ocean?.directionTo ? String(ocean.directionTo) : '';
+		const parts = [];
+
+		if (Number.isFinite(speed)) parts.push(`${formatNumber(speed, 1, '0.0')} kph`);
+		if (Number.isFinite(degree)) {
+			parts.push(`${formatNumber(degree, 0, '0')}°`);
+		} else if (direction) {
+			parts.push(direction);
+		}
+
+		return parts.length ? parts.join(' • ') : '-';
+	}
+
+	function calculateDistanceNm(fromPoint, toPoint) {
+		const lat1 = Number(fromPoint?.latitude);
+		const lng1 = Number(fromPoint?.longitude);
+		const lat2 = Number(toPoint?.latitude);
+		const lng2 = Number(toPoint?.longitude);
+
+		if (![lat1, lng1, lat2, lng2].every(Number.isFinite)) return Infinity;
+
+		const toRadians = (degree) => (degree * Math.PI) / 180;
+		const earthRadiusNm = 3440.065;
+		const deltaLat = toRadians(lat2 - lat1);
+		const deltaLng = toRadians(lng2 - lng1);
+		const a =
+			Math.sin(deltaLat / 2) ** 2 +
+			Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(deltaLng / 2) ** 2;
+		const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+		return earthRadiusNm * c;
+	}
+
+	function isValidTraceCoordinate(lat, lng) {
+		return (
+			Number.isFinite(lat) &&
+			Number.isFinite(lng) &&
+			lat >= -90 &&
+			lat <= 90 &&
+			lng >= -180 &&
+			lng <= 180 &&
+			!(lat === 0 && lng === 0)
+		);
+	}
+
+	function filterTracePointJumps(points = []) {
+		const filtered = [];
+		const dropped = [];
+
+		points.forEach((point) => {
+			const previous = filtered[filtered.length - 1];
+
+			if (previous) {
+				const distanceNm = calculateDistanceNm(previous, point);
+				const previousTime = parseDateTimeMs(previous?.timestampRaw || previous?.timestamp);
+				const pointTime = parseDateTimeMs(point?.timestampRaw || point?.timestamp);
+				const elapsedHours =
+					Number.isFinite(previousTime) && Number.isFinite(pointTime)
+						? Math.max(Math.abs(pointTime - previousTime) / 3_600_000, 1 / 60)
+						: 1 / 60;
+				const allowedDistanceNm = Math.max(
+					MAX_TRACE_POINT_JUMP_NM,
+					MAX_TRACE_POINT_SPEED_KN * elapsedHours
+				);
+
+				if (distanceNm > allowedDistanceNm) {
+					dropped.push({
+						index: point.rawIndex ?? point.index,
+						latitude: point.latitude,
+						longitude: point.longitude,
+						distanceNm,
+						allowedDistanceNm,
+						from: previous.timeFormatted || previous.timestamp,
+						to: point.timeFormatted || point.timestamp
+					});
+					return;
+				}
+			}
+
+			filtered.push({
+				...point,
+				index: filtered.length
+			});
+		});
+
+		if (dropped.length) {
+			traceDebug('[TRACE_POINTS_OUTLIERS_DROPPED]', {
+				dropped: dropped.length,
+				minThresholdNm: MAX_TRACE_POINT_JUMP_NM,
+				maxSpeedKn: MAX_TRACE_POINT_SPEED_KN,
+				samples: dropped.slice(0, 8)
+			});
+		}
+
+		return filtered;
+	}
+
+	function getTracePayload(data) {
+		const payload = data?.data && !Array.isArray(data?.data) ? data.data : data;
+		return payload || {};
+	}
+
+	function getTraceCandidates(data) {
+		const payload = getTracePayload(data);
+
+		return (
+			payload?.points ||
+			payload?.trace ||
+			payload?.traces ||
+			payload?.coordinates ||
+			payload?.path ||
+			payload?.rows ||
+			payload?.items ||
+			payload?.result ||
 			data?.data?.points ||
 			data?.data?.trace ||
 			data?.data?.coordinates ||
@@ -905,7 +1144,45 @@
 			data?.data?.rows ||
 			data?.data ||
 			data ||
-			[];
+			[]
+		);
+	}
+
+	function getTraceTimestampRaw(item = {}) {
+		return (
+			item.timestamp ??
+			item.timestamp_ms ??
+			item.timestampMs ??
+			item.ts ??
+			item.timeMs ??
+			item.timeRaw ??
+			item.time_raw ??
+			item.time ??
+			item.datetime ??
+			item.createdAt ??
+			item.created_at ??
+			item.timeFormatted ??
+			item.time_formatted ??
+			''
+		);
+	}
+
+	function getTraceDisplayTime(item = {}, timestampRaw = '') {
+		const display =
+			item.timeFormatted ??
+			item.time_formatted ??
+			item.displayTime ??
+			item.display_time ??
+			item.localTime ??
+			item.local_time ??
+			'';
+
+		if (display) return formatDateTime(display);
+		return formatDateTime(timestampRaw);
+	}
+
+	function getTracePoints(data) {
+		const candidates = getTraceCandidates(data);
 
 		if (!Array.isArray(candidates)) {
 			console.warn('[TRACE_POINTS_NOT_ARRAY]', data);
@@ -939,13 +1216,15 @@
 					NaN
 				);
 
-				if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-				if (lat === 0 && lng === 0) return null;
+				if (!isValidTraceCoordinate(lat, lng)) return null;
 
 				const rpm = normalizeRpm(item.rpm ?? item.me_rpm ?? item.mePortRpm ?? item.me_port_rpm);
+				const timestampRaw = getTraceTimestampRaw(item);
+				const timestampDisplay = getTraceDisplayTime(item, timestampRaw);
 
 				return {
 					index,
+					rawIndex: index,
 					latitude: lat,
 					longitude: lng,
 					heading: toNumber(item.heading ?? item.course ?? item.bearing, 0),
@@ -961,34 +1240,23 @@
 							item.f_rate,
 						0
 					),
-					weather: item.weather || item.weatherForecast || item.condition || '-',
+					weather: normalizeTraceWeather(item.weather ?? item.weatherForecast ?? item.condition),
+					ocean: normalizeOceanCurrent(item.ocean ?? item.oceanCurrent ?? item.current),
 					queue: toNumber(item.queue, 0),
 					sdCard: toNumber(item.sdCard ?? item.sd_card, 0),
-					online: Boolean(item.online),
-					timestampRaw:
-						item.timestamp ||
-						item.ts ||
-						item.time ||
-						item.datetime ||
-						item.createdAt ||
-						item.created_at ||
-						'',
-					timestamp: formatDateTime(
-						item.timestamp ||
-							item.ts ||
-							item.time ||
-							item.datetime ||
-							item.createdAt ||
-							item.created_at ||
-							'-'
-					)
+					online: item.online === undefined ? true : Boolean(item.online),
+					timeFormatted: timestampDisplay,
+					timestampRaw,
+					timestamp: timestampDisplay
 				};
 			})
 			.filter(Boolean);
 
-		traceDebug('[TRACE_POINTS_PARSED]', points.length, points.slice(0, 3));
+		const filteredPoints = filterTracePointJumps(points);
 
-		return points;
+		traceDebug('[TRACE_POINTS_PARSED]', filteredPoints.length, filteredPoints.slice(0, 3));
+
+		return filteredPoints;
 	}
 
 	let tracePoints = $derived(getTracePoints(traceData));
@@ -1008,9 +1276,10 @@
 				: Math.max(0, findClosestTraceIndexByTime(activeTimelineTimestampMs))
 	);
 	let activeTimelineLabel = $derived(
-		(Number.isFinite(activeTimelineTimestampMs) ? formatDateTime(activeTimelineTimestampMs) : '') ||
-			activeTimelineEvent?.label ||
-			formatDateTime(activeTimelineTimestampMs) ||
+		activeTimelineEvent?.label ||
+			tracePoints[activeTraceIndex]?.timeFormatted ||
+			tracePoints[activeTraceIndex]?.timestamp ||
+			(Number.isFinite(activeTimelineTimestampMs) ? formatDateTime(activeTimelineTimestampMs) : '') ||
 			tracePoints[activeTraceIndex]?.timestamp ||
 			'-'
 	);
@@ -1028,6 +1297,7 @@
 				avgRpm: 0,
 				fuelPerMinute: 0,
 				weather: $selectedVesselInfo?.weather?.current?.condition || '-',
+				ocean: normalizeOceanCurrent($selectedVesselInfo?.oceanCurrent?.current || {}),
 				queue: 0,
 				sdCard: 0,
 				online: false,
@@ -1082,6 +1352,7 @@
 		avgRpm: `${formatNumber(activePoint.avgRpm, 0, '0')} RPM`,
 		fuelPerMinute: `${formatNumber(activePoint.fuelPerMinute, 2, '0.00')} L/min`,
 		weatherForecast: activePoint.weather || $selectedVesselInfo?.weather?.current?.condition || '-',
+		oceanCurrent: formatOceanCurrent(activePoint.ocean),
 		lastUpdate: activeTimelineLabel || activePoint.timestamp || '-',
 		onlineStatus: activePoint.online ? 'Online' : 'Offline'
 	});
@@ -1097,6 +1368,7 @@
 		if (!startDateTime || !endDateTime) {
 			error = 'Please choose a start and end time first.';
 			traceData = null;
+			hasLoadedDateRange = false;
 			activePlaybackTimestampMs = NaN;
 			cctvItems = [];
 			cctvSnapshotsTotal = 0;
@@ -1112,6 +1384,7 @@
 		if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
 			error = 'End time must be later than start time.';
 			traceData = null;
+			hasLoadedDateRange = false;
 			activePlaybackTimestampMs = NaN;
 			cctvItems = [];
 			cctvSnapshotsTotal = 0;
@@ -1124,6 +1397,7 @@
 		if (!$selectedVesselId) {
 			error = 'No vessel has been selected from Fleet View.';
 			traceData = null;
+			hasLoadedDateRange = false;
 			activePlaybackTimestampMs = NaN;
 			cctvItems = [];
 			cctvSnapshotsTotal = 0;
@@ -1177,6 +1451,7 @@
 			]);
 
 			traceData = result;
+			hasLoadedDateRange = true;
 			activeIndex = 0;
 			playbackRenderTick += 1;
 
@@ -1226,6 +1501,7 @@
 			console.error('[VESSEL_TRACE_ERROR]', err);
 			error = err?.message || 'Failed to load vessel trace.';
 			traceData = null;
+			hasLoadedDateRange = false;
 			activePlaybackTimestampMs = NaN;
 			cctvItems = [];
 			cctvSnapshotsTotal = 0;
@@ -1282,20 +1558,25 @@
 			: clampPlaybackTimestamp(activePlaybackTimestampMs);
 		const elapsedRealMs =
 			source === 'start' ? 0 : Math.max(0, Date.now() - playbackClockStartedAtRealMs);
-		const nextTime = Math.min(end, baseTraceTime + elapsedRealMs * TRACE_MS_PER_REAL_MS);
+		const direction = playbackDirection === -1 ? -1 : 1;
+		const rawNextTime =
+			baseTraceTime + elapsedRealMs * TRACE_MS_PER_REAL_MS * playbackSpeedMultiplier * direction;
+		const nextTime = direction === -1 ? Math.max(start, rawNextTime) : Math.min(end, rawNextTime);
 		const nextIndex = findTimelineIndexAtOrBefore(timelineEvents, nextTime);
 
-		if (nextTime >= end) {
-			setPlaybackTimestamp(end);
+		if ((direction === 1 && nextTime >= end) || (direction === -1 && nextTime <= start)) {
+			const boundaryTime = direction === -1 ? start : end;
+			setPlaybackTimestamp(boundaryTime);
 
 			traceDebug('[TRACE_PLAY_STOP_END]', {
 				activeIndex,
 				totalTimelineEvents,
-				playbackTime: formatDateTime(end),
-				source
+				playbackTime: formatDateTime(boundaryTime),
+				source,
+				direction
 			});
 
-			clearPlaybackInterval('end');
+			clearPlaybackInterval(direction === -1 ? 'start' : 'end');
 			isPlaying = false;
 			return;
 		}
@@ -1347,9 +1628,10 @@
 		}
 	}
 
-	function startPlayback() {
+	function startPlayback(direction = 1) {
 		clearPlaybackInterval('restart');
 		const { start, end } = getTimelineBounds(timelineEvents);
+		const normalizedDirection = direction === -1 ? -1 : 1;
 
 		if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
 			isPlaying = false;
@@ -1359,15 +1641,25 @@
 		const currentTimestamp = Number.isFinite(activePlaybackTimestampMs)
 			? clampPlaybackTimestamp(activePlaybackTimestampMs)
 			: start;
-		const startTimestamp = currentTimestamp >= end ? start : currentTimestamp;
+		const startTimestamp =
+			normalizedDirection === -1
+				? currentTimestamp <= start
+					? end
+					: currentTimestamp
+				: currentTimestamp >= end
+					? start
+					: currentTimestamp;
 		setPlaybackTimestamp(startTimestamp, { bumpRender: false });
+		playbackDirection = normalizedDirection;
 		playbackClockStartedAtTraceMs = startTimestamp;
 		playbackClockStartedAtRealMs = Date.now();
 
 		traceDebug('[TRACE_PLAY_START]', {
 			activeIndex,
 			playbackStartTime: formatDateTime(startTimestamp),
-			speed: '1 real second = 1 trace minute',
+			speed: `1 real second = ${playbackSpeedMultiplier} trace minute(s)`,
+			speedMultiplier: playbackSpeedMultiplier,
+			direction: playbackDirection,
 			totalTimelineEvents: timelineEvents.length,
 			totalTracePoints: tracePoints.length,
 			cctvItems: cctvItems.length
@@ -1387,7 +1679,9 @@
 			totalTimelineEvents: timelineEvents.length,
 			totalTracePoints: tracePoints.length,
 			delayMs: PLAYBACK_TICK_INTERVAL_MS,
-			traceMsPerRealMs: TRACE_MS_PER_REAL_MS
+			traceMsPerRealMs: TRACE_MS_PER_REAL_MS,
+			speedMultiplier: playbackSpeedMultiplier,
+			direction: playbackDirection
 		});
 	}
 
@@ -1396,7 +1690,29 @@
 		isPlaying = false;
 	}
 
-	function togglePlayback() {
+	function setPlaybackSpeed(multiplier) {
+		const nextMultiplier = Number(multiplier);
+		if (!PLAYBACK_SPEED_OPTIONS.includes(nextMultiplier)) return;
+		if (playbackSpeedMultiplier === nextMultiplier) return;
+
+		if (isPlaying) {
+			runPlaybackTick('speed-change');
+			playbackClockStartedAtTraceMs = getCurrentTimelineTimestampMs();
+			playbackClockStartedAtRealMs = Date.now();
+		}
+
+		playbackSpeedMultiplier = nextMultiplier;
+
+		traceDebug('[TRACE_PLAY_SPEED_CHANGE]', {
+			speedMultiplier: playbackSpeedMultiplier,
+			direction: playbackDirection,
+			activeIndex,
+			playbackTime: formatDateTime(getCurrentTimelineTimestampMs()),
+			isPlaying
+		});
+	}
+
+	function togglePlayback(direction = 1) {
 		if (!timelineEvents.length) {
 			console.warn('[TRACE_PLAY_TOGGLE_BLOCKED]', {
 				reason: 'timelineEvents is empty',
@@ -1420,11 +1736,14 @@
 
 		lastPlaybackToggleAt = now;
 
-		const nextPlaying = !isPlaying;
+		const normalizedDirection = direction === -1 ? -1 : 1;
+		const nextPlaying = !(isPlaying && playbackDirection === normalizedDirection);
 
 		traceDebug('[TRACE_PLAY_TOGGLE]', {
 			from: isPlaying,
 			to: nextPlaying,
+			fromDirection: playbackDirection,
+			toDirection: normalizedDirection,
 			activeIndex,
 			activeTraceIndex,
 			totalTimelineEvents: timelineEvents.length,
@@ -1441,7 +1760,11 @@
 		});
 
 		if (nextPlaying) {
-			startPlayback();
+			if (isPlaying && playbackDirection !== normalizedDirection) {
+				runPlaybackTick('direction-change');
+			}
+
+			startPlayback(normalizedDirection);
 		} else {
 			stopPlayback('toggle');
 		}
@@ -1551,44 +1874,86 @@
 
 <section class="trace-root page-content">
 	<section class="trace-viewport">
-		<section class="compact-filter-card">
-			<div class="filter-title">
-				<strong>Trace Playback</strong>
-				<span>{vesselInfo.vesselName}</span>
+		<section class="trace-header-card">
+			<div class="trace-header-copy">
+				<div class="page-kicker">Trace Playback</div>
+				<h1>{vesselInfo.vesselName}</h1>
+				<p>Replay vessel position, route trail, telemetry, engine RPM, and CCTV snapshots by time range.</p>
 			</div>
 
-			<div class="filter-controls">
-				<label>
-					<span>Start</span>
-					<input type="datetime-local" bind:value={startDateTime} />
-				</label>
+			<div class="trace-header-filters">
+				<div class="filter-controls">
+					<label>
+						<span>Start</span>
+						<input
+							type="datetime-local"
+							bind:value={startDateTime}
+							oninput={clearActiveTimePreset}
+						/>
+					</label>
+
+					<label>
+						<span>End</span>
+						<input
+							type="datetime-local"
+							bind:value={endDateTime}
+							oninput={clearActiveTimePreset}
+						/>
+					</label>
 
 				<label>
-					<span>End</span>
-					<input type="datetime-local" bind:value={endDateTime} />
-				</label>
-
-				<label>
-					<span>Timezone</span>
-					<select bind:value={timezoneMode}>
-						<option value="auto">Auto</option>
-						<option value="manual">Manual</option>
+					<span class="field-label-row">
+						Timezone
+						{#if timezoneMode === 'auto'}
+							<small class="timezone-auto-pill">Auto • {autoTimezoneLabel}</small>
+						{/if}
+					</span>
+					<select bind:value={timezoneMode} onchange={() => (hasLoadedDateRange = false)}>
+						{#each TIMEZONE_MODE_OPTIONS as option}
+							<option value={option.value}>{option.label}</option>
+						{/each}
 					</select>
 				</label>
 
 				{#if timezoneMode === 'manual'}
 					<label>
 						<span>Offset</span>
-						<input type="text" bind:value={timezoneOffset} placeholder="+07:00" />
+						<select bind:value={timezoneOffset} onchange={() => (hasLoadedDateRange = false)}>
+							{#each TIMEZONE_OFFSET_OPTIONS as option}
+								<option value={option.value}>{option.label}</option>
+							{/each}
+						</select>
 					</label>
 				{/if}
 
-				<button type="button" onclick={loadTrace} disabled={loading || !startDateTime || !endDateTime}>
+				<button
+					type="button"
+					class="primary-btn"
+					onclick={loadTrace}
+					disabled={loading || !startDateTime || !endDateTime}
+				>
 					{loading ? 'Loading...' : 'Load Trace'}
 				</button>
 			</div>
+
+			<div class="time-preset-row" aria-label="Trace time presets">
+				<span>Preset</span>
+				<div class="time-preset-list">
+					{#each TIME_PRESETS as preset}
+						<button
+							type="button"
+							class:active={activeTimePreset === preset.id}
+							onclick={() => applyTimePreset(preset.id)}
+						>
+							{preset.label}
+						</button>
+					{/each}
+				</div>
+			</div>
+			</div>
 		</section>
 
+		<div class="load-required-area trace-load-required-area" class:is-locked={shouldShowDateRangeOverlay}>
 		{#if error}
 			<div class="status-box error-box">{error}</div>
 		{/if}
@@ -1759,7 +2124,7 @@
 							activeIndex={activeTraceIndex}
 							renderKey={playbackRenderTick}
 							showTraceLine={true}
-							followActivePoint={isPlaying}
+							followActivePoint={false}
 						/>
 					{/if}
 				</div>
@@ -1784,12 +2149,44 @@
 						onclick={(event) => {
 							event.preventDefault();
 							event.stopPropagation();
-							togglePlayback();
+							togglePlayback(-1);
 						}}
 						disabled={!timelineEvents.length}
 					>
-						{isPlaying ? 'Pause' : 'Play'}
+						{isPlaying && playbackDirection === -1 ? 'Pause' : 'Reverse'}
 					</button>
+
+					<button
+						type="button"
+						class="play-button"
+						onclick={(event) => {
+							event.preventDefault();
+							event.stopPropagation();
+							togglePlayback(1);
+						}}
+						disabled={!timelineEvents.length}
+					>
+						{isPlaying && playbackDirection === 1 ? 'Pause' : 'Play'}
+					</button>
+
+					<div
+						class="speed-controls"
+						style={`--speed-index: ${PLAYBACK_SPEED_OPTIONS.indexOf(playbackSpeedMultiplier)}`}
+						aria-label="Playback speed"
+					>
+						{#each PLAYBACK_SPEED_OPTIONS as speed}
+							<button
+								type="button"
+								class="speed-btn"
+								class:active-speed={playbackSpeedMultiplier === speed}
+								onclick={() => setPlaybackSpeed(speed)}
+								disabled={!timelineEvents.length}
+								aria-pressed={playbackSpeedMultiplier === speed}
+							>
+								x{speed}
+							</button>
+						{/each}
+					</div>
 
 					<button
 						type="button"
@@ -1850,6 +2247,11 @@
 					</article>
 
 					<article class="info-card">
+						<span>Ocean</span>
+						<strong>{vesselInfo.oceanCurrent}</strong>
+					</article>
+
+					<article class="info-card">
 						<span>Points</span>
 						<strong>{tracePoints.length}</strong>
 					</article>
@@ -1876,15 +2278,23 @@
 				</section>
 			</section>
 		</section>
-		{/if}
-	</section>
-
-	{#if traceData && !loading}
-		<details class="raw-box">
-			<summary>Raw Trace Response</summary>
-			<pre>{JSON.stringify(traceData, null, 2)}</pre>
-		</details>
 	{/if}
+
+			{#if shouldShowDateRangeOverlay}
+				<div class="load-required-overlay">
+					<div class="load-required-card">
+						<div class="load-required-icon">!</div>
+						<span class="section-kicker">Waiting for date range</span>
+						<h2>Choose a trace range first</h2>
+						<p>
+							Select Start, End, and timezone above, then click <strong>Load Trace</strong>
+							to display playback, map, and CCTV snapshots.
+						</p>
+					</div>
+				</div>
+			{/if}
+		</div>
+	</section>
 </section>
 
 <style>
@@ -1908,75 +2318,129 @@
 		overflow: visible;
 	}
 
-	.compact-filter-card {
-		min-height: 64px;
-		padding: 10px 18px;
+	.trace-header-card,
+	.monitor-card,
+	.playback-card,
+	.info-card,
+	.rpm-panel {
 		background: var(--color-surface);
 		border: 1px solid #d8dde3;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+	}
+
+	.trace-header-card {
+		padding: 16px;
 		display: grid;
-		grid-template-columns: 260px minmax(0, 1fr);
+		grid-template-columns: minmax(240px, 0.75fr) minmax(520px, 1.25fr);
 		align-items: center;
 		gap: 16px;
 	}
 
-	.filter-title {
-		display: grid;
-		align-content: center;
-		gap: 4px;
-		min-height: 42px;
+	.trace-header-copy {
+		min-width: 220px;
+		max-width: 520px;
 	}
 
-	.filter-title strong {
-		display: block;
-		color: var(--text-primary);
-		font-size: 13px;
-		font-weight: 950;
-		line-height: 1.1;
-	}
-
-	.filter-title span {
-		display: block;
-		margin-top: 4px;
-		color: var(--text-secondary);
+	.page-kicker,
+	.section-kicker {
+		display: inline-flex;
+		width: fit-content;
+		align-items: center;
+		justify-content: center;
+		padding: 4px 9px;
+		border-radius: 999px;
+		background: var(--color-accent-muted);
+		color: #1d4ed8;
 		font-size: 10px;
-		font-weight: 800;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
+		font-weight: 900;
+		letter-spacing: 0.07em;
+		text-transform: uppercase;
+	}
+
+	.trace-header-card h1 {
+		margin: 8px 0 0;
+		color: var(--text-primary);
+		font-size: 22px;
+		font-weight: 900;
+		line-height: 1.2;
+	}
+
+	.trace-header-card p {
+		margin: 7px 0 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.trace-header-filters {
+		width: 100%;
+		min-width: 0;
+		display: grid;
+		justify-items: end;
+		gap: 8px;
 	}
 
 	.filter-controls {
-		display: flex;
-		align-items: center;
+		width: 100%;
+		display: grid;
+		grid-template-columns: minmax(170px, 1fr) minmax(170px, 1fr) minmax(190px, 1fr) auto;
+		align-items: end;
 		justify-content: flex-end;
 		gap: 10px;
-		flex-wrap: wrap;
+	}
+
+	.filter-controls:has(label:nth-of-type(4)) {
+		grid-template-columns: repeat(4, minmax(135px, 1fr)) auto;
 	}
 
 	.filter-controls label {
+		min-width: 0;
 		display: grid;
 		gap: 4px;
 	}
 
 	.filter-controls label span {
 		color: var(--text-secondary);
-		font-size: 9px;
-		font-weight: 950;
+		font-size: 10px;
+		font-weight: 900;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 	}
 
+	.field-label-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.timezone-auto-pill {
+		display: inline-flex;
+		align-items: center;
+		min-height: 17px;
+		padding: 2px 7px;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.1);
+		color: #bfdbfe;
+		font-size: 9px;
+		font-weight: 800;
+		letter-spacing: 0;
+		text-transform: none;
+		white-space: nowrap;
+	}
+
 	.filter-controls input,
 	.filter-controls select {
-		height: 28px;
-		min-width: 135px;
+		height: 32px;
+		width: 100%;
+		min-width: 0;
 		border: 1px solid #cbd5e1;
 		background: var(--color-surface);
-		padding: 0 8px;
+		padding: 0 9px;
 		color: var(--text-primary);
-		font-size: 10px;
-		font-weight: 750;
+		font-size: 12px;
+		font-weight: 700;
 		outline: none;
 		box-sizing: border-box;
 	}
@@ -1988,19 +2452,75 @@
 	}
 
 	.filter-controls button {
-		height: 28px;
+		height: 32px;
 		padding: 0 12px;
+		align-self: end;
 		border: none;
 		background: #2563eb;
 		color: #ffffff;
-		font-size: 10px;
-		font-weight: 950;
+		font-size: 12px;
+		font-weight: 900;
 		cursor: pointer;
 	}
 
 	.filter-controls button:disabled {
 		opacity: 0.55;
 		cursor: not-allowed;
+	}
+
+	.time-preset-row {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 8px;
+		margin-top: 0;
+		min-width: 0;
+	}
+
+	.time-preset-row > span {
+		color: var(--text-secondary);
+		font-size: 9px;
+		font-weight: 950;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.time-preset-list {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 6px;
+		flex-wrap: wrap;
+		min-width: 0;
+	}
+
+	.time-preset-list button {
+		height: 24px;
+		border: 1px solid rgba(148, 163, 184, 0.34);
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.48);
+		padding: 0 10px;
+		color: var(--text-secondary);
+		font-size: 9px;
+		font-weight: 850;
+		cursor: pointer;
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease,
+			color 0.16s ease,
+			transform 0.16s ease;
+	}
+
+	.time-preset-list button:hover,
+	.time-preset-list button.active {
+		border-color: rgba(96, 165, 250, 0.78);
+		background: rgba(37, 99, 235, 0.26);
+		color: #bfdbfe;
+	}
+
+	.time-preset-list button:active {
+		transform: translateY(1px);
 	}
 
 	.status-box {
@@ -2650,8 +3170,44 @@
 		gap: 7px;
 	}
 
+	.speed-controls {
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		gap: 3px;
+		padding: 3px;
+		border: 1px solid rgba(147, 197, 253, 0.24);
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.42);
+		overflow: hidden;
+		--speed-button-width: 34px;
+		--speed-gap: 3px;
+		--speed-index: 0;
+	}
+
+	.speed-controls::before {
+		content: '';
+		position: absolute;
+		z-index: 0;
+		top: 3px;
+		left: 3px;
+		width: var(--speed-button-width);
+		height: 22px;
+		border-radius: 999px;
+		background: linear-gradient(135deg, #2563eb, #3b82f6);
+		box-shadow:
+			0 0 0 1px rgba(147, 197, 253, 0.35),
+			0 8px 18px rgba(37, 99, 235, 0.26);
+		transform: translateX(calc(var(--speed-index) * (var(--speed-button-width) + var(--speed-gap))));
+		transition:
+			transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+			box-shadow 220ms ease,
+			opacity 180ms ease;
+	}
+
 	.play-button,
-	.step-btn {
+	.step-btn,
+	.speed-btn {
 		height: 28px;
 		border: 1px solid #93b4ec;
 		background: #2563eb;
@@ -2672,8 +3228,38 @@
 		line-height: 1;
 	}
 
+	.speed-btn {
+		position: relative;
+		z-index: 1;
+		width: 34px;
+		height: 22px;
+		border-color: transparent;
+		border-radius: 999px;
+		background: transparent;
+		color: #9fb4d2;
+		font-size: 10px;
+		font-weight: 850;
+		transition:
+			color 160ms ease,
+			transform 160ms ease,
+			background 160ms ease;
+	}
+
+	.speed-btn:hover:not(:disabled) {
+		color: #f8fbff;
+		background: rgba(96, 165, 250, 0.18);
+		transform: translateY(-1px);
+	}
+
+	.speed-btn.active-speed {
+		color: #ffffff;
+		background: transparent;
+		box-shadow: none;
+	}
+
 	.play-button:disabled,
-	.step-btn:disabled {
+	.step-btn:disabled,
+	.speed-btn:disabled {
 		opacity: 0.45;
 		cursor: not-allowed;
 	}
@@ -2950,6 +3536,36 @@
 		}
 	}
 
+	@media (max-width: 1100px) {
+		.trace-header-card {
+			grid-template-columns: 1fr;
+			align-items: stretch;
+			gap: 14px;
+		}
+
+		.trace-header-copy {
+			max-width: none;
+		}
+
+		.trace-header-filters {
+			justify-items: stretch;
+		}
+
+		.filter-controls {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			justify-content: stretch;
+		}
+
+		.filter-controls button {
+			width: 100%;
+		}
+
+		.time-preset-row,
+		.time-preset-list {
+			justify-content: flex-start;
+		}
+	}
+
 	@media (max-width: 760px) {
 		.trace-viewport {
 			padding: 8px;
@@ -2963,12 +3579,37 @@
 			min-height: 360px;
 		}
 
-		.compact-filter-card {
-			grid-template-columns: 1fr;
+		.trace-header-card {
+			padding: 14px;
+			gap: 12px;
+		}
+
+		.trace-header-card h1 {
+			font-size: 20px;
+		}
+
+		.trace-header-copy,
+		.trace-header-filters {
+			width: 100%;
+			min-width: 0;
 		}
 
 		.filter-controls {
+			width: 100%;
+			grid-template-columns: 1fr;
+			justify-content: stretch;
+		}
+
+		.time-preset-row {
+			align-items: flex-start;
 			justify-content: flex-start;
+			flex-direction: column;
+			margin-top: 0;
+		}
+
+		.time-preset-list {
+			justify-content: flex-start;
+			width: 100%;
 		}
 
 		.filter-controls label,

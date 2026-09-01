@@ -4,7 +4,7 @@
 	import { getFleetVessels, getFleetVesselLiveDetail, getFleetAssets } from '$lib/api/fleetApi.js';
 	import { setSelectedVessel } from '$lib/stores/selectedVessel.svelte.js';
 	import { activeMenu, setActiveMenu } from '$lib/stores/appNavigation.svelte.js';
-	import { VMS_TILE_URL, VMS_TILE_OPTIONS } from '$lib/mapStyle.js';
+	import { addMapTileLayer } from '$lib/mapStyle.js';
 	import { addLeafletZoomAndScale } from '$lib/utils/leafletControls.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
@@ -20,6 +20,7 @@
 		createCopyableCoordinateHtml,
 		handleCoordinateCopyClick
 	} from '$lib/utils/coordinateClipboard.js';
+	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 
 	let { active = false } = $props();
 
@@ -64,7 +65,12 @@
 
 	let isSidebarOpen = $state(true);
 	let mapStageContainer;
+	let sidebarToggleButton;
+	let mapLegendElement;
 	let isFleetFullscreen = $state(false);
+	let sidebarToggleOverlapsLegend = $state(false);
+	let sidebarToggleSafeTop = $state(0);
+	let sidebarToggleOverlapFrame = null;
 
 	let mapContainer;
 	let vesselListContainer;
@@ -175,6 +181,8 @@
 			vesselName: vessel.vesselName ?? vessel.name ?? '-',
 			lat: vessel.latitude ?? vessel.lat,
 			lng: vessel.longitude ?? vessel.lng,
+			fleetLatitude: vessel.fleetLatitude ?? vessel.latitude ?? vessel.lat,
+			fleetLongitude: vessel.fleetLongitude ?? vessel.longitude ?? vessel.lng,
 			speed: vessel.speed ?? '-',
 			heading: vessel.heading ?? 0,
 			online: Boolean(vessel.online),
@@ -393,8 +401,39 @@
 			vesselId: normalizedLiveDetail.vesselId ?? normalizedVessel.vesselId,
 			name: normalizedLiveDetail.name ?? normalizedVessel.name,
 			vesselName: normalizedLiveDetail.vesselName ?? normalizedVessel.vesselName,
+			fleetLatitude: normalizedVessel.fleetLatitude ?? normalizedLiveDetail.fleetLatitude,
+			fleetLongitude: normalizedVessel.fleetLongitude ?? normalizedLiveDetail.fleetLongitude,
 			engines: liveEngines,
 			liveEngines
+		};
+	}
+
+	function getFleetVesselLatLng(vessel = {}) {
+		const lat = Number(vessel.fleetLatitude ?? vessel.latitude ?? vessel.lat);
+		const lng = Number(vessel.fleetLongitude ?? vessel.longitude ?? vessel.lng);
+
+		if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+		if (lat === 0 && lng === 0) return null;
+
+		return { lat, lng };
+	}
+
+	function mergeFleetRefreshVessel(previousVessel, incomingVessel) {
+		const previous = normalizeFleetVessel(previousVessel || {});
+		const incoming = normalizeFleetVessel(incomingVessel || {});
+		const hasIncomingEngines = Array.isArray(incoming.engines) && incoming.engines.length > 0;
+		const previousLiveEngines = Array.isArray(previous.liveEngines) ? previous.liveEngines : [];
+
+		return {
+			...previous,
+			...incoming,
+			weather: incoming.weather ?? previous.weather,
+			oceanCurrent: incoming.oceanCurrent ?? previous.oceanCurrent,
+			voyageProgress: incoming.voyageProgress ?? previous.voyageProgress,
+			fleetLatitude: incoming.fleetLatitude ?? previous.fleetLatitude,
+			fleetLongitude: incoming.fleetLongitude ?? previous.fleetLongitude,
+			engines: hasIncomingEngines ? incoming.engines : previous.engines,
+			liveEngines: hasIncomingEngines ? incoming.engines : previousLiveEngines
 		};
 	}
 
@@ -426,7 +465,33 @@
 
 		if (rpm === null || rpm === undefined || rpm === '') return '-';
 
-		return `${rpm} RPM`;
+		return `${rpm}`;
+	}
+
+	function getEngineDisplayName(engine = {}) {
+		return engine?.engineName || engine?.name || engine?.engineKeyThingsboard || engine?.key || '-';
+	}
+
+	function getEngineSortRank(engine = {}) {
+		const name = normalizeEngineName(getEngineDisplayName(engine));
+
+		if (/^ME\b|MAIN ENGINE|\bME PORT\b|\bME STBD\b|\bME CENTER\b/.test(name)) return 0;
+		if (/^AE\b|AUX|GENSET/.test(name)) return 1;
+		return 2;
+	}
+
+	function sortVesselEngines(engines = []) {
+		if (!Array.isArray(engines)) return [];
+
+		return [...engines].sort((left, right) => {
+			const rankDiff = getEngineSortRank(left) - getEngineSortRank(right);
+			if (rankDiff !== 0) return rankDiff;
+
+			return getEngineDisplayName(left).localeCompare(getEngineDisplayName(right), undefined, {
+				numeric: true,
+				sensitivity: 'base'
+			});
+		});
 	}
 
 	function formatMissingValue(value, suffix = '') {
@@ -499,18 +564,22 @@
 	}
 
 	let filteredVessels = $derived(
-		vesselData.filter((v) => {
-			const keyword = search.toLowerCase().trim();
-			const name = String(v.name || '').toLowerCase();
-			const company = String(v.companyName || '').toLowerCase();
+		sortByAlpha(
+			vesselData.filter((v) => {
+				const keyword = search.toLowerCase().trim();
+				const name = String(v.name || '').toLowerCase();
+				const company = String(v.companyName || '').toLowerCase();
 
-			const matchSearch = !keyword || name.includes(keyword) || company.includes(keyword);
+				const matchSearch = !keyword || name.includes(keyword) || company.includes(keyword);
 
-			if (statusFilter === 'online') return matchSearch && v.online;
-			if (statusFilter === 'offline') return matchSearch && !v.online;
+				if (statusFilter === 'online') return matchSearch && v.online;
+				if (statusFilter === 'offline') return matchSearch && !v.online;
 
-			return matchSearch;
-		})
+				return matchSearch;
+			}),
+			(vessel) => vessel.name || vessel.vesselName,
+			(vessel) => vessel.companyName
+		)
 	);
 
 	let selectedVessel = $derived(
@@ -518,6 +587,7 @@
 			vesselData.find((v) => String(v.id) === String(selectedVesselId)) ||
 			null
 	);
+	let sortedDetailEngines = $derived(sortVesselEngines(selectedVessel?.engines || []));
 
 	let totalMeasureMeters = $derived(getTotalMeasureDistance(measurePoints));
 
@@ -532,6 +602,43 @@
 		return number.toFixed(digits);
 	}
 
+	function formatDmsCoordinate(value, axis = 'lat') {
+		const number = Number(value);
+		if (!Number.isFinite(number)) return '-';
+
+		const direction =
+			axis === 'lng' ? (number >= 0 ? 'E' : 'W') : number >= 0 ? 'N' : 'S';
+		let absolute = Math.abs(number);
+		let degrees = Math.floor(absolute);
+		let minutesFloat = (absolute - degrees) * 60;
+		let minutes = Math.floor(minutesFloat);
+		let seconds = Number(((minutesFloat - minutes) * 60).toFixed(2));
+
+		if (seconds >= 60) {
+			seconds = 0;
+			minutes += 1;
+		}
+
+		if (minutes >= 60) {
+			minutes = 0;
+			degrees += 1;
+		}
+
+		const paddedMinutes = String(minutes).padStart(2, '0');
+		const paddedSeconds = seconds.toFixed(2).padStart(5, '0');
+
+		return `${degrees}\u00b0 ${paddedMinutes}' ${paddedSeconds}" ${direction}`;
+	}
+
+	function formatDmsPair(latitude, longitude) {
+		const latDms = formatDmsCoordinate(latitude, 'lat');
+		const lngDms = formatDmsCoordinate(longitude, 'lng');
+
+		if (latDms === '-' || lngDms === '-') return '-';
+
+		return `${latDms} \u2022 ${lngDms}`;
+	}
+
 	function hasValidVesselCoordinate(vessel) {
 		const lat = Number(vessel?.lat ?? vessel?.latitude);
 		const lng = Number(vessel?.lng ?? vessel?.longitude);
@@ -539,10 +646,30 @@
 		return Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
 	}
 
-	function parseVesselDateTime(value) {
+	function parseVesselDateTime(value, timezoneHint = null) {
 		if (!value || value === '-') return null;
 
 		const text = String(value).trim();
+		const timezoneText = `${text} ${timezoneHint || ''}`;
+		const timezoneMatch = timezoneText.match(/\(?\bUTC\s*([+-])(\d{1,2})(?::?(\d{2}))?\)?/i);
+		const timezoneOffsetMinutes = timezoneMatch
+			? (timezoneMatch[1] === '-' ? -1 : 1) *
+				(Number(timezoneMatch[2]) * 60 + Number(timezoneMatch[3] || 0))
+			: null;
+
+		function buildDateWithOptionalTimezone({ year, month, day, hour, minute, second }) {
+			if (Number.isFinite(timezoneOffsetMinutes)) {
+				const utcTime =
+					Date.UTC(year, month - 1, day, hour, minute, second) -
+					timezoneOffsetMinutes * 60 * 1000;
+
+				const date = new Date(utcTime);
+				return Number.isNaN(date.getTime()) ? null : date;
+			}
+
+			const date = new Date(year, month - 1, day, hour, minute, second);
+			return Number.isNaN(date.getTime()) ? null : date;
+		}
 
 		// Format contoh: "03/06/2026 16:34:00 (UTC+07:00)"
 		const match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
@@ -550,17 +677,34 @@
 		if (match) {
 			const [, dd, mm, yyyy, hh, min, ss] = match;
 
-			// Created using the browser local time
-			const date = new Date(
-				Number(yyyy),
-				Number(mm) - 1,
-				Number(dd),
-				Number(hh),
-				Number(min),
-				Number(ss)
-			);
+			const date = buildDateWithOptionalTimezone({
+				year: Number(yyyy),
+				month: Number(mm),
+				day: Number(dd),
+				hour: Number(hh),
+				minute: Number(min),
+				second: Number(ss)
+			});
 
-			if (!Number.isNaN(date.getTime())) return date;
+			if (date) return date;
+		}
+
+		const isoLikeMatch = text.match(
+			/^(\d{4})-(\d{2})-(\d{2})[T\s]+(\d{2}):(\d{2})(?::(\d{2}))?/
+		);
+
+		if (isoLikeMatch) {
+			const [, yyyy, mm, dd, hh, min, ss = '0'] = isoLikeMatch;
+			const date = buildDateWithOptionalTimezone({
+				year: Number(yyyy),
+				month: Number(mm),
+				day: Number(dd),
+				hour: Number(hh),
+				minute: Number(min),
+				second: Number(ss)
+			});
+
+			if (date) return date;
 		}
 
 		const fallbackDate = new Date(text);
@@ -588,10 +732,10 @@
 		});
 	}
 
-	function formatLastUpdated(value) {
+	function formatLastUpdated(value, timezoneHint = null) {
 		if (!value || value === '-') return '-';
 
-		const date = parseVesselDateTime(value);
+		const date = parseVesselDateTime(value, timezoneHint);
 		if (!date) return value;
 
 		const diffMs = Date.now() - date.getTime();
@@ -662,8 +806,32 @@
 		return stripUtcLabel(formatValue(value, '-'));
 	}
 
-	function formatLastUpdatedBadge(value) {
-		return stripUtcLabel(formatLastUpdated(value));
+	function formatLastUpdatedBadge(value, timezoneHint = null) {
+		return stripUtcLabel(formatLastUpdated(value, timezoneHint));
+	}
+
+	function formatActualLastUpdated(value) {
+		if (!value || value === '-') return '-';
+
+		const cleanedValue = stripUtcLabel(formatValue(value, '-'));
+		if (!cleanedValue || cleanedValue === '-') return '-';
+
+		if (/^(just now|\d+\s+minutes?\s+ago)$/i.test(cleanedValue)) {
+			const parsedDate = parseVesselDateTime(value);
+			if (!parsedDate) return cleanedValue;
+
+			return parsedDate.toLocaleString('en-GB', {
+				day: '2-digit',
+				month: 'short',
+				year: 'numeric',
+				hour: '2-digit',
+				minute: '2-digit',
+				second: '2-digit',
+				hour12: false
+			});
+		}
+
+		return cleanedValue;
 	}
 
 	function getLatestConnectionEvent(vessel) {
@@ -1036,6 +1204,8 @@
 		const longitude = vessel.longitude ?? vessel.lng;
 		const formattedLatitude = formatNumber(latitude, 6, '-');
 		const formattedLongitude = formatNumber(longitude, 6, '-');
+		const formattedLatitudeDms = formatDmsCoordinate(latitude, 'lat');
+		const formattedLongitudeDms = formatDmsCoordinate(longitude, 'lng');
 
 		return `
       <div class="fleet-popup">
@@ -1066,21 +1236,19 @@
           <div>
             <span>Latitude</span>
             ${createCopyableCoordinateHtml(formattedLatitude, 'latitude')}
+            <small class="coordinate-dms">${formattedLatitudeDms}</small>
           </div>
           <div>
             <span>Longitude</span>
             ${createCopyableCoordinateHtml(formattedLongitude, 'longitude')}
+            <small class="coordinate-dms">${formattedLongitudeDms}</small>
           </div>
         </div>
 
         <div class="fleet-popup-meta">
           <div class="fleet-popup-row">
-            <span>Hire status</span>
-            <strong>${formatValue(vessel.hireStatus)}</strong>
-          </div>
-          <div class="fleet-popup-row">
             <span>Last updated</span>
-            <strong>${formatLastUpdatedBadge(vessel.lastUpdated)}</strong>
+            <strong>${formatActualLastUpdated(vessel.lastUpdated)}</strong>
           </div>
         </div>
 
@@ -1187,10 +1355,12 @@
         <div>
           <span>Latitude</span>
           ${createCopyableCoordinateHtml(formattedLatitude, 'asset latitude')}
+          <small class="coordinate-dms">${formatDmsCoordinate(asset.latitude, 'lat')}</small>
         </div>
         <div>
           <span>Longitude</span>
           ${createCopyableCoordinateHtml(formattedLongitude, 'asset longitude')}
+          <small class="coordinate-dms">${formatDmsCoordinate(asset.longitude, 'lng')}</small>
         </div>
       </div>
     </div>
@@ -1359,7 +1529,7 @@
 		})();
 	}
 
-	function openVesselPopupFromInteraction(id, { zoom = 7, keepSidebarOpen = false } = {}) {
+	async function openVesselPopupFromInteraction(id, { zoom = 7, keepSidebarOpen = false } = {}) {
 		const normalizedId = String(id);
 		const previousId = selectedVesselId ? String(selectedVesselId) : null;
 
@@ -1386,6 +1556,14 @@
 			marker?.openPopup?.();
 		}, 0);
 		void scrollSidebarToVessel(normalizedId);
+
+		const detail = await loadVesselDetail(normalizedId);
+
+		if (detail && String(selectedVesselId) === normalizedId && !showDetailPanel) {
+			const marker = markers.get(normalizedId);
+			marker?.setPopupContent?.(createPopupHtml(detail));
+			marker?.openPopup?.();
+		}
 	}
 
 	function closeVesselDetail() {
@@ -1449,7 +1627,7 @@
 				autoPan: true,
 				autoClose: true,
 				closeOnClick: false,
-				maxWidth: 320,
+				maxWidth: 360,
 				className: 'fleet-leaflet-popup'
 			});
 
@@ -1463,7 +1641,7 @@
 
 			marker.on('click', () => {
 				closeVesselTooltips();
-				openVesselPopupFromInteraction(vesselId, { zoom: map?.getZoom?.() ?? 7 });
+				void openVesselPopupFromInteraction(vesselId, { zoom: map?.getZoom?.() ?? 7 });
 			});
 
 			marker.on('popupclose', () => {
@@ -1596,7 +1774,7 @@
 			marker.bindPopup(createAssetPopupHtml(asset), {
 				closeButton: true,
 				autoPan: true,
-				maxWidth: 280,
+				maxWidth: 300,
 				className: 'asset-leaflet-popup'
 			});
 
@@ -1659,11 +1837,9 @@
 		return sourceVessels
 			.map((vessel) => {
 				const currentWeather = getCurrentWeather(vessel) || vessel?.weather || {};
-				const lat = Number(vessel.lat ?? vessel.latitude);
-				const lng = Number(vessel.lng ?? vessel.longitude);
+				const fleetPosition = getFleetVesselLatLng(vessel);
 
-				if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-				if (lat === 0 && lng === 0) return null;
+				if (!fleetPosition) return null;
 
 				const windFromDeg = normalizeWindDirectionDegrees(
 					currentWeather.wind_degree ??
@@ -1675,13 +1851,11 @@
 						vessel.wind_degree ??
 						vessel.wind_deg ??
 						vessel.wind_dir
-				);
-
-				if (windFromDeg === null) return null;
+				) ?? 110;
 
 				return {
-					lat,
-					lng,
+					lat: fleetPosition.lat,
+					lng: fleetPosition.lng,
 					// weather wind direction umumnya menunjukkan arah asal angin.
 					// Particles move toward the wind direction.
 					directionToDeg: (windFromDeg + 180) % 360,
@@ -1712,23 +1886,26 @@
 
 		return sourceVessels
 			.map((vessel) => {
-				const current = getSeaCurrentData(vessel);
-				const lat = Number(vessel.lat ?? vessel.latitude);
-				const lng = Number(vessel.lng ?? vessel.longitude);
+				const current = getSeaCurrentData(vessel) || {};
+				const fleetPosition = getFleetVesselLatLng(vessel);
 
-				if (!current) return null;
-				if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-				if (lat === 0 && lng === 0) return null;
+				if (!fleetPosition) return null;
 
 				const directionToDeg = normalizeWindDirectionDegrees(
-					current.direction_to_deg ?? current.direction_to
-				);
-
-				if (directionToDeg === null) return null;
+					current.direction_to_deg ??
+						current.directionToDeg ??
+						current.current_direction_to_deg ??
+						current.direction_to ??
+						current.directionTo ??
+						vessel.current_direction_to_deg ??
+						vessel.currentDirectionToDeg ??
+						vessel.current_direction_to ??
+						vessel.currentDirectionTo
+				) ?? 105;
 
 				return {
-					lat,
-					lng,
+					lat: fleetPosition.lat,
+					lng: fleetPosition.lng,
 					directionToDeg,
 					speedKt: getSeaCurrentSpeedKt(current)
 				};
@@ -2324,7 +2501,7 @@
 	function selectVessel(id) {
 		const normalizedId = String(id);
 
-		openVesselPopupFromInteraction(normalizedId, { keepSidebarOpen: true });
+		void openVesselPopupFromInteraction(normalizedId, { keepSidebarOpen: true });
 	}
 
 	async function waitForMapContainer(maxRetry = 20) {
@@ -2341,10 +2518,16 @@
 		return null;
 	}
 
-	async function loadFleetVessels({ silent = false, includeLiveDetails = false } = {}) {
+	async function loadFleetVessels({ silent = false } = {}) {
 		if (fleetRefreshInProgress) return;
 
 		fleetRefreshInProgress = true;
+		const activePopupVesselId = selectedVesselId ? String(selectedVesselId) : null;
+		const shouldRestoreActivePopup = Boolean(
+			activePopupVesselId &&
+				!showDetailPanel &&
+				markers.get(activePopupVesselId)?.isPopupOpen?.()
+		);
 
 		if (!silent) {
 			fleetLoading = true;
@@ -2353,14 +2536,21 @@
 
 		try {
 			const vessels = await getFleetVessels({});
+			const previousVesselMap = new Map(
+				vesselData.map((item) => [String(item.id ?? item.vesselId), item])
+			);
 
-			let normalizedVessels = Array.isArray(vessels) ? vessels.map(normalizeFleetVessel) : [];
-
-			if (includeLiveDetails) {
-				normalizedVessels = await loadLiveDetailsForAllVessels(normalizedVessels);
-			}
-
-			console.log('[FLEET_VIEW][VESSELS_REFRESHED]', normalizedVessels);
+			const normalizedVessels = sortByAlpha(
+				Array.isArray(vessels)
+					? vessels.map((vessel) => {
+							const normalized = normalizeFleetVessel(vessel);
+							const previous = previousVesselMap.get(String(normalized.id ?? normalized.vesselId));
+							return previous ? mergeFleetRefreshVessel(previous, normalized) : normalized;
+						})
+					: [],
+				(vessel) => vessel.name || vessel.vesselName,
+				(vessel) => vessel.companyName
+			);
 
 			vesselData = normalizedVessels;
 			fleetError = '';
@@ -2383,6 +2573,25 @@
 
 			if (map && L) {
 				buildMarkers();
+
+				if (showWindParticles) {
+					seedWindParticles(true);
+					drawWindParticles();
+				}
+
+				if (showCurrentParticles) {
+					seedCurrentParticles(true);
+					drawCurrentParticles();
+				}
+
+				if (shouldRestoreActivePopup) {
+					setTimeout(() => {
+						const marker = markers.get(activePopupVesselId);
+						if (marker && String(selectedVesselId) === activePopupVesselId && !showDetailPanel) {
+							marker.openPopup?.();
+						}
+					}, 0);
+				}
 			}
 		} catch (error) {
 			console.error('[FLEET_VIEW_LOAD_ERROR]', error);
@@ -2417,17 +2626,21 @@
 			const assets = await getFleetAssets();
 
 			zoneData = normalizeMapZonesFromAssets(assets);
-			assetData = assets.map(normalizeFleetAsset).filter((asset) => {
-				if (!asset) return false;
+			assetData = sortByAlpha(
+				assets.map(normalizeFleetAsset).filter((asset) => {
+					if (!asset) return false;
 
-				const lat = Number(asset.lat ?? asset.latitude);
-				const lng = Number(asset.lng ?? asset.longitude);
+					const lat = Number(asset.lat ?? asset.latitude);
+					const lng = Number(asset.lng ?? asset.longitude);
 
-				if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
-				if (lat === 0 && lng === 0) return false;
+					if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+					if (lat === 0 && lng === 0) return false;
 
-				return true;
-			});
+					return true;
+				}),
+				(asset) => asset.assetName || asset.name,
+				(asset) => asset.assetType
+			);
 
 			if (map && L) {
 				rebuildZoneLayer();
@@ -2486,17 +2699,21 @@
 	async function loadVesselDetail(id) {
 		if (!id) return null;
 
-		try {
-			const existing = vesselData.find((item) => String(item.id) === String(id));
+		const normalizedId = String(id);
 
-			const liveDetail = await getFleetVesselLiveDetail(id);
+		try {
+			const existing = vesselData.find((item) => String(item.id) === normalizedId);
+
+			const liveDetail = await getFleetVesselLiveDetail(normalizedId);
 
 			const mergedDetail = mergeVesselWithLiveDetail(existing, liveDetail);
 
-			selectedVesselDetail = mergedDetail;
+			if (String(selectedVesselId) === normalizedId) {
+				selectedVesselDetail = mergedDetail;
+			}
 
 			vesselData = vesselData.map((item) => {
-				if (String(item.id) !== String(id)) return item;
+				if (String(item.id) !== normalizedId) return item;
 				return mergedDetail;
 			});
 
@@ -2512,33 +2729,6 @@
 		}
 	}
 
-	async function loadLiveDetailsForAllVessels(vessels = [], batchSize = 5) {
-		if (!Array.isArray(vessels) || !vessels.length) return vessels;
-
-		const results = [];
-
-		for (let i = 0; i < vessels.length; i += batchSize) {
-			const batch = vessels.slice(i, i + batchSize);
-
-			const batchResults = await Promise.all(
-				batch.map(async (vessel) => {
-					try {
-						const liveDetail = await getFleetVesselLiveDetail(vessel.vesselId || vessel.id);
-
-						return mergeVesselWithLiveDetail(vessel, liveDetail);
-					} catch (error) {
-						console.error('[FLEET_VIEW][LIVE_DETAIL_PRELOAD_ERROR]', vessel, error);
-						return vessel;
-					}
-				})
-			);
-
-			results.push(...batchResults);
-		}
-
-		return results;
-	}
-
 	function startFleetAutoRefresh() {
 		if (!browser) return;
 
@@ -2550,8 +2740,7 @@
 			if (!isFleetMounted) return;
 
 			loadFleetVessels({
-				silent: true,
-				includeLiveDetails: true
+				silent: true
 			});
 		}, FLEET_REFRESH_INTERVAL_MS);
 	}
@@ -2583,7 +2772,7 @@
 				closePopupOnClick: false
 			}).setView([-2.8, 114.5], 5);
 
-			L.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(map);
+			addMapTileLayer(L, map);
 			addLeafletZoomAndScale(L, map);
 
 			setupMapPanes();
@@ -2658,6 +2847,51 @@
 		}
 	}
 
+	function doRectsOverlap(rectA, rectB, padding = 0) {
+		if (!rectA || !rectB) return false;
+
+		return !(
+			rectA.right + padding < rectB.left ||
+			rectA.left - padding > rectB.right ||
+			rectA.bottom + padding < rectB.top ||
+			rectA.top - padding > rectB.bottom
+		);
+	}
+
+	function updateSidebarToggleLegendOverlap() {
+		if (!browser) return;
+
+		if (sidebarToggleOverlapFrame) {
+			cancelAnimationFrame(sidebarToggleOverlapFrame);
+		}
+
+		sidebarToggleOverlapFrame = requestAnimationFrame(() => {
+			sidebarToggleOverlapFrame = null;
+
+			if (!isMapLegendOpen || !sidebarToggleButton || !mapLegendElement) {
+				sidebarToggleOverlapsLegend = false;
+				sidebarToggleSafeTop = 0;
+				return;
+			}
+
+			const toggleRect = sidebarToggleButton.getBoundingClientRect();
+			const legendRect = mapLegendElement.getBoundingClientRect();
+			const overlaps = doRectsOverlap(toggleRect, legendRect, 6);
+
+			sidebarToggleOverlapsLegend = overlaps;
+
+			if (!overlaps) {
+				sidebarToggleSafeTop = 0;
+				return;
+			}
+
+			sidebarToggleSafeTop = Math.max(
+				50,
+				Math.round(legendRect.top - toggleRect.height / 2 - 10)
+			);
+		});
+	}
+
 	onMount(async () => {
 		if (!browser) return;
 
@@ -2665,6 +2899,7 @@
 		isSidebarOpen = window.innerWidth > 760;
 
 		window.addEventListener('mobile-panel-open', handleMobilePanelOpen);
+		window.addEventListener('resize', updateSidebarToggleLegendOverlap);
 		document.addEventListener('fullscreenchange', handleFleetFullscreenChange);
 		document.addEventListener('webkitfullscreenchange', handleFleetFullscreenChange);
 		document.addEventListener('mozfullscreenchange', handleFleetFullscreenChange);
@@ -2672,9 +2907,7 @@
 
 		await initializeFleetMap();
 
-		await loadFleetVessels({
-			includeLiveDetails: true
-		});
+		await loadFleetVessels();
 
 		await loadFleetAssets();
 
@@ -2691,13 +2924,29 @@
 
 		if (browser) {
 			window.removeEventListener('mobile-panel-open', handleMobilePanelOpen);
+			window.removeEventListener('resize', updateSidebarToggleLegendOverlap);
 			document.removeEventListener('fullscreenchange', handleFleetFullscreenChange);
 			document.removeEventListener('webkitfullscreenchange', handleFleetFullscreenChange);
 			document.removeEventListener('mozfullscreenchange', handleFleetFullscreenChange);
 			document.removeEventListener('MSFullscreenChange', handleFleetFullscreenChange);
 		}
 
+		if (sidebarToggleOverlapFrame) {
+			cancelAnimationFrame(sidebarToggleOverlapFrame);
+			sidebarToggleOverlapFrame = null;
+		}
+
 		destroyFleetMap();
+	});
+
+	$effect(() => {
+		isMapLegendOpen;
+		isSidebarOpen;
+		isFleetFullscreen;
+
+		if (!browser || !isFleetMounted) return;
+
+		tick().then(updateSidebarToggleLegendOverlap);
 	});
 
 	$effect(() => {
@@ -2807,7 +3056,10 @@
 	<button
 		type="button"
 		class:sidebar-open-toggle={isSidebarOpen}
+		class:legend-overlap-toggle={sidebarToggleOverlapsLegend}
 		class="sidebar-toggle-btn"
+		style={sidebarToggleOverlapsLegend ? `--sidebar-toggle-safe-top: ${sidebarToggleSafeTop}px;` : ''}
+		bind:this={sidebarToggleButton}
 		aria-expanded={isSidebarOpen}
 		aria-label={isSidebarOpen ? 'Close vessel sidebar' : 'Open vessel sidebar'}
 		title={isSidebarOpen ? 'Hide vessels' : 'Show vessels'}
@@ -2909,7 +3161,7 @@
 											Last Updated: 
 										</p>
 										<p>
-											{formatLastUpdatedBadge(vessel.lastUpdated)}
+											{formatLastUpdatedBadge(vessel.lastUpdated, vessel.timezone)}
 										</p>
 									</div>
 								</div>
@@ -3185,7 +3437,7 @@
 								<div class="detail-grid two-col">
 									<div class="detail-item detail-updated-item">
 										<span>Last Updated</span>
-										<strong>{formatLastUpdatedBadge(selectedVessel.lastUpdated)}</strong>
+										<strong>{formatActualLastUpdated(selectedVessel.lastUpdated)}</strong>
 									</div>
 
 									<div
@@ -3208,13 +3460,16 @@
 										<span>Coordinates</span>
 										<strong>
 											<CopyableCoordinate
-												value={`${formatMissingValue(selectedVessel.latitude)}, ${formatMissingValue(selectedVessel.longitude)}`}
-												display={`${formatMissingValue(selectedVessel.latitude)}, ${formatMissingValue(selectedVessel.longitude)}`}
+												value={`${formatMissingValue(selectedVessel.latitude ?? selectedVessel.lat)}, ${formatMissingValue(selectedVessel.longitude ?? selectedVessel.lng)}`}
+												display={`${formatMissingValue(selectedVessel.latitude ?? selectedVessel.lat)}, ${formatMissingValue(selectedVessel.longitude ?? selectedVessel.lng)}`}
 												label="latitude and longitude"
 												compact
 												class="coordinate-pair-copy"
 											/>
 										</strong>
+										<small class="coordinate-dms">
+											{formatDmsPair(selectedVessel.latitude ?? selectedVessel.lat, selectedVessel.longitude ?? selectedVessel.lng)}
+										</small>
 									</div>
 
 								</div>
@@ -3260,10 +3515,10 @@
 								</div>
 
 								<div class="simple-table">
-									{#if selectedVessel.engines?.length}
-										{#each selectedVessel.engines as engine}
+									{#if sortedDetailEngines.length}
+										{#each sortedDetailEngines as engine}
 											<div class="simple-row">
-												<span>{engine.engineName || engine.name || '-'}</span>
+												<span>{getEngineDisplayName(engine)}</span>
 												<strong>
 													{getLiveEngineRpm(selectedVessel, engine)}
 												</strong>
@@ -3279,7 +3534,7 @@
 								<div class="detail-section-heading">
 									<div>
 										<span class="detail-section-kicker">Environment</span>
-										<h3>Weather</h3>
+										<h3>Weather & ocean current</h3>
 									</div>
 								</div>
 
@@ -3306,18 +3561,10 @@
 								{:else}
 									<div class="empty-voyage">Weather is not available.</div>
 								{/if}
-							</section>
-
-							<section class="detail-section">
-								<div class="detail-section-heading">
-									<div>
-										<span class="detail-section-kicker">Environment</span>
-										<h3>Ocean current</h3>
-									</div>
-								</div>
+								<div class="environment-divider"></div>
 
 								{#if selectedVessel.oceanCurrent?.current}
-									<div class="simple-table">
+									<div class="simple-table ocean-current-card">
 										<div class="simple-row">
 											<span>Speed</span>
 											<strong>{selectedVessel.oceanCurrent.current.speed_kph} kph</strong>
@@ -3346,7 +3593,7 @@
 					</aside>
 				{/if}
 
-				<div class:legend-collapsed={!isMapLegendOpen} class="map-legend">
+				<div class:legend-collapsed={!isMapLegendOpen} class="map-legend" bind:this={mapLegendElement}>
 					<div class="legend-header">
 						<div>
 							<span class="legend-title">Map Legend</span>
@@ -3503,6 +3750,17 @@
 		--fleet-sidebar-width: 280px;
 		--fleet-gap: 5px;
 		--fleet-main-sidebar-offset: 0px;
+		--fleet-map-glass-bg:
+			linear-gradient(180deg, rgba(15, 23, 42, 0.52), rgba(15, 23, 42, 0.38)),
+			rgba(15, 23, 42, 0.34);
+		--fleet-map-glass-bg-collapsed:
+			linear-gradient(180deg, rgba(15, 23, 42, 0.48), rgba(15, 23, 42, 0.34)),
+			rgba(15, 23, 42, 0.3);
+		--fleet-map-glass-border: rgba(147, 197, 253, 0.14);
+		--fleet-map-glass-shadow:
+			0 18px 40px rgba(15, 23, 42, 0.12),
+			inset 0 1px 0 rgba(255, 255, 255, 0.045);
+		--fleet-map-glass-blur: blur(8px) saturate(1.04);
 		position: relative;
 		height: 100%;
 		min-height: 0;
@@ -3623,7 +3881,7 @@
 
 	:global(.asset-leaflet-popup .leaflet-popup-content) {
 		margin: 0;
-		width: 224px !important;
+		width: 258px !important;
 	}
 
 	:global(.asset-leaflet-popup .leaflet-popup-tip) {
@@ -3658,23 +3916,29 @@
 	}
 
 	:global(.asset-leaflet-popup .leaflet-popup-close-button) {
-		top: 10px !important;
-		right: 10px !important;
-		width: 26px !important;
-		height: 26px !important;
-		border: 1px solid rgba(255, 255, 255, 0.08) !important;
-		border-radius: 8px !important;
-		background: rgba(255, 255, 255, 0.055) !important;
-		color: var(--text-secondary) !important;
-		font-size: 17px !important;
-		line-height: 23px !important;
+		top: 12px !important;
+		right: 12px !important;
+		width: 28px !important;
+		height: 28px !important;
+		border: 1px solid rgba(226, 232, 240, 0.12) !important;
+		border-radius: 10px !important;
+		background: rgba(15, 23, 42, 0.72) !important;
+		color: rgba(226, 232, 240, 0.82) !important;
+		font-size: 18px !important;
+		line-height: 25px !important;
 		padding: 0 !important;
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease,
+			color 0.16s ease,
+			transform 0.16s ease !important;
 	}
 
 	:global(.asset-leaflet-popup .leaflet-popup-close-button:hover) {
 		border-color: rgba(245, 158, 11, 0.3) !important;
 		background: var(--color-warning-muted) !important;
 		color: #fbbf24 !important;
+		transform: translateY(-1px) !important;
 	}
 
 	:global(.fleet-asset-popup) {
@@ -3683,8 +3947,8 @@
 		box-sizing: border-box;
 		overflow: hidden;
 		background:
-			radial-gradient(circle at 4% 0%, rgba(245, 158, 11, 0.14), transparent 42%),
-			#0a0e1a;
+			radial-gradient(circle at 9% 8%, rgba(245, 158, 11, 0.18), transparent 34%),
+			linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(6, 10, 21, 0.98));
 	}
 
 	:global(.fleet-asset-popup-hero) {
@@ -3692,26 +3956,31 @@
 		max-width: 100%;
 		box-sizing: border-box;
 		display: grid;
-		grid-template-columns: 30px minmax(0, 1fr) auto;
-		align-items: center;
-		gap: 7px;
-		padding: 10px 38px 9px 10px;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+		grid-template-columns: 36px minmax(0, 1fr);
+		align-items: start;
+		gap: 9px;
+		padding: 12px 46px 12px 12px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 	}
 
 	:global(.fleet-asset-popup-icon) {
-		width: 30px;
-		height: 30px;
+		width: 36px;
+		height: 36px;
 		display: grid;
 		place-items: center;
-		border: 1px solid rgba(245, 158, 11, 0.26);
-		border-radius: 11px;
-		background: var(--color-warning-muted);
+		border: 1px solid rgba(245, 158, 11, 0.34);
+		border-radius: 13px;
+		background:
+			linear-gradient(145deg, rgba(245, 158, 11, 0.2), rgba(245, 158, 11, 0.06)),
+			rgba(15, 23, 42, 0.66);
+		box-shadow:
+			inset 0 1px 0 rgba(255, 255, 255, 0.08),
+			0 9px 20px rgba(245, 158, 11, 0.11);
 	}
 
 	:global(.fleet-asset-popup-icon img) {
-		width: 21px;
-		height: 21px;
+		width: 24px;
+		height: 24px;
 		object-fit: contain;
 		filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.28));
 	}
@@ -3719,25 +3988,28 @@
 	:global(.fleet-asset-popup-heading) {
 		min-width: 0;
 		display: grid;
-		gap: 2px;
+		gap: 3px;
+		padding-top: 1px;
 	}
 
 	:global(.fleet-asset-popup-eyebrow) {
 		color: #fbbf24;
-		font-size: 8px;
-		font-weight: 900;
+		font-size: 8.5px;
+		font-weight: 850;
 		letter-spacing: 0.11em;
 		text-transform: uppercase;
 	}
 
 	:global(.fleet-asset-popup-heading > strong) {
-		overflow: hidden;
 		color: var(--text-primary);
-		font-size: 11px;
-		line-height: 1.2;
-		font-weight: 900;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		font-size: 12.5px;
+		line-height: 1.18;
+		font-weight: 850;
+		display: -webkit-box;
+		overflow: hidden;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		word-break: break-word;
 	}
 
 	:global(.fleet-asset-popup-heading > small) {
@@ -3750,14 +4022,21 @@
 	}
 
 	:global(.fleet-asset-popup-badge) {
-		padding: 3px 6px;
-		border: 1px solid rgba(245, 158, 11, 0.24);
+		position: absolute;
+		top: 14px;
+		right: 48px;
+		max-width: 64px;
+		padding: 3px 7px;
+		border: 1px solid rgba(245, 158, 11, 0.32);
 		border-radius: 999px;
-		background: var(--color-warning-muted);
+		background: rgba(245, 158, 11, 0.1);
 		color: #fbbf24;
 		font-size: 7.5px;
-		font-weight: 900;
+		font-weight: 850;
 		letter-spacing: 0.08em;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	:global(.asset-popup-location) {
@@ -3790,35 +4069,95 @@
 		box-sizing: border-box;
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 6px;
-		padding: 9px 10px 10px;
+		gap: 8px;
+		padding: 10px 12px 12px;
 	}
 
 	:global(.fleet-asset-popup-coordinates > div) {
 		min-width: 0;
-		padding: 8px;
-		border: 1px solid rgba(255, 255, 255, 0.065);
-		border-radius: 10px;
-		background: rgba(255, 255, 255, 0.03);
+		display: grid;
+		grid-template-rows: auto auto 1fr;
+		min-height: 102px;
+		padding: 10px;
+		border: 1px solid rgba(147, 197, 253, 0.16);
+		border-radius: 12px;
+		background:
+			linear-gradient(145deg, rgba(30, 41, 59, 0.68), rgba(15, 23, 42, 0.5)),
+			rgba(15, 23, 42, 0.42);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
 	}
 
 	:global(.fleet-asset-popup-coordinates span) {
 		display: block;
-		margin-bottom: 4px;
-		color: var(--text-muted);
-		font-size: 7.5px;
-		font-weight: 900;
+		margin-bottom: 6px;
+		color: rgba(191, 219, 254, 0.78);
+		font-size: 8px;
+		font-weight: 850;
+		letter-spacing: 0.08em;
 		text-transform: uppercase;
 	}
 
 	:global(.fleet-asset-popup-coordinates strong) {
-		display: block;
-		overflow: hidden;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 6px;
 		color: var(--text-primary);
-		font-size: 9px;
-		font-weight: 900;
+		font-size: 12px;
+		font-weight: 850;
+		line-height: 1.18;
+		white-space: normal;
+		word-break: break-word;
+	}
+
+	:global(.fleet-asset-popup-coordinates .coordinate-copy-inline) {
+		display: flex;
+		width: 100%;
+		min-width: 0;
+		align-items: center;
+		justify-content: space-between;
+		gap: 7px;
+	}
+
+	:global(.fleet-asset-popup-coordinates .coordinate-copy-inline strong) {
+		min-width: 0;
+		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	:global(.fleet-asset-popup-coordinates .coordinate-copy-button) {
+		width: 24px;
+		height: 24px;
+		min-width: 24px;
+		border: 1px solid rgba(96, 165, 250, 0.34);
+		border-radius: 8px;
+		background: rgba(37, 99, 235, 0.22);
+		color: rgba(191, 219, 254, 0.96);
+		font-size: 12px;
+		line-height: 1;
+		display: inline-grid;
+		place-items: center;
+	}
+
+	:global(.fleet-asset-popup-coordinates .coordinate-copy-button:hover) {
+		border-color: rgba(147, 197, 253, 0.58);
+		background: rgba(37, 99, 235, 0.34);
+		color: #fff;
+	}
+
+	:global(.fleet-popup-coordinates .coordinate-dms),
+	:global(.fleet-asset-popup-coordinates .coordinate-dms),
+	.coordinate-dms {
+		display: block;
+		margin-top: 4px;
+		color: rgba(147, 197, 253, 0.88);
+		font-size: 8px;
+		font-weight: 700;
+		line-height: 1.25;
+		letter-spacing: 0.01em;
+		text-transform: none;
+		word-break: break-word;
 	}
 
 	:global(.wind-particle-canvas) {
@@ -4200,7 +4539,7 @@
 	.sidebar-toggle-btn {
 		position: absolute;
 		top: 50%;
-		left: calc(var(--fleet-main-sidebar-offset) - 5px);
+		left: calc(var(--fleet-main-sidebar-offset) + 6px);
 		z-index: 950;
 		width: 32px;
 		min-height: 92px;
@@ -4212,20 +4551,21 @@
 		border: 1px solid rgba(147, 197, 253, 0.42);
 		border-radius: 14px;
 		background:
-			linear-gradient(180deg, rgba(30, 64, 175, 0.28), rgba(15, 23, 42, 0.08)),
-			rgba(15, 23, 42, 0.9);
+			linear-gradient(180deg, rgba(30, 64, 175, 0.18), rgba(15, 23, 42, 0.04)),
+			rgba(15, 23, 42, 0.46);
 		color: #dbeafe;
 		padding: 8px 5px;
 		font-size: 0;
 		font-weight: 800;
 		box-shadow:
-			0 12px 28px rgba(15, 23, 42, 0.22),
-			inset 0 1px 0 rgba(255, 255, 255, 0.08);
-		backdrop-filter: blur(12px) saturate(1.15);
+			0 10px 22px rgba(15, 23, 42, 0.12),
+			inset 0 1px 0 rgba(255, 255, 255, 0.045);
+		backdrop-filter: blur(8px) saturate(1.04);
 		cursor: pointer;
 		transform: translateY(-50%);
 		transition:
 			left 0.22s ease,
+			top 0.22s ease,
 			background 0.18s ease,
 			border-color 0.18s ease,
 			box-shadow 0.18s ease,
@@ -4244,8 +4584,8 @@
 		display: grid;
 		place-items: center;
 		border-radius: 999px;
-		background: rgba(37, 99, 235, 0.55);
-		border: 1px solid rgba(191, 219, 254, 0.28);
+		background: rgba(37, 99, 235, 0.38);
+		border: 1px solid rgba(191, 219, 254, 0.2);
 		font-size: 0;
 		font-weight: 900;
 		box-shadow: 0 6px 14px rgba(37, 99, 235, 0.22);
@@ -4265,6 +4605,11 @@
 
 	.sidebar-toggle-btn.sidebar-open-toggle {
 		left: calc(var(--fleet-main-sidebar-offset) + 10px + var(--fleet-sidebar-width));
+	}
+
+	.sidebar-toggle-btn.legend-overlap-toggle {
+		top: var(--sidebar-toggle-safe-top, 50%);
+		transform: translateY(-50%);
 	}
 
 	.sidebar-toggle-btn span:first-of-type::before {
@@ -4289,12 +4634,16 @@
 	.sidebar-toggle-btn:hover {
 		border-color: rgba(147, 197, 253, 0.8);
 		background:
-			linear-gradient(180deg, rgba(37, 99, 235, 0.36), rgba(15, 23, 42, 0.12)),
-			rgba(15, 23, 42, 0.96);
+			linear-gradient(180deg, rgba(37, 99, 235, 0.24), rgba(15, 23, 42, 0.08)),
+			rgba(15, 23, 42, 0.68);
 		box-shadow:
-			0 16px 34px rgba(15, 23, 42, 0.28),
-			0 0 0 4px rgba(37, 99, 235, 0.09),
-			inset 0 1px 0 rgba(255, 255, 255, 0.1);
+			0 14px 28px rgba(15, 23, 42, 0.18),
+			0 0 0 4px rgba(37, 99, 235, 0.07),
+			inset 0 1px 0 rgba(255, 255, 255, 0.07);
+		transform: translateY(-50%) translateX(1px);
+	}
+
+	.sidebar-toggle-btn.legend-overlap-toggle:hover {
 		transform: translateY(-50%) translateX(1px);
 	}
 
@@ -4304,9 +4653,10 @@
 
 	.fleet-sidebar {
 		position: absolute;
-		top: 0;
+		top: 5px;
 		left: var(--fleet-main-sidebar-offset);
 		z-index: 900;
+		height: calc(100vh - 10px);
 		width: var(--fleet-sidebar-width);
 		display: flex;
 		flex-direction: column;
@@ -5077,8 +5427,8 @@
 	}
 
 	:global(.fleet-page .vms-map-controls .leaflet-top.leaflet-left) {
-		left: calc(var(--fleet-main-sidebar-offset) + 12px);
-		top: 12px;
+		left: calc(var(--fleet-main-sidebar-offset) + 32px);
+		top: -5px;
 		padding: 0;
 		z-index: 910;
 		transition:
@@ -5088,6 +5438,48 @@
 
 	:global(.fleet-page .fleet-layout:not(.sidebar-collapsed) .vms-map-controls .leaflet-top.leaflet-left) {
 		left: calc(var(--fleet-main-sidebar-offset) + var(--fleet-sidebar-width) + 16px);
+		top: 12px;
+	}
+
+	:global(.fleet-page .vms-map-controls .leaflet-top.leaflet-left .leaflet-control) {
+		margin-top: 0;
+		margin-left: 0;
+	}
+
+	:global(.fleet-page .vms-map-controls .leaflet-control-zoom) {
+		height: 28px;
+		display: inline-flex;
+		overflow: hidden;
+		border-radius: 10px;
+		vertical-align: top;
+	}
+
+	:global(.fleet-page .vms-map-controls .leaflet-control-zoom a) {
+		width: 28px;
+		height: 28px;
+		line-height: 26px;
+		font-size: 16px;
+	}
+
+	:global(.fleet-page .vms-map-controls .vms-scale-control) {
+		height: 28px;
+		min-height: 28px;
+		min-width: 140px;
+		padding: 3px 8px;
+		margin-left: 8px;
+		vertical-align: top;
+	}
+
+	:global(.fleet-page .vms-map-controls .vms-scale-control__ruler) {
+		height: 22px;
+	}
+
+	:global(.fleet-page .vms-map-controls .vms-scale-control__tick) {
+		height: 7px;
+	}
+
+	:global(.fleet-page .vms-map-controls .vms-scale-control__label) {
+		font-size: 8px;
 	}
 
 	.map-legend {
@@ -5104,14 +5496,10 @@
 		overflow: hidden;
 		padding: 11px;
 		border-radius: 14px;
-		background:
-			linear-gradient(180deg, rgba(15, 23, 42, 0.52), rgba(15, 23, 42, 0.38)),
-			rgba(15, 23, 42, 0.34);
-		border: 1px solid rgba(147, 197, 253, 0.14);
-		box-shadow:
-			0 18px 40px rgba(15, 23, 42, 0.12),
-			inset 0 1px 0 rgba(255, 255, 255, 0.045);
-		backdrop-filter: blur(8px) saturate(1.04);
+		background: var(--fleet-map-glass-bg);
+		border: 1px solid var(--fleet-map-glass-border);
+		box-shadow: var(--fleet-map-glass-shadow);
+		backdrop-filter: var(--fleet-map-glass-blur);
 		z-index: 980;
 		transition:
 			left 0.22s ease,
@@ -5124,20 +5512,14 @@
 	}
 
 	:global(body .app-content .fleet-page .map-legend) {
-		background:
-			linear-gradient(180deg, rgba(15, 23, 42, 0.52), rgba(15, 23, 42, 0.38)),
-			rgba(15, 23, 42, 0.34) !important;
-		border-color: rgba(147, 197, 253, 0.14) !important;
-		box-shadow:
-			0 18px 40px rgba(15, 23, 42, 0.12),
-			inset 0 1px 0 rgba(255, 255, 255, 0.045) !important;
-		backdrop-filter: blur(8px) saturate(1.04) !important;
+		background: var(--fleet-map-glass-bg) !important;
+		border-color: var(--fleet-map-glass-border) !important;
+		box-shadow: var(--fleet-map-glass-shadow) !important;
+		backdrop-filter: var(--fleet-map-glass-blur) !important;
 	}
 
 	:global(body .app-content .fleet-page .map-legend.legend-collapsed) {
-		background:
-			linear-gradient(180deg, rgba(15, 23, 42, 0.48), rgba(15, 23, 42, 0.34)),
-			rgba(15, 23, 42, 0.3) !important;
+		background: var(--fleet-map-glass-bg-collapsed) !important;
 	}
 
 	:global(body .app-content .fleet-page .map-legend .legend-body),
@@ -5148,6 +5530,60 @@
 		background: transparent !important;
 		border-color: transparent !important;
 		box-shadow: none !important;
+	}
+
+	:global(body .app-content .fleet-page .fleet-leaflet-popup .leaflet-popup-content-wrapper),
+	:global(body .app-content .fleet-page .vessel-detail-panel) {
+		background: var(--fleet-map-glass-bg) !important;
+		border-color: var(--fleet-map-glass-border) !important;
+		box-shadow: var(--fleet-map-glass-shadow) !important;
+		backdrop-filter: var(--fleet-map-glass-blur) !important;
+	}
+
+	:global(body .app-content .fleet-page .fleet-popup),
+	:global(body .app-content .fleet-page .fleet-popup-hero),
+	:global(body .app-content .fleet-page .detail-panel-header) {
+		background: transparent !important;
+	}
+
+	:global(body .app-content .fleet-page .vessel-detail-panel .detail-section) {
+		background: rgba(15, 23, 42, 0.16) !important;
+		border-color: rgba(147, 197, 253, 0.1) !important;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025) !important;
+	}
+
+	:global(body .app-content .fleet-page .vessel-detail-panel .detail-item) {
+		background: rgba(15, 23, 42, 0.12) !important;
+		border-color: rgba(147, 197, 253, 0.085) !important;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.018) !important;
+	}
+
+	:global(body .app-content .fleet-page .vessel-detail-panel .connection-time-item.latest-connected) {
+		background:
+			linear-gradient(145deg, rgba(34, 197, 94, 0.38), rgba(34, 197, 94, 0.16)),
+			rgba(15, 23, 42, 0.5) !important;
+		border-color: rgba(34, 197, 94, 0.92) !important;
+		box-shadow:
+			inset 4px 0 0 rgba(34, 197, 94, 1),
+			0 0 0 1px rgba(34, 197, 94, 0.22),
+			0 12px 26px rgba(34, 197, 94, 0.16) !important;
+	}
+
+	:global(body .app-content .fleet-page .vessel-detail-panel .connection-time-item.latest-disconnected) {
+		background:
+			linear-gradient(145deg, rgba(239, 68, 68, 0.38), rgba(239, 68, 68, 0.16)),
+			rgba(15, 23, 42, 0.5) !important;
+		border-color: rgba(248, 113, 113, 0.92) !important;
+		box-shadow:
+			inset 4px 0 0 rgba(239, 68, 68, 1),
+			0 0 0 1px rgba(239, 68, 68, 0.22),
+			0 12px 26px rgba(239, 68, 68, 0.16) !important;
+	}
+
+	:global(body .app-content .fleet-page .vessel-detail-panel .simple-row) {
+		background: rgba(15, 23, 42, 0.1) !important;
+		border-color: rgba(147, 197, 253, 0.075) !important;
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.014) !important;
 	}
 
 	.fleet-layout:not(.sidebar-collapsed) .map-legend {
@@ -5162,9 +5598,7 @@
 		width: auto;
 		min-width: 0;
 		padding: 8px 9px;
-		background:
-			linear-gradient(180deg, rgba(15, 23, 42, 0.48), rgba(15, 23, 42, 0.34)),
-			rgba(15, 23, 42, 0.3);
+		background: var(--fleet-map-glass-bg-collapsed);
 	}
 
 	.legend-header {
@@ -5304,12 +5738,9 @@
 		place-items: center;
 		flex: 0 0 auto;
 		border-radius: 12px;
-		background: rgba(34, 197, 94, 0.12);
+		background: transparent;
 		border: 0;
-		box-shadow:
-			inset 0 0 0 1px rgba(34, 197, 94, 0.22),
-			0 0 0 4px rgba(34, 197, 94, 0.1),
-			0 8px 16px rgba(15, 23, 42, 0.18);
+		box-shadow: none;
 	}
 
 	.legend-vessel-marker::before {
@@ -5322,16 +5753,14 @@
 		background-position: center;
 		transform: scaleX(1.16);
 		filter:
-			drop-shadow(0 0 4px rgba(255, 255, 255, 0.92))
+			saturate(1.12)
+			brightness(1.04)
 			drop-shadow(0 5px 8px rgba(15, 23, 42, 0.28));
 	}
 
 	.legend-vessel-marker.offline {
-		background: rgba(100, 116, 139, 0.14);
-		box-shadow:
-			inset 0 0 0 1px rgba(148, 163, 184, 0.18),
-			0 0 0 4px rgba(100, 116, 139, 0.1),
-			0 8px 16px rgba(15, 23, 42, 0.22);
+		background: transparent;
+		box-shadow: none;
 	}
 
 	.legend-vessel-marker.offline::before {
@@ -5531,19 +5960,7 @@
 	}
 
 	:global(.vessel-leaflet-icon::before) {
-		content: '';
-		position: absolute;
-		left: 50%;
-		top: 50%;
-		z-index: 0;
-		width: 34px;
-		height: 34px;
-		border-radius: 999px;
-		transform: translate(-50%, -50%);
-		background: rgba(34, 197, 94, 0.18);
-		box-shadow:
-			0 0 0 8px rgba(34, 197, 94, 0.12),
-			0 0 18px rgba(34, 197, 94, 0.44);
+		display: none;
 	}
 
 	:global(.fleet-vessel-marker-icon) {
@@ -5556,7 +5973,8 @@
 		margin: 0;
 		transform-origin: center center;
 		filter:
-			drop-shadow(0 0 4px rgba(255, 255, 255, 0.95))
+			saturate(1.12)
+			brightness(1.04)
 			drop-shadow(0 7px 13px rgba(15, 23, 42, 0.32));
 		transition:
 			filter 0.18s ease,
@@ -5567,18 +5985,15 @@
 		width: 100%;
 		margin: 0;
 		filter:
+			saturate(1.16)
+			brightness(1.08)
 			drop-shadow(0 0 5px rgba(59, 130, 246, 0.98))
 			drop-shadow(0 0 12px rgba(37, 99, 235, 0.62))
 			drop-shadow(0 10px 18px rgba(15, 23, 42, 0.3));
 	}
 
 	:global(.vessel-leaflet-icon.selected::before) {
-		width: 40px;
-		height: 40px;
-		background: rgba(59, 130, 246, 0.2);
-		box-shadow:
-			0 0 0 9px rgba(59, 130, 246, 0.14),
-			0 0 22px rgba(37, 99, 235, 0.54);
+		display: none;
 	}
 
 	:global(.vessel-leaflet-icon.offline .fleet-vessel-marker-icon) {
@@ -5591,19 +6006,16 @@
 	}
 
 	:global(.vessel-leaflet-icon.offline::before) {
-		background: rgba(239, 68, 68, 0.17);
-		box-shadow:
-			0 0 0 8px rgba(239, 68, 68, 0.11),
-			0 0 18px rgba(239, 68, 68, 0.4);
+		display: none;
 	}
 
 	:global(.vessel-leaflet-icon.offline.selected .fleet-vessel-marker-icon) {
 		opacity: 0.82;
 		filter:
-			grayscale(0.7)
-			brightness(0.82)
-			drop-shadow(0 0 5px rgba(248, 113, 113, 0.88))
-			drop-shadow(0 0 12px rgba(239, 68, 68, 0.5))
+			grayscale(1)
+			brightness(0.88)
+			drop-shadow(0 0 5px rgba(59, 130, 246, 0.72))
+			drop-shadow(0 0 12px rgba(37, 99, 235, 0.42))
 			drop-shadow(0 10px 18px rgba(15, 23, 42, 0.3));
 	}
 
@@ -5927,6 +6339,23 @@
 		word-break: break-word;
 	}
 
+	.coordinates-detail-item .coordinate-dms {
+		margin-top: 4px;
+		color: rgba(203, 213, 225, 0.94);
+		font-size: 9px;
+		font-weight: 780;
+	}
+
+	.coordinates-detail-item {
+		border-color: rgba(147, 197, 253, 0.22);
+		background: rgba(15, 23, 42, 0.3);
+	}
+
+	:global(.coordinates-detail-item .coordinate-pair-copy .copyable-coordinate-value) {
+		color: rgba(248, 250, 252, 0.98);
+		font-weight: 860;
+	}
+
 	.voyage-progress-card {
 		display: flex;
 		flex-direction: column;
@@ -6159,23 +6588,21 @@
 	   ========================= */
 
 	:global(.fleet-leaflet-popup .leaflet-popup-content-wrapper) {
-		border: 1px solid rgba(59, 130, 246, 0.24);
+		border: 1px solid var(--fleet-map-glass-border);
 		border-radius: 16px;
-		background: rgba(10, 14, 26, 0.96);
-		box-shadow:
-			0 24px 60px rgba(0, 0, 0, 0.48),
-			0 0 0 1px rgba(255, 255, 255, 0.04);
-		backdrop-filter: blur(18px) saturate(1.3);
+		background: var(--fleet-map-glass-bg);
+		box-shadow: var(--fleet-map-glass-shadow);
+		backdrop-filter: var(--fleet-map-glass-blur);
 	}
 
 	:global(.fleet-leaflet-popup .leaflet-popup-content) {
-		width: 300px !important;
+		width: 340px !important;
 	}
 
 	:global(.fleet-leaflet-popup .leaflet-popup-tip) {
 		border: none;
-		background: #0a0e1a;
-		box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.25);
+		background: rgba(15, 23, 42, 0.42);
+		box-shadow: 4px 4px 12px rgba(15, 23, 42, 0.12);
 	}
 
 	:global(.fleet-leaflet-popup .leaflet-popup-close-button) {
@@ -6202,10 +6629,7 @@
 		width: 100%;
 		max-width: 100%;
 		box-sizing: border-box;
-		background:
-			radial-gradient(circle at 5% 0%, rgba(59, 130, 246, 0.16), transparent 36%),
-			linear-gradient(180deg, rgba(30, 41, 59, 0.25), rgba(10, 14, 26, 0)),
-			#0a0e1a;
+		background: transparent;
 	}
 
 	:global(.fleet-popup-hero) {
@@ -6327,62 +6751,94 @@
 	:global(.fleet-popup-coordinates) {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 7px;
-		padding: 0 12px 8px;
+		gap: 8px;
+		padding: 0 12px 9px;
 	}
 
 	:global(.fleet-popup-coordinates > div) {
 		min-width: 0;
-		padding: 8px 9px;
-		border: 1px solid rgba(255, 255, 255, 0.07);
-		border-radius: 11px;
-		background: rgba(255, 255, 255, 0.028);
+		display: grid;
+		gap: 5px;
+		padding: 9px 10px;
+		border: 1px solid rgba(147, 197, 253, 0.18);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.46);
 	}
 
 	:global(.fleet-popup-coordinates span) {
 		display: block;
-		margin-bottom: 4px;
-		color: var(--text-muted);
-		font-size: 8px;
+		color: rgba(191, 219, 254, 0.88);
+		font-size: 8.5px;
 		font-weight: 900;
-		letter-spacing: 0.06em;
+		letter-spacing: 0.08em;
 		text-transform: uppercase;
+	}
+
+	:global(.fleet-popup-coordinates .coordinate-copy-inline) {
+		display: flex;
+		width: 100%;
+		min-width: 0;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
 	}
 
 	:global(.fleet-popup-coordinates strong) {
 		display: block;
 		overflow: hidden;
 		color: var(--text-primary);
-		font-size: 10px;
+		font-size: 11px;
 		font-weight: 900;
 		line-height: 1.1;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
+	:global(.fleet-popup-coordinates .coordinate-copy-button) {
+		width: 22px;
+		height: 22px;
+		min-width: 22px;
+		border-radius: 7px;
+		background: rgba(37, 99, 235, 0.18);
+	}
+
+	:global(.fleet-popup-coordinates .coordinate-dms) {
+		display: block;
+		overflow: hidden;
+		color: rgba(203, 213, 225, 0.9);
+		font-size: 10px;
+		font-weight: 800;
+		line-height: 1.2;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
 	:global(.fleet-popup-meta .fleet-popup-row) {
-		grid-template-columns: 72px minmax(0, 1fr);
-		gap: 10px;
-		padding: 6px 0;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+		grid-template-columns: 86px minmax(0, 1fr);
+		align-items: center;
+		gap: 12px;
+		padding: 8px 10px;
+		border: 1px solid rgba(147, 197, 253, 0.13);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.36);
 	}
 
 	:global(.fleet-popup-meta .fleet-popup-row:last-child) {
-		border-bottom: none;
-		background: transparent;
+		border-bottom: 1px solid rgba(147, 197, 253, 0.13);
 	}
 
 	:global(.fleet-popup-meta .fleet-popup-row span) {
-		color: var(--text-muted);
-		font-size: 8px;
-		font-weight: 800;
+		color: rgba(191, 219, 254, 0.85);
+		font-size: 8.5px;
+		font-weight: 900;
+		letter-spacing: 0.08em;
 		text-transform: uppercase;
 	}
 
 	:global(.fleet-popup-meta .fleet-popup-row strong) {
-		color: var(--text-secondary);
-		font-size: 9px;
-		font-weight: 800;
+		color: rgba(241, 245, 249, 0.96);
+		font-size: 10px;
+		font-weight: 850;
 		text-align: right;
 	}
 
@@ -6437,13 +6893,11 @@
 		width: 360px;
 		max-width: calc(100% - 28px);
 		max-height: none;
-		border: 1px solid rgba(59, 130, 246, 0.2);
+		border: 1px solid var(--fleet-map-glass-border);
 		border-radius: 16px;
-		background: rgba(10, 14, 26, 0.94);
-		box-shadow:
-			0 24px 64px rgba(0, 0, 0, 0.5),
-			0 0 0 1px rgba(255, 255, 255, 0.035);
-		backdrop-filter: blur(22px) saturate(1.35);
+		background: var(--fleet-map-glass-bg);
+		box-shadow: var(--fleet-map-glass-shadow);
+		backdrop-filter: var(--fleet-map-glass-blur);
 		animation: detailPanelIn 220ms var(--ease-spring);
 	}
 
@@ -6651,20 +7105,21 @@
 
 	.detail-panel-body {
 		padding: 8px;
-		background: rgba(5, 9, 18, 0.32);
+		background: rgba(5, 9, 18, 0.12);
 	}
 
 	.detail-section {
 		margin-bottom: 7px;
 		padding: 10px;
-		border: 1px solid rgba(255, 255, 255, 0.07);
+		border: 1px solid rgba(147, 197, 253, 0.1);
 		border-radius: 14px;
-		background: rgba(255, 255, 255, 0.025);
+		background: rgba(15, 23, 42, 0.16);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
 	}
 
 	.detail-section:last-child {
 		margin-bottom: 0;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+		border-bottom: 1px solid rgba(147, 197, 253, 0.1);
 	}
 
 	.detail-section-heading {
@@ -6954,30 +7409,51 @@
 
 	.detail-item {
 		padding: 7px 8px;
-		border: 1px solid rgba(255, 255, 255, 0.06);
+		border: 1px solid rgba(147, 197, 253, 0.18);
 		border-radius: 10px;
-		background: rgba(255, 255, 255, 0.025);
+		background: rgba(15, 23, 42, 0.28);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
 	}
 
 	.detail-item span {
-		color: var(--text-muted);
-		font-size: 8px;
-		font-weight: 800;
+		color: rgba(191, 219, 254, 0.86);
+		font-size: 8.2px;
+		font-weight: 850;
+		letter-spacing: 0.07em;
 		text-transform: uppercase;
 	}
 
 	.detail-item strong {
 		margin-top: 5px;
-		color: var(--text-primary);
-		font-size: 10px;
+		color: rgba(248, 250, 252, 0.96);
+		font-size: 10.4px;
+		font-weight: 850;
+	}
+
+	.detail-updated-item strong,
+	.connection-time-item strong {
+		color: #f8fafc;
+	}
+
+	.connection-time-item:not(.latest-connected):not(.latest-disconnected) {
+		border-color: rgba(148, 163, 184, 0.2);
+		background: rgba(15, 23, 42, 0.24);
+	}
+
+	.connection-time-item:not(.latest-connected):not(.latest-disconnected) span {
+		color: rgba(191, 219, 254, 0.74);
 	}
 
 	.connection-time-item.latest-connected {
-		border-color: rgba(34, 197, 94, 0.42);
+		position: relative;
+		border-color: rgba(34, 197, 94, 0.92);
 		background:
-			linear-gradient(145deg, rgba(34, 197, 94, 0.16), rgba(34, 197, 94, 0.045)),
-			rgba(255, 255, 255, 0.025);
-		box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.86);
+			linear-gradient(145deg, rgba(34, 197, 94, 0.38), rgba(34, 197, 94, 0.16)),
+			rgba(15, 23, 42, 0.5);
+		box-shadow:
+			inset 4px 0 0 rgba(34, 197, 94, 1),
+			0 0 0 1px rgba(34, 197, 94, 0.22),
+			0 12px 26px rgba(34, 197, 94, 0.16);
 	}
 
 	.connection-time-item.latest-connected span,
@@ -6986,11 +7462,15 @@
 	}
 
 	.connection-time-item.latest-disconnected {
-		border-color: rgba(248, 113, 113, 0.44);
+		position: relative;
+		border-color: rgba(248, 113, 113, 0.92);
 		background:
-			linear-gradient(145deg, rgba(239, 68, 68, 0.16), rgba(239, 68, 68, 0.045)),
-			rgba(255, 255, 255, 0.025);
-		box-shadow: inset 3px 0 0 rgba(239, 68, 68, 0.88);
+			linear-gradient(145deg, rgba(239, 68, 68, 0.38), rgba(239, 68, 68, 0.16)),
+			rgba(15, 23, 42, 0.5);
+		box-shadow:
+			inset 4px 0 0 rgba(239, 68, 68, 1),
+			0 0 0 1px rgba(239, 68, 68, 0.22),
+			0 12px 26px rgba(239, 68, 68, 0.16);
 	}
 
 	.connection-time-item.latest-disconnected span,
@@ -7012,22 +7492,62 @@
 		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: center;
 		padding: 6px 8px;
-		border: 1px solid rgba(255, 255, 255, 0.055);
+		border: 1px solid rgba(147, 197, 253, 0.16);
 		border-radius: 9px;
-		background: rgba(255, 255, 255, 0.025);
+		background: rgba(15, 23, 42, 0.24);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 		font-size: 9px;
 	}
 
+	.simple-row span {
+		color: rgba(191, 219, 254, 0.82);
+		font-weight: 780;
+	}
+
 	.simple-row strong {
-		color: var(--text-primary);
+		color: rgba(248, 250, 252, 0.96);
 	}
 
 	.weather-current {
 		margin-bottom: 0;
 		padding: 8px;
-		border: 1px solid rgba(255, 255, 255, 0.06);
+		border: 1px solid rgba(147, 197, 253, 0.16);
 		border-radius: 11px;
-		background: rgba(255, 255, 255, 0.025);
+		background: rgba(15, 23, 42, 0.24);
+	}
+
+	.weather-current span,
+	.weather-current small {
+		color: rgba(203, 213, 225, 0.9);
+	}
+
+	.weather-current strong {
+		color: rgba(248, 250, 252, 0.98);
+	}
+
+	.environment-divider {
+		height: 1px;
+		margin: 8px 0;
+		background: rgba(147, 197, 253, 0.12);
+	}
+
+	.ocean-current-card {
+		padding: 8px;
+		border: 1px solid rgba(147, 197, 253, 0.16);
+		border-radius: 11px;
+		background: rgba(15, 23, 42, 0.24);
+	}
+
+	:global(body .app-content .fleet-page .vessel-detail-panel .ocean-current-card) {
+		background: rgba(15, 23, 42, 0.24) !important;
+		border-color: rgba(147, 197, 253, 0.16) !important;
+		box-shadow: none !important;
+	}
+
+	:global(body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-row) {
+		background: transparent !important;
+		border-color: rgba(147, 197, 253, 0.12) !important;
+		box-shadow: none !important;
 	}
 
 	.weather-icon {
@@ -7171,6 +7691,11 @@
 				calc(var(--fleet-main-sidebar-offset) + 274px),
 				calc(100vw - 50px)
 			);
+		}
+
+		.sidebar-toggle-btn.legend-overlap-toggle {
+			top: 50%;
+			transform: translateY(-50%);
 		}
 
 		.sidebar-toggle-btn span {
@@ -7470,7 +7995,7 @@
 		}
 
 		:global(.fleet-leaflet-popup .leaflet-popup-content) {
-			width: min(238px, calc(100vw - 54px)) !important;
+			width: min(286px, calc(100vw - 54px)) !important;
 		}
 
 		:global(.asset-leaflet-popup .leaflet-popup-content) {
@@ -7527,23 +8052,30 @@
 		}
 
 		:global(.fleet-popup-coordinates) {
-			gap: 5px;
+			gap: 6px;
 			padding-inline: 9px;
 		}
 
 		:global(.fleet-popup-coordinates > div) {
-			padding: 7px;
-			border-radius: 9px;
+			padding: 8px;
+			border-radius: 10px;
 		}
 
 		:global(.fleet-popup-coordinates span),
 		:global(.fleet-popup-meta .fleet-popup-row span) {
-			font-size: 7px;
+			font-size: 7.5px;
 		}
 
-		:global(.fleet-popup-coordinates strong),
+		:global(.fleet-popup-coordinates strong) {
+			font-size: 9.5px;
+		}
+
+		:global(.fleet-popup-coordinates .coordinate-dms) {
+			font-size: 8.5px;
+		}
+
 		:global(.fleet-popup-meta .fleet-popup-row strong) {
-			font-size: 8px;
+			font-size: 8.5px;
 		}
 
 		:global(.fleet-popup-meta) {
@@ -7551,7 +8083,8 @@
 		}
 
 		:global(.fleet-popup-meta .fleet-popup-row) {
-			padding: 6px 0;
+			grid-template-columns: 78px minmax(0, 1fr);
+			padding: 7px 8px;
 		}
 
 		:global(.fleet-popup-actions) {
@@ -7569,12 +8102,12 @@
 
 		:global(.fleet-asset-popup-hero) {
 			gap: 7px;
-			padding: 8px 32px 8px 8px;
+			padding: 9px 40px 9px 9px;
 		}
 
 		:global(.fleet-asset-popup-icon) {
-			width: 32px;
-			height: 32px;
+			width: 34px;
+			height: 34px;
 			border-radius: 10px;
 		}
 
@@ -7584,7 +8117,7 @@
 		}
 
 		:global(.fleet-asset-popup-heading > strong) {
-			font-size: 11px;
+			font-size: 11.5px;
 		}
 
 		:global(.fleet-asset-popup-eyebrow),
@@ -7593,13 +8126,13 @@
 		}
 
 		:global(.fleet-asset-popup-coordinates) {
-			gap: 5px;
-			padding: 8px;
+			gap: 6px;
+			padding: 8px 9px 9px;
 		}
 
 		:global(.fleet-asset-popup-coordinates > div) {
-			min-height: 44px;
-			padding: 7px;
+			min-height: 86px;
+			padding: 8px;
 			border-radius: 9px;
 		}
 
@@ -7608,7 +8141,20 @@
 		}
 
 		:global(.fleet-asset-popup-coordinates strong) {
-			font-size: 8px;
+			font-size: 10px;
+		}
+
+		:global(.fleet-asset-popup-badge) {
+			top: 11px;
+			right: 42px;
+			max-width: 54px;
+			font-size: 7px;
+		}
+
+		:global(.fleet-asset-popup-coordinates .coordinate-copy-button) {
+			width: 22px;
+			height: 22px;
+			min-width: 22px;
 		}
 
 		.vessel-detail-panel {
@@ -7725,16 +8271,22 @@
 		}
 
 		.detail-item span {
+			color: rgba(191, 219, 254, 0.86);
 			font-size: 8px;
 		}
 
 		.detail-item strong {
-			font-size: 8px;
+			color: rgba(248, 250, 252, 0.96);
+			font-size: 8.8px;
 		}
 
 		.simple-row {
 			font-size: 8px;
 			grid-template-columns: 1fr 48px;
+		}
+
+		.coordinates-detail-item .coordinate-dms {
+			font-size: 8.3px;
 		}
 
 		.weather-current {

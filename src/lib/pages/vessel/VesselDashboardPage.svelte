@@ -10,9 +10,9 @@
     getLatestCctvSnapshots,
     getVesselDashboard
   } from "$lib/api/dashboardApi.js";
-  import { getFleetAssets, getFleetVesselLiveDetail } from "$lib/api/fleetApi.js";
+  import { getFleetAssets } from "$lib/api/fleetApi.js";
   import { apiRequest } from "$lib/api/authApi.js";
-  import { VMS_TILE_URL, VMS_TILE_OPTIONS } from "$lib/mapStyle.js";
+  import { addMapTileLayer } from "$lib/mapStyle.js";
   import { addLeafletZoomAndScale } from "$lib/utils/leafletControls.js";
   import LoadingSkeleton from "$lib/components/LoadingSkeleton.svelte";
   import CopyableCoordinate from "$lib/components/CopyableCoordinate.svelte";
@@ -27,11 +27,11 @@
     createCopyableCoordinateHtml,
     handleCoordinateCopyClick
   } from "$lib/utils/coordinateClipboard.js";
+  import { sortByAlpha } from "$lib/utils/alphaSort.js";
 
   let loading = $state(false);
   let error = $state("");
   let dashboardData = $state(null);
-  let liveVesselDetail = $state(null);
   let cctvSnapshots = $state([]);
   let cctvSnapshotsLoading = $state(false);
   let cctvSnapshotsError = $state("");
@@ -397,6 +397,43 @@
     })} L`;
   }
 
+  function normalizeFuelConsumptionSource(value) {
+    const normalized = String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_");
+
+    if (["fm", "fms"].includes(normalized)) return "fm";
+    if (["ecu"].includes(normalized)) return "ecu";
+    if (["ems_internal", "vms"].includes(normalized)) return "ems_internal";
+    if (["ems_external", "ems"].includes(normalized)) return "ems_external";
+
+    return normalized || "";
+  }
+
+  function getFuelSourceLabel(source) {
+    const normalized = normalizeFuelConsumptionSource(source);
+
+    if (normalized === "fm") return "FM";
+    if (normalized === "ecu") return "ECU";
+    if (normalized === "ems_internal") return shouldShowVmsFuelLabel ? "VMS" : "EMS";
+    if (normalized === "ems_external") return "EMS";
+
+    return normalized ? normalized.toUpperCase() : "Fuel";
+  }
+
+  function getDashboardConsumptionForSource(source, legacyValue = null) {
+    const normalized = normalizeFuelConsumptionSource(source);
+    const activeSource = normalizeFuelConsumptionSource(dashboardData?.consumptionSource);
+    const sourceValue =
+      activeSource && activeSource === normalized
+        ? dashboardData?.consumptionLiter
+        : null;
+
+    if (!isMissingValue(sourceValue)) return sourceValue;
+    return legacyValue;
+  }
+
   function normalizeStatus(value) {
     return value ? "online" : "offline";
   }
@@ -416,31 +453,32 @@
 
   let currentVessel = $derived({
     ...($selectedVesselInfo || {}),
-    ...(liveVesselDetail || {}),
+    ...(dashboardData || {}),
 
     // engine configuration remains from selected vessel
     engines: Array.isArray($selectedVesselInfo?.engines)
       ? $selectedVesselInfo.engines
-      : Array.isArray(liveVesselDetail?.engines)
-        ? liveVesselDetail.engines
+      : Array.isArray(dashboardData?.engines)
+        ? dashboardData.engines
         : [],
 
-    // live engine RPM from /fleet/vessels/{id}
-    liveEngines: Array.isArray(liveVesselDetail?.liveEngines)
-      ? liveVesselDetail.liveEngines
-      : Array.isArray(liveVesselDetail?.rawLive?.engines)
-        ? liveVesselDetail.rawLive.engines
+    liveEngines: Array.isArray(dashboardData?.engines)
+      ? dashboardData.engines
         : []
   });
 
   let vesselInfo = $derived({
     vesselId: $selectedVesselId,
     vesselName:
+      dashboardData?.vesselName ||
+      dashboardData?.vessel_name ||
       currentVessel?.name ||
       currentVessel?.vesselName ||
       "Selected Vessel",
 
     companyName: currentVessel?.companyName || "-",
+    deviceId: dashboardData?.deviceId || currentVessel?.deviceId || currentVessel?.device_id || "-",
+    timezone: dashboardData?.timezone || currentVessel?.timezone || "-",
 
     latitude: toNumber(
       dashboardData?.latitude ??
@@ -455,7 +493,7 @@
         currentVessel?.longitude,
       null
     ),
-    heading: toNumber(currentVessel?.heading, null),
+    heading: toNumber(dashboardData?.heading ?? currentVessel?.heading, null),
 
     online: formatOnlineStatus(
       dashboardData?.online ?? currentVessel?.online,
@@ -492,7 +530,7 @@
     weatherDetail: dashboardData?.weatherForecast?.current || currentVessel?.weather?.current || null,
     weatherTomorrow: dashboardData?.weatherForecast?.tomorrow || null,
     weatherDayAfter: dashboardData?.weatherForecast?.day_after || null,
-    dataReceivedStats: dashboardData?.dataReceivedStats || null,
+    dataReceivedStats: dashboardData?.dataReceivedStats || dashboardData?.data_received_stats || null,
     oceanCurrent: dashboardData?.oceanCurrent || null
   });
 
@@ -555,9 +593,22 @@
   }
 
   let dataReceivedSummary = $derived({
-    receivedMinutes: dashboardData?.dataReceivedStats?.received_minutes ?? 0,
-    totalMinutes: dashboardData?.dataReceivedStats?.total_minutes ?? 1440,
-    percentage: dashboardData?.dataReceivedStats?.percentage ?? 0
+    receivedMinutes:
+      dashboardData?.dataReceivedStats?.received_minutes ??
+      dashboardData?.dataReceivedStats?.receivedMinutes ??
+      dashboardData?.data_received_stats?.received_minutes ??
+      dashboardData?.data_received_stats?.receivedMinutes ??
+      0,
+    totalMinutes:
+      dashboardData?.dataReceivedStats?.total_minutes ??
+      dashboardData?.dataReceivedStats?.totalMinutes ??
+      dashboardData?.data_received_stats?.total_minutes ??
+      dashboardData?.data_received_stats?.totalMinutes ??
+      1440,
+    percentage:
+      dashboardData?.dataReceivedStats?.percentage ??
+      dashboardData?.data_received_stats?.percentage ??
+      0
   });
 
   let weatherSummary = $derived({
@@ -571,6 +622,27 @@
     tomorrow: dashboardData?.oceanCurrent?.tomorrow || null,
     dayAfter: dashboardData?.oceanCurrent?.day_after || null
   });
+
+  let environmentForecastDays = $derived([
+    {
+      key: "today",
+      label: weatherSummary.current?.label || oceanCurrentSummary.current?.label || "Today",
+      weather: weatherSummary.current,
+      current: oceanCurrentSummary.current
+    },
+    {
+      key: "tomorrow",
+      label: weatherSummary.tomorrow?.label || oceanCurrentSummary.tomorrow?.label || "Tomorrow",
+      weather: weatherSummary.tomorrow,
+      current: oceanCurrentSummary.tomorrow
+    },
+    {
+      key: "day-after",
+      label: weatherSummary.dayAfter?.label || oceanCurrentSummary.dayAfter?.label || "Day After",
+      weather: weatherSummary.dayAfter,
+      current: oceanCurrentSummary.dayAfter
+    }
+  ]);
 
   let speedSummary = $derived({
     topSpeed:
@@ -628,6 +700,26 @@
     }
 
     return CARDINAL_WIND_DEGREES[text] ?? null;
+  }
+
+  function getCurrentDirectionDegrees(current = {}) {
+    return normalizeWindDirectionDegrees(
+      current?.direction_to_deg ??
+        current?.directionToDeg ??
+        current?.direction_deg ??
+        current?.directionDegree ??
+        current?.direction_to_degree ??
+        current?.direction_to ??
+        current?.direction
+    );
+  }
+
+  function formatCurrentDirectionAngle(current = {}) {
+    const degrees = getCurrentDirectionDegrees(current);
+
+    if (degrees === null) return "-";
+
+    return `${formatNumber(degrees, Number.isInteger(degrees) ? 0 : 1, "0")}°`;
   }
 
   function getDashboardMapCoordinates() {
@@ -908,7 +1000,7 @@
         <div class="dashboard-map-popup-row"><span>Speed</span><strong>${vesselInfo.currentSpeed || "-"}</strong></div>
         <div class="dashboard-map-popup-row"><span>Heading</span><strong>${formatNumber(vesselInfo.heading, 1, "-")}°</strong></div>
         <div class="dashboard-map-popup-row"><span>Wind</span><strong>${weather?.wind_dir || "-"} ${weather?.wind_speed_kt || "-"} kt</strong></div>
-        <div class="dashboard-map-popup-row"><span>Current</span><strong>${current ? `${formatNumber(current.speed_kph, 1, "0.0")} kph · ${current.direction_to || "-"}` : "-"}</strong></div>
+        <div class="dashboard-map-popup-row"><span>Current</span><strong>${current ? `${formatNumber(current.speed_kph, 1, "0.0")} kph · ${formatCurrentDirectionAngle(current)}` : "-"}</strong></div>
       </div>
     `;
   }
@@ -978,7 +1070,7 @@
         preferCanvas: true
       }).setView(center, coords ? 12 : 5);
 
-      L.tileLayer(VMS_TILE_URL, VMS_TILE_OPTIONS).addTo(dashboardMap);
+      addMapTileLayer(L, dashboardMap);
       addLeafletZoomAndScale(L, dashboardMap);
 
       setupDashboardMapPanes();
@@ -1662,20 +1754,30 @@
     hasPermission("view_fuel_engine_maker")
   );
 
+  let activeConsumptionSource = $derived(normalizeFuelConsumptionSource(dashboardData?.consumptionSource));
+  let activeConsumptionLiter = $derived(dashboardData?.consumptionLiter);
+
   let canShowFuelEmsInternal = $derived(
-    canViewFuelEmsInternal && !isMissingValue(dashboardData?.consumptionEmsInternal ?? dashboardData?.consumptionEms)
+    canViewFuelEmsInternal &&
+      !isMissingValue(
+        getDashboardConsumptionForSource(
+          "ems_internal",
+          dashboardData?.consumptionEmsInternal ?? dashboardData?.consumptionEms
+        )
+      )
   );
 
   let canShowFuelEmsExternal = $derived(
-    canViewFuelEmsExternal && !isMissingValue(dashboardData?.consumptionEmsExternal)
+    canViewFuelEmsExternal &&
+      !isMissingValue(getDashboardConsumptionForSource("ems_external", dashboardData?.consumptionEmsExternal))
   );
 
   let canShowFuelFms = $derived(
-    canViewFuelFms && !isMissingValue(dashboardData?.consumptionFms)
+    canViewFuelFms && !isMissingValue(getDashboardConsumptionForSource("fm", dashboardData?.consumptionFms))
   );
 
   let canShowFuelEcu = $derived(
-    canViewFuelEcu && !isMissingValue(dashboardData?.consumptionEcu)
+    canViewFuelEcu && !isMissingValue(getDashboardConsumptionForSource("ecu", dashboardData?.consumptionEcu))
   );
 
   let hasVisibleFuelSource = $derived(
@@ -1696,14 +1798,22 @@
   );
 
   let fuelSummary = $derived({
-    emsInternal: formatLiter(dashboardData?.consumptionEmsInternal ?? dashboardData?.consumptionEms ?? 0),
-    emsExternal: formatLiter(dashboardData?.consumptionEmsExternal ?? 0),
-    fms: isMissingValue(dashboardData?.consumptionFms)
+    source: activeConsumptionSource,
+    sourceLabel: getFuelSourceLabel(activeConsumptionSource),
+    sourceValue: isMissingValue(activeConsumptionLiter) ? "-" : formatLiter(activeConsumptionLiter),
+    emsInternal: formatLiter(
+      getDashboardConsumptionForSource(
+        "ems_internal",
+        dashboardData?.consumptionEmsInternal ?? dashboardData?.consumptionEms ?? 0
+      )
+    ),
+    emsExternal: formatLiter(getDashboardConsumptionForSource("ems_external", dashboardData?.consumptionEmsExternal ?? 0)),
+    fms: isMissingValue(getDashboardConsumptionForSource("fm", dashboardData?.consumptionFms))
       ? "-"
-      : formatLiter(dashboardData?.consumptionFms),
-    ecu: isMissingValue(dashboardData?.consumptionEcu)
+      : formatLiter(getDashboardConsumptionForSource("fm", dashboardData?.consumptionFms)),
+    ecu: isMissingValue(getDashboardConsumptionForSource("ecu", dashboardData?.consumptionEcu))
       ? "-"
-      : formatLiter(dashboardData?.consumptionEcu),
+      : formatLiter(getDashboardConsumptionForSource("ecu", dashboardData?.consumptionEcu)),
     latestRob:
       dashboardData?.latestRob !== null &&
       dashboardData?.latestRob !== undefined
@@ -1713,7 +1823,6 @@
 
   function resetDashboardStateForVessel() {
     dashboardData = null;
-    liveVesselDetail = null;
     cctvSnapshots = [];
     cctvSnapshotsError = "";
     selectedDashboardCctvKey = "";
@@ -1733,7 +1842,6 @@
 
     if (!targetVesselId) {
       dashboardData = null;
-      liveVesselDetail = null;
       cctvSnapshots = [];
       error = "No vessel has been selected from Fleet View.";
       return;
@@ -1743,9 +1851,8 @@
     error = "";
 
     try {
-      const [dashboardResult, liveResult] = await Promise.all([
+      const [dashboardResult] = await Promise.all([
         getVesselDashboard(targetVesselId),
-        getFleetVesselLiveDetail(targetVesselId),
         loadDashboardAssets(),
         loadLatestCctvSnapshots(targetVesselId, requestId),
         loadCurrentUser()
@@ -1754,13 +1861,8 @@
       if (!isDashboardRequestCurrent(targetVesselId, requestId)) return;
 
       dashboardData = dashboardResult?.data || dashboardResult || null;
-      liveVesselDetail = liveResult || null;
 
       console.log("[VESSEL_DASHBOARD_DATA]", { vesselId: targetVesselId, data: dashboardData });
-      console.log("[VESSEL_DASHBOARD_LIVE_DETAIL]", {
-        vesselId: targetVesselId,
-        data: liveVesselDetail
-      });
 
       scheduleDashboardMapRefresh({ center: true });
     } catch (err) {
@@ -1769,7 +1871,6 @@
       console.error("[VESSEL_DASHBOARD_ERROR]", err);
       error = err?.message || "Failed to load vessel dashboard.";
       dashboardData = null;
-      liveVesselDetail = null;
       cctvSnapshots = [];
     } finally {
       if (isDashboardRequestCurrent(targetVesselId, requestId)) {
@@ -1785,7 +1886,11 @@
     try {
       const assets = await getFleetAssets();
       dashboardZones = normalizeMapZonesFromAssets(assets);
-      dashboardAssets = assets.map(normalizeDashboardAsset).filter(Boolean);
+      dashboardAssets = sortByAlpha(
+        assets.map(normalizeDashboardAsset).filter(Boolean),
+        (asset) => asset.assetName,
+        (asset) => asset.assetType
+      );
       rebuildDashboardZoneLayer();
       buildDashboardAssetMarkers();
       return dashboardAssets;
@@ -1914,7 +2019,6 @@
     showWindParticles;
     showCurrentParticles;
     dashboardData;
-    liveVesselDetail;
     vesselInfo.latitude;
     vesselInfo.longitude;
     vesselInfo.heading;
@@ -2215,7 +2319,7 @@
           <span class="info-label">Ocean Current</span>
           <strong>
             {#if oceanCurrentSummary.current}
-              {formatNumber(oceanCurrentSummary.current.speed_kph, 1, "0.0")} kph · {oceanCurrentSummary.current.direction_to || "-"}
+              {formatNumber(oceanCurrentSummary.current.speed_kph, 1, "0.0")} kph · {formatCurrentDirectionAngle(oceanCurrentSummary.current)}
             {:else}
               -
             {/if}
@@ -2280,6 +2384,45 @@
     </section>
   {/if}
 
+  <section class="environment-summary combined-environment-summary">
+    <section class="table-section environment-card">
+      <div class="section-header">
+        <div>
+          <span class="section-kicker">Environment Forecast</span>
+          <h2>Weather & Ocean Current</h2>
+        </div>
+      </div>
+
+      <div class="environment-grid">
+        {#each environmentForecastDays as day}
+          <article>
+            <span>{day.label}</span>
+
+            <div class="environment-metric">
+              <small>Weather</small>
+              <strong>
+                {#if day.weather}
+                  {day.key === "today"
+                    ? `${formatNumber(day.weather.temp_c, 1)}°C`
+                    : `${formatNumber(day.weather.temp_min_c, 1)}–${formatNumber(day.weather.temp_max_c, 1)}°C`}
+                {:else}
+                  -
+                {/if}
+              </strong>
+              <em>{day.weather?.condition || "-"}</em>
+            </div>
+
+            <div class="environment-metric">
+              <small>Current</small>
+              <strong>{day.current ? `${formatNumber(day.current.speed_kph, 1)} kph` : "-"}</strong>
+              <em>Direction : {day.current ? formatCurrentDirectionAngle(day.current) : "-"}</em>
+            </div>
+          </article>
+        {/each}
+      </div>
+    </section>
+  </section>
+
   <section class="environment-summary">
     <section class="table-section environment-card">
       <div class="section-header">
@@ -2322,19 +2465,19 @@
         <article>
           <span>{oceanCurrentSummary.current?.label || "Today"}</span>
           <strong>{oceanCurrentSummary.current ? `${formatNumber(oceanCurrentSummary.current.speed_kph, 1)} kph` : "-"}</strong>
-          <small>{oceanCurrentSummary.current?.direction_to || "-"}</small>
+          <small>{oceanCurrentSummary.current ? formatCurrentDirectionAngle(oceanCurrentSummary.current) : "-"}</small>
         </article>
 
         <article>
           <span>{oceanCurrentSummary.tomorrow?.label || "Tomorrow"}</span>
           <strong>{oceanCurrentSummary.tomorrow ? `${formatNumber(oceanCurrentSummary.tomorrow.speed_kph, 1)} kph` : "-"}</strong>
-          <small>{oceanCurrentSummary.tomorrow?.direction_to || "-"}</small>
+          <small>{oceanCurrentSummary.tomorrow ? formatCurrentDirectionAngle(oceanCurrentSummary.tomorrow) : "-"}</small>
         </article>
 
         <article>
           <span>{oceanCurrentSummary.dayAfter?.label || "Day After"}</span>
           <strong>{oceanCurrentSummary.dayAfter ? `${formatNumber(oceanCurrentSummary.dayAfter.speed_kph, 1)} kph` : "-"}</strong>
-          <small>{oceanCurrentSummary.dayAfter?.direction_to || "-"}</small>
+          <small>{oceanCurrentSummary.dayAfter ? formatCurrentDirectionAngle(oceanCurrentSummary.dayAfter) : "-"}</small>
         </article>
       </div>
     </section>
@@ -3649,6 +3792,14 @@
     margin-top: 14px;
   }
 
+  .environment-summary:not(.combined-environment-summary) {
+    display: none;
+  }
+
+  .combined-environment-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .environment-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3663,6 +3814,27 @@
     border-radius: 10px;
     background: var(--color-surface);
     border: 1px solid #d9e2ec;
+  }
+
+  .combined-environment-summary .environment-grid article {
+    display: grid;
+    gap: 12px;
+  }
+
+  .environment-metric {
+    display: grid;
+    gap: 5px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(148, 163, 184, 0.18);
+  }
+
+  .environment-metric small {
+    margin-top: 0;
+  }
+
+  .environment-metric:first-of-type {
+    border-top: 0;
+    padding-top: 0;
   }
 
   .environment-grid span,
@@ -3689,6 +3861,13 @@
     text-transform: none;
     letter-spacing: 0;
     font-size: 11px;
+  }
+
+  .environment-grid em {
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 700;
   }
 
   .fuel-summary {

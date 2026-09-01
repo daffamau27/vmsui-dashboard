@@ -12,12 +12,16 @@
 		importFuelVdor,
 		downloadVdorTemplate
 	} from '$lib/api/fuelManagementApi.js';
+	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
 
 	let { active = true } = $props();
 
-	let selectedDate = $state(todayDate());
+	let historyStartDate = $state(daysAgoDate(30));
+	let historyEndDate = $state(todayDate());
 	let timezoneMode = $state('auto');
 	let timezoneOffset = $state('+07:00');
+	let hasLoadedDateRange = $state(false);
 
 	let loadingData = $state(false);
 	let loadingHistory = $state(false);
@@ -37,6 +41,8 @@
 	let historyError = $state('');
 	let successMessage = $state('');
 	let hideNoVesselNotice = $state(false);
+	let selectedHistoryNote = $state(null);
+	let showFuelOperationOverlay = $state(false);
 
 	let robForm = $state({
 		datetime: datetimeInputValue(),
@@ -53,8 +59,7 @@
 
 	let selectedImportFile = $state(null);
 	let selectedImportFileName = $state('');
-	let autoLoadKey = $state('');
-
+	let lastDashboardLoadKey = $state('');
 	$effect(() => {
 		if (!active) return;
 
@@ -68,13 +73,11 @@
 	const tableConfigs = [
 		{
 			key: 'per_engine_system',
-			title: 'Per Engine - System / FMS',
-			description: 'Fuel usage from system/FMS basis.',
+			title: 'Per Engine - System',
+			description: 'Fuel usage from system basis.',
 			permission: 'view_fuel_fms',
 			columns: [
 				{ label: 'Engine', field: 'engine', align: 'left' },
-				{ label: 'Source', field: 'source', align: 'left' },
-				{ label: 'Metric', field: 'metric', align: 'left' },
 				{ label: 'Total', field: 'total', type: 'liter', align: 'right' }
 			]
 		},
@@ -128,6 +131,7 @@
 	let fuelConsumption = $derived(report?.fuel_consumption || {});
 	let perEngine = $derived(report?.fuel_consumption_per_engine || {});
 	let comparison = $derived(perEngine?.comparison || null);
+	let latestRobHeader = $derived(formatLiter(fuelConsumption?.fuel_rob));
 
 	let canAccessDailyReport = $derived(hasPermission('access_daily_report'));
 
@@ -185,9 +189,133 @@
 		return config?.description || '';
 	}
 
-	let canManageRob = $derived(canViewFuelConsumptionTable);
-	let canManageTransactions = $derived(canViewFuelConsumptionTable);
-	let canImportVdor = $derived(canViewFuelConsumptionTable);
+	function formatFuelSourceLabel(value) {
+		const normalized = String(value || '').trim().toLowerCase();
+
+		if (['fm', 'fms'].includes(normalized)) return 'FM';
+		if (normalized === 'ecu') return 'ECU';
+		if (['ems_internal', 'vms'].includes(normalized)) return 'VMS';
+		if (['ems_external', 'ems'].includes(normalized)) return 'EMS';
+
+		return normalized ? normalized.toUpperCase().replace(/_/g, ' ') : '-';
+	}
+
+	function isDailyConsumptionAction(action) {
+		return String(action || '').trim().toLowerCase().includes('daily consumption');
+	}
+
+	function isFuelSourceChangeAction(action) {
+		return String(action || '').trim().toLowerCase().includes('fuel source change');
+	}
+
+	function getHistoryActionSource(item) {
+		if (isFuelSourceChangeAction(item?.action)) return item?.source || '';
+		if (!isDailyConsumptionAction(item?.action)) return '';
+		const label = formatFuelSourceLabel(item?.source);
+		return label === '-' ? '' : label;
+	}
+
+	function formatHistoryDate(value) {
+		if (!value || value === '-') return '-';
+		const raw = String(value).trim();
+		const timezone = raw.match(/\((UTC[+-]\d{1,2}(?::\d{2})?)\)/i)?.[1] || '';
+		const cleaned = raw.replace(/\s*\(UTC[+-]\d{1,2}(?::\d{2})?\)\s*/i, '').trim();
+		const dateOnlyMatch = cleaned.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+		if (dateOnlyMatch) {
+			const [, year, month, day] = dateOnlyMatch;
+			const date = new Date(Number(year), Number(month) - 1, Number(day));
+
+			if (!Number.isNaN(date.getTime())) {
+				return new Intl.DateTimeFormat('en-US', {
+					day: '2-digit',
+					month: 'short',
+					year: 'numeric'
+				}).format(date);
+			}
+		}
+
+		const localMatch = cleaned.match(
+			/^(\d{1,2})\/(\d{1,2})\/(\d{4})[\s,]+(\d{1,2}):(\d{2})(?::(\d{2}))?/
+		);
+		const yearFirstLocalMatch = cleaned.match(
+			/^(\d{4})-(\d{2})-(\d{2})[\s,]+(\d{1,2}):(\d{2})(?::(\d{2}))?/
+		);
+
+		if (localMatch) {
+			const [, day, month, year, hour, minute, second = '00'] = localMatch;
+			const date = new Date(
+				Number(year),
+				Number(month) - 1,
+				Number(day),
+				Number(hour),
+				Number(minute),
+				Number(second)
+			);
+
+			if (!Number.isNaN(date.getTime())) {
+				const formatted = new Intl.DateTimeFormat('en-US', {
+					day: '2-digit',
+					month: 'short',
+					year: 'numeric',
+					hour: '2-digit',
+					minute: '2-digit',
+					second: '2-digit',
+					hour12: false
+				}).format(date);
+				return timezone ? `${formatted} ${timezone}` : formatted;
+			}
+		}
+
+		if (yearFirstLocalMatch) {
+			const [, year, month, day, hour, minute, second = '00'] = yearFirstLocalMatch;
+			const date = new Date(
+				Number(year),
+				Number(month) - 1,
+				Number(day),
+				Number(hour),
+				Number(minute),
+				Number(second)
+			);
+
+			if (!Number.isNaN(date.getTime())) {
+				const formatted = new Intl.DateTimeFormat('en-US', {
+					day: '2-digit',
+					month: 'short',
+					year: 'numeric',
+					hour: '2-digit',
+					minute: '2-digit',
+					second: '2-digit',
+					hour12: false
+				}).format(date);
+				return timezone ? `${formatted} ${timezone}` : formatted;
+			}
+		}
+
+		const parsed = new Date(raw);
+		if (!Number.isNaN(parsed.getTime())) {
+			return new Intl.DateTimeFormat('en-US', {
+				day: '2-digit',
+				month: 'short',
+				year: 'numeric',
+				hour: '2-digit',
+				minute: '2-digit',
+				second: '2-digit',
+				hour12: false
+			}).format(parsed);
+		}
+
+		return raw;
+	}
+
+	let canManageRob = $derived(hasPermission('manage_fuel_rob'));
+	let canManageTransactions = $derived(hasPermission('manage_fuel_transactions'));
+	let canImportVdor = $derived(hasPermission('import_fuel_vdor'));
+	let canManageFuelOperations = $derived(canManageRob || canManageTransactions || canImportVdor);
+	let shouldShowDateRangeOverlay = $derived(!hasLoadedDateRange || !historyStartDate || !historyEndDate);
+	let autoTimezoneLabel = $derived(
+		getAutoTimezoneLabelFromSources(dashboardData, dashboardData?.data, $selectedVesselInfo)
+	);
 
 	function canViewTableConfig(config) {
 		if (!canViewFuelConsumptionTable) return false;
@@ -202,19 +330,14 @@
 		if (canViewFuelConsumptionTable) {
 			cards.push(
 				{
-					label: 'Fuel ROB',
-					value: formatLiter(fuelConsumption?.fuel_rob),
-					note: 'Remaining on Board'
-				},
-				{
 					label: 'VDOR Consumption',
 					value: formatLiter(fuelConsumption?.cons_vdor),
 					note: 'Manual report basis'
 				},
 				{
-					label: 'Daily System',
+					label: 'Daily Consumption',
 					value: formatLiter(fuelConsumption?.daily_system),
-					note: 'System daily consumption'
+					note: `Source: ${formatFuelSourceLabel(fuelConsumption?.daily_system_source)}`
 				}
 			);
 		}
@@ -253,27 +376,25 @@
 	});
 
 	$effect(() => {
-		const isActive = active;
-		const vesselId = currentVesselId;
-		const date = selectedDate;
-		const mode = timezoneMode;
-		const offset = timezoneOffset;
-
-		if (!isActive || !vesselId || !date) return;
-
-		const key = `${vesselId}|${date}|${mode}|${offset}`;
-		if (autoLoadKey === key) return;
-
-		autoLoadKey = key;
-		loadDashboardFor({ vesselId, date, mode, offset });
-		loadHistoryFor({ vesselId, date, page: 1, limit: historyLimit });
-	});
-
-	$effect(() => {
 		if (!active) return;
 		if (currentUser || currentUserLoading) return;
 
 		loadCurrentUser();
+	});
+
+	$effect(() => {
+		if (!active || !currentVesselId) return;
+
+		const dashboardLoadKey = [
+			currentVesselId,
+			timezoneMode,
+			timezoneMode === 'manual' ? timezoneOffset : 'auto'
+		].join('|');
+
+		if (lastDashboardLoadKey === dashboardLoadKey) return;
+
+		lastDashboardLoadKey = dashboardLoadKey;
+		loadDashboardCurrent();
 	});
 
 	function todayDate() {
@@ -281,6 +402,15 @@
 		const year = now.getFullYear();
 		const month = String(now.getMonth() + 1).padStart(2, '0');
 		const day = String(now.getDate()).padStart(2, '0');
+		return `${year}-${month}-${day}`;
+	}
+
+	function daysAgoDate(days = 0) {
+		const date = new Date();
+		date.setDate(date.getDate() - Number(days || 0));
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, '0');
+		const day = String(date.getDate()).padStart(2, '0');
 		return `${year}-${month}-${day}`;
 	}
 
@@ -305,8 +435,284 @@
 		successMessage = '';
 	}
 
+	function markDateFilterDirty() {
+		hasLoadedDateRange = false;
+		historyPage = 1;
+	}
+
+	function hasHistoryNote(item) {
+		const note = String(item?.note ?? '').trim();
+		return note !== '' && note !== '-';
+	}
+
+	function openHistoryNote(item) {
+		if (!hasHistoryNote(item)) return;
+		selectedHistoryNote = {
+			date: item?.date || '-',
+			formattedDate: formatHistoryDate(item?.date),
+			action: item?.action || '-',
+			user: item?.user || '-',
+			note: String(item?.note || '').trim()
+		};
+	}
+
+	function closeHistoryNote() {
+		selectedHistoryNote = null;
+	}
+
+	function openFuelOperationOverlay() {
+		showFuelOperationOverlay = true;
+	}
+
+	function closeFuelOperationOverlay() {
+		showFuelOperationOverlay = false;
+	}
+
 	function getErrorMessage(err, fallback = 'An error occurred.') {
 		return err?.data?.message || err?.response?.data?.message || err?.message || fallback;
+	}
+
+	function unwrapFuelHistoryPayload(response) {
+		const payload = response?.data?.data || response?.data || response || {};
+		const rawHistory = Array.isArray(payload?.history)
+			? payload.history
+			: Array.isArray(payload?.items)
+				? payload.items
+				: Array.isArray(payload)
+					? payload
+					: [];
+		const history = normalizeFuelHistoryRows(rawHistory, payload?.timezone || '');
+		const rawPagination = payload?.pagination || {};
+		const totalItems = Number(
+			rawPagination?.total_items ?? rawPagination?.totalItems ?? history.length
+		);
+		const currentPage = Number(rawPagination?.page ?? rawPagination?.currentPage ?? 1);
+		const limitValue = Number(rawPagination?.limit ?? rawPagination?.pageSize ?? historyLimit);
+		const totalPages = Number(rawPagination?.total_pages ?? rawPagination?.totalPages ?? 1);
+
+		return {
+			history,
+			pagination: {
+				total_items: Number.isFinite(totalItems) ? totalItems : history.length,
+				page: Number.isFinite(currentPage) ? currentPage : 1,
+				limit: Number.isFinite(limitValue) ? limitValue : historyLimit,
+				total_pages: Number.isFinite(totalPages) ? totalPages : 1
+			}
+		};
+	}
+
+	function normalizeFuelHistoryRows(history = [], timezone = '') {
+		return history.flatMap((dayItem) => {
+			const transactions = Array.isArray(dayItem?.transactions) ? dayItem.transactions : [];
+			const sources = Array.isArray(dayItem?.sources) ? dayItem.sources : [];
+			const fallbackFuelSource =
+				dayItem?.fuel_source ||
+				dayItem?.fuelSource ||
+				dayItem?.source ||
+				dayItem?.daily_system_source ||
+				dayItem?.dailySystemSource ||
+				dayItem?.consumption_source ||
+				dayItem?.consumptionSource ||
+				'-';
+			const dayStart = getHistoryDayBoundary(dayItem?.date, 'start', timezone);
+			const dayEnd = getHistoryDayBoundary(dayItem?.date, 'end', timezone);
+			const rawSourceSegments = sources
+				.map((sourceItem) => ({
+					...sourceItem,
+					recorded_from: sourceItem?.recorded_from || sourceItem?.recordedFrom || '',
+					recorded_until: sourceItem?.recorded_until || sourceItem?.recordedUntil || '',
+					normalized_source: sourceItem?.fuel_source || sourceItem?.fuelSource || fallbackFuelSource
+				}))
+				.sort((a, b) => {
+					const aTime = toHistorySortTime(a.recorded_from || a.recorded_until || dayStart);
+					const bTime = toHistorySortTime(b.recorded_from || b.recorded_until || dayStart);
+					return aTime - bTime;
+				});
+			const sourceSegments = rawSourceSegments.map((sourceItem, index) => {
+				const previousSource = rawSourceSegments[index - 1] || null;
+				const nextSource = rawSourceSegments[index + 1] || null;
+				const resolvedFrom =
+					sourceItem.recorded_from ||
+					previousSource?.recorded_until ||
+					previousSource?.recordedUntil ||
+					dayStart;
+				const resolvedUntil =
+					sourceItem.recorded_until ||
+					nextSource?.recorded_from ||
+					nextSource?.recordedFrom ||
+					dayEnd;
+
+				return {
+					...sourceItem,
+					resolved_from: resolvedFrom || dayStart,
+					resolved_until: resolvedUntil || dayEnd
+				};
+			});
+
+			const dailyRows = sourceSegments.length
+				? sourceSegments.map((sourceItem) => ({
+						date: sourceItem.resolved_from || dayItem?.date || dayItem?.timestamp || '-',
+						action: dayItem?.action || 'Daily Consumption',
+						user: dayItem?.user || '-',
+						received: 0,
+						consumption:
+							sourceItem?.consumption_l ??
+							sourceItem?.consumptionL ??
+							sourceItem?.consumption ??
+							0,
+						rob_after: dayItem?.rob_after ?? dayItem?.rob_end ?? dayItem?.robEnd ?? '-',
+						rob_before: dayItem?.rob_before ?? dayItem?.rob_start ?? dayItem?.robStart ?? '-',
+						note:
+							sourceItem?.note ||
+							dayItem?.note ||
+							formatSourceRecordedRange(sourceItem.resolved_from, sourceItem.resolved_until),
+						is_deletable: Boolean(dayItem?.is_deletable ?? false),
+						id: dayItem?.id || '',
+						source: sourceItem.normalized_source,
+						recorded_from: sourceItem.resolved_from,
+						recorded_until: sourceItem.resolved_until,
+						period_label: formatSourceRecordedRange(
+							sourceItem.resolved_from,
+							sourceItem.resolved_until,
+							'compact'
+						),
+						sort_time: toHistorySortTime(sourceItem.resolved_from || dayItem?.date)
+					}))
+				: [
+						{
+							date: dayStart || dayItem?.date || dayItem?.timestamp || '-',
+							action: dayItem?.action || 'Daily Consumption',
+							user: dayItem?.user || '-',
+							received: dayItem?.received ?? 0,
+							consumption:
+								dayItem?.consumption ??
+								dayItem?.consumption_l ??
+								dayItem?.consumptionL ??
+								0,
+							rob_after: dayItem?.rob_after ?? dayItem?.rob_end ?? dayItem?.robEnd ?? '-',
+							rob_before: dayItem?.rob_before ?? dayItem?.rob_start ?? dayItem?.robStart ?? '-',
+							note: dayItem?.note || '-',
+							is_deletable: Boolean(dayItem?.is_deletable ?? false),
+							id: dayItem?.id || '',
+							source: fallbackFuelSource,
+							recorded_from: dayStart || '',
+							recorded_until: dayEnd || '',
+							period_label: formatSourceRecordedRange(dayStart, dayEnd, 'compact'),
+							sort_time: toHistorySortTime(dayStart || dayItem?.date)
+						}
+					];
+
+			const sourceChangeRows = sourceSegments.slice(1).map((sourceItem, index) => {
+				const previousSource = sourceSegments[index];
+				const previousLabel = formatFuelSourceLabel(previousSource?.normalized_source);
+				const nextLabel = formatFuelSourceLabel(sourceItem?.normalized_source);
+				const changeTime =
+					sourceItem.recorded_from ||
+					sourceItem.resolved_from ||
+					previousSource?.recorded_until ||
+					previousSource?.resolved_until ||
+					dayItem?.date ||
+					'-';
+
+				return {
+					date: changeTime,
+					action: 'Fuel Source Change',
+					user: '-',
+					received: 0,
+					consumption: 0,
+					rob_after: dayItem?.rob_after ?? dayItem?.rob_end ?? dayItem?.robEnd ?? '-',
+					rob_before: dayItem?.rob_before ?? dayItem?.rob_start ?? dayItem?.robStart ?? '-',
+					note: `Fuel source changed from ${previousLabel} to ${nextLabel}.`,
+					is_deletable: false,
+					id: `source-change-${dayItem?.date || index}-${index}`,
+					source: `${previousLabel} → ${nextLabel}`,
+					recorded_from: changeTime,
+					recorded_until: changeTime,
+					sort_time: toHistorySortTime(changeTime) - 1
+				};
+			});
+
+			const transactionRows = transactions.map((transaction) => {
+				const quantity = Number(transaction?.quantity_l ?? transaction?.quantityL ?? 0);
+				const type = String(transaction?.transaction_type || transaction?.transactionType || '').toUpperCase();
+				const isConsumption = ['BOUT', 'CONSUMPTION', 'OUT'].includes(type);
+
+				return {
+					date: transaction?.timestamp || dayItem?.date || '-',
+					action: transaction?.action || transaction?.transaction_type || '-',
+					user: transaction?.user || '-',
+					received: !isConsumption && quantity > 0 ? quantity : 0,
+					consumption: isConsumption && quantity > 0 ? quantity : 0,
+					rob_after: transaction?.rob_after ?? transaction?.robAfter ?? dayItem?.rob_end ?? '-',
+					rob_before: transaction?.rob_before ?? transaction?.robBefore ?? dayItem?.rob_start ?? '-',
+					note: transaction?.note || '-',
+					is_deletable: Boolean(
+						transaction?.is_deletable ?? transaction?.isDeletable ?? transaction?.id
+					),
+					id: transaction?.id || '',
+					source:
+						transaction?.fuel_source ||
+						transaction?.fuelSource ||
+						transaction?.source ||
+						fallbackFuelSource,
+					sort_time: toHistorySortTime(transaction?.timestamp || dayItem?.date)
+				};
+			});
+
+			return [...dailyRows, ...sourceChangeRows, ...transactionRows].sort(
+				(a, b) => Number(b?.sort_time || 0) - Number(a?.sort_time || 0)
+			);
+		});
+	}
+
+	function getHistoryDayBoundary(day, boundary = 'start', timezone = '') {
+		const match = String(day || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+		if (!match) return '';
+
+		const time = boundary === 'end' ? '23:59:59' : '00:00:00';
+		const suffix = timezone ? ` (${timezone})` : '';
+		return `${match[1]}-${match[2]}-${match[3]} ${time}${suffix}`;
+	}
+
+	function formatSourceRecordedRange(recordedFrom, recordedUntil, mode = 'sentence') {
+		if (!recordedFrom && !recordedUntil) return '-';
+
+		const from = recordedFrom ? formatHistoryDate(recordedFrom) : '-';
+		const until = recordedUntil ? formatHistoryDate(recordedUntil) : '-';
+
+		if (mode === 'compact') return `${from} - ${until}`;
+
+		return `Recorded from ${from} until ${until}`;
+	}
+
+	function toHistorySortTime(value) {
+		if (!value || value === '-') return 0;
+		const raw = String(value).trim();
+		const cleaned = raw.replace(/\s*\(UTC[+-]\d{1,2}(?::\d{2})?\)\s*/i, '').trim();
+		const dateOnlyMatch = cleaned.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+		const dateTimeMatch = cleaned.match(
+			/^(\d{4})-(\d{2})-(\d{2})[\sT]+(\d{1,2}):(\d{2})(?::(\d{2}))?/
+		);
+
+		if (dateTimeMatch) {
+			const [, year, month, day, hour, minute, second = '00'] = dateTimeMatch;
+			return new Date(
+				Number(year),
+				Number(month) - 1,
+				Number(day),
+				Number(hour),
+				Number(minute),
+				Number(second)
+			).getTime();
+		}
+
+		if (dateOnlyMatch) {
+			const [, year, month, day] = dateOnlyMatch;
+			return new Date(Number(year), Number(month) - 1, Number(day)).getTime();
+		}
+
+		const parsed = new Date(raw).getTime();
+		return Number.isFinite(parsed) ? parsed : 0;
 	}
 
 	async function loadCurrentUser() {
@@ -358,14 +764,13 @@
 		return hasPermissionForUser(currentUser, permissionKey);
 	}
 
-	async function loadDashboardFor({ vesselId, date, mode, offset }) {
+	async function loadDashboardFor({ vesselId, mode, offset }) {
 		loadingData = true;
 		errorMessage = '';
 
 		try {
 			const response = await getFuelManagementData({
 				vesselId,
-				date,
 				timezoneMode: mode,
 				timezoneOffset: offset
 			});
@@ -380,13 +785,21 @@
 		}
 	}
 
-	async function loadHistoryFor({ vesselId, date, page = 1, limit = 10 }) {
+	async function loadHistoryFor({ vesselId, startDate, endDate, mode, offset, page = 1, limit = 10 }) {
 		loadingHistory = true;
 		historyError = '';
 
 		try {
-			const response = await getFuelManagementHistory({ vesselId, date, page, limit });
-			const payload = response?.data || response || {};
+			const response = await getFuelManagementHistory({
+				vesselId,
+				startDate,
+				endDate,
+				timezoneMode: mode,
+				timezoneOffset: offset,
+				page,
+				limit
+			});
+			const payload = unwrapFuelHistoryPayload(response);
 
 			historyRows = Array.isArray(payload?.history) ? payload.history : [];
 			historyPagination = payload?.pagination || {
@@ -406,26 +819,51 @@
 		}
 	}
 
-	async function refreshCurrent() {
-		if (!currentVesselId || !selectedDate) return;
-		await Promise.all([
-			loadDashboardFor({
-				vesselId: currentVesselId,
-				date: selectedDate,
-				mode: timezoneMode,
-				offset: timezoneOffset
-			}),
-			loadHistoryFor({
-				vesselId: currentVesselId,
-				date: selectedDate,
-				page: historyPage,
-				limit: historyLimit
-			})
-		]);
+	async function loadDashboardCurrent() {
+		if (!currentVesselId) {
+			dashboardData = null;
+			return;
+		}
+
+		await loadDashboardFor({
+			vesselId: currentVesselId,
+			mode: timezoneMode,
+			offset: timezoneOffset
+		});
+	}
+
+	async function loadHistoryCurrent(page = historyPage) {
+		if (!currentVesselId || !historyStartDate || !historyEndDate) {
+			hasLoadedDateRange = false;
+			return;
+		}
+
+		historyPage = Number(page || 1);
+
+		await loadHistoryFor({
+			vesselId: currentVesselId,
+			startDate: historyStartDate,
+			endDate: historyEndDate,
+			mode: timezoneMode,
+			offset: timezoneOffset,
+			page: historyPage,
+			limit: historyLimit
+		});
+
+		hasLoadedDateRange = true;
+	}
+
+	async function refreshCurrent(page = historyPage) {
+		await Promise.all([loadDashboardCurrent(), loadHistoryCurrent(page)]);
 	}
 
 	async function submitRob() {
 		clearMessages();
+
+		if (!canManageRob) {
+			errorMessage = 'This account does not have permission to manage Fuel ROB.';
+			return;
+		}
 
 		if (!currentVesselId) {
 			errorMessage = 'Please select a vessel first.';
@@ -461,6 +899,11 @@
 
 	async function submitTransaction() {
 		clearMessages();
+
+		if (!canManageTransactions) {
+			errorMessage = 'This account does not have permission to manage fuel transactions.';
+			return;
+		}
 
 		if (!currentVesselId) {
 			errorMessage = 'Please select a vessel first.';
@@ -514,6 +957,11 @@
 	async function removeTransaction(item) {
 		clearMessages();
 
+		if (!canManageTransactions) {
+			errorMessage = 'This account does not have permission to manage fuel transactions.';
+			return;
+		}
+
 		if (!item?.id || !item?.is_deletable) return;
 		if (!window.confirm(`Delete transaction ${item.action} on ${item.date}?`)) return;
 
@@ -552,6 +1000,11 @@
 	async function submitImportVdor() {
 		clearMessages();
 
+		if (!canImportVdor) {
+			errorMessage = 'This account does not have permission to import VDOR.';
+			return;
+		}
+
 		if (!currentVesselId) {
 			errorMessage = 'Please select a vessel first.';
 			return;
@@ -585,6 +1038,12 @@
 
 	async function downloadTemplate() {
 		clearMessages();
+
+		if (!canImportVdor) {
+			errorMessage = 'This account does not have permission to download the VDOR template.';
+			return;
+		}
+
 		actionLoading = 'template';
 
 		try {
@@ -653,17 +1112,12 @@
 	}
 
 	function loadHistoryPage(page) {
-		if (!currentVesselId || !selectedDate) return;
+		if (!currentVesselId || !historyStartDate || !historyEndDate) return;
 		const safePage = Math.max(
 			1,
 			Math.min(Number(page || 1), Number(historyPagination?.total_pages || 1))
 		);
-		loadHistoryFor({
-			vesselId: currentVesselId,
-			date: selectedDate,
-			page: safePage,
-			limit: historyLimit
-		});
+		loadHistoryCurrent(safePage);
 	}
 
 	function getSection(key) {
@@ -687,7 +1141,7 @@
 
 	function formatNumber(value, digits = 2) {
 		if (value === null || value === undefined || value === '') return '-';
-		const number = Number(value);
+		const number = parseFuelNumber(value);
 		if (!Number.isFinite(number)) return '-';
 		return number.toLocaleString('en-US', {
 			minimumFractionDigits: digits,
@@ -698,6 +1152,24 @@
 	function formatLiter(value) {
 		const formatted = formatNumber(value);
 		return formatted === '-' ? '-' : `${formatted} L`;
+	}
+
+	function parseFuelNumber(value) {
+		if (value === null || value === undefined || value === '') return NaN;
+		if (typeof value === 'number') return value;
+
+		const normalized = String(value)
+			.trim()
+			.replace(/,/g, '')
+			.replace(/\s*l(?:iter|itre)?s?\.?\s*$/i, '');
+		const number = Number(normalized);
+
+		return Number.isFinite(number) ? number : NaN;
+	}
+
+	function hasPositiveFuelValue(value) {
+		const number = parseFuelNumber(value);
+		return Number.isFinite(number) && number > 0;
 	}
 
 	function deltaClass(value) {
@@ -717,34 +1189,10 @@
 		</div>
 
 		<div class="header-actions">
-			<label>
-				<span>Date</span>
-				<input type="date" bind:value={selectedDate} />
-			</label>
-
-			<label>
-				<span>Timezone</span>
-				<select bind:value={timezoneMode}>
-					<option value="auto">Auto</option>
-					<option value="manual">Manual</option>
-				</select>
-			</label>
-
-			{#if timezoneMode === 'manual'}
-				<label class="offset-field">
-					<span>Offset</span>
-					<input type="text" bind:value={timezoneOffset} placeholder="+07:00" />
-				</label>
-			{/if}
-
-			<button
-				class="primary-button"
-				type="button"
-				onclick={refreshCurrent}
-				disabled={loadingData || loadingHistory}
-			>
-				{loadingData || loadingHistory ? 'Loading...' : 'Refresh'}
-			</button>
+			<div class="header-rob-card">
+				<span>Latest ROB</span>
+				<strong>{loadingData ? 'Loading...' : latestRobHeader}</strong>
+			</div>
 		</div>
 	</header>
 
@@ -816,15 +1264,12 @@
 	</section>
 
 	<section class="main-grid">
-		<article class="panel comparison-panel">
+		<article class="panel comparison-panel full-width-panel">
 			<div class="panel-header">
 				<div>
 					<h2>Comparison</h2>
 					<p>System total compared with VDOR basis.</p>
 				</div>
-				{#if report?.timezone}
-					<span class="badge">{report.timezone}</span>
-				{/if}
 			</div>
 
 			{#if loadingData}
@@ -855,130 +1300,6 @@
 			{/if}
 		</article>
 
-		<article class="panel action-panel">
-			<div class="panel-header">
-				<div>
-					<h2>Fuel Operations</h2>
-					<p>Manual ROB adjustment, bunkering transaction, and VDOR import.</p>
-				</div>
-			</div>
-
-			{#if currentUserLoading}
-				<LoadingSkeleton label="Loading fuel operation permissions" variant="fuel-operations" />
-			{:else if currentUserError}
-				<div class="empty-state">{currentUserError}</div>
-			{:else if canViewFuelConsumptionTable}
-				<div class="operation-grid">
-					{#if canManageRob}
-						<form
-							class="mini-form"
-							onsubmit={(event) => {
-								event.preventDefault();
-								submitRob();
-							}}
-						>
-							<h3>Save / Adjust ROB</h3>
-							<label>
-								<span>Datetime</span>
-								<input type="datetime-local" bind:value={robForm.datetime} />
-							</label>
-							<label>
-								<span>ROB (L)</span>
-								<input
-									type="number"
-									min="0"
-									step="0.01"
-									bind:value={robForm.rob}
-									placeholder="52000.50"
-								/>
-							</label>
-							<label>
-								<span>Note</span>
-								<input type="text" bind:value={robForm.note} placeholder="Initial tank sounding" />
-							</label>
-							<button type="submit" disabled={actionLoading === 'rob'}>
-								{actionLoading === 'rob' ? 'Saving...' : 'Save ROB'}
-							</button>
-						</form>
-					{/if}
-
-					{#if canManageTransactions}
-						<form
-							class="mini-form"
-							onsubmit={(event) => {
-								event.preventDefault();
-								submitTransaction();
-							}}
-						>
-							<h3>Bunkering Transaction</h3>
-							<label>
-								<span>Datetime</span>
-								<input type="datetime-local" bind:value={transactionForm.datetime} />
-							</label>
-							<div class="split-fields">
-								<label>
-									<span>Received (L)</span>
-									<input
-										type="number"
-										min="0"
-										step="0.01"
-										bind:value={transactionForm.received}
-										placeholder="15000"
-									/>
-								</label>
-								<label>
-									<span>Consumption (L)</span>
-									<input
-										type="number"
-										min="0"
-										step="0.01"
-										bind:value={transactionForm.consumption}
-										placeholder="0"
-									/>
-								</label>
-							</div>
-							<label>
-								<span>Note</span>
-								<input
-									type="text"
-									bind:value={transactionForm.note}
-									placeholder="Bunkering receipt"
-								/>
-							</label>
-							<button type="submit" disabled={actionLoading === 'transaction'}>
-								{actionLoading === 'transaction' ? 'Saving...' : 'Apply Transaction'}
-							</button>
-						</form>
-					{/if}
-
-					{#if canImportVdor}
-						<div class="mini-form">
-							<h3>VDOR Import</h3>
-							<button
-								type="button"
-								class="secondary-button"
-								onclick={downloadTemplate}
-								disabled={actionLoading === 'template'}
-							>
-								{actionLoading === 'template' ? 'Downloading...' : 'Download Template'}
-							</button>
-							<label class="file-picker">
-								<span>Excel file</span>
-								<input type="file" accept=".xlsx" onchange={handleFileInput} />
-								<small>{selectedImportFileName || 'No file selected'}</small>
-							</label>
-							<button type="button" onclick={submitImportVdor} disabled={importLoading}>
-								{importLoading ? 'Importing...' : 'Import VDOR'}
-							</button>
-						</div>
-					{/if}
-				</div>
-			{:else}
-				<div class="empty-state">
-					This account does not have permission to manage ROB, transactions, or VDOR imports.
-				</div>
-			{/if}
-		</article>
 	</section>
 
 	<section class="table-grid">
@@ -1057,77 +1378,352 @@
 				<h2>Fuel History Timeline</h2>
 				<p>ROB transactions, carry over, daily consumption, and deletable bunkering logs.</p>
 			</div>
-			<div class="history-control">
+
+			<div class="history-toolbar">
+				<div class="history-filters">
+					<label>
+						<span>Start Date</span>
+						<input type="date" bind:value={historyStartDate} onchange={markDateFilterDirty} />
+					</label>
+
+					<label>
+						<span>End Date</span>
+						<input type="date" bind:value={historyEndDate} onchange={markDateFilterDirty} />
+					</label>
+
+					<label>
+						<span class="field-label-row">
+							Timezone
+							{#if timezoneMode === 'auto'}
+								<small class="timezone-auto-pill">Auto • {autoTimezoneLabel}</small>
+							{/if}
+						</span>
+						<select bind:value={timezoneMode} onchange={markDateFilterDirty}>
+							{#each TIMEZONE_MODE_OPTIONS as option}
+								<option value={option.value}>{option.label}</option>
+							{/each}
+						</select>
+					</label>
+
+					{#if timezoneMode === 'manual'}
+						<label class="offset-field">
+							<span>Offset</span>
+							<select bind:value={timezoneOffset} onchange={markDateFilterDirty}>
+								{#each TIMEZONE_OFFSET_OPTIONS as option}
+									<option value={option.value}>{option.label}</option>
+								{/each}
+							</select>
+						</label>
+					{/if}
+				</div>
+
 				<button
+					class="primary-button history-load-button"
 					type="button"
-					onclick={() => loadHistoryPage(historyPage - 1)}
-					disabled={loadingHistory || historyPage <= 1}
+					onclick={() => loadHistoryCurrent(1)}
+					disabled={loadingHistory || !historyStartDate || !historyEndDate}
 				>
-					Prev
+					{loadingHistory ? 'Loading...' : 'Load History'}
 				</button>
-				<span>Page {historyPage} / {historyPagination?.total_pages || 1}</span>
+
 				<button
+					class="secondary-button history-operation-button"
 					type="button"
-					onclick={() => loadHistoryPage(historyPage + 1)}
-					disabled={loadingHistory || historyPage >= Number(historyPagination?.total_pages || 1)}
+					onclick={openFuelOperationOverlay}
 				>
-					Next
+					Fuel Operations
 				</button>
 			</div>
 		</div>
 
-		{#if historyError}
-			<div class="alert danger compact">{historyError}</div>
-		{/if}
+		<div class="history-load-area load-required-area" class:is-locked={shouldShowDateRangeOverlay}>
+			{#if historyError}
+				<div class="alert danger compact">{historyError}</div>
+			{/if}
 
-		{#if loadingHistory}
-			<LoadingSkeleton label="Loading fuel history" variant="fuel-history" rows={6} columns={7} />
-		{:else if historyRows.length}
-			<div class="table-wrap">
-				<table>
-					<thead>
-						<tr>
-							<th>Date</th>
-							<th>Action</th>
-							<th>User</th>
-							<th class="right">Received</th>
-							<th class="right">Consumption</th>
-							<th class="right">ROB After</th>
-							<th class="right">Action</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each historyRows as item}
+			{#if loadingHistory}
+				<LoadingSkeleton label="Loading fuel history" variant="fuel-history" rows={6} columns={7} />
+			{:else if historyRows.length}
+				<div class="table-wrap">
+					<table>
+						<thead>
 							<tr>
-								<td>{item.date || '-'}</td>
-								<td><span class="action-chip">{item.action || '-'}</span></td>
-								<td>{item.user || '-'}</td>
-								<td class="right">{item.received || '-'}</td>
-								<td class="right">{item.consumption || '-'}</td>
-								<td class="right"><strong>{item.rob_after || '-'}</strong></td>
-								<td class="right">
-									{#if item.is_deletable && item.id && canManageTransactions}
-										<button
-											type="button"
-											class="danger-button"
-											onclick={() => removeTransaction(item)}
-											disabled={actionLoading === `delete-${item.id}`}
-										>
-											{actionLoading === `delete-${item.id}` ? 'Deleting...' : 'Delete'}
-										</button>
-									{:else}
-										<span class="muted">-</span>
-									{/if}
-								</td>
+								<th>Date</th>
+								<th>Action</th>
+								<th>User</th>
+								<th class="right">Fuel Movement</th>
+								<th class="right">ROB After</th>
+								<th>Note</th>
+								<!-- <th class="right">Action</th> -->
 							</tr>
-						{/each}
-					</tbody>
-				</table>
+						</thead>
+						<tbody>
+							{#each historyRows as item}
+								<tr>
+									<td>
+										<div class="history-date-cell">
+											<strong>{formatHistoryDate(item.date)}</strong>
+											{#if item.period_label}
+												<small>{item.period_label}</small>
+											{/if}
+										</div>
+									</td>
+									<td>
+										<span
+											class="action-chip"
+											class:has-source={getHistoryActionSource(item)}
+											class:is-source-change={isFuelSourceChangeAction(item.action)}
+										>
+											<strong>{item.action || '-'}</strong>
+											{#if getHistoryActionSource(item)}
+												<small>{getHistoryActionSource(item)}</small>
+											{/if}
+										</span>
+									</td>
+									<td>{item.user || '-'}</td>
+									<td class="right">
+										{#if hasPositiveFuelValue(item.received)}
+											<div class="fuel-movement-chip received">
+												<span>Received</span>
+												<strong>{formatLiter(item.received)}</strong>
+											</div>
+										{:else if hasPositiveFuelValue(item.consumption)}
+											<div class="fuel-movement-chip consumption">
+												<span>Consumption</span>
+												<strong>{formatLiter(item.consumption)}</strong>
+											</div>
+										{:else}
+											<span class="muted">-</span>
+										{/if}
+									</td>
+									<td class="right"><strong>{item.rob_after || '-'}</strong></td>
+									<td>
+										{#if hasHistoryNote(item)}
+											<button type="button" class="note-view-button" onclick={() => openHistoryNote(item)}>
+												View note
+											</button>
+										{:else}
+											<span class="muted">-</span>
+										{/if}
+									</td>
+									<!-- <td class="right">
+										{#if item.is_deletable && item.id && canManageTransactions}
+											<button
+												type="button"
+												class="danger-button"
+												onclick={() => removeTransaction(item)}
+												disabled={actionLoading === `delete-${item.id}`}
+											>
+												{actionLoading === `delete-${item.id}` ? 'Deleting...' : 'Delete'}
+											</button>
+										{:else}
+											<span class="muted">-</span>
+										{/if}
+									</td> -->
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+				<div class="history-control history-control-bottom">
+					<button
+						type="button"
+						onclick={() => loadHistoryPage(historyPage - 1)}
+						disabled={loadingHistory || historyPage <= 1}
+					>
+						Prev
+					</button>
+					<span>Page {historyPage} / {historyPagination?.total_pages || 1}</span>
+					<button
+						type="button"
+						onclick={() => loadHistoryPage(historyPage + 1)}
+						disabled={loadingHistory || historyPage >= Number(historyPagination?.total_pages || 1)}
+					>
+						Next
+					</button>
+				</div>
+			{:else}
+				<div class="empty-state">History is not available for this date range.</div>
+			{/if}
+
+		{#if shouldShowDateRangeOverlay}
+			<div class="load-required-overlay">
+				<div class="load-required-card">
+					<div class="load-required-icon">!</div>
+					<span class="section-kicker">Waiting for date</span>
+					<h2>Choose a fuel history range first</h2>
+					<p>
+						Select the fuel history range and timezone in the history header, then click <strong>Load History</strong>
+						to display the timeline.
+					</p>
+				</div>
 			</div>
-		{:else}
-			<div class="empty-state">History is not available for this date.</div>
 		{/if}
+		</div>
 	</section>
+
+	{#if showFuelOperationOverlay}
+		<div class="fuel-operation-modal-backdrop" role="presentation" onclick={closeFuelOperationOverlay}>
+			<section
+				class="fuel-operation-modal-card"
+				role="dialog"
+				aria-modal="true"
+				aria-label="Fuel operations"
+				onclick={(event) => event.stopPropagation()}
+			>
+				<header class="fuel-operation-modal-header">
+					<div>
+						<span class="page-kicker">Fuel Operation</span>
+						<h2>Fuel Operations</h2>
+						<p>Manual ROB adjustment, bunkering transaction, and VDOR import.</p>
+					</div>
+					<button
+						type="button"
+						class="note-modal-close"
+						onclick={closeFuelOperationOverlay}
+						aria-label="Close fuel operations"
+					>
+						×
+					</button>
+				</header>
+
+				<div class="fuel-operation-modal-body">
+					{#if currentUserLoading}
+						<LoadingSkeleton label="Loading fuel operation permissions" variant="fuel-operations" />
+					{:else if currentUserError}
+						<div class="empty-state">{currentUserError}</div>
+					{:else if canManageFuelOperations}
+						<div class="operation-grid modal-operation-grid">
+							{#if canManageRob}
+								<form
+									class="mini-form"
+									onsubmit={(event) => {
+										event.preventDefault();
+										submitRob();
+									}}
+								>
+									<h3>Save / Adjust ROB</h3>
+									<label>
+										<span>Datetime</span>
+										<input type="datetime-local" bind:value={robForm.datetime} />
+									</label>
+									<label>
+										<span>ROB (L)</span>
+										<input
+											type="number"
+											min="0"
+											step="0.01"
+											bind:value={robForm.rob}
+											placeholder="52000.50"
+										/>
+									</label>
+									<label>
+										<span>Note</span>
+										<input type="text" bind:value={robForm.note} placeholder="Initial tank sounding" />
+									</label>
+									<button type="submit" disabled={actionLoading === 'rob'}>
+										{actionLoading === 'rob' ? 'Saving...' : 'Save ROB'}
+									</button>
+								</form>
+							{/if}
+
+							{#if canManageTransactions}
+								<form
+									class="mini-form"
+									onsubmit={(event) => {
+										event.preventDefault();
+										submitTransaction();
+									}}
+								>
+									<h3>Bunkering Transaction</h3>
+									<label>
+										<span>Datetime</span>
+										<input type="datetime-local" bind:value={transactionForm.datetime} />
+									</label>
+									<div class="split-fields">
+										<label>
+											<span>Received (L)</span>
+											<input
+												type="number"
+												min="0"
+												step="0.01"
+												bind:value={transactionForm.received}
+												placeholder="15000"
+											/>
+										</label>
+										<label>
+											<span>Consumption (L)</span>
+											<input
+												type="number"
+												min="0"
+												step="0.01"
+												bind:value={transactionForm.consumption}
+												placeholder="0"
+											/>
+										</label>
+									</div>
+									<label>
+										<span>Note</span>
+										<input
+											type="text"
+											bind:value={transactionForm.note}
+											placeholder="Bunkering receipt"
+										/>
+									</label>
+									<button type="submit" disabled={actionLoading === 'transaction'}>
+										{actionLoading === 'transaction' ? 'Saving...' : 'Apply Transaction'}
+									</button>
+								</form>
+							{/if}
+
+							{#if canImportVdor}
+								<div class="mini-form">
+									<h3>VDOR Import</h3>
+									<label class="file-picker">
+										<span>Excel file</span>
+										<input type="file" accept=".xlsx" onchange={handleFileInput} />
+										<small>{selectedImportFileName || 'No file selected'}</small>
+									</label>
+									<button type="button" onclick={submitImportVdor} disabled={importLoading}>
+										{importLoading ? 'Importing...' : 'Import VDOR'}
+									</button>
+								</div>
+							{/if}
+						</div>
+					{:else}
+						<div class="empty-state">This feature is locked.</div>
+					{/if}
+				</div>
+			</section>
+		</div>
+	{/if}
+
+	{#if selectedHistoryNote}
+		<div class="note-modal-backdrop" role="presentation" onclick={closeHistoryNote}>
+			<section
+				class="note-modal-card"
+				role="dialog"
+				aria-modal="true"
+				aria-label="Fuel history note"
+				onclick={(event) => event.stopPropagation()}
+			>
+				<header class="note-modal-header">
+					<div>
+						<span class="page-kicker">Fuel Note</span>
+						<h2>{selectedHistoryNote.action}</h2>
+						<p>{selectedHistoryNote.formattedDate || selectedHistoryNote.date} • {selectedHistoryNote.user}</p>
+					</div>
+					<button type="button" class="note-modal-close" onclick={closeHistoryNote} aria-label="Close note">
+						×
+					</button>
+				</header>
+
+				<div class="note-modal-body">
+					<p>{selectedHistoryNote.note}</p>
+				</div>
+			</section>
+		</div>
+	{/if}
 </section>
 
 <style>
@@ -1206,7 +1802,90 @@
 		justify-content: flex-end;
 		gap: 10px;
 		flex-wrap: wrap;
-		min-width: 390px;
+		min-width: 230px;
+	}
+
+	.header-rob-card {
+		min-width: 220px;
+		padding: 12px 14px;
+		border: 1px solid rgba(34, 197, 94, 0.28);
+		border-radius: 16px;
+		background:
+			linear-gradient(135deg, rgba(16, 185, 129, 0.16), rgba(37, 99, 235, 0.08)),
+			rgba(15, 23, 42, 0.5);
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+	}
+
+	.header-rob-card span,
+	.header-rob-card small {
+		display: block;
+		color: #9fb0c9;
+		font-size: 10px;
+		font-weight: 850;
+		letter-spacing: 0.07em;
+		text-transform: uppercase;
+	}
+
+	.header-rob-card strong {
+		display: block;
+		margin-top: 6px;
+		color: #ecfdf5;
+		font-size: 22px;
+		font-weight: 900;
+		line-height: 1.05;
+	}
+
+	.header-rob-card small {
+		margin-top: 7px;
+		color: #86efac;
+	}
+
+	.history-toolbar {
+		display: flex;
+		align-items: flex-end;
+		justify-content: flex-end;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+
+	.history-filters {
+		display: flex;
+		align-items: flex-end;
+		gap: 9px;
+		flex-wrap: wrap;
+	}
+
+	.history-load-button {
+		height: 32px;
+		padding: 0 13px;
+	}
+
+	.history-operation-button {
+		height: 32px;
+		padding: 0 13px;
+		border-color: rgba(147, 197, 253, 0.34);
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.18), rgba(14, 165, 233, 0.08)),
+			rgba(15, 23, 42, 0.42);
+		color: #dbeafe;
+	}
+
+	.history-operation-button:hover:not(:disabled) {
+		border-color: rgba(147, 197, 253, 0.72);
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.3), rgba(14, 165, 233, 0.14)),
+			rgba(15, 23, 42, 0.58);
+		color: #ffffff;
+	}
+
+	.history-load-area {
+		min-height: 260px;
+		margin-top: 0;
+	}
+
+	.history-load-area .load-required-overlay {
+		border-top-left-radius: 0;
+		border-top-right-radius: 0;
 	}
 
 	label {
@@ -1219,6 +1898,29 @@
 		font-size: 10px;
 		font-weight: 900;
 		text-transform: uppercase;
+	}
+
+	.field-label-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.timezone-auto-pill {
+		display: inline-flex;
+		align-items: center;
+		min-height: 18px;
+		padding: 2px 7px;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.1);
+		color: #bfdbfe;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0;
+		text-transform: none;
+		white-space: nowrap;
 	}
 
 	input,
@@ -1240,9 +1942,9 @@
 		box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 	}
 
-	.offset-field input {
-		min-width: 86px;
-		width: 86px;
+	.offset-field select {
+		min-width: 118px;
+		width: 118px;
 	}
 
 	button {
@@ -1486,6 +2188,10 @@
 		margin-bottom: 14px;
 	}
 
+	.full-width-panel {
+		grid-column: 1 / -1;
+	}
+
 	.table-grid {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(360px, 1fr));
@@ -1670,7 +2376,222 @@
 	}
 
 	.history-panel table {
-		min-width: 780px;
+		min-width: 720px;
+	}
+
+	.fuel-movement-chip {
+		width: 178px;
+		display: inline-grid;
+		grid-template-columns: 74px minmax(0, 1fr);
+		align-items: center;
+		gap: 10px;
+		padding: 5px 10px;
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.18);
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		color: var(--text-muted);
+	}
+
+	.fuel-movement-chip.received {
+		background: rgba(34, 197, 94, 0.12);
+		border-color: rgba(34, 197, 94, 0.28);
+		color: #bbf7d0;
+	}
+
+	.fuel-movement-chip.consumption {
+		background: rgba(248, 113, 113, 0.1);
+		border-color: rgba(248, 113, 113, 0.26);
+		color: #fecaca;
+	}
+
+	.fuel-movement-chip span {
+		font-size: 10px;
+		font-weight: 850;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		text-align: left;
+	}
+
+	.fuel-movement-chip strong {
+		color: var(--text-primary);
+		font-size: 11.5px;
+		font-weight: 850;
+		text-align: right;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.note-view-button {
+		min-height: 28px;
+		padding: 0 11px;
+		border: 1px solid rgba(96, 165, 250, 0.34);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.12);
+		color: #bfdbfe;
+		font-size: 11px;
+		font-weight: 850;
+		cursor: pointer;
+		transition:
+			transform 0.16s ease,
+			border-color 0.16s ease,
+			background 0.16s ease,
+			color 0.16s ease;
+	}
+
+	.note-view-button:hover {
+		transform: translateY(-1px);
+		border-color: rgba(147, 197, 253, 0.72);
+		background: rgba(37, 99, 235, 0.26);
+		color: #ffffff;
+	}
+
+	.note-modal-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 80;
+		display: grid;
+		place-items: center;
+		padding: 18px;
+		background: rgba(3, 7, 18, 0.66);
+		backdrop-filter: blur(8px);
+	}
+
+	.fuel-operation-modal-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 82;
+		display: grid;
+		place-items: center;
+		padding: 20px;
+		background: rgba(3, 7, 18, 0.68);
+		backdrop-filter: blur(9px);
+	}
+
+	.note-modal-card {
+		width: min(520px, 100%);
+		max-height: min(620px, calc(100vh - 36px));
+		overflow: hidden;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		border-radius: 22px;
+		background:
+			linear-gradient(145deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.98)),
+			var(--color-surface);
+		box-shadow: 0 26px 80px rgba(0, 0, 0, 0.46);
+	}
+
+	.fuel-operation-modal-card {
+		width: min(1120px, calc(100vw - 40px));
+		max-height: min(760px, calc(100vh - 40px));
+		overflow: hidden;
+		border: 1px solid rgba(148, 163, 184, 0.24);
+		border-radius: 24px;
+		background:
+			linear-gradient(145deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.98)),
+			var(--color-surface);
+		box-shadow: 0 30px 90px rgba(0, 0, 0, 0.52);
+	}
+
+	.note-modal-header {
+		padding: 18px 18px 15px;
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 16px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+	}
+
+	.fuel-operation-modal-header {
+		padding: 20px 20px 16px;
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 16px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.12), transparent 48%),
+			rgba(15, 23, 42, 0.24);
+	}
+
+	.note-modal-header h2 {
+		margin: 6px 0 5px;
+		color: var(--text-primary);
+		font-size: 18px;
+		font-weight: 850;
+	}
+
+	.fuel-operation-modal-header h2 {
+		margin: 6px 0 5px;
+		color: var(--text-primary);
+		font-size: 22px;
+		font-weight: 850;
+	}
+
+	.note-modal-header p {
+		margin: 0;
+		color: #9fb0c9;
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.fuel-operation-modal-header p {
+		margin: 0;
+		color: #9fb0c9;
+		font-size: 13px;
+		font-weight: 700;
+	}
+
+	.note-modal-close {
+		width: 34px;
+		height: 34px;
+		min-width: 34px;
+		border: 1px solid rgba(148, 163, 184, 0.2);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.5);
+		color: #cbd5e1;
+		font-size: 22px;
+		line-height: 1;
+		cursor: pointer;
+	}
+
+	.note-modal-close:hover {
+		background: rgba(239, 68, 68, 0.16);
+		color: #fecaca;
+		border-color: rgba(248, 113, 113, 0.36);
+	}
+
+	.note-modal-body {
+		padding: 18px;
+		max-height: 420px;
+		overflow: auto;
+	}
+
+	.fuel-operation-modal-body {
+		max-height: calc(min(760px, calc(100vh - 40px)) - 88px);
+		overflow: auto;
+		padding: 16px;
+		background:
+			radial-gradient(circle at top left, rgba(37, 99, 235, 0.08), transparent 34%),
+			rgba(8, 13, 26, 0.28);
+	}
+
+	.modal-operation-grid {
+		padding: 0;
+		grid-template-columns: repeat(3, minmax(250px, 1fr));
+		background: transparent;
+	}
+
+	.note-modal-body p {
+		margin: 0;
+		padding: 14px;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 16px;
+		background: rgba(15, 23, 42, 0.38);
+		color: #e2e8f0;
+		font-size: 13px;
+		font-weight: 650;
+		line-height: 1.65;
+		white-space: pre-wrap;
 	}
 
 	.history-control {
@@ -1682,19 +2603,49 @@
 		color: var(--text-secondary);
 	}
 
+	.history-control-bottom {
+		justify-content: flex-end;
+		padding: 10px 14px;
+		border-top: 1px solid rgba(148, 163, 184, 0.16);
+		background: rgba(15, 23, 42, 0.22);
+	}
+
 	.history-control button {
 		height: 30px;
 		padding: 0 10px;
 	}
 
+	.history-date-cell {
+		display: grid;
+		gap: 4px;
+		min-width: 190px;
+	}
+
+	.history-date-cell strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 800;
+		line-height: 1.2;
+	}
+
+	.history-date-cell small {
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 700;
+		line-height: 1.35;
+		white-space: normal;
+	}
+
 	.action-chip {
 		display: inline-flex;
+		flex-direction: column;
 		align-items: center;
 		justify-content: center;
 		min-width: 52px;
 		min-height: 24px;
-		padding: 0 10px;
-		border-radius: 999px;
+		gap: 2px;
+		padding: 5px 10px;
+		border-radius: 12px;
 		background: var(--color-accent-muted);
 		border: 1px solid #bfdbfe;
 		color: #1d4ed8;
@@ -1702,6 +2653,43 @@
 		font-weight: 900;
 		letter-spacing: 0.04em;
 		text-transform: uppercase;
+	}
+
+	.action-chip strong {
+		color: inherit;
+		font-size: 10px;
+		font-weight: 900;
+		line-height: 1.1;
+	}
+
+	.action-chip small {
+		color: #93c5fd;
+		font-size: 9px;
+		font-weight: 900;
+		letter-spacing: 0.08em;
+		line-height: 1;
+	}
+
+	.action-chip.has-source {
+		align-items: flex-start;
+		min-width: 132px;
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.18), rgba(14, 165, 233, 0.08)),
+			rgba(15, 23, 42, 0.34);
+		border-color: rgba(147, 197, 253, 0.34);
+		color: #dbeafe;
+	}
+
+	.action-chip.is-source-change {
+		background:
+			linear-gradient(135deg, rgba(245, 158, 11, 0.22), rgba(251, 191, 36, 0.08)),
+			rgba(69, 26, 3, 0.32);
+		border-color: rgba(251, 191, 36, 0.48);
+		color: #fde68a;
+	}
+
+	.action-chip.is-source-change small {
+		color: #fbbf24;
 	}
 
 	.empty-state {
@@ -1752,11 +2740,19 @@
 			min-width: 0;
 		}
 
-		.header-actions label,
-		.header-actions button,
-		.header-actions input,
-		.header-actions select {
+		.header-rob-card,
+		.history-toolbar,
+		.history-filters,
+		.history-filters label,
+		.history-filters input,
+		.history-filters select,
+		.history-operation-button,
+		.history-load-button {
 			width: 100%;
+		}
+
+		.history-toolbar {
+			justify-content: stretch;
 		}
 
 		.summary-grid,
@@ -1764,6 +2760,25 @@
 		.comparison-grid,
 		.split-fields {
 			grid-template-columns: 1fr;
+		}
+
+		.fuel-operation-modal-backdrop {
+			padding: 10px;
+		}
+
+		.fuel-operation-modal-card {
+			width: 100%;
+			max-height: calc(100vh - 20px);
+			border-radius: 18px;
+		}
+
+		.fuel-operation-modal-header {
+			padding: 16px;
+		}
+
+		.fuel-operation-modal-body {
+			max-height: calc(100vh - 118px);
+			padding: 12px;
 		}
 
 		.fuel-header-card h1 {
