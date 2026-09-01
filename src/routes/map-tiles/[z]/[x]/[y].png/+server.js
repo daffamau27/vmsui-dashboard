@@ -1,4 +1,4 @@
-const TILE_BASE_URL = 'https://apimap.semar.biz.id/tiles';
+const TILE_BASE_URL = 'https://vmsmap.semar.biz.id/tiles';
 const TRANSPARENT_PNG_BASE64 =
 	'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 

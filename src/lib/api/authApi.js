@@ -1,6 +1,5 @@
 import { sortByAlpha } from "$lib/utils/alphaSort.js";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+import { getApiBaseUrl } from "$lib/runtimeConfig.js";
 
 function safeJsonParse(text) {
   try {
@@ -74,6 +73,7 @@ export function redirectToLogin() {
 
 export async function apiRequest(path, options = {}) {
   const token = getAccessToken();
+  const apiBaseUrl = await getApiBaseUrl();
 
   const headers = {
     ...(options.headers || {})
@@ -93,7 +93,7 @@ export async function apiRequest(path, options = {}) {
 
   const { rawResponse, responseType, ...fetchOptions } = options;
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
     ...fetchOptions,
     headers
   });
@@ -251,11 +251,7 @@ export async function changePasswordApi(payload) {
 
 export async function downloadApiFile(path, fileName = "download.xlsx") {
   const token = localStorage.getItem("accessToken") || localStorage.getItem("token");
-
-  const baseUrl =
-    import.meta.env.VITE_API_BASE_URL ||
-    import.meta.env.VITE_BACKEND_BASE_URL ||
-    "";
+  const baseUrl = await getApiBaseUrl();
 
   const response = await fetch(`${baseUrl}${path}`, {
     method: "GET",

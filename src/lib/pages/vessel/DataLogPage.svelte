@@ -26,6 +26,7 @@
 	let dataDeviation = $state(null);
 	let dataDeviationLoading = $state(false);
 	let dataDeviationError = $state('');
+	let dataDeviationSkipped = $state(false);
 
 	let startDateTime = $state('');
 	let endDateTime = $state('');
@@ -803,6 +804,10 @@
 			0
 		)
 	);
+	let selectedRangeDays = $derived(getSelectedRangeDays());
+	let shouldLoadDataDeviation = $derived(
+		canViewDataLogDataDeviations && (!Number.isFinite(selectedRangeDays) || selectedRangeDays <= 14)
+	);
 
 	let dataRows = $derived(loadedRows);
 
@@ -866,6 +871,14 @@
 		};
 	}
 
+	function getSelectedRangeDays() {
+		if (!startDateTime || !endDateTime) return null;
+		const startTime = new Date(startDateTime).getTime();
+		const endTime = new Date(endDateTime).getTime();
+		if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return null;
+		return Math.abs(endTime - startTime) / 86400000;
+	}
+
 	async function fetchDataLogPage(page = 1) {
 		return getDataLogData(getDataLogRequestParams(page));
 	}
@@ -899,6 +912,7 @@
 			dataLogPage = 1;
 			dataDeviation = null;
 			dataDeviationError = '';
+			dataDeviationSkipped = false;
 		}
 
 		error = '';
@@ -995,6 +1009,7 @@
 				dataLogPagination = null;
 				hasLoadedDateRange = false;
 				dataDeviation = null;
+				dataDeviationSkipped = false;
 			}
 		} finally {
 			loading = false;
@@ -1011,12 +1026,22 @@
 		) {
 			dataDeviation = null;
 			dataDeviationError = '';
+			dataDeviationSkipped = false;
+			dataDeviationLoading = false;
+			return null;
+		}
+
+		if (!shouldLoadDataDeviation) {
+			dataDeviation = null;
+			dataDeviationError = '';
+			dataDeviationSkipped = true;
 			dataDeviationLoading = false;
 			return null;
 		}
 
 		dataDeviationLoading = true;
 		dataDeviationError = '';
+		dataDeviationSkipped = false;
 
 		try {
 			const result = await getDataLogDeviations({
@@ -1752,7 +1777,12 @@
 				</strong>
 				</div>
 
-				{#if dataDeviationLoading && !dataDeviation}
+				{#if dataDeviationSkipped}
+					<div class="empty-box">
+						Data deviation is skipped for date ranges longer than 14 days to keep data log loading
+						light. Use a shorter range to view deviation details.
+					</div>
+				{:else if dataDeviationLoading && !dataDeviation}
 					<div class="deviation-loading">Loading data deviation...</div>
 				{:else if dataDeviationError}
 					<div class="status-box error-box">{dataDeviationError}</div>

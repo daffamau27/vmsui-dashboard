@@ -1774,6 +1774,15 @@
 		}
 	}
 
+	async function refreshVoyagePlans() {
+		clearMessages();
+		await Promise.all([
+			loadPlans(page),
+			canAssign ? loadActiveAssignments(activeAssignmentPage) : Promise.resolve(),
+			loadActivePlanLocks()
+		]);
+	}
+
 	async function openPlan(id, showLoading = true) {
 		clearMessages();
 		selectedPlanId = id;
@@ -2297,6 +2306,16 @@
 		</div>
 
 		<div class="header-actions">
+			{#if canAccess}
+				<button
+					class="ghost-button refresh-button"
+					type="button"
+					on:click={refreshVoyagePlans}
+					disabled={loading || activeAssignmentsLoading || activePlanLocksLoading}
+				>
+					Refresh
+				</button>
+			{/if}
 			{#if canManage}
 				<button class="primary-button" type="button" on:click={startCreate}>Create Plan</button>
 			{/if}

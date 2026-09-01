@@ -29,7 +29,7 @@
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
 	import { sortByAlpha } from '$lib/utils/alphaSort.js';
-	
+
 	let loading = $state(false);
 	let exporting = $state(false);
 	let exportingPdf = $state(false);
@@ -1414,7 +1414,12 @@
 	function normalizeSegmentDuration(duration, durationSeconds) {
 		const text = String(duration || '').trim();
 
-		if (text && text !== '-' && text.toLowerCase() !== 'null' && text.toLowerCase() !== 'undefined') {
+		if (
+			text &&
+			text !== '-' &&
+			text.toLowerCase() !== 'null' &&
+			text.toLowerCase() !== 'undefined'
+		) {
 			return text;
 		}
 
@@ -1765,7 +1770,8 @@
 	}
 
 	function buildFodChartGroup(data) {
-		const fodRows = data?.fod_chart || data?.fodChart || data?.fuel_fod_chart || data?.fuelFodChart || [];
+		const fodRows =
+			data?.fod_chart || data?.fodChart || data?.fuel_fod_chart || data?.fuelFodChart || [];
 
 		if (!Array.isArray(fodRows) || !fodRows.length) return null;
 
@@ -1774,7 +1780,9 @@
 			const fuelFodPort = Number(row?.fuel_fod_port ?? row?.fuelFodPort);
 			const fuelFodStbd = Number(row?.fuel_fod_stbd ?? row?.fuelFodStbd);
 
-			return Number.isFinite(fuelFod) || Number.isFinite(fuelFodPort) || Number.isFinite(fuelFodStbd);
+			return (
+				Number.isFinite(fuelFod) || Number.isFinite(fuelFodPort) || Number.isFinite(fuelFodStbd)
+			);
 		});
 
 		if (!validRows.length) return null;
@@ -2368,11 +2376,22 @@
 			return keys.length && !keys.some((key) => matchedSourceKeys.has(key));
 		});
 
-		return sortByAlpha([...matchedRows, ...fallbackDetails], getTripAssetSortName, getTripAssetSortType);
+		return sortByAlpha(
+			[...matchedRows, ...fallbackDetails],
+			getTripAssetSortName,
+			getTripAssetSortType
+		);
 	}
 
 	function getTripAssetSortName(asset = {}) {
-		return asset?.assetName || asset?.asset_name || asset?.thingsboardName || asset?.name || asset?.assetId || '';
+		return (
+			asset?.assetName ||
+			asset?.asset_name ||
+			asset?.thingsboardName ||
+			asset?.name ||
+			asset?.assetId ||
+			''
+		);
 	}
 
 	function getTripAssetSortType(asset = {}) {
@@ -2416,7 +2435,10 @@
 		const typeMap = new Map();
 
 		(Array.isArray(assets) ? assets : []).forEach((asset) => {
-			const key = String(getAssetTypeValue(asset) || 'asset').trim().toLowerCase() || 'asset';
+			const key =
+				String(getAssetTypeValue(asset) || 'asset')
+					.trim()
+					.toLowerCase() || 'asset';
 
 			if (typeMap.has(key)) return;
 
@@ -2836,10 +2858,7 @@
 		const consumptionRows = addRpmCurveSource(getConsumptionPerRangeRows(data), 'fms_ecu');
 		const hasFmsRows = consumptionRows.some((row) => hasPresentRpmFuelValue(row, 'fms'));
 		const hasEcuRows = consumptionRows.some((row) => hasPresentRpmFuelValue(row, 'ecu'));
-		const consumptionSourceKeys = [
-			...(hasFmsRows ? ['fms'] : []),
-			...(hasEcuRows ? ['ecu'] : [])
-		];
+		const consumptionSourceKeys = [...(hasFmsRows ? ['fms'] : []), ...(hasEcuRows ? ['ecu'] : [])];
 
 		const tables = [
 			{
@@ -3100,10 +3119,7 @@
 			normalizedReport?.rpm_ranges_maker?.details || normalizedReport?.rpmRangesMaker?.details,
 			'engine_maker'
 		),
-		...addRpmCurveSource(
-			getConsumptionPerRangeRows(normalizedReport),
-			'fms_ecu'
-		)
+		...addRpmCurveSource(getConsumptionPerRangeRows(normalizedReport), 'fms_ecu')
 	]);
 
 	let rpmCurveTables = $derived(buildRpmCurveTables(normalizedReport));
@@ -3676,7 +3692,6 @@
 
 		loadCurrentUser();
 	});
-
 </script>
 
 <section class="daily-page">
@@ -3689,487 +3704,471 @@
 
 		<div class="daily-header-filters">
 			<div class="filter-card">
-		<label>
-			<span>Date</span>
-			<input type="date" bind:value={reportDate} onchange={markDateFilterDirty} />
-		</label>
+				<label>
+					<span>Date</span>
+					<input type="date" bind:value={reportDate} onchange={markDateFilterDirty} />
+				</label>
 
-		<label>
-			<span class="field-label-row">
-				Timezone Mode
-				{#if timezoneMode === 'auto'}
-					<small class="timezone-auto-pill">Auto • {autoTimezoneLabel}</small>
+				<label>
+					<span class="field-label-row">
+						Timezone Mode
+						{#if timezoneMode === 'auto'}
+							<small class="timezone-auto-pill">Auto • {autoTimezoneLabel}</small>
+						{/if}
+					</span>
+					<select bind:value={timezoneMode} onchange={markDateFilterDirty}>
+						{#each TIMEZONE_MODE_OPTIONS as option}
+							<option value={option.value}>{option.label}</option>
+						{/each}
+					</select>
+				</label>
+
+				{#if timezoneMode === 'manual'}
+					<label>
+						<span>Timezone Offset</span>
+						<select bind:value={timezoneOffset} onchange={markDateFilterDirty}>
+							{#each TIMEZONE_OFFSET_OPTIONS as option}
+								<option value={option.value}>{option.label}</option>
+							{/each}
+						</select>
+					</label>
 				{/if}
-			</span>
-			<select bind:value={timezoneMode} onchange={markDateFilterDirty}>
-				{#each TIMEZONE_MODE_OPTIONS as option}
-					<option value={option.value}>{option.label}</option>
-				{/each}
-			</select>
-		</label>
 
-		{#if timezoneMode === 'manual'}
-			<label>
-				<span>Timezone Offset</span>
-				<select bind:value={timezoneOffset} onchange={markDateFilterDirty}>
-					{#each TIMEZONE_OFFSET_OPTIONS as option}
-						<option value={option.value}>{option.label}</option>
-					{/each}
-				</select>
-			</label>
-		{/if}
+				<div class="filter-actions">
+					<button
+						type="button"
+						class="primary-btn"
+						onclick={loadDailyReport}
+						disabled={loading || !reportDate}
+					>
+						{loading ? 'Loading...' : 'Load Data'}
+					</button>
 
-		<div class="filter-actions">
-			<button type="button" class="primary-btn" onclick={loadDailyReport} disabled={loading || !reportDate}>
-				{loading ? 'Loading...' : 'Load Data'}
-			</button>
+					<button
+						type="button"
+						class="export-btn excel"
+						onclick={handleExportExcel}
+						disabled={exporting || shouldShowDateRangeOverlay}
+					>
+						{exporting ? 'Exporting...' : 'Export Excel'}
+					</button>
 
-			<button type="button" class="export-btn excel" onclick={handleExportExcel} disabled={exporting || shouldShowDateRangeOverlay}>
-				{exporting ? 'Exporting...' : 'Export Excel'}
-			</button>
-
-			<button type="button" class="export-btn pdf" onclick={handleExportPdf} disabled={exportingPdf || shouldShowDateRangeOverlay}>
-				{exportingPdf ? 'Exporting PDF...' : 'Export PDF'}
-			</button>
-		</div>
+					<button
+						type="button"
+						class="export-btn pdf"
+						onclick={handleExportPdf}
+						disabled={exportingPdf || shouldShowDateRangeOverlay}
+					>
+						{exportingPdf ? 'Exporting PDF...' : 'Export PDF'}
+					</button>
+				</div>
 			</div>
 		</div>
 	</section>
 
 	<div class="load-required-area" class:is-locked={shouldShowDateRangeOverlay}>
-	{#if error}
-		<div class="status-box error-box">{error}</div>
-	{/if}
-
-	{#if vesselEnginesLoading}
-		<LoadingSkeleton label="Loading vessel engines" variant="list" rows={3} compact />
-	{/if}
-
-	{#if loading}
-		<LoadingSkeleton label="Loading daily report data" variant="daily-report" />
-	{/if}
-
-	{#if vesselEnginesError}
-		<div class="status-box error-box">{vesselEnginesError}</div>
-	{/if}
-
-	{#if !loading}
-		<section class="summary-grid">
-		<article class="summary-card">
-			<span>Total Runtime</span>
-			<strong>{formatHour(totalRuntimeHours)}</strong>
-		</article>
-
-		{#if canViewSpeedStatsTable}
-			<article class="summary-card">
-				<span>Top Speed</span>
-				<strong>
-					{speedSummary?.top_speed !== undefined && speedSummary?.top_speed !== null
-						? `${formatNumber(speedSummary.top_speed, 2)} knot`
-						: speedSummary?.topSpeed !== undefined && speedSummary?.topSpeed !== null
-							? `${formatNumber(speedSummary.topSpeed, 2)} knot`
-							: speedSummary?.maxSpeed !== undefined && speedSummary?.maxSpeed !== null
-								? `${formatNumber(speedSummary.maxSpeed, 2)} knot`
-								: '-'}
-				</strong>
-			</article>
+		{#if error}
+			<div class="status-box error-box">{error}</div>
 		{/if}
 
-		{#if canViewSpeedStatsTable}
-			<article class="summary-card">
-				<span>Average Speed</span>
-				<strong>
-					{speedSummary?.avg_running_speed !== undefined && speedSummary?.avg_running_speed !== null
-						? `${formatNumber(speedSummary.avg_running_speed, 2)} knot`
-						: speedSummary?.averageSpeed !== undefined && speedSummary?.averageSpeed !== null
-							? `${formatNumber(speedSummary.averageSpeed, 2)} knot`
-							: speedSummary?.avgSpeed !== undefined && speedSummary?.avgSpeed !== null
-								? `${formatNumber(speedSummary.avgSpeed, 2)} knot`
-								: '-'}
-				</strong>
-			</article>
+		{#if vesselEnginesLoading}
+			<LoadingSkeleton label="Loading vessel engines" variant="list" rows={3} compact />
 		{/if}
 
-		{#if canViewLiterPerNauticalMileTable && canShowFuelEcu}
-			<article class="summary-card">
-				<span>ECU Fuel per NM</span>
-				<strong>{formatLiterPerNm(ecuLiterPerNm)}</strong>
-			</article>
+		{#if loading}
+			<LoadingSkeleton label="Loading daily report data" variant="daily-report" />
 		{/if}
 
-		{#if canViewLiterPerNauticalMileTable && canShowFuelFms}
-			<article class="summary-card">
-				<span>FMS Fuel per NM</span>
-				<strong>{formatLiterPerNm(fmsLiterPerNm)}</strong>
-			</article>
+		{#if vesselEnginesError}
+			<div class="status-box error-box">{vesselEnginesError}</div>
 		{/if}
 
-		{#if canViewLiterPerNauticalMileTable && canShowFuelEmsInternal}
-			<article class="summary-card">
-				<span>{getDailyFuelSourceLabel('ems_internal')} Fuel per NM</span>
-				<strong>{formatLiterPerNm(emsInternalLiterPerNm)}</strong>
-			</article>
-		{/if}
-
-		{#if canViewLiterPerNauticalMileTable && canShowFuelEmsExternal}
-			<article class="summary-card">
-				<span>{getDailyFuelSourceLabel('ems_external')} Fuel per NM</span>
-				<strong>{formatLiterPerNm(emsExternalLiterPerNm)}</strong>
-			</article>
-		{/if}
-
-		{#if canViewLiterPerNauticalMileTable && canShowFuelEngineMaker}
-			<article class="summary-card">
-				<span>Engine Maker Fuel per NM</span>
-				<strong>{formatLiterPerNm(engineMakerLiterPerNm)}</strong>
-			</article>
-		{/if}
-	</section>
-
-	{#if canViewSpeedStatsTable || canViewTravelDistanceTable}
-		<section class="speed-detail-grid">
-			{#if canViewTravelDistanceTable}
-				<article>
-					<span>Total Distance</span>
-					<strong>
-						{travelDistance?.total_distance_nm || travelDistance?.totalDistanceNm
-							? `${formatNumber(travelDistance?.total_distance_nm ?? travelDistance?.totalDistanceNm, 3)} NM`
-							: '-'}
-					</strong>
+		{#if !loading}
+			<section class="summary-grid">
+				<article class="summary-card">
+					<span>Total Runtime</span>
+					<strong>{formatHour(totalRuntimeHours)}</strong>
 				</article>
 
-				<article>
-					<span>Outside Safety Zone</span>
-					<strong>
-						{travelDistance?.outside_safety_zone_distance_nm ||
-						travelDistance?.outsideSafetyZoneDistanceNm
-							? `${formatNumber(travelDistance?.outside_safety_zone_distance_nm ?? travelDistance?.outsideSafetyZoneDistanceNm, 3)} NM`
-							: '-'}
-					</strong>
-				</article>
-			{/if}
-
-		</section>
-	{/if}
-
-	{#if canViewTravelDistanceTable}
-		<section class="table-section trip-summary-section">
-			<div class="section-header">
-				<div>
-					<span class="section-kicker">Trip</span>
-					<h2>Daily Trip Summary</h2>
-				</div>
-
-				<strong>{dailyTripSummary.totalPoints} points</strong>
-			</div>
-
-			{#if canViewDailyPathMap && dailyTripSummary.totalPoints}
-				<div class="trip-summary-content">
-					<article class="trip-route-card">
-						<div class="trip-route-header">
-							<div>
-								<span>Route Preview</span>
-								<strong>{dailyTripSummary.startTime} - {dailyTripSummary.endTime}</strong>
-							</div>
-						</div>
-
-						<div class="trip-route-map">
-							{#if active}
-								<div
-									class="trip-leaflet-map"
-									use:tripLeafletMap={{
-										points: tripMapPoints,
-										zones: mapZones,
-										assets: tripMapAssets
-									}}
-								></div>
-							{/if}
-						</div>
-
-						{#if mapZones.length || tripAssetLegendTypes.length}
-							<div class="trip-zone-legend" aria-label="Zone legend">
-								{#each mapZones as zone}
-									<span>
-										<i
-											style={`--zone-color: ${zone.color}; --zone-fill: ${zone.fillColor};`}
-											aria-hidden="true"
-										></i>
-										{zone.name}
-									</span>
-								{/each}
-
-								{#each tripAssetLegendTypes as assetType}
-									<span class="trip-asset-legend-item">
-										<img src={assetType.icon} alt={`${assetType.label} icon`} />
-										{assetType.label}
-									</span>
-								{/each}
-							</div>
-						{/if}
+				{#if canViewSpeedStatsTable}
+					<article class="summary-card">
+						<span>Top Speed</span>
+						<strong>
+							{speedSummary?.top_speed !== undefined && speedSummary?.top_speed !== null
+								? `${formatNumber(speedSummary.top_speed, 2)} knot`
+								: speedSummary?.topSpeed !== undefined && speedSummary?.topSpeed !== null
+									? `${formatNumber(speedSummary.topSpeed, 2)} knot`
+									: speedSummary?.maxSpeed !== undefined && speedSummary?.maxSpeed !== null
+										? `${formatNumber(speedSummary.maxSpeed, 2)} knot`
+										: '-'}
+						</strong>
 					</article>
+				{/if}
 
-					<article class="trip-summary-card">
-						<div class="trip-summary-list">
-							<div>
-								<span>Total Distance</span>
-								<strong>{formatNumber(dailyTripSummary.totalDistanceNm, 3)} NM</strong>
-							</div>
-
-							{#if canViewLiterPerNauticalMileTable}
-								<div>
-									<span>Fuel per Nautical Mile</span>
-									<strong>
-										{literPerNauticalMile === null
-											? '-'
-											: `${formatNumber(literPerNauticalMile, 2)} L/NM (${visibleFuelSourceForDistance})`}
-									</strong>
-								</div>
-							{/if}
-
-							<div>
-								<span>Outside Safety Zone</span>
-								<strong>{formatNumber(dailyTripSummary.outsideDistanceNm, 3)} NM</strong>
-							</div>
-
-							<div>
-								<span>Outside Points</span>
-								<strong>{dailyTripSummary.outsidePoints}</strong>
-							</div>
-
-							<div>
-								<span>Start Coordinate</span>
-								<strong class="coordinate-pair">
-									<CopyableCoordinate
-										value={formatCoordinatePair(
-											dailyTripSummary.startLat,
-											dailyTripSummary.startLng
-										)}
-										display={formatCoordinatePair(
-											dailyTripSummary.startLat,
-											dailyTripSummary.startLng
-										)}
-										label="start coordinate"
-										compact
-									/>
-								</strong>
-							</div>
-
-							<div>
-								<span>End Coordinate</span>
-								<strong class="coordinate-pair">
-									<CopyableCoordinate
-										value={formatCoordinatePair(dailyTripSummary.endLat, dailyTripSummary.endLng)}
-										display={formatCoordinatePair(dailyTripSummary.endLat, dailyTripSummary.endLng)}
-										label="end coordinate"
-										compact
-									/>
-								</strong>
-							</div>
-						</div>
+				{#if canViewSpeedStatsTable}
+					<article class="summary-card">
+						<span>Average Speed</span>
+						<strong>
+							{speedSummary?.avg_running_speed !== undefined &&
+							speedSummary?.avg_running_speed !== null
+								? `${formatNumber(speedSummary.avg_running_speed, 2)} knot`
+								: speedSummary?.averageSpeed !== undefined && speedSummary?.averageSpeed !== null
+									? `${formatNumber(speedSummary.averageSpeed, 2)} knot`
+									: speedSummary?.avgSpeed !== undefined && speedSummary?.avgSpeed !== null
+										? `${formatNumber(speedSummary.avgSpeed, 2)} knot`
+										: '-'}
+						</strong>
 					</article>
-				</div>
-			{:else}
-				<div class="empty-box">Daily trip path is not available yet.</div>
-			{/if}
-		</section>
-	{/if}
+				{/if}
 
-	{#if canViewEngineRuntimeTable}
-		<section class="table-section">
-			<div class="section-header">
-				<div>
-					<span class="section-kicker">Runtime</span>
-					<h2>Engine Running Hour</h2>
-				</div>
-				<strong>{runtimeRows.length} rows</strong>
-			</div>
+				{#if canViewLiterPerNauticalMileTable && canShowFuelEcu}
+					<article class="summary-card">
+						<span>ECU Fuel per NM</span>
+						<strong>{formatLiterPerNm(ecuLiterPerNm)}</strong>
+					</article>
+				{/if}
 
-			{#if runtimeRows.length}
-				<div class="table-wrapper">
-					<table>
-						<thead>
-							<tr>
-								<th>Engine</th>
-								<th>Running Hour</th>
-								<th>Runtime Hours</th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each runtimeRows as row}
-								<tr>
-									<td>{row.engine_name || row.engineName || row.engine || row.name || '-'}</td>
-									<td
-										>{row.runtime_formatted ||
-											row.runtimeFormatted ||
-											formatHour(row.runtime_hours ?? row.runtimeHours)}</td
-									>
-									<td>{formatHour(row.runtime_hours ?? row.runtimeHours)}</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				</div>
-			{:else}
-				<div class="empty-box">Runtime data is not available yet.</div>
-			{/if}
-		</section>
-	{/if}
+				{#if canViewLiterPerNauticalMileTable && canShowFuelFms}
+					<article class="summary-card">
+						<span>FMS Fuel per NM</span>
+						<strong>{formatLiterPerNm(fmsLiterPerNm)}</strong>
+					</article>
+				{/if}
 
-	{#if canViewEngineEventStatusHistory}
-		<section class="table-section event-history-section">
-			<div class="section-header">
-				<div>
-					<span class="section-kicker">Status</span>
-					<h2>Engine Event Status History</h2>
-				</div>
+				{#if canViewLiterPerNauticalMileTable && canShowFuelEmsInternal}
+					<article class="summary-card">
+						<span>{getDailyFuelSourceLabel('ems_internal')} Fuel per NM</span>
+						<strong>{formatLiterPerNm(emsInternalLiterPerNm)}</strong>
+					</article>
+				{/if}
 
-				<strong>{statusHistoryGroups.length} engines</strong>
-			</div>
+				{#if canViewLiterPerNauticalMileTable && canShowFuelEmsExternal}
+					<article class="summary-card">
+						<span>{getDailyFuelSourceLabel('ems_external')} Fuel per NM</span>
+						<strong>{formatLiterPerNm(emsExternalLiterPerNm)}</strong>
+					</article>
+				{/if}
 
-			{#if statusHistoryGroups.length}
-				<div class="event-history-grid">
-					{#each statusHistoryGroups as group}
-						<article class="event-card">
-							<div class="event-card-header">
-								<div>
-									<span>Engine</span>
-									<strong>{group.engineName}</strong>
-								</div>
+				{#if canViewLiterPerNauticalMileTable && canShowFuelEngineMaker}
+					<article class="summary-card">
+						<span>Engine Maker Fuel per NM</span>
+						<strong>{formatLiterPerNm(engineMakerLiterPerNm)}</strong>
+					</article>
+				{/if}
+			</section>
 
-								<div class="event-count">
-									{group.rows.length} events
-								</div>
-							</div>
-
-							<div class="event-table-wrapper">
-								<table class="event-table">
-									<thead>
-										<tr>
-											<th>Start</th>
-											<th>End</th>
-											<th>Duration</th>
-											<th>Status</th>
-										</tr>
-									</thead>
-
-									<tbody>
-										{#each group.rows as row}
-											<tr>
-												<td>{row.start}</td>
-												<td>{row.end}</td>
-												<td>{row.duration}</td>
-												<td>
-													<span
-														class="event-status"
-														class:on-status={isOnStatus(row.status)}
-														class:off-status={isOffStatus(row.status)}
-													>
-														{row.status}
-													</span>
-												</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							</div>
+			{#if canViewSpeedStatsTable || canViewTravelDistanceTable}
+				<section class="speed-detail-grid">
+					{#if canViewTravelDistanceTable}
+						<article>
+							<span>Total Distance</span>
+							<strong>
+								{travelDistance?.total_distance_nm || travelDistance?.totalDistanceNm
+									? `${formatNumber(travelDistance?.total_distance_nm ?? travelDistance?.totalDistanceNm, 3)} NM`
+									: '-'}
+							</strong>
 						</article>
-					{/each}
-				</div>
-			{:else}
-				<div class="empty-box">Event status history is not available yet.</div>
+
+						<article>
+							<span>Outside Safety Zone</span>
+							<strong>
+								{travelDistance?.outside_safety_zone_distance_nm ||
+								travelDistance?.outsideSafetyZoneDistanceNm
+									? `${formatNumber(travelDistance?.outside_safety_zone_distance_nm ?? travelDistance?.outsideSafetyZoneDistanceNm, 3)} NM`
+									: '-'}
+							</strong>
+						</article>
+					{/if}
+				</section>
 			{/if}
-		</section>
-	{/if}
 
-	{#if canViewEngineOnOffChart}
-		<section class="table-section engine-status-chart-section">
-			<div class="section-header">
-				<div>
-					<span class="section-kicker">Chart</span>
-					<h2>Engine Activity Timeline</h2>
-				</div>
+			{#if canViewTravelDistanceTable}
+				<section class="table-section trip-summary-section">
+					<div class="section-header">
+						<div>
+							<span class="section-kicker">Trip</span>
+							<h2>Daily Trip Summary</h2>
+						</div>
 
-				<strong>{statusTimelineGroups.length} engines</strong>
-			</div>
-
-			{#if statusTimelineGroups.length}
-				<div class="compact-status-list">
-					<div class="compact-status-legend">
-						<span><i class="legend-on"></i> ON</span>
-						<span><i class="legend-off"></i> OFF</span>
+						<strong>{dailyTripSummary.totalPoints} points</strong>
 					</div>
 
-					{#each statusTimelineGroups as group}
-						<div class="compact-status-row">
-							<div class="compact-engine-name">
-								<strong>{group.engineName}</strong>
-								<span>{formatDurationSeconds(group.totalSeconds)}</span>
-							</div>
-
-							<div
-								class="compact-timeline-area"
-								class:engine-timeline-area={canViewClutchInChart &&
-									hasClutchInTimelineData(
-										getTimelineGroupByEngine(clutchTimelineGroups, group.engineName)
-									)}
-							>
-								<div class="compact-transition-labels">
-									{#each group.transitionLabels as label}
-										<span
-											class="compact-transition-label"
-											style={`left: ${label.leftPercent}%;`}
-											title={`${label.time} · ${label.status}`}
-										>
-											{label.time}
-										</span>
-									{/each}
+					{#if canViewDailyPathMap && dailyTripSummary.totalPoints}
+						<div class="trip-summary-content">
+							<article class="trip-route-card">
+								<div class="trip-route-header">
+									<div>
+										<span>Route Preview</span>
+										<strong>{dailyTripSummary.startTime} - {dailyTripSummary.endTime}</strong>
+									</div>
 								</div>
 
-								<div class="compact-timeline">
-									{#each group.segments as segment}
+								<div class="trip-route-map">
+									{#if active}
 										<div
-											class="compact-segment"
-											class:on-segment={isOnStatus(segment.status)}
-											class:off-segment={isOffStatus(segment.status)}
-											style={`width: ${segment.widthPercent}%;`}
-											title={`${segment.status} | ${segment.start} - ${segment.end} | ${segment.duration}`}
-										>
-											{#if segment.widthPercent >= 12}
-												<span>{segment.status}</span>
-											{/if}
-										</div>
-									{/each}
+											class="trip-leaflet-map"
+											use:tripLeafletMap={{
+												points: tripMapPoints,
+												zones: mapZones,
+												assets: tripMapAssets
+											}}
+										></div>
+									{/if}
 								</div>
 
-								<div class="compact-axis">
-									<span>{group.segments[0]?.start || '-'}</span>
-									<span>{group.segments[group.segments.length - 1]?.end || '-'}</span>
+								{#if mapZones.length || tripAssetLegendTypes.length}
+									<div class="trip-zone-legend" aria-label="Zone legend">
+										{#each mapZones as zone}
+											<span>
+												<i
+													style={`--zone-color: ${zone.color}; --zone-fill: ${zone.fillColor};`}
+													aria-hidden="true"
+												></i>
+												{zone.name}
+											</span>
+										{/each}
+
+										{#each tripAssetLegendTypes as assetType}
+											<span class="trip-asset-legend-item">
+												<img src={assetType.icon} alt={`${assetType.label} icon`} />
+												{assetType.label}
+											</span>
+										{/each}
+									</div>
+								{/if}
+							</article>
+
+							<article class="trip-summary-card">
+								<div class="trip-summary-list">
+									<div>
+										<span>Total Distance</span>
+										<strong>{formatNumber(dailyTripSummary.totalDistanceNm, 3)} NM</strong>
+									</div>
+
+									{#if canViewLiterPerNauticalMileTable}
+										<div>
+											<span>Fuel per Nautical Mile</span>
+											<strong>
+												{literPerNauticalMile === null
+													? '-'
+													: `${formatNumber(literPerNauticalMile, 2)} L/NM (${visibleFuelSourceForDistance})`}
+											</strong>
+										</div>
+									{/if}
+
+									<div>
+										<span>Outside Safety Zone</span>
+										<strong>{formatNumber(dailyTripSummary.outsideDistanceNm, 3)} NM</strong>
+									</div>
+
+									<div>
+										<span>Outside Points</span>
+										<strong>{dailyTripSummary.outsidePoints}</strong>
+									</div>
+
+									<div>
+										<span>Start Coordinate</span>
+										<strong class="coordinate-pair">
+											<CopyableCoordinate
+												value={formatCoordinatePair(
+													dailyTripSummary.startLat,
+													dailyTripSummary.startLng
+												)}
+												display={formatCoordinatePair(
+													dailyTripSummary.startLat,
+													dailyTripSummary.startLng
+												)}
+												label="start coordinate"
+												compact
+											/>
+										</strong>
+									</div>
+
+									<div>
+										<span>End Coordinate</span>
+										<strong class="coordinate-pair">
+											<CopyableCoordinate
+												value={formatCoordinatePair(
+													dailyTripSummary.endLat,
+													dailyTripSummary.endLng
+												)}
+												display={formatCoordinatePair(
+													dailyTripSummary.endLat,
+													dailyTripSummary.endLng
+												)}
+												label="end coordinate"
+												compact
+											/>
+										</strong>
+									</div>
 								</div>
+							</article>
+						</div>
+					{:else}
+						<div class="empty-box">Daily trip path is not available yet.</div>
+					{/if}
+				</section>
+			{/if}
+
+			{#if canViewEngineRuntimeTable}
+				<section class="table-section">
+					<div class="section-header">
+						<div>
+							<span class="section-kicker">Runtime</span>
+							<h2>Engine Running Hour</h2>
+						</div>
+						<strong>{runtimeRows.length} rows</strong>
+					</div>
+
+					{#if runtimeRows.length}
+						<div class="table-wrapper">
+							<table>
+								<thead>
+									<tr>
+										<th>Engine</th>
+										<th>Running Hour</th>
+										<th>Runtime Hours</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each runtimeRows as row}
+										<tr>
+											<td>{row.engine_name || row.engineName || row.engine || row.name || '-'}</td>
+											<td
+												>{row.runtime_formatted ||
+													row.runtimeFormatted ||
+													formatHour(row.runtime_hours ?? row.runtimeHours)}</td
+											>
+											<td>{formatHour(row.runtime_hours ?? row.runtimeHours)}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					{:else}
+						<div class="empty-box">Runtime data is not available yet.</div>
+					{/if}
+				</section>
+			{/if}
+
+			{#if canViewEngineEventStatusHistory}
+				<section class="table-section event-history-section">
+					<div class="section-header">
+						<div>
+							<span class="section-kicker">Status</span>
+							<h2>Engine Event Status History</h2>
+						</div>
+
+						<strong>{statusHistoryGroups.length} engines</strong>
+					</div>
+
+					{#if statusHistoryGroups.length}
+						<div class="event-history-grid">
+							{#each statusHistoryGroups as group}
+								<article class="event-card">
+									<div class="event-card-header">
+										<div>
+											<span>Engine</span>
+											<strong>{group.engineName}</strong>
+										</div>
+
+										<div class="event-count">
+											{group.rows.length} events
+										</div>
+									</div>
+
+									<div class="event-table-wrapper">
+										<table class="event-table">
+											<thead>
+												<tr>
+													<th>Start</th>
+													<th>End</th>
+													<th>Duration</th>
+													<th>Status</th>
+												</tr>
+											</thead>
+
+											<tbody>
+												{#each group.rows as row}
+													<tr>
+														<td>{row.start}</td>
+														<td>{row.end}</td>
+														<td>{row.duration}</td>
+														<td>
+															<span
+																class="event-status"
+																class:on-status={isOnStatus(row.status)}
+																class:off-status={isOffStatus(row.status)}
+															>
+																{row.status}
+															</span>
+														</td>
+													</tr>
+												{/each}
+											</tbody>
+										</table>
+									</div>
+								</article>
+							{/each}
+						</div>
+					{:else}
+						<div class="empty-box">Event status history is not available yet.</div>
+					{/if}
+				</section>
+			{/if}
+
+			{#if canViewEngineOnOffChart}
+				<section class="table-section engine-status-chart-section">
+					<div class="section-header">
+						<div>
+							<span class="section-kicker">Chart</span>
+							<h2>Engine Activity Timeline</h2>
+						</div>
+
+						<strong>{statusTimelineGroups.length} engines</strong>
+					</div>
+
+					{#if statusTimelineGroups.length}
+						<div class="compact-status-list">
+							<div class="compact-status-legend">
+								<span><i class="legend-on"></i> ON</span>
+								<span><i class="legend-off"></i> OFF</span>
 							</div>
 
-							{#each [getTimelineGroupByEngine(clutchTimelineGroups, group.engineName)] as clutchGroup}
-								{#if canViewClutchInChart && hasClutchInTimelineData(clutchGroup)}
-									<div class="compact-timeline-area clutch-timeline-area">
+							{#each statusTimelineGroups as group}
+								<div class="compact-status-row">
+									<div class="compact-engine-name">
+										<strong>{group.engineName}</strong>
+										<span>{formatDurationSeconds(group.totalSeconds)}</span>
+									</div>
+
+									<div
+										class="compact-timeline-area"
+										class:engine-timeline-area={canViewClutchInChart &&
+											hasClutchInTimelineData(
+												getTimelineGroupByEngine(clutchTimelineGroups, group.engineName)
+											)}
+									>
 										<div class="compact-transition-labels">
-											{#each clutchGroup.transitionLabels as label}
+											{#each group.transitionLabels as label}
 												<span
-													class="compact-transition-label clutch-transition-label"
+													class="compact-transition-label"
 													style={`left: ${label.leftPercent}%;`}
-													title={`${label.time} Â· ${label.status}`}
+													title={`${label.time} · ${label.status}`}
 												>
 													{label.time}
 												</span>
 											{/each}
 										</div>
 
-										<div class="compact-timeline clutch-timeline">
-											{#each clutchGroup.segments as segment}
+										<div class="compact-timeline">
+											{#each group.segments as segment}
 												<div
-													class="compact-segment clutch-segment"
+													class="compact-segment"
 													class:on-segment={isOnStatus(segment.status)}
 													class:off-segment={isOffStatus(segment.status)}
 													style={`width: ${segment.widthPercent}%;`}
-													title={`Clutch ${segment.status} | ${segment.start} - ${segment.end} | ${segment.duration}`}
+													title={`${segment.status} | ${segment.start} - ${segment.end} | ${segment.duration}`}
 												>
 													{#if segment.widthPercent >= 12}
 														<span>{segment.status}</span>
@@ -4179,509 +4178,569 @@
 										</div>
 
 										<div class="compact-axis">
-											<span>{clutchGroup.segments[0]?.start || '-'}</span>
-											<span>{clutchGroup.segments[clutchGroup.segments.length - 1]?.end || '-'}</span>
+											<span>{group.segments[0]?.start || '-'}</span>
+											<span>{group.segments[group.segments.length - 1]?.end || '-'}</span>
 										</div>
 									</div>
-								{/if}
+
+									{#each [getTimelineGroupByEngine(clutchTimelineGroups, group.engineName)] as clutchGroup}
+										{#if canViewClutchInChart && hasClutchInTimelineData(clutchGroup)}
+											<div class="compact-timeline-area clutch-timeline-area">
+												<div class="compact-transition-labels">
+													{#each clutchGroup.transitionLabels as label}
+														<span
+															class="compact-transition-label clutch-transition-label"
+															style={`left: ${label.leftPercent}%;`}
+															title={`${label.time} Â· ${label.status}`}
+														>
+															{label.time}
+														</span>
+													{/each}
+												</div>
+
+												<div class="compact-timeline clutch-timeline">
+													{#each clutchGroup.segments as segment}
+														<div
+															class="compact-segment clutch-segment"
+															class:on-segment={isOnStatus(segment.status)}
+															class:off-segment={isOffStatus(segment.status)}
+															style={`width: ${segment.widthPercent}%;`}
+															title={`Clutch ${segment.status} | ${segment.start} - ${segment.end} | ${segment.duration}`}
+														>
+															{#if segment.widthPercent >= 12}
+																<span>{segment.status}</span>
+															{/if}
+														</div>
+													{/each}
+												</div>
+
+												<div class="compact-axis">
+													<span>{clutchGroup.segments[0]?.start || '-'}</span>
+													<span
+														>{clutchGroup.segments[clutchGroup.segments.length - 1]?.end ||
+															'-'}</span
+													>
+												</div>
+											</div>
+										{/if}
+									{/each}
+								</div>
 							{/each}
 						</div>
-					{/each}
-				</div>
-			{:else}
-				<div class="empty-box">Engine Activity timeline is not available yet.</div>
-			{/if}
-		</section>
-	{/if}
-
-	{#if canViewFuelConsumptionTable}
-		<section class="table-section">
-			<div class="section-header">
-				<div>
-					<span class="section-kicker">Fuel</span>
-					<h2>Fuel Consumption</h2>
-				</div>
-				<strong>{fuelRows.length} rows</strong>
-			</div>
-
-			{#if canViewFuelFod && hasFodUsage}
-				<div class="fod-usage-summary" class:single-fod-layout={hasFodSingleOnly}>
-					{#if hasFodSingleOnly}
-						<article>
-							<span>FOD Single</span>
-							<strong>{formatLiter(fodSingleValue)}</strong>
-						</article>
-
-						<article class="fod-total-card">
-							<span>Total FOD</span>
-							<strong>{formatLiter(fodTotalValue)}</strong>
-						</article>
 					{:else}
-						<article>
-							<span>FOD Port</span>
-							<strong>{formatLiter(fodPortValue)}</strong>
-						</article>
-
-						<article>
-							<span>FOD STBD</span>
-							<strong>{formatLiter(fodStbdValue)}</strong>
-						</article>
-
-						<article class="fod-total-card">
-							<span>Total FOD</span>
-							<strong>{formatLiter(fodTotalValue)}</strong>
-						</article>
+						<div class="empty-box">Engine Activity timeline is not available yet.</div>
 					{/if}
-				</div>
+				</section>
 			{/if}
 
-			{#if fuelRows.length}
-				<div class="table-wrapper">
-					<table>
-						<thead>
-							<tr>
-								<th>Engine</th>
-								<th>Type</th>
-								{#if canShowFuelEcu}<th>ECU</th>{/if}
-								{#if canShowFuelFms}<th>FMS</th>{/if}
-								{#if canShowFuelEmsInternal}
-									<th>{getDailyFuelSourceLabel('ems_internal')}</th>
-								{/if}
-								{#if canShowFuelEmsExternal}
-									<th>{getDailyFuelSourceLabel('ems_external')}</th>
-								{/if}
-								{#if canShowFuelEngineMaker}<th>Engine Maker</th>{/if}
-							</tr>
-						</thead>
-
-						<tbody>
-							{#each fuelRows as row}
-								<tr>
-									<td>{row.engine_name || row.engineName || row.engine || row.name || '-'}</td>
-									<td>{row.is_main ? 'ME' : 'AE'}</td>
-
-									{#if canShowFuelEcu}
-										<td>{formatPlainLiter(row.ecu)}</td>
-									{/if}
-
-									{#if canShowFuelFms}
-										<td>{formatPlainLiter(row.fms)}</td>
-									{/if}
-
-									{#if canShowFuelEmsInternal}
-										<td>{formatPlainLiter(row.ems_internal ?? row.emsInternal)}</td>
-									{/if}
-
-									{#if canShowFuelEmsExternal}
-										<td>{formatPlainLiter(row.ems_external ?? row.emsExternal)}</td>
-									{/if}
-
-									{#if canShowFuelEngineMaker}
-										<td>{formatPlainLiter(row.engine_maker ?? row.engineMaker)}</td>
-									{/if}
-								</tr>
-							{/each}
-
-							<tr class="total-row">
-								<td colspan="2">Grand Total</td>
-
-								{#if canShowFuelEcu}
-									<td>{formatPlainLiter(fuelSummary?.ecu)}</td>
-								{/if}
-
-								{#if canShowFuelFms}
-									<td>{formatPlainLiter(fuelSummary?.fms)}</td>
-								{/if}
-
-								{#if canShowFuelEmsInternal}
-									<td>{formatPlainLiter(fuelSummary?.ems_internal ?? fuelSummary?.emsInternal)}</td>
-								{/if}
-
-								{#if canShowFuelEmsExternal}
-									<td>{formatPlainLiter(fuelSummary?.ems_external ?? fuelSummary?.emsExternal)}</td>
-								{/if}
-
-								{#if canShowFuelEngineMaker}
-									<td>{formatPlainLiter(fuelSummary?.engine_maker ?? fuelSummary?.engineMaker)}</td>
-								{/if}
-							</tr>
-						</tbody>
-					</table>
-				</div>
-			{:else}
-				<div class="empty-box">Fuel data is not available yet.</div>
-			{/if}
-		</section>
-	{/if}
-
-	{#if canViewEngineRpmStatsTable}
-		<section class="table-section">
-			<div class="section-header">
-				<div>
-					<span class="section-kicker">RPM</span>
-					<h2>Engine RPM Statistics</h2>
-				</div>
-
-				<strong>{engineRpmStatsRows.length} engines</strong>
-			</div>
-
-			{#if engineRpmStatsRows.length}
-				<div class="table-wrapper">
-					<table>
-						<thead>
-							<tr>
-								<th>Engine</th>
-								<th>Top RPM</th>
-								<th>Avg RPM</th>
-							</tr>
-						</thead>
-
-						<tbody>
-							{#each engineRpmStatsRows as row}
-								<tr>
-									<td>{row.engine_name || row.engineName || row.engine || row.name || '-'}</td>
-									<td>{formatNumber(row.top_rpm ?? row.topRpm ?? row.top ?? 0, 0)}</td>
-									<td>{formatNumber(row.avg_rpm ?? row.avgRpm ?? row.average ?? 0, 1)}</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				</div>
-			{:else}
-				<div class="empty-box">RPM statistics data is not available yet.</div>
-			{/if}
-		</section>
-	{/if}
-
-	{#if canViewRpmRangeRuntimeFuel}
-		<section class="table-section rpm-curve-section">
-			<div class="section-header">
-				<div>
-					<span class="section-kicker">RPM</span>
-					<h2>RPM Range Runtime & Fuel</h2>
-				</div>
-
-				<div class="rpm-curve-source-control">
-					<label for="rpm-runtime-fuel-source">Table Source</label>
-					<select id="rpm-runtime-fuel-source" bind:value={selectedRpmRuntimeFuelTableKey}>
-						{#each visibleRpmCurveTables as table}
-							<option value={table.key}>{getRpmCurveTableLabel(table)}</option>
-						{/each}
-					</select>
-				</div>
-			</div>
-
-			{#if selectedRpmCurveTable}
-				<div class="rpm-curve-table-list">
-					<article class="rpm-curve-table-card">
-						<div class="rpm-curve-table-header">
-							<div>
-								<span>Curve Source</span>
-								<strong>{getRpmCurveTableLabel(selectedRpmCurveTable)}</strong>
-							</div>
-
-							<div class="rpm-curve-table-count">
-								{selectedRpmCurveTable.rows.length} rows
-							</div>
+			{#if canViewFuelConsumptionTable}
+				<section class="table-section">
+					<div class="section-header">
+						<div>
+							<span class="section-kicker">Fuel</span>
+							<h2>Fuel Consumption</h2>
 						</div>
+						<strong>{fuelRows.length} rows</strong>
+					</div>
 
+					{#if canViewFuelFod && hasFodUsage}
+						<div class="fod-usage-summary" class:single-fod-layout={hasFodSingleOnly}>
+							{#if hasFodSingleOnly}
+								<article>
+									<span>FOD Single</span>
+									<strong>{formatLiter(fodSingleValue)}</strong>
+								</article>
+
+								<article class="fod-total-card">
+									<span>Total FOD</span>
+									<strong>{formatLiter(fodTotalValue)}</strong>
+								</article>
+							{:else}
+								<article>
+									<span>FOD Port</span>
+									<strong>{formatLiter(fodPortValue)}</strong>
+								</article>
+
+								<article>
+									<span>FOD STBD</span>
+									<strong>{formatLiter(fodStbdValue)}</strong>
+								</article>
+
+								<article class="fod-total-card">
+									<span>Total FOD</span>
+									<strong>{formatLiter(fodTotalValue)}</strong>
+								</article>
+							{/if}
+						</div>
+					{/if}
+
+					{#if fuelRows.length}
 						<div class="table-wrapper">
 							<table>
 								<thead>
 									<tr>
 										<th>Engine</th>
-										<th>RPM Range</th>
-										<th>Runtime</th>
-										{#if selectedRpmCurveTable.showLh}
-											<th>L/h</th>
+										<th>Type</th>
+										{#if canShowFuelEcu}<th>ECU</th>{/if}
+										{#if canShowFuelFms}<th>FMS</th>{/if}
+										{#if canShowFuelEmsInternal}
+											<th>{getDailyFuelSourceLabel('ems_internal')}</th>
 										{/if}
-										{#each selectedRpmCurveTable.sourceKeys as sourceKey}
-											<th>{getRpmSourceLabel(sourceKey)} Fuel</th>
-										{/each}
+										{#if canShowFuelEmsExternal}
+											<th>{getDailyFuelSourceLabel('ems_external')}</th>
+										{/if}
+										{#if canShowFuelEngineMaker}<th>Engine Maker</th>{/if}
 									</tr>
 								</thead>
 
 								<tbody>
-									{#each selectedRpmCurveTable.rows as row}
-										<tr class:total-row={row.is_total_row || row.isTotalRow}>
+									{#each fuelRows as row}
+										<tr>
 											<td>{row.engine_name || row.engineName || row.engine || row.name || '-'}</td>
+											<td>{row.is_main ? 'ME' : 'AE'}</td>
 
-											<td>{formatRpmRangeLabel(row.rpm_range || row.rpmRange || row.range)}</td>
-
-											<td>{formatHour(getRpmRuntimeHours(row))}</td>
-
-											{#if selectedRpmCurveTable.showLh}
-												<td>{formatNumber(getRpmLhValue(row), 2)}</td>
+											{#if canShowFuelEcu}
+												<td>{formatPlainLiter(row.ecu)}</td>
 											{/if}
 
-											{#each selectedRpmCurveTable.sourceKeys as sourceKey}
-												<td>{formatLiter(getRpmFuelValue(row, sourceKey))}</td>
-											{/each}
+											{#if canShowFuelFms}
+												<td>{formatPlainLiter(row.fms)}</td>
+											{/if}
+
+											{#if canShowFuelEmsInternal}
+												<td>{formatPlainLiter(row.ems_internal ?? row.emsInternal)}</td>
+											{/if}
+
+											{#if canShowFuelEmsExternal}
+												<td>{formatPlainLiter(row.ems_external ?? row.emsExternal)}</td>
+											{/if}
+
+											{#if canShowFuelEngineMaker}
+												<td>{formatPlainLiter(row.engine_maker ?? row.engineMaker)}</td>
+											{/if}
+										</tr>
+									{/each}
+
+									<tr class="total-row">
+										<td colspan="2">Grand Total</td>
+
+										{#if canShowFuelEcu}
+											<td>{formatPlainLiter(fuelSummary?.ecu)}</td>
+										{/if}
+
+										{#if canShowFuelFms}
+											<td>{formatPlainLiter(fuelSummary?.fms)}</td>
+										{/if}
+
+										{#if canShowFuelEmsInternal}
+											<td
+												>{formatPlainLiter(
+													fuelSummary?.ems_internal ?? fuelSummary?.emsInternal
+												)}</td
+											>
+										{/if}
+
+										{#if canShowFuelEmsExternal}
+											<td
+												>{formatPlainLiter(
+													fuelSummary?.ems_external ?? fuelSummary?.emsExternal
+												)}</td
+											>
+										{/if}
+
+										{#if canShowFuelEngineMaker}
+											<td
+												>{formatPlainLiter(
+													fuelSummary?.engine_maker ?? fuelSummary?.engineMaker
+												)}</td
+											>
+										{/if}
+									</tr>
+								</tbody>
+							</table>
+						</div>
+					{:else}
+						<div class="empty-box">Fuel data is not available yet.</div>
+					{/if}
+				</section>
+			{/if}
+
+			{#if canViewEngineRpmStatsTable}
+				<section class="table-section">
+					<div class="section-header">
+						<div>
+							<span class="section-kicker">RPM</span>
+							<h2>Engine RPM Statistics</h2>
+						</div>
+
+						<strong>{engineRpmStatsRows.length} engines</strong>
+					</div>
+
+					{#if engineRpmStatsRows.length}
+						<div class="table-wrapper">
+							<table>
+								<thead>
+									<tr>
+										<th>Engine</th>
+										<th>Top RPM</th>
+										<th>Avg RPM</th>
+									</tr>
+								</thead>
+
+								<tbody>
+									{#each engineRpmStatsRows as row}
+										<tr>
+											<td>{row.engine_name || row.engineName || row.engine || row.name || '-'}</td>
+											<td>{formatNumber(row.top_rpm ?? row.topRpm ?? row.top ?? 0, 0)}</td>
+											<td>{formatNumber(row.avg_rpm ?? row.avgRpm ?? row.average ?? 0, 1)}</td>
 										</tr>
 									{/each}
 								</tbody>
 							</table>
 						</div>
-					</article>
-				</div>
-			{:else}
-				<div class="empty-box">RPM range data is not available yet.</div>
+					{:else}
+						<div class="empty-box">RPM statistics data is not available yet.</div>
+					{/if}
+				</section>
 			{/if}
-		</section>
-	{/if}
 
-	{#if canViewRpmVsFuelChart}
-		<section class="table-section rpm-fuel-curve-section">
-			<div class="section-header">
-				<div>
-					<span class="section-kicker">Chart</span>
-					<h2>RPM vs Fuel Curve</h2>
-				</div>
-
-				<strong>{rpmFuelCurveChartGroups.length} engines</strong>
-			</div>
-
-			{#if rpmFuelCurveChartGroups.length}
-				<div class="rpm-fuel-chart-grid">
-					{#each rpmFuelCurveChartGroups as group}
-						<article class="rpm-fuel-chart-card">
-							<div class="rpm-fuel-chart-header">
-								<div>
-									<span>Engine</span>
-									<strong>{group.engineName}</strong>
-								</div>
-
-								<div class="rpm-fuel-chart-badges">
-									{#if group.hasSpeed}
-										<span>Speed</span>
-									{/if}
-
-									{#if group.hasEcu && canShowFuelEcu}
-										<span>{getDailyFuelSourceLabel('ecu')}</span>
-									{/if}
-
-									{#if group.hasFms && canShowFuelFms}
-										<span>{getDailyFuelSourceLabel('fms')}</span>
-									{/if}
-
-									{#if group.hasInternal && canShowFuelEmsInternal}
-										<span>{getDailyFuelSourceLabel('ems_internal')}</span>
-									{/if}
-
-									{#if group.hasExternal && canShowFuelEmsExternal}
-										<span>{getDailyFuelSourceLabel('ems_external')}</span>
-									{/if}
-
-									{#if group.hasEngineMaker && canShowFuelEngineMaker}
-										<span>{getDailyFuelSourceLabel('engine_maker')}</span>
-									{/if}
-								</div>
-							</div>
-
-							<div class="rpm-fuel-chart-canvas">
-								<canvas use:rpmFuelCurveChart={group}></canvas>
-							</div>
-
-							<div class="rpm-fuel-chart-hint">
-								Scroll to zoom in/out, drag to select a zoom area, Shift + drag to pan, double click to reset.
-							</div>
-						</article>
-					{/each}
-				</div>
-			{:else}
-				<div class="empty-box">RPM vs fuel curve chart is not available yet.</div>
-			{/if}
-		</section>
-	{/if}
-
-	{#if canViewFuelFod}
-		<section class="table-section rpm-fuel-curve-section fod-chart-section">
-			<div class="section-header">
-				<div>
-					<span class="section-kicker">FOD</span>
-					<h2>FOD Fuel Curve</h2>
-				</div>
-
-				<strong>{fodChartGroup?.points || 0} points</strong>
-			</div>
-
-			{#if fodChartGroup}
-				<div class="rpm-fuel-chart-grid fod-chart-grid">
-					<article class="rpm-fuel-chart-card fod-chart-card">
-						<div class="rpm-fuel-chart-header">
-							<div>
-								<span>Fuel oil day tank</span>
-								<strong>
-									{#if fodChartGroup.hasPort || fodChartGroup.hasStbd}
-										FOD Port / FOD STBD
-									{:else}
-										FOD Single
-									{/if}
-								</strong>
-							</div>
-
-							<div class="rpm-fuel-chart-badges">
-								{#if fodChartGroup.hasSingle}<span>FOD Single</span>{/if}
-								{#if fodChartGroup.hasPort}<span>FOD Port</span>{/if}
-								{#if fodChartGroup.hasStbd}<span>FOD STBD</span>{/if}
-							</div>
+			{#if canViewRpmRangeRuntimeFuel}
+				<section class="table-section rpm-curve-section">
+					<div class="section-header">
+						<div>
+							<span class="section-kicker">RPM</span>
+							<h2>RPM Range Runtime & Fuel</h2>
 						</div>
 
-						<div class="rpm-fuel-chart-canvas fod-chart-canvas">
-							<canvas use:fodLineChart={fodChartGroup}></canvas>
+						<div class="rpm-curve-source-control">
+							<label for="rpm-runtime-fuel-source">Table Source</label>
+							<select id="rpm-runtime-fuel-source" bind:value={selectedRpmRuntimeFuelTableKey}>
+								{#each visibleRpmCurveTables as table}
+									<option value={table.key}>{getRpmCurveTableLabel(table)}</option>
+								{/each}
+							</select>
 						</div>
+					</div>
 
-						<div class="rpm-fuel-chart-hint">
-							Scroll to zoom in/out, drag to select a zoom area, Shift + drag to pan, double click to reset.
-						</div>
-					</article>
-				</div>
-			{:else}
-				<div class="empty-box">FOD fuel curve chart is not available yet.</div>
-			{/if}
-		</section>
-	{/if}
-
-	{#if canViewHighRpmOutsideSafetyZoneTable}
-		<section class="table-section high-rpm-section">
-			<div class="section-header">
-				<div>
-					<span class="section-kicker">RPM</span>
-					<h2>High RPM Outside Safety Zone</h2>
-				</div>
-
-				<strong>{highRpmOutsideSafetyZoneRows.length} rows</strong>
-			</div>
-
-			{#if highRpmOutsideSafetyZoneGroups.length}
-				<div class="high-rpm-group-list">
-					{#each highRpmOutsideSafetyZoneGroups as group}
-						<article class="high-rpm-card">
-							<div class="high-rpm-title">
-								{group.rule}
-							</div>
-
-							<div class="high-rpm-table-wrapper">
-								<table class="high-rpm-table">
-									<thead>
-										<tr>
-											<th>Engine (ME)</th>
-											<th>Duration</th>
-											<th>% RH</th>
-											<th>Avg Speed</th>
-											<th>Highest Speed</th>
-											<th>Lowest Speed</th>
-										</tr>
-									</thead>
-
-									<tbody>
-										{#each group.rows as row}
-											<tr>
-												<td>{row.engine}</td>
-												<td>{row.duration}</td>
-												<td>{formatPercent(row.percentageRh)}</td>
-												<td>{formatSpeed(row.avgSpeed)}</td>
-												<td>{formatSpeed(row.highestSpeed)}</td>
-												<td>{formatSpeed(row.lowestSpeed)}</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							</div>
-						</article>
-					{/each}
-				</div>
-			{:else}
-				<div class="empty-box">High RPM outside safety zone data is not available yet.</div>
-			{/if}
-		</section>
-	{/if}
-
-	{#if canViewHighRpmLowSpeedTable}
-		<section class="table-section low-speed-section">
-			<div class="section-header">
-				<div>
-					<span class="section-kicker">Fuel</span>
-					<h2>High RPM Low Speed</h2>
-				</div>
-
-				<strong>{highRpmLowSpeedGroups.length} engines</strong>
-			</div>
-
-			{#if highRpmLowSpeedGroups.length}
-				<div class="low-speed-content">
-					<div class="low-speed-grid">
-						{#each highRpmLowSpeedGroups as group}
-							<article class="low-speed-card">
-								<div class="low-speed-card-header">
+					{#if selectedRpmCurveTable}
+						<div class="rpm-curve-table-list">
+							<article class="rpm-curve-table-card">
+								<div class="rpm-curve-table-header">
 									<div>
-										<span>Engine</span>
-										<strong>{group.engineName}</strong>
+										<span>Curve Source</span>
+										<strong>{getRpmCurveTableLabel(selectedRpmCurveTable)}</strong>
 									</div>
 
-									<div class="low-speed-total-pill">
-										{formatLiter(group.totalFuel)}
+									<div class="rpm-curve-table-count">
+										{selectedRpmCurveTable.rows.length} rows
 									</div>
 								</div>
 
-								<div class="low-speed-table-wrapper">
-									<table class="low-speed-table">
+								<div class="table-wrapper">
+									<table>
 										<thead>
 											<tr>
-												<th>Start Time</th>
-												<th>End Time</th>
-												<th>Fuel Used</th>
+												<th>Engine</th>
+												<th>RPM Range</th>
+												<th>Runtime</th>
+												{#if selectedRpmCurveTable.showLh}
+													<th>L/h</th>
+												{/if}
+												{#each selectedRpmCurveTable.sourceKeys as sourceKey}
+													<th>{getRpmSourceLabel(sourceKey)} Fuel</th>
+												{/each}
 											</tr>
 										</thead>
 
 										<tbody>
-											{#each group.rows as row}
-												<tr>
-													<td>{formatTimeDot(row.startTime)}</td>
-													<td>{formatTimeDot(row.endTime)}</td>
-													<td>{formatLiter(row.fuelUsedL)}</td>
+											{#each selectedRpmCurveTable.rows as row}
+												<tr class:total-row={row.is_total_row || row.isTotalRow}>
+													<td
+														>{row.engine_name ||
+															row.engineName ||
+															row.engine ||
+															row.name ||
+															'-'}</td
+													>
+
+													<td>{formatRpmRangeLabel(row.rpm_range || row.rpmRange || row.range)}</td>
+
+													<td>{formatHour(getRpmRuntimeHours(row))}</td>
+
+													{#if selectedRpmCurveTable.showLh}
+														<td>{formatNumber(getRpmLhValue(row), 2)}</td>
+													{/if}
+
+													{#each selectedRpmCurveTable.sourceKeys as sourceKey}
+														<td>{formatLiter(getRpmFuelValue(row, sourceKey))}</td>
+													{/each}
 												</tr>
 											{/each}
 										</tbody>
 									</table>
 								</div>
 							</article>
-						{/each}
+						</div>
+					{:else}
+						<div class="empty-box">RPM range data is not available yet.</div>
+					{/if}
+				</section>
+			{/if}
+
+			{#if canViewRpmVsFuelChart}
+				<section class="table-section rpm-fuel-curve-section">
+					<div class="section-header">
+						<div>
+							<span class="section-kicker">Chart</span>
+							<h2>RPM vs Fuel Curve</h2>
+						</div>
+
+						<strong>{rpmFuelCurveChartGroups.length} engines</strong>
 					</div>
 
-					<article class="low-speed-summary-card">
-						<div class="low-speed-summary-header">
-							<div>
-								<span>Summary</span>
-								<strong>Total All Engines</strong>
-							</div>
-						</div>
+					{#if rpmFuelCurveChartGroups.length}
+						<div class="rpm-fuel-chart-grid">
+							{#each rpmFuelCurveChartGroups as group}
+								<article class="rpm-fuel-chart-card">
+									<div class="rpm-fuel-chart-header">
+										<div>
+											<span>Engine</span>
+											<strong>{group.engineName}</strong>
+										</div>
 
-						<div class="low-speed-table-wrapper">
-							<table class="low-speed-table">
-								<tbody>
-									{#each highRpmLowSpeedTotals as row}
-										<tr>
-											<td>TOTAL {row.engineName}</td>
-											<td>{formatLiter(row.fuelUsedL)}</td>
-										</tr>
-									{/each}
+										<div class="rpm-fuel-chart-badges">
+											{#if group.hasSpeed}
+												<span>Speed</span>
+											{/if}
 
-									<tr class="grand-total-row">
-										<td>GRAND TOTAL ALL ENGINES</td>
-										<td>{formatLiter(highRpmLowSpeedGrandTotal)}</td>
-									</tr>
-								</tbody>
-							</table>
+											{#if group.hasEcu && canShowFuelEcu}
+												<span>{getDailyFuelSourceLabel('ecu')}</span>
+											{/if}
+
+											{#if group.hasFms && canShowFuelFms}
+												<span>{getDailyFuelSourceLabel('fms')}</span>
+											{/if}
+
+											{#if group.hasInternal && canShowFuelEmsInternal}
+												<span>{getDailyFuelSourceLabel('ems_internal')}</span>
+											{/if}
+
+											{#if group.hasExternal && canShowFuelEmsExternal}
+												<span>{getDailyFuelSourceLabel('ems_external')}</span>
+											{/if}
+
+											{#if group.hasEngineMaker && canShowFuelEngineMaker}
+												<span>{getDailyFuelSourceLabel('engine_maker')}</span>
+											{/if}
+										</div>
+									</div>
+
+									<div class="rpm-fuel-chart-canvas">
+										<canvas use:rpmFuelCurveChart={group}></canvas>
+									</div>
+
+									<div class="rpm-fuel-chart-hint">
+										Scroll to zoom in/out, drag to select a zoom area, Shift + drag to pan, double
+										click to reset.
+									</div>
+								</article>
+							{/each}
 						</div>
-					</article>
-				</div>
-			{:else}
-				<div class="empty-box">High RPM low speed data is not available yet.</div>
+					{:else}
+						<div class="empty-box">RPM vs fuel curve chart is not available yet.</div>
+					{/if}
+				</section>
 			{/if}
-		</section>
-	{/if}
-	{/if}
+
+			{#if canViewFuelFod}
+				<section class="table-section rpm-fuel-curve-section fod-chart-section">
+					<div class="section-header">
+						<div>
+							<span class="section-kicker">FOD</span>
+							<h2>FOD Fuel Chart</h2>
+						</div>
+
+						<strong>{fodChartGroup?.points || 0} points</strong>
+					</div>
+
+					{#if fodChartGroup}
+						<div class="rpm-fuel-chart-grid fod-chart-grid">
+							<article class="rpm-fuel-chart-card fod-chart-card">
+								<div class="rpm-fuel-chart-header">
+									<div>
+										<span>Fuel oil day tank</span>
+										<strong>
+											{#if fodChartGroup.hasPort || fodChartGroup.hasStbd}
+												FOD Port / FOD STBD
+											{:else}
+												FOD Single
+											{/if}
+										</strong>
+									</div>
+
+									<div class="rpm-fuel-chart-badges">
+										{#if fodChartGroup.hasSingle}<span>FOD Single</span>{/if}
+										{#if fodChartGroup.hasPort}<span>FOD Port</span>{/if}
+										{#if fodChartGroup.hasStbd}<span>FOD STBD</span>{/if}
+									</div>
+								</div>
+
+								<div class="rpm-fuel-chart-canvas fod-chart-canvas">
+									<canvas use:fodLineChart={fodChartGroup}></canvas>
+								</div>
+
+								<div class="rpm-fuel-chart-hint">
+									Scroll to zoom in/out, drag to select a zoom area, Shift + drag to pan, double
+									click to reset.
+								</div>
+							</article>
+						</div>
+					{:else}
+						<div class="empty-box">FOD fuel curve chart is not available yet.</div>
+					{/if}
+				</section>
+			{/if}
+
+			{#if canViewHighRpmOutsideSafetyZoneTable}
+				<section class="table-section high-rpm-section">
+					<div class="section-header">
+						<div>
+							<span class="section-kicker">RPM</span>
+							<h2>High RPM Outside Safety Zone</h2>
+						</div>
+
+						<strong>{highRpmOutsideSafetyZoneRows.length} rows</strong>
+					</div>
+
+					{#if highRpmOutsideSafetyZoneGroups.length}
+						<div class="high-rpm-group-list">
+							{#each highRpmOutsideSafetyZoneGroups as group}
+								<article class="high-rpm-card">
+									<div class="high-rpm-title">
+										{group.rule}
+									</div>
+
+									<div class="high-rpm-table-wrapper">
+										<table class="high-rpm-table">
+											<thead>
+												<tr>
+													<th>Engine (ME)</th>
+													<th>Duration</th>
+													<th>% RH</th>
+													<th>Avg Speed</th>
+													<th>Highest Speed</th>
+													<th>Lowest Speed</th>
+												</tr>
+											</thead>
+
+											<tbody>
+												{#each group.rows as row}
+													<tr>
+														<td>{row.engine}</td>
+														<td>{row.duration}</td>
+														<td>{formatPercent(row.percentageRh)}</td>
+														<td>{formatSpeed(row.avgSpeed)}</td>
+														<td>{formatSpeed(row.highestSpeed)}</td>
+														<td>{formatSpeed(row.lowestSpeed)}</td>
+													</tr>
+												{/each}
+											</tbody>
+										</table>
+									</div>
+								</article>
+							{/each}
+						</div>
+					{:else}
+						<div class="empty-box">High RPM outside safety zone data is not available yet.</div>
+					{/if}
+				</section>
+			{/if}
+
+			{#if canViewHighRpmLowSpeedTable}
+				<section class="table-section low-speed-section">
+					<div class="section-header">
+						<div>
+							<span class="section-kicker">Fuel</span>
+							<h2>High RPM Low Speed</h2>
+						</div>
+
+						<strong>{highRpmLowSpeedGroups.length} engines</strong>
+					</div>
+
+					{#if highRpmLowSpeedGroups.length}
+						<div class="low-speed-content">
+							<div class="low-speed-grid">
+								{#each highRpmLowSpeedGroups as group}
+									<article class="low-speed-card">
+										<div class="low-speed-card-header">
+											<div>
+												<span>Engine</span>
+												<strong>{group.engineName}</strong>
+											</div>
+
+											<div class="low-speed-total-pill">
+												{formatLiter(group.totalFuel)}
+											</div>
+										</div>
+
+										<div class="low-speed-table-wrapper">
+											<table class="low-speed-table">
+												<thead>
+													<tr>
+														<th>Start Time</th>
+														<th>End Time</th>
+														<th>Fuel Used</th>
+													</tr>
+												</thead>
+
+												<tbody>
+													{#each group.rows as row}
+														<tr>
+															<td>{formatTimeDot(row.startTime)}</td>
+															<td>{formatTimeDot(row.endTime)}</td>
+															<td>{formatLiter(row.fuelUsedL)}</td>
+														</tr>
+													{/each}
+												</tbody>
+											</table>
+										</div>
+									</article>
+								{/each}
+							</div>
+
+							<article class="low-speed-summary-card">
+								<div class="low-speed-summary-header">
+									<div>
+										<span>Summary</span>
+										<strong>Total All Engines</strong>
+									</div>
+								</div>
+
+								<div class="low-speed-table-wrapper">
+									<table class="low-speed-table">
+										<tbody>
+											{#each highRpmLowSpeedTotals as row}
+												<tr>
+													<td>TOTAL {row.engineName}</td>
+													<td>{formatLiter(row.fuelUsedL)}</td>
+												</tr>
+											{/each}
+
+											<tr class="grand-total-row">
+												<td>GRAND TOTAL ALL ENGINES</td>
+												<td>{formatLiter(highRpmLowSpeedGrandTotal)}</td>
+											</tr>
+										</tbody>
+									</table>
+								</div>
+							</article>
+						</div>
+					{:else}
+						<div class="empty-box">High RPM low speed data is not available yet.</div>
+					{/if}
+				</section>
+			{/if}
+		{/if}
 
 		{#if shouldShowDateRangeOverlay}
 			<div class="load-required-overlay">
@@ -5181,9 +5240,7 @@
 	.trip-leaflet-map :global(.trip-map-popup-title) {
 		display: block;
 		padding: 10px 36px 9px 12px;
-		background:
-			linear-gradient(135deg, rgba(37, 99, 235, 0.2), rgba(96, 165, 250, 0.04)),
-			#111827;
+		background: linear-gradient(135deg, rgba(37, 99, 235, 0.2), rgba(96, 165, 250, 0.04)), #111827;
 		color: #f8fafc;
 		font-size: 13px;
 		font-weight: 800;
@@ -5202,9 +5259,7 @@
 		align-items: center;
 		gap: 10px;
 		padding: 10px 36px 10px 12px;
-		background:
-			linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(37, 99, 235, 0.05)),
-			#111827;
+		background: linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(37, 99, 235, 0.05)), #111827;
 		border-bottom: 1px solid rgba(148, 163, 184, 0.22);
 	}
 
@@ -5378,7 +5433,8 @@
 			grid-column: span 2;
 		}
 
-		.summary-grid:has(> .summary-card:nth-child(5):last-child) > .summary-card:nth-last-child(-n + 2) {
+		.summary-grid:has(> .summary-card:nth-child(5):last-child)
+			> .summary-card:nth-last-child(-n + 2) {
 			grid-column: span 3;
 		}
 	}

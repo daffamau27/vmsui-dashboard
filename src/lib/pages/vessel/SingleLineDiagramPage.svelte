@@ -8,6 +8,7 @@
 	import { apiRequest } from '$lib/api/authApi.js';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
 	import SingleLineFlowControls from '$lib/components/single-line/SingleLineFlowControls.svelte';
+	import SingleLineWireEdge from '$lib/components/single-line/SingleLineWireEdge.svelte';
 	import SingleLineNode from '$lib/components/single-line/SingleLineNode.svelte';
 	import SingleLineSectionNode from '$lib/components/single-line/SingleLineSectionNode.svelte';
 
@@ -25,6 +26,10 @@
 	const nodeTypes = {
 		sldNode: SingleLineNode,
 		sldSection: SingleLineSectionNode
+	};
+
+	const edgeTypes = {
+		sldWire: SingleLineWireEdge
 	};
 
 	const CABLES = {
@@ -63,6 +68,7 @@
 	let ei = $derived(normalizeEi(eip?.ei));
 	let router = $derived(mcp?.router || {});
 	let mastGps = $derived(mcp?.gps || {});
+	let dbAc220v = $derived(mcp?.db_ac_220v || mcp?.dbAc220v || {});
 	let hasEip = $derived(Boolean(eip));
 	let hasWayjunFuelSource = $derived(
 		hasFuelSourceForWayjun(eip?.wayjun?.fuel_source) ||
@@ -263,9 +269,13 @@
 		return min + ((max - min) * index) / (total - 1);
 	}
 
-	function laneOffset(index, total, base = 26, step = 16) {
+	function laneOffset(index, total, base = 34, step = 26) {
 		if (total <= 1) return base;
 		return base + index * step;
+	}
+
+	function sectionNodeBendOffset(index, total, base = 42, step = 32) {
+		return laneOffset(index, total, base, step);
 	}
 
 	function makeEdge(id, source, target, type = 'canbus', options = {}) {
@@ -281,7 +291,7 @@
 			target,
 			sourceHandle: options.sourceHandle,
 			targetHandle: options.targetHandle,
-			type: options.edgeType || 'smoothstep',
+			type: options.edgeType || 'sldWire',
 			style: `stroke: ${cable.color}; stroke-width: ${options.width || cable.width};`,
 			pathOptions,
 			selectable: false,
@@ -430,17 +440,19 @@
 		const wayjunOutputPorts = outputPortsForProcessor('wayjun');
 		const eiOutputPorts = outputPortsForProcessor('ei');
 		const mcpDirectOutputConnections = outgoingConnections.filter((entry) => entry.processor === 'mcp');
-		const mcpRightOutputPorts = mcpDirectOutputConnections.length
-			? sourcePortsFromHandles(
-					[
-						{ handleId: 'mast-out' },
-						{ handleId: 'router-out' },
-						...mcpDirectOutputConnections
-					],
-					22,
-					84
-				)
-			: [makePort('mast-out', 'source', 'right', 28), makePort('router-out', 'source', 'right', 55)];
+		const mcpRightHandleEntries = [
+			{ handleId: 'mast-out' },
+			{ handleId: 'router-out' },
+			...mcpDirectOutputConnections
+		];
+		const mcpRightOutputPorts = sourcePortsFromHandles(mcpRightHandleEntries, 22, 84);
+		function getMcpRightBendOffset(handleId) {
+			const handleIndex = Math.max(
+				0,
+				mcpRightHandleEntries.findIndex((entry) => entry.handleId === handleId)
+			);
+			return sectionNodeBendOffset(handleIndex, mcpRightHandleEntries.length, 44, 34);
+		}
 		const rightContentBottom = Math.max(
 			aeRows.length ? aeNodeStartY + aeRows.length * aeNodeGap : 0,
 			fuelRows.length ? fuelNodeStartY + fuelRows.length * fuelNodeGap : 0
@@ -459,7 +471,7 @@
 			makeSection('mast-section', 'MAST LOCATION', mastSectionX, 10, mastSectionWidth, wheelhouseSectionHeight),
 			makeSection('engine-section', 'ENGINE ROOM', 20, engineSectionY, engineSectionWidth, engineSectionHeight),
 
-			makeSection('wheelhouse-system-group', 'VESSEL SYSTEM', 82, 70, 200, 370, {
+			makeSection('wheelhouse-system-group', 'VESSEL SYSTEM', 82, 70, 200, 205, {
 				variant: 'group'
 			}),
 			makeSection('engine-system-group', 'VESSEL SYSTEM', 72, 600, 220, engineGroupHeight, {
@@ -494,22 +506,8 @@
 				height: 82,
 				handles: [makePort('out', 'source', 'right', 50)]
 			}),
-			makeNode('db-ac', 'DB-AC 220V', 116, 195, {
-				online: null,
-				variant: 'sensor',
-				width: 132,
-				height: 82,
-				handles: [makePort('out', 'source', 'right', 50)]
-			}),
-			makeNode('wind-sensor', 'WIND SENSOR', 116, 285, {
-				online: null,
-				variant: 'sensor',
-				width: 132,
-				height: 82,
-				handles: [makePort('out', 'source', 'right', 50)]
-			}),
-			makeNode('speed-doppler', 'SPEED\nDOPPLER', 116, 375, {
-				online: null,
+			makeNode('db-ac', dbAc220v?.name || 'DB-AC 220V', 116, 195, {
+				online: dbAc220v?.online,
 				variant: 'sensor',
 				width: 132,
 				height: 82,
@@ -526,10 +524,8 @@
 				height: 236,
 				panelOpened: resolvePanelOpened(mcp),
 				handles: [
-					makePort('gps-in', 'target', 'left', 18),
-					makePort('power-in', 'target', 'left', 34),
-					makePort('wind-in', 'target', 'left', 50),
-					makePort('speed-in', 'target', 'left', 66),
+					makePort('gps-in', 'target', 'left', 24),
+					makePort('power-in', 'target', 'left', 42),
 					...mcpRightOutputPorts,
 					...mcpBottomPorts
 				]
@@ -647,53 +643,41 @@
 		const nextEdges = [
 			makeEdge('vessel-gps-to-mcp', 'vessel-gps', 'mcp', 'canbus', {
 				sourceHandle: 'out',
-				targetHandle: 'gps-in'
+				targetHandle: 'gps-in',
+				pathOffset: sectionNodeBendOffset(0, 2, 42, 34)
 			}),
 			makeEdge('db-to-mcp', 'db-ac', 'mcp', 'powerAc', {
 				sourceHandle: 'out',
-				targetHandle: 'power-in'
-			}),
-			makeEdge('wind-to-mcp', 'wind-sensor', 'mcp', 'canbus', {
-				sourceHandle: 'out',
-				targetHandle: 'wind-in'
-			}),
-			makeEdge('speed-to-mcp', 'speed-doppler', 'mcp', 'canbus', {
-				sourceHandle: 'out',
-				targetHandle: 'speed-in'
+				targetHandle: 'power-in',
+				pathOffset: sectionNodeBendOffset(1, 2, 42, 34)
 			}),
 			makeEdge('mcp-to-router', 'mcp', 'router', 'ethernet', {
 				sourceHandle: 'router-out',
-				targetHandle: 'in'
+				targetHandle: 'in',
+				pathOffset: getMcpRightBendOffset('router-out')
 			}),
 			makeEdge('mcp-to-mast-gps', 'mcp', 'mast-gps', 'canbus', {
 				sourceHandle: 'mast-out',
-				targetHandle: 'in'
+				targetHandle: 'in',
+				pathOffset: getMcpRightBendOffset('mast-out')
 			}),
 			...mcpToProcessorCables.map((name, index) =>
 				makeEdge(`mcp-${name}-to-${mcpProcessorTargetId}`, 'mcp', mcpProcessorTargetId, name === 'power' ? 'powerDc' : name, {
 					sourceHandle: `${mcpProcessorTargetId}-${name}-out`,
 					targetHandle: `${name}-in`,
-					pathOffset: laneOffset(index, mcpToProcessorCables.length, 26, 15)
+					pathOffset: laneOffset(index, mcpToProcessorCables.length, 32, 24)
 				})
 			)
 		];
 
-		const engineEdgeLaneCounters = {};
 		engineRows.forEach((engine, index) => {
 			const targetProcessor = engine?.processor || defaultEngineProcessorId;
 			if (targetProcessor) {
-				const targetTotal = engineRows.filter(
-					(row) => (row?.processor || defaultEngineProcessorId) === targetProcessor
-				).length;
-				const targetLane = engineEdgeLaneCounters[targetProcessor] || 0;
-				engineEdgeLaneCounters[targetProcessor] = targetLane + 1;
-
 				nextEdges.push(
 					makeEdge(`engine-${index}-to-${targetProcessor}`, `engine-${index}`, targetProcessor, 'canbus', {
 						sourceHandle: 'out',
 						targetHandle: `engine-${index}-in`,
-						edgeType: 'step',
-						pathOffset: laneOffset(targetLane, targetTotal, 24, 18)
+						pathOffset: sectionNodeBendOffset(index, engineRows.length, 46, 32)
 					})
 				);
 			}
@@ -706,27 +690,31 @@
 			).length;
 			const sourceLane = outputEdgeLaneCounters[sourceNode] || 0;
 			outputEdgeLaneCounters[sourceNode] = sourceLane + 1;
-			return laneOffset(sourceLane, sourceTotal, 24, 18);
+			return laneOffset(sourceLane, sourceTotal, 38, 30);
 		}
 
 		aeRows.forEach((load, index) => {
 			const sourceNode = resolveOutputProcessor(load);
+			const sourceHandle = `ae-${index}-out`;
 			nextEdges.push(
 				makeEdge(`${sourceNode}-to-ae-${index}`, sourceNode, `ae-${index}`, 'canbus', {
-					sourceHandle: `ae-${index}-out`,
+					sourceHandle,
 					targetHandle: 'in',
-					pathOffset: getOutputLane(sourceNode)
+					pathOffset:
+						sourceNode === 'mcp' ? getMcpRightBendOffset(sourceHandle) : getOutputLane(sourceNode)
 				})
 			);
 		});
 
 		fuelRows.forEach((source, index) => {
 			const sourceNode = resolveOutputProcessor(source);
+			const sourceHandle = `fuel-${index}-out`;
 			nextEdges.push(
 				makeEdge(`${sourceNode}-to-fuel-${index}`, sourceNode, `fuel-${index}`, 'canbus', {
-					sourceHandle: `fuel-${index}-out`,
+					sourceHandle,
 					targetHandle: 'in',
-					pathOffset: getOutputLane(sourceNode)
+					pathOffset:
+						sourceNode === 'mcp' ? getMcpRightBendOffset(sourceHandle) : getOutputLane(sourceNode)
 				})
 			);
 		});
@@ -889,8 +877,6 @@
 
 				<div class="sld-skeleton-node small gps"></div>
 				<div class="sld-skeleton-node small power"></div>
-				<div class="sld-skeleton-node small wind"></div>
-				<div class="sld-skeleton-node small speed"></div>
 				<div class="sld-skeleton-node panel mcp"></div>
 				<div class="sld-skeleton-node device router"></div>
 				<div class="sld-skeleton-node device mast-gps"></div>
@@ -906,8 +892,6 @@
 
 				<div class="sld-skeleton-wire wire-gps"></div>
 				<div class="sld-skeleton-wire wire-power"></div>
-				<div class="sld-skeleton-wire wire-wind"></div>
-				<div class="sld-skeleton-wire wire-speed"></div>
 				<div class="sld-skeleton-wire wire-router"></div>
 				<div class="sld-skeleton-wire wire-mast"></div>
 				<div class="sld-skeleton-wire wire-down-one"></div>
@@ -944,6 +928,7 @@
 					nodes={flowNodes}
 					edges={flowEdges}
 					{nodeTypes}
+					{edgeTypes}
 					fitView
 					fitViewOptions={{ padding: 0.1, minZoom: 0.34, maxZoom: 1.0, duration: 260 }}
 					minZoom={0.28}
@@ -1291,16 +1276,6 @@
 		top: 23%;
 	}
 
-	.sld-skeleton-node.wind {
-		left: 8%;
-		top: 33%;
-	}
-
-	.sld-skeleton-node.speed {
-		left: 8%;
-		top: 43%;
-	}
-
 	.sld-skeleton-node.mcp {
 		left: 25%;
 		top: 16%;
@@ -1384,18 +1359,6 @@
 		top: 28%;
 		width: 9%;
 		background: rgba(245, 158, 11, 0.42);
-	}
-
-	.sld-skeleton-wire.wire-wind {
-		left: 17%;
-		top: 38%;
-		width: 9%;
-	}
-
-	.sld-skeleton-wire.wire-speed {
-		left: 17%;
-		top: 48%;
-		width: 9%;
 	}
 
 	.sld-skeleton-wire.wire-router {

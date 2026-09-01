@@ -158,6 +158,14 @@
 
 	let selectedHireIsOn = $derived(isOnHireStatus(getVesselHireRawValue(selectedVesselRecord)));
 	let selectedHireLabel = $derived(selectedHireIsOn ? 'On Hire' : 'Off Hire');
+	let canManageHireStatus = $derived(hasPermission(['manage_hire_status']));
+	let hireStatusToggleTitle = $derived(
+		permissionLoading
+			? 'Loading hire status permission...'
+			: !canManageHireStatus
+				? 'Requires manage_hire_status permission'
+				: hireStatusError || `Change to ${selectedHireIsOn ? 'Off Hire' : 'On Hire'}`
+	);
 
 	let vesselPageKey = $derived(
 		String($selectedVesselId || getVesselId($selectedVesselInfo) || 'no-vessel')
@@ -978,6 +986,10 @@
 		const vesselId = getVesselId(selectedVesselRecord) || $selectedVesselId;
 
 		if (!vesselId || hireStatusLoading) return;
+		if (!canManageHireStatus) {
+			hireStatusError = 'This account does not have the manage_hire_status permission.';
+			return;
+		}
 
 		const nextHireStatus = !selectedHireIsOn;
 		hireStatusLoading = true;
@@ -1137,24 +1149,40 @@
 				</span>
 			</div>
 
-			<button
-				type="button"
-				class="hire-status-toggle"
-				class:on-hire={selectedHireIsOn}
-				class:off-hire={!selectedHireIsOn}
-				onclick={toggleSelectedVesselHireStatus}
-				disabled={!selectedVesselRecord || hireStatusLoading}
-				aria-pressed={selectedHireIsOn}
-				title={hireStatusError || `Change to ${selectedHireIsOn ? 'Off Hire' : 'On Hire'}`}
-			>
-				<span class="hire-toggle-track" aria-hidden="true">
-					<span></span>
-				</span>
-				<span class="hire-toggle-copy">
-					<small>Hire Status</small>
-					<strong>{hireStatusLoading ? 'Updating...' : selectedHireLabel}</strong>
-				</span>
-			</button>
+			{#if canManageHireStatus}
+				<button
+					type="button"
+					class="hire-status-toggle"
+					class:on-hire={selectedHireIsOn}
+					class:off-hire={!selectedHireIsOn}
+					onclick={toggleSelectedVesselHireStatus}
+					disabled={!selectedVesselRecord || hireStatusLoading || permissionLoading}
+					aria-pressed={selectedHireIsOn}
+					title={hireStatusToggleTitle}
+				>
+					<span class="hire-toggle-track" aria-hidden="true">
+						<span></span>
+					</span>
+					<span class="hire-toggle-copy">
+						<small>Hire Status</small>
+						<strong>{hireStatusLoading ? 'Updating...' : selectedHireLabel}</strong>
+					</span>
+				</button>
+			{:else}
+				<div
+					class="hire-status-display"
+					class:on-hire={selectedHireIsOn}
+					class:off-hire={!selectedHireIsOn}
+					role="status"
+					title="Hire status"
+				>
+					<span class="hire-status-dot" aria-hidden="true"></span>
+					<span class="hire-toggle-copy">
+						<small>Hire Status</small>
+						<strong>{selectedHireLabel}</strong>
+					</span>
+				</div>
+			{/if}
 		</div>
 
 		<div class="vessel-dropdown">
@@ -1996,6 +2024,7 @@
 	.vessel-selector,
 	.topbar-item,
 	.topbar-table,
+	.hire-status-display,
 	.hire-status-toggle {
 		height: var(--vessel-topbar-item-height);
 		min-height: var(--vessel-topbar-item-height);
@@ -2201,6 +2230,46 @@
 			rgba(15, 23, 42, 0.62);
 		color: #fbbf24;
 		cursor: pointer;
+	}
+
+	.hire-status-display {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: flex-start;
+		gap: 9px;
+		margin-left: auto;
+		min-width: 126px;
+		padding: 0 12px;
+		border-color: rgba(245, 158, 11, 0.22);
+		background:
+			linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+		color: #fbbf24;
+		cursor: default;
+		user-select: none;
+	}
+
+	.hire-status-display.on-hire {
+		border-color: rgba(16, 185, 129, 0.24);
+		background:
+			linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+		color: #34d399;
+	}
+
+	.hire-status-dot {
+		width: 9px;
+		height: 9px;
+		border-radius: 999px;
+		background: #f59e0b;
+		box-shadow: 0 0 12px rgba(245, 158, 11, 0.42);
+		flex: 0 0 auto;
+	}
+
+	.hire-status-display.on-hire .hire-status-dot {
+		background: #22c55e;
+		box-shadow: 0 0 12px rgba(34, 197, 94, 0.46);
 	}
 
 	.hire-status-toggle:hover:not(:disabled) {
@@ -2565,11 +2634,13 @@
 		.vessel-selector,
 		.topbar-item,
 		.topbar-table,
+		.hire-status-display,
 		.hire-status-toggle {
 			height: var(--vessel-topbar-item-height);
 			min-height: var(--vessel-topbar-item-height);
 		}
 
+		.hire-status-display,
 		.hire-status-toggle {
 			margin-left: 0;
 			min-width: 128px;
@@ -2632,11 +2703,13 @@
 		.vessel-selector,
 		.topbar-item,
 		.topbar-table,
+		.hire-status-display,
 		.hire-status-toggle {
 			height: var(--vessel-topbar-item-height);
 			min-height: var(--vessel-topbar-item-height);
 		}
 
+		.hire-status-display,
 		.hire-status-toggle {
 			margin-left: 0;
 			min-width: 108px;
