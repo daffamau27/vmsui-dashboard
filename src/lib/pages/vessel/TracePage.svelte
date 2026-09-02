@@ -3,7 +3,7 @@
 	import VesselMap from '$lib/VesselMap.svelte';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
 	import { getVesselCctvSnapshots, getVesselTrace } from '$lib/api/traceApi.js';
-	import { fade, fly, scale } from 'svelte/transition';
+	import { fade, scale } from 'svelte/transition';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
 	import CctvSnapshotImage from '$lib/components/CctvSnapshotImage.svelte';
@@ -43,10 +43,14 @@
 	let cctvItems = $state([]);
 	let cctvSnapshotsError = $state('');
 	let cctvSnapshotsTotal = $state(0);
+	let cctvSnapshotsTotalPages = $state(1);
 	let cctvSnapshotsBuffering = $state(false);
 	let cctvSnapshotsLoadedPages = $state(0);
+	let cctvSnapshotsLoadedPageNumbers = $state([]);
+	let cctvSnapshotBufferPivotPage = $state(1);
 	let selectedCctvPanelKey = $state('');
 	let cctvSnapshotRequestId = 0;
+	let cctvSnapshotPageRequests = new Set();
 	const CCTV_SNAPSHOT_PAGE_SIZE = 50;
 	const ENABLE_CCTV_BACKGROUND_BUFFER = true;
 	const CCTV_BACKGROUND_PAGE_DELAY_MS = 900;
@@ -326,11 +330,23 @@
 		cctvSnapshotsTotal =
 			Number(
 				payload?.total ??
+					payload?.total_items ??
+					payload?.totalItems ??
 					payload?.pagination?.total ??
 					payload?.pagination?.totalItems ??
+					payload?.pagination?.total_items ??
 					payload?.meta?.total ??
 					items.length
 			) || 0;
+		cctvSnapshotsTotalPages =
+			Number(
+				payload?.totalPages ??
+					payload?.total_pages ??
+					payload?.pagination?.totalPages ??
+					payload?.pagination?.total_pages ??
+					payload?.meta?.totalPages ??
+					payload?.meta?.total_pages
+			) || Math.max(1, Math.ceil((Number(cctvSnapshotsTotal) || 0) / CCTV_SNAPSHOT_PAGE_SIZE));
 
 		return items
 			.map((item, index) => {
@@ -385,7 +401,119 @@
 	}
 
 	function getCctvTotalPages(total = cctvSnapshotsTotal) {
+		const explicitTotalPages = Number(cctvSnapshotsTotalPages);
+		if (Number.isFinite(explicitTotalPages) && explicitTotalPages > 1) {
+			return Math.max(1, Math.ceil(explicitTotalPages));
+		}
+
 		return Math.max(1, Math.ceil((Number(total) || 0) / CCTV_SNAPSHOT_PAGE_SIZE));
+	}
+
+	function markCctvPageLoaded(page) {
+		const pageNumber = Number(page);
+		if (!Number.isInteger(pageNumber) || pageNumber < 1) return;
+
+		if (!cctvSnapshotsLoadedPageNumbers.includes(pageNumber)) {
+			cctvSnapshotsLoadedPageNumbers = [...cctvSnapshotsLoadedPageNumbers, pageNumber].sort(
+				(a, b) => a - b
+			);
+		}
+
+		cctvSnapshotsLoadedPages = cctvSnapshotsLoadedPageNumbers.length;
+	}
+
+	function isCctvPageLoaded(page) {
+		const pageNumber = Number(page);
+		return Number.isInteger(pageNumber) && cctvSnapshotsLoadedPageNumbers.includes(pageNumber);
+	}
+
+	function isCctvPageRequesting(page, requestId = cctvSnapshotRequestId) {
+		const pageNumber = Number(page);
+		return (
+			Number.isInteger(pageNumber) &&
+			cctvSnapshotPageRequests.has(`${requestId}|${pageNumber}`)
+		);
+	}
+
+	function getNextCctvBufferPage(totalPages = getCctvTotalPages(), requestId = cctvSnapshotRequestId) {
+		const normalizedTotalPages = Math.max(1, Number(totalPages) || 1);
+		const pivotPage = Math.min(
+			normalizedTotalPages,
+			Math.max(1, Number(cctvSnapshotBufferPivotPage) || 1)
+		);
+
+		for (let distance = 0; distance < normalizedTotalPages; distance += 1) {
+			const candidates =
+				distance === 0
+					? [pivotPage]
+					: [pivotPage + distance, pivotPage - distance];
+
+			for (const page of candidates) {
+				if (page < 1 || page > normalizedTotalPages) continue;
+				if (isCctvPageLoaded(page) || isCctvPageRequesting(page, requestId)) continue;
+				return page;
+			}
+		}
+
+		return null;
+	}
+
+	function getCctvPageForTimestamp(timestampMs) {
+		const startMs = getRangeTimestampMs(startDateTime);
+		const endMs = getRangeTimestampMs(endDateTime);
+		const totalPages = getCctvTotalPages();
+
+		if (
+			!Number.isFinite(timestampMs) ||
+			!Number.isFinite(startMs) ||
+			!Number.isFinite(endMs) ||
+			endMs <= startMs ||
+			totalPages <= 1
+		) {
+			return 1;
+		}
+
+		const ratio = Math.min(1, Math.max(0, (timestampMs - startMs) / (endMs - startMs)));
+		return Math.min(totalPages, Math.max(1, Math.floor(ratio * totalPages) + 1));
+	}
+
+	function getCctvBufferSegments() {
+		const totalPages = getCctvTotalPages();
+		if (!cctvSnapshotsLoadedPageNumbers.length || totalPages <= 0) return [];
+
+		const loadedPages = cctvSnapshotsLoadedPageNumbers
+			.filter((page) => Number.isInteger(page) && page >= 1 && page <= totalPages)
+			.sort((a, b) => a - b);
+
+		if (!loadedPages.length) return [];
+
+		const ranges = [];
+
+		for (const page of loadedPages) {
+			const lastRange = ranges.at(-1);
+
+			if (lastRange && page === lastRange.endPage + 1) {
+				lastRange.endPage = page;
+			} else {
+				ranges.push({
+					startPage: page,
+					endPage: page
+				});
+			}
+		}
+
+		return ranges.map((range) => {
+			const left = ((range.startPage - 1) / totalPages) * 100;
+			const width = ((range.endPage - range.startPage + 1) / totalPages) * 100;
+
+			return {
+				key: `${range.startPage}-${range.endPage}`,
+				startPage: range.startPage,
+				endPage: range.endPage,
+				left: Math.min(100, Math.max(0, left)),
+				width: Math.min(100 - left, Math.max(0, width))
+			};
+		});
 	}
 
 	function getRangeTimestampMs(value) {
@@ -783,6 +911,68 @@
 		}
 	}
 
+	async function loadCctvSnapshotPage({
+		requestId,
+		vesselId,
+		startTime,
+		endTime,
+		page,
+		preserveTimeline = true,
+		source = 'buffer'
+	}) {
+		const pageNumber = Number(page);
+		if (!Number.isInteger(pageNumber) || pageNumber < 1) return null;
+		if (requestId !== cctvSnapshotRequestId) return null;
+		if (isCctvPageLoaded(pageNumber)) return null;
+
+		const requestKey = `${requestId}|${pageNumber}`;
+		if (cctvSnapshotPageRequests.has(requestKey)) return null;
+
+		cctvSnapshotPageRequests.add(requestKey);
+
+		try {
+			traceDebug('[TRACE_CCTV_PAGE_REQUEST]', {
+				source,
+				page: pageNumber,
+				totalPages: getCctvTotalPages(),
+				pageSize: CCTV_SNAPSHOT_PAGE_SIZE,
+				loadedBefore: cctvItems.length,
+				vesselId,
+				startTime,
+				endTime
+			});
+
+			const result = await getVesselCctvSnapshots({
+				vesselId,
+				startTime,
+				endTime,
+				page: pageNumber,
+				pageSize: CCTV_SNAPSHOT_PAGE_SIZE
+			});
+
+			if (requestId !== cctvSnapshotRequestId) return null;
+
+			const nextItems = normalizeCctvSnapshots(result);
+			const beforeMergeCount = cctvItems.length;
+			applyCctvItems(mergeCctvSnapshots(cctvItems, nextItems), { preserveTimeline });
+			markCctvPageLoaded(pageNumber);
+
+			traceDebug('[TRACE_CCTV_PAGE_LOADED]', {
+				source,
+				page: pageNumber,
+				totalPages: getCctvTotalPages(),
+				normalizedItems: nextItems.length,
+				beforeMergeCount,
+				afterMergeCount: cctvItems.length,
+				totalSnapshots: cctvSnapshotsTotal
+			});
+
+			return result;
+		} finally {
+			cctvSnapshotPageRequests.delete(requestKey);
+		}
+	}
+
 	async function bufferRemainingCctvSnapshots({
 		requestId,
 		vesselId,
@@ -795,7 +985,10 @@
 		cctvSnapshotsBuffering = true;
 
 		try {
-			for (let page = 2; page <= totalPages; page += 1) {
+			while (cctvSnapshotsLoadedPageNumbers.length < totalPages) {
+				const page = getNextCctvBufferPage(totalPages, requestId);
+				if (!page) return;
+
 				if (requestId !== cctvSnapshotRequestId) {
 					traceDebug('[TRACE_CCTV_PAGE_SKIP_STALE]', {
 						page,
@@ -809,47 +1002,20 @@
 				await sleep(CCTV_BACKGROUND_PAGE_DELAY_MS);
 
 				if (requestId !== cctvSnapshotRequestId) return;
+				if (isCctvPageLoaded(page)) continue;
 
-				traceDebug('[TRACE_CCTV_PAGE_REQUEST]', {
-					page,
-					totalPages,
-					pageSize: CCTV_SNAPSHOT_PAGE_SIZE,
-					loadedBefore: cctvItems.length,
-					vesselId,
-					startTime,
-					endTime
-				});
-
-				const result = await getVesselCctvSnapshots({
+				const result = await loadCctvSnapshotPage({
+					requestId,
 					vesselId,
 					startTime,
 					endTime,
 					page,
-					pageSize: CCTV_SNAPSHOT_PAGE_SIZE
+					preserveTimeline: true,
+					source: 'background-buffer'
 				});
 
-				if (requestId !== cctvSnapshotRequestId) {
-					traceDebug('[TRACE_CCTV_PAGE_RESPONSE_STALE]', {
-						page,
-						requestId,
-						activeRequestId: cctvSnapshotRequestId
-					});
-					return;
-				}
-
-				const nextItems = normalizeCctvSnapshots(result);
-				const beforeMergeCount = cctvItems.length;
-				applyCctvItems(mergeCctvSnapshots(cctvItems, nextItems), { preserveTimeline: true });
-				cctvSnapshotsLoadedPages = page;
-
-				traceDebug('[TRACE_CCTV_PAGE_LOADED]', {
-					page,
-					totalPages,
-					normalizedItems: nextItems.length,
-					beforeMergeCount,
-					afterMergeCount: cctvItems.length,
-					totalSnapshots: cctvSnapshotsTotal
-				});
+				if (requestId !== cctvSnapshotRequestId) return;
+				if (!result) continue;
 			}
 		} catch (err) {
 			console.error('[VESSEL_TRACE_CCTV_BUFFER_ERROR]', err);
@@ -871,7 +1037,11 @@
 
 		cctvItems = [];
 		cctvSnapshotsTotal = 0;
+		cctvSnapshotsTotalPages = 1;
 		cctvSnapshotsLoadedPages = 0;
+		cctvSnapshotsLoadedPageNumbers = [];
+		cctvSnapshotBufferPivotPage = 1;
+		cctvSnapshotPageRequests.clear();
 		cctvSnapshotsBuffering = false;
 
 		traceDebug('[TRACE_CCTV_PAGE_REQUEST]', {
@@ -896,7 +1066,7 @@
 
 		const firstItems = normalizeCctvSnapshots(firstPageResult);
 		applyCctvItems(firstItems, { preserveTimeline: false });
-		cctvSnapshotsLoadedPages = 1;
+		markCctvPageLoaded(1);
 
 		const totalPages = getCctvTotalPages();
 
@@ -912,7 +1082,7 @@
 		if (totalPages > 1 && ENABLE_CCTV_BACKGROUND_BUFFER) {
 			traceDebug('[TRACE_CCTV_BUFFER_START]', {
 				totalPages,
-				nextPage: 2,
+				pivotPage: cctvSnapshotBufferPivotPage,
 				totalSnapshots: cctvSnapshotsTotal,
 				pageSize: CCTV_SNAPSHOT_PAGE_SIZE
 			});
@@ -934,6 +1104,40 @@
 		}
 
 		return firstPageResult;
+	}
+
+	async function ensureCctvPageForTimestamp(timestampMs, source = 'timeline-seek') {
+		if (!Number.isFinite(timestampMs)) return;
+		if (!$selectedVesselId || !startDateTime || !endDateTime) return;
+		if (!cctvSnapshotsTotal || getCctvTotalPages() <= 1) return;
+
+		const targetPage = getCctvPageForTimestamp(timestampMs);
+		cctvSnapshotBufferPivotPage = targetPage;
+		if (isCctvPageLoaded(targetPage)) return;
+
+		const requestId = cctvSnapshotRequestId;
+		const cctvStart = toSnapshotApiDateTime(startDateTime);
+		const cctvEnd = toSnapshotApiDateTime(endDateTime);
+
+		try {
+			await loadCctvSnapshotPage({
+				requestId,
+				vesselId: $selectedVesselId,
+				startTime: cctvStart,
+				endTime: cctvEnd,
+				page: targetPage,
+				preserveTimeline: true,
+				source
+			});
+		} catch (err) {
+			console.error('[VESSEL_TRACE_CCTV_SEEK_PAGE_ERROR]', err);
+			cctvSnapshotsError = err?.message || 'Failed to load CCTV snapshots near selected time.';
+		}
+	}
+
+	function ensureCctvPageForCurrentTimeline(source = 'timeline-seek') {
+		const timestampMs = getCurrentTimelineTimestampMs();
+		void ensureCctvPageForTimestamp(timestampMs, source);
 	}
 
 	function normalizeRpm(value) {
@@ -1323,6 +1527,7 @@
 		})()
 	);
 	let cctvBufferedPercent = $derived(getCctvBufferedPercent(cctvItems));
+	let cctvBufferSegments = $derived(getCctvBufferSegments());
 	let cctvCameraIndex = $derived(buildCctvCameraIndex(cctvItems));
 
 	let activeTraceTimestampMs = $derived(
@@ -1372,8 +1577,12 @@
 			activePlaybackTimestampMs = NaN;
 			cctvItems = [];
 			cctvSnapshotsTotal = 0;
+			cctvSnapshotsTotalPages = 1;
 			cctvSnapshotsBuffering = false;
 			cctvSnapshotsLoadedPages = 0;
+			cctvSnapshotsLoadedPageNumbers = [];
+			cctvSnapshotBufferPivotPage = 1;
+			cctvSnapshotPageRequests.clear();
 			cctvSnapshotRequestId += 1;
 			return;
 		}
@@ -1388,8 +1597,12 @@
 			activePlaybackTimestampMs = NaN;
 			cctvItems = [];
 			cctvSnapshotsTotal = 0;
+			cctvSnapshotsTotalPages = 1;
 			cctvSnapshotsBuffering = false;
 			cctvSnapshotsLoadedPages = 0;
+			cctvSnapshotsLoadedPageNumbers = [];
+			cctvSnapshotBufferPivotPage = 1;
+			cctvSnapshotPageRequests.clear();
 			cctvSnapshotRequestId += 1;
 			return;
 		}
@@ -1401,8 +1614,12 @@
 			activePlaybackTimestampMs = NaN;
 			cctvItems = [];
 			cctvSnapshotsTotal = 0;
+			cctvSnapshotsTotalPages = 1;
 			cctvSnapshotsBuffering = false;
 			cctvSnapshotsLoadedPages = 0;
+			cctvSnapshotsLoadedPageNumbers = [];
+			cctvSnapshotBufferPivotPage = 1;
+			cctvSnapshotPageRequests.clear();
 			cctvSnapshotRequestId += 1;
 			return;
 		}
@@ -1505,6 +1722,10 @@
 			activePlaybackTimestampMs = NaN;
 			cctvItems = [];
 			cctvSnapshotsTotal = 0;
+			cctvSnapshotsTotalPages = 1;
+			cctvSnapshotsLoadedPageNumbers = [];
+			cctvSnapshotBufferPivotPage = 1;
+			cctvSnapshotPageRequests.clear();
 		} finally {
 			loading = false;
 		}
@@ -1794,6 +2015,7 @@
 
 	function moveTimeline(event) {
 		updateTimelineFromPointer(event);
+		ensureCctvPageForCurrentTimeline('timeline-click');
 	}
 
 	function startTimelineDrag(event) {
@@ -1817,6 +2039,7 @@
 
 		isDraggingTimeline = false;
 		event.currentTarget.releasePointerCapture?.(event.pointerId);
+		ensureCctvPageForCurrentTimeline('timeline-drag-release');
 	}
 
 	function moveStep(direction) {
@@ -2213,7 +2436,13 @@
 					onclick={moveTimeline}
 				>
 					<div class="timeline-track"></div>
-					<div class="timeline-buffer" style={`width: ${cctvBufferedPercent}%`}></div>
+					{#each cctvBufferSegments as segment (segment.key)}
+						<div
+							class="timeline-buffer-segment"
+							style={`left: ${segment.left}%; width: ${segment.width}%;`}
+							title={`CCTV page ${segment.startPage}-${segment.endPage} loaded`}
+						></div>
+					{/each}
 					<div class="timeline-progress" style={`width: ${timelineProgress}%`}></div>
 					<div class="timeline-dot" style={`left: ${timelineProgress}%`}></div>
 				</div>
@@ -3280,7 +3509,7 @@
 	}
 
 	.timeline-track,
-	.timeline-buffer,
+	.timeline-buffer-segment,
 	.timeline-progress,
 	.timeline-dot {
 		pointer-events: none;
@@ -3295,14 +3524,16 @@
 		background: #d5dbe3;
 	}
 
-	.timeline-buffer {
+	.timeline-buffer-segment {
 		position: absolute;
-		left: 0;
 		top: 9px;
 		height: 3px;
 		background: #64748b;
 		opacity: 0.72;
-		transition: width 0.28s ease;
+		transition:
+			left 0.22s ease,
+			width 0.22s ease,
+			opacity 0.22s ease;
 	}
 
 	.timeline-progress {
