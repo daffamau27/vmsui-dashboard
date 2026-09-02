@@ -2466,7 +2466,7 @@
 					</article>
 
 					<article class="info-card">
-						<span>Fuel / Min</span>
+						<span>L / Min</span>
 						<strong>{vesselInfo.fuelPerMinute}</strong>
 					</article>
 
