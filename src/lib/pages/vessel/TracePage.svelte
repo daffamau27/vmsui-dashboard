@@ -173,6 +173,28 @@
 		return Number.isFinite(number) ? number : fallback;
 	}
 
+	function getTraceFuelPerHour(item = {}) {
+		const explicitHourlyValue =
+			item.fuelPerHour ??
+			item.fuel_per_hour ??
+			item.fuel_lph ??
+			item.fuel_l_per_hour ??
+			item.fuel_lh ??
+			item.fuelHour ??
+			item.fuel_hour;
+		const explicitHourly = Number(explicitHourlyValue);
+		if (Number.isFinite(explicitHourly)) return explicitHourly;
+
+		const perMinuteValue =
+			item.fuelPerMinute ??
+			item.fuel_per_minute ??
+			item.fuelRate ??
+			item.fuel_rate ??
+			item.f_rate;
+		const perMinute = Number(perMinuteValue);
+		return Number.isFinite(perMinute) ? perMinute * 60 : 0;
+	}
+
 	function formatNumber(value, digits = 1, fallback = '-') {
 		const number = Number(value);
 		if (!Number.isFinite(number)) return fallback;
@@ -1154,6 +1176,43 @@
 		};
 	}
 
+	function getEngineRpmSortRank(engineName = '') {
+		const normalized = String(engineName).trim().toUpperCase();
+		const compact = normalized.replace(/[\s_-]+/g, '');
+
+		if (/^(ME|MAINENGINE)/.test(compact) || /\bME\b/.test(normalized)) return 0;
+		if (/^(AE|AUX|AUXILIARYENGINE)/.test(compact) || /\bAE\b/.test(normalized)) return 1;
+		return 2;
+	}
+
+	function getEngineSideSortRank(engineName = '') {
+		const normalized = String(engineName).trim().toUpperCase();
+
+		if (/\bPORT\b|\bPS\b/.test(normalized)) return 0;
+		if (/\bCENTER\b|\bCENTRE\b|\bCTR\b/.test(normalized)) return 1;
+		if (/\bSTBD\b|\bSTARBOARD\b|\bSB\b/.test(normalized)) return 2;
+		return 3;
+	}
+
+	function sortRpmEntriesByEnginePriority(entries = []) {
+		return [...entries].sort(([engineNameA], [engineNameB]) => {
+			const engineRankA = getEngineRpmSortRank(engineNameA);
+			const engineRankB = getEngineRpmSortRank(engineNameB);
+
+			if (engineRankA !== engineRankB) return engineRankA - engineRankB;
+
+			const sideRankA = getEngineSideSortRank(engineNameA);
+			const sideRankB = getEngineSideSortRank(engineNameB);
+
+			if (sideRankA !== sideRankB) return sideRankA - sideRankB;
+
+			return String(engineNameA).localeCompare(String(engineNameB), undefined, {
+				numeric: true,
+				sensitivity: 'base'
+			});
+		});
+	}
+
 	function getMaxRpm(rpmObject = {}) {
 		const values = Object.values(rpmObject)
 			.map((value) => toNumber(value, 0))
@@ -1238,6 +1297,14 @@
 		}
 
 		return parts.length ? parts.join(' • ') : '-';
+	}
+
+	function formatTraceDistance(value) {
+		const number = Number(value);
+		if (!Number.isFinite(number)) return '-';
+
+		const digits = Math.abs(number) < 10 ? 3 : 2;
+		return `${formatNumber(number, digits, '0')} NM`;
 	}
 
 	function calculateDistanceNm(fromPoint, toPoint) {
@@ -1433,6 +1500,16 @@
 					longitude: lng,
 					heading: toNumber(item.heading ?? item.course ?? item.bearing, 0),
 					speed: toNumber(item.speed ?? item.sog ?? item.speedOverGround, 0),
+					distance: toNumber(
+						item.distance ??
+							item.distance_nm ??
+							item.distanceNm ??
+							item.totalDistance ??
+							item.total_distance ??
+							item.distance_traveled ??
+							item.distanceTraveled,
+						0
+					),
 					rpm,
 					maxRpm: getMaxRpm(rpm),
 					avgRpm: getAvgRpm(rpm),
@@ -1444,6 +1521,7 @@
 							item.f_rate,
 						0
 					),
+					fuelPerHour: getTraceFuelPerHour(item),
 					weather: normalizeTraceWeather(item.weather ?? item.weatherForecast ?? item.condition),
 					ocean: normalizeOceanCurrent(item.ocean ?? item.oceanCurrent ?? item.current),
 					queue: toNumber(item.queue, 0),
@@ -1496,10 +1574,18 @@
 				longitude: toNumber($selectedVesselInfo?.longitude ?? $selectedVesselInfo?.lng, 0),
 				heading: toNumber($selectedVesselInfo?.heading, 0),
 				speed: toNumber($selectedVesselInfo?.speed, 0),
+				distance: toNumber(
+					$selectedVesselInfo?.distance ??
+						$selectedVesselInfo?.distanceNm ??
+						$selectedVesselInfo?.totalDistance ??
+						$selectedVesselInfo?.total_distance,
+					0
+				),
 				rpm: {},
 				maxRpm: 0,
 				avgRpm: 0,
 				fuelPerMinute: 0,
+				fuelPerHour: 0,
 				weather: $selectedVesselInfo?.weather?.current?.condition || '-',
 				ocean: normalizeOceanCurrent($selectedVesselInfo?.oceanCurrent?.current || {}),
 				queue: 0,
@@ -1517,7 +1603,7 @@
 			'Selected Vessel'
 	);
 
-	let activeRpmEntries = $derived(Object.entries(activePoint.rpm || {}));
+	let activeRpmEntries = $derived(sortRpmEntriesByEnginePriority(Object.entries(activePoint.rpm || {})));
 
 	let timelineProgress = $derived(
 		(() => {
@@ -1553,9 +1639,10 @@
 		longitude: activePoint.longitude,
 		heading: activePoint.heading,
 		currentSpeed: `${formatNumber(activePoint.speed, 1, '0.0')} knot`,
+		distance: formatTraceDistance(activePoint.distance),
 		maxRpm: `${formatNumber(activePoint.maxRpm, 0, '0')} RPM`,
 		avgRpm: `${formatNumber(activePoint.avgRpm, 0, '0')} RPM`,
-		fuelPerMinute: `${formatNumber(activePoint.fuelPerMinute, 2, '0.00')} L/min`,
+		fuelPerHour: `${formatNumber(activePoint.fuelPerHour, 2, '0.00')} L/h`,
 		weatherForecast: activePoint.weather || $selectedVesselInfo?.weather?.current?.condition || '-',
 		oceanCurrent: formatOceanCurrent(activePoint.ocean),
 		lastUpdate: activeTimelineLabel || activePoint.timestamp || '-',
@@ -2461,13 +2548,18 @@
 					</article>
 
 					<article class="info-card">
+						<span>Distance</span>
+						<strong>{vesselInfo.distance}</strong>
+					</article>
+
+					<article class="info-card">
 						<span>Heading</span>
 						<strong>{formatNumber(vesselInfo.heading, 1, '0.0')}°</strong>
 					</article>
 
 					<article class="info-card">
-						<span>L / Min</span>
-						<strong>{vesselInfo.fuelPerMinute}</strong>
+						<span>L/h</span>
+						<strong>{vesselInfo.fuelPerHour}</strong>
 					</article>
 
 					<article class="info-card">

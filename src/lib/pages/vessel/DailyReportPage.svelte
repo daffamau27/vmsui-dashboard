@@ -2959,6 +2959,70 @@
 		return 0;
 	}
 
+	function isRpmTotalRow(row) {
+		const rangeText = String(row?.rpm_range ?? row?.rpmRange ?? row?.range ?? '')
+			.trim()
+			.toUpperCase();
+		const engineText = String(getRowEngineName(row)).trim().toUpperCase();
+
+		return Boolean(
+			row?.is_total_row ||
+				row?.isTotalRow ||
+				rangeText === 'TOTAL' ||
+				rangeText === 'GRAND TOTAL' ||
+				/\bTOTAL$/.test(engineText)
+		);
+	}
+
+	function getRpmEngineTotalRuntimeHours(row, rows = []) {
+		const explicitTotal = parseRuntimeHours(
+			row?.total_runtime_hours ??
+				row?.totalRuntimeHours ??
+				row?.engine_runtime_hours ??
+				row?.engineRuntimeHours ??
+				row?.total_rh ??
+				row?.totalRh
+		);
+
+		if (Number.isFinite(explicitTotal) && explicitTotal > 0) return explicitTotal;
+
+		const targetEngine = normalizeEngineText(getRpmRowEngineName(row));
+		const engineRows = rows.filter((item) => {
+			return normalizeEngineText(getRpmRowEngineName(item)) === targetEngine;
+		});
+		const totalRow = engineRows.find((item) => isRpmTotalRow(item));
+		const totalRowRuntime = totalRow ? getRpmRuntimeHours(totalRow) : 0;
+
+		if (totalRowRuntime > 0) return totalRowRuntime;
+
+		return engineRows.reduce((sum, item) => {
+			if (isRpmTotalRow(item)) return sum;
+			return sum + getRpmRuntimeHours(item);
+		}, 0);
+	}
+
+	function getRpmRuntimePercent(row, rows = []) {
+		const runtimeHours = getRpmRuntimeHours(row);
+		const totalRuntimeHours = getRpmEngineTotalRuntimeHours(row, rows);
+
+		if (totalRuntimeHours > 0) {
+			if (isRpmTotalRow(row)) return 100;
+			return (runtimeHours / totalRuntimeHours) * 100;
+		}
+
+		const explicitPercent =
+			row?.runtime_percent ??
+			row?.runtimePercent ??
+			row?.runtime_percentage ??
+			row?.runtimePercentage ??
+			row?.rh_percent ??
+			row?.rhPercent ??
+			row?.percentage_rh ??
+			row?.percentageRh;
+
+		return explicitPercent ?? null;
+	}
+
 	function hasRuntimeValue(row) {
 		return getRpmRuntimeHours(row) > 0;
 	}
@@ -4443,6 +4507,7 @@
 												<th>Engine</th>
 												<th>RPM Range</th>
 												<th>Runtime</th>
+												<th>Runtime %</th>
 												{#if selectedRpmCurveTable.showLh}
 													<th>L/h</th>
 												{/if}
@@ -4466,6 +4531,8 @@
 													<td>{formatRpmRangeLabel(row.rpm_range || row.rpmRange || row.range)}</td>
 
 													<td>{formatHour(getRpmRuntimeHours(row))}</td>
+
+													<td>{formatPercent(getRpmRuntimePercent(row, selectedRpmCurveTable.rows))}</td>
 
 													{#if selectedRpmCurveTable.showLh}
 														<td>{formatNumber(getRpmLhValue(row), 2)}</td>
