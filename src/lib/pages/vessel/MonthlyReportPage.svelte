@@ -19,6 +19,24 @@
 	let timezoneMode = $state('auto');
 	let timezoneOffset = $state('+07:00');
 	let hasLoadedDateRange = $state(false);
+	const MONTHLY_COLUMN_FILTER_DEFAULTS = [
+		'data_received',
+		'runtime',
+		'fuel',
+		'speed',
+		'high_rpm_low_speed'
+	];
+	const MONTHLY_FUEL_SOURCE_FILTER_DEFAULTS = [
+		'ecu',
+		'fms',
+		'ems_internal',
+		'ems_external',
+		'engine_maker',
+		'fod',
+		'fuel_bunker'
+	];
+	let selectedMonthlyColumnKeys = $state([...MONTHLY_COLUMN_FILTER_DEFAULTS]);
+	let selectedMonthlyFuelSourceKeys = $state([...MONTHLY_FUEL_SOURCE_FILTER_DEFAULTS]);
 
 	let currentUser = $state(null);
 	let currentUserLoading = $state(false);
@@ -71,6 +89,40 @@
 
 	function hasPermission(permissionKey) {
 		return hasPermissionForUser(currentUser, permissionKey);
+	}
+
+	function isMonthlyColumnSelected(key) {
+		return selectedMonthlyColumnKeys.includes(key);
+	}
+
+	function toggleMonthlyColumn(key) {
+		if (isMonthlyColumnSelected(key)) {
+			selectedMonthlyColumnKeys = selectedMonthlyColumnKeys.filter((item) => item !== key);
+			return;
+		}
+
+		selectedMonthlyColumnKeys = [...selectedMonthlyColumnKeys, key];
+	}
+
+	function resetMonthlyColumns() {
+		selectedMonthlyColumnKeys = [...MONTHLY_COLUMN_FILTER_DEFAULTS];
+	}
+
+	function isMonthlyFuelSourceSelected(key) {
+		return selectedMonthlyFuelSourceKeys.includes(key);
+	}
+
+	function toggleMonthlyFuelSource(key) {
+		if (isMonthlyFuelSourceSelected(key)) {
+			selectedMonthlyFuelSourceKeys = selectedMonthlyFuelSourceKeys.filter((item) => item !== key);
+			return;
+		}
+
+		selectedMonthlyFuelSourceKeys = [...selectedMonthlyFuelSourceKeys, key];
+	}
+
+	function resetMonthlyFuelSources() {
+		selectedMonthlyFuelSourceKeys = [...MONTHLY_FUEL_SOURCE_FILTER_DEFAULTS];
 	}
 
 	let { active = false } = $props();
@@ -698,18 +750,22 @@
 		});
 	}
 
-	let visibleMonthlyEngineFuelSources = $derived(
+	let availableMonthlyEngineFuelSources = $derived(
 		monthlyEngineFuelSources.filter(
 			(source) => canViewMonthlyFuelSource(source.key) && engineFuelSourceHasAnyValue(source.key)
 		)
 	);
 
+	let visibleMonthlyEngineFuelSources = $derived(
+		availableMonthlyEngineFuelSources.filter((source) => isMonthlyFuelSourceSelected(source.key))
+	);
+
 	function getMonthlyFuelSourceLabel(sourceKey) {
-		const hasInternal = visibleMonthlyEngineFuelSources.some(
+		const hasInternal = availableMonthlyEngineFuelSources.some(
 			(source) => source.key === 'ems_internal'
 		);
 
-		const hasExternal = visibleMonthlyEngineFuelSources.some(
+		const hasExternal = availableMonthlyEngineFuelSources.some(
 			(source) => source.key === 'ems_external'
 		);
 
@@ -828,7 +884,7 @@
 
 	let monthlyBunkerColumns = $derived(collectGlobalFuelColumns(monthlyRows, 'fuel_bunker'));
 
-	let visibleMonthlyGlobalFuelGroups = $derived([
+	let availableMonthlyGlobalFuelGroups = $derived([
 		...(canViewMonthlyFuelSource('fod') && monthlyFodColumns.length
 			? [{ key: 'fod', label: 'FOD', columns: monthlyFodColumns }]
 			: []),
@@ -842,6 +898,10 @@
 				]
 			: [])
 	]);
+
+	let visibleMonthlyGlobalFuelGroups = $derived(
+		availableMonthlyGlobalFuelGroups.filter((group) => isMonthlyFuelSourceSelected(group.key))
+	);
 
 	function getGlobalFuelValue(row, sourceKey, columnKey) {
 		const source = getGlobalFuelSource(row, sourceKey);
@@ -862,12 +922,65 @@
 		visibleMonthlyEngineFuelSources.length > 0 || visibleMonthlyGlobalFuelGroups.length > 0
 	);
 
+	let hasMonthlyAvailableFuelColumns = $derived(
+		availableMonthlyEngineFuelSources.length > 0 || availableMonthlyGlobalFuelGroups.length > 0
+	);
+
+	let monthlyColumnFilterOptions = $derived(
+		[
+			{ key: 'data_received', label: 'Data Received', available: true },
+			{ key: 'runtime', label: 'Runtime', available: canViewEngineRuntimeTable },
+			{
+				key: 'fuel',
+				label: 'Fuel Consumption',
+				available: canViewFuelConsumptionTable && hasMonthlyAvailableFuelColumns
+			},
+			{ key: 'speed', label: 'Speed', available: canViewSpeedStatsTable },
+			{
+				key: 'high_rpm_low_speed',
+				label: 'High RPM Low Speed',
+				available: canViewHighRpmLowSpeedTable
+			}
+		].filter((option) => option.available)
+	);
+
+	let monthlyFuelSourceFilterOptions = $derived([
+		...availableMonthlyEngineFuelSources.map((source) => ({
+			key: source.key,
+			label: getMonthlyFuelSourceLabel(source.key)
+		})),
+		...availableMonthlyGlobalFuelGroups.map((group) => ({
+			key: group.key,
+			label: group.label
+		}))
+	]);
+
+	let showMonthlyDataReceivedColumn = $derived(isMonthlyColumnSelected('data_received'));
+	let showMonthlyRuntimeColumns = $derived(
+		canViewEngineRuntimeTable && isMonthlyColumnSelected('runtime')
+	);
+	let showMonthlyFuelColumns = $derived(
+		canViewFuelConsumptionTable && isMonthlyColumnSelected('fuel') && hasMonthlyFuelColumns
+	);
+	let showMonthlySpeedColumns = $derived(canViewSpeedStatsTable && isMonthlyColumnSelected('speed'));
+	let showMonthlyHighRpmLowSpeedColumns = $derived(
+		canViewHighRpmLowSpeedTable && isMonthlyColumnSelected('high_rpm_low_speed')
+	);
+	let hasMonthlyGroupedHeaderRows = $derived(
+		showMonthlyRuntimeColumns ||
+			showMonthlyFuelColumns ||
+			showMonthlySpeedColumns ||
+			showMonthlyHighRpmLowSpeedColumns
+	);
+	let monthlyHeaderRowspan = $derived(hasMonthlyGroupedHeaderRows ? 3 : 1);
+
 	let monthlyTableSkeletonColumns = $derived(
-		2 +
-			(canViewEngineRuntimeTable ? Math.max(monthlyEngines.length, 1) : 0) +
-			(canViewFuelConsumptionTable ? (hasMonthlyFuelColumns ? monthlyFuelColspan : 1) : 0) +
-			(canViewSpeedStatsTable ? 2 : 0) +
-			(canViewHighRpmLowSpeedTable ? 3 : 0)
+		1 +
+			(showMonthlyDataReceivedColumn ? 1 : 0) +
+			(showMonthlyRuntimeColumns ? Math.max(monthlyEngines.length, 1) : 0) +
+			(showMonthlyFuelColumns ? (hasMonthlyFuelColumns ? monthlyFuelColspan : 1) : 0) +
+			(showMonthlySpeedColumns ? 2 : 0) +
+			(showMonthlyHighRpmLowSpeedColumns ? 3 : 0)
 	);
 
 	function getSpeed(row, type) {
@@ -956,12 +1069,12 @@
 		const total = monthlyRows.reduce((sum, row) => {
 			const fuelConsumption = row?.fuel_consumption || row?.fuelConsumption || {};
 
-			const engineFuelTotal = visibleMonthlyEngineFuelSources.reduce((sourceSum, source) => {
+			const engineFuelTotal = availableMonthlyEngineFuelSources.reduce((sourceSum, source) => {
 				const value = getFuelNumber(fuelConsumption?.[source.key]?.total);
 				return sourceSum + (Number.isFinite(value) ? value : 0);
 			}, 0);
 
-			const globalFuelTotal = visibleMonthlyGlobalFuelGroups.reduce((groupSum, group) => {
+			const globalFuelTotal = availableMonthlyGlobalFuelGroups.reduce((groupSum, group) => {
 				const source = fuelConsumption?.[group.key] || {};
 
 				const hasTotalFod =
@@ -1260,7 +1373,7 @@
 		/>
 	{:else}
 		<section class="summary-grid">
-		{#if canViewFuelConsumptionTable && hasMonthlyFuelColumns}
+		{#if canViewFuelConsumptionTable && hasMonthlyAvailableFuelColumns}
 			<article class="summary-card">
 				<span>Total Fuel</span>
 				<strong>{getSummaryFuel()} L</strong>
@@ -1289,7 +1402,57 @@
 				<h2>Monthly Report by Date</h2>
 			</div>
 
-			<strong>{monthlyRows.length} rows</strong>
+			<div class="section-header-actions">
+				<div class="column-filter-panel">
+					<div class="column-filter-title">
+						<span>Visible Columns</span>
+						<button type="button" onclick={resetMonthlyColumns}>Reset</button>
+					</div>
+
+					<div class="column-filter-options">
+						{#each monthlyColumnFilterOptions as option}
+							<label
+								class="column-filter-option"
+								class:is-selected={isMonthlyColumnSelected(option.key)}
+							>
+								<input
+									type="checkbox"
+									checked={isMonthlyColumnSelected(option.key)}
+									onchange={() => toggleMonthlyColumn(option.key)}
+								/>
+								<span>{option.label}</span>
+							</label>
+						{/each}
+					</div>
+
+					{#if isMonthlyColumnSelected('fuel') && monthlyFuelSourceFilterOptions.length}
+						<div class="fuel-source-filter">
+							<div class="fuel-source-filter-title">
+								<span>Fuel Sources</span>
+								<button type="button" onclick={resetMonthlyFuelSources}>Reset sources</button>
+							</div>
+
+							<div class="column-filter-options">
+								{#each monthlyFuelSourceFilterOptions as source}
+									<label
+										class="column-filter-option fuel-source-option"
+										class:is-selected={isMonthlyFuelSourceSelected(source.key)}
+									>
+										<input
+											type="checkbox"
+											checked={isMonthlyFuelSourceSelected(source.key)}
+											onchange={() => toggleMonthlyFuelSource(source.key)}
+										/>
+										<span>{source.label}</span>
+									</label>
+								{/each}
+							</div>
+						</div>
+					{/if}
+				</div>
+
+				<strong>{monthlyRows.length} rows</strong>
+			</div>
 		</div>
 
 		{#if monthlyRows.length}
@@ -1297,85 +1460,89 @@
 				<table class="monthly-report-table">
 					<thead>
 						<tr>
-							<th rowspan="3" class="sticky-col">DATE</th>
-							<th rowspan="3">DATA RECEIVED</th>
+							<th rowspan={monthlyHeaderRowspan} class="sticky-col">DATE</th>
+							{#if showMonthlyDataReceivedColumn}
+								<th rowspan={monthlyHeaderRowspan}>DATA RECEIVED</th>
+							{/if}
 
-							{#if canViewEngineRuntimeTable}
+							{#if showMonthlyRuntimeColumns}
 								<th colspan={monthlyEngines.length || 1}>RUNTIME</th>
 							{/if}
 
-							{#if canViewFuelConsumptionTable}
+							{#if showMonthlyFuelColumns}
 								<th colspan={monthlyFuelColspan}> FUEL CONSUMPTION (L) </th>
 							{/if}
 
-							{#if canViewSpeedStatsTable}
+							{#if showMonthlySpeedColumns}
 								<th colspan="2">SPEED (KNOT)</th>
 							{/if}
 
-							{#if canViewHighRpmLowSpeedTable}
+							{#if showMonthlyHighRpmLowSpeedColumns}
 								<th colspan="3">HIGH RPM LOW SPEED</th>
 							{/if}
 						</tr>
 
-						<tr>
-							{#if canViewEngineRuntimeTable}
-								{#if monthlyEngines.length}
-									{#each monthlyEngines as engine}
-										<th rowspan="2">{engine.name}</th>
-									{/each}
-								{:else}
-									<th rowspan="2">-</th>
+						{#if hasMonthlyGroupedHeaderRows}
+							<tr>
+								{#if showMonthlyRuntimeColumns}
+									{#if monthlyEngines.length}
+										{#each monthlyEngines as engine}
+											<th rowspan="2">{engine.name}</th>
+										{/each}
+									{:else}
+										<th rowspan="2">-</th>
+									{/if}
 								{/if}
-							{/if}
 
-							{#if canViewFuelConsumptionTable}
-								{#if hasMonthlyFuelColumns}
+								{#if showMonthlyFuelColumns}
+									{#if hasMonthlyFuelColumns}
+										{#each visibleMonthlyEngineFuelSources as source}
+											<th colspan={monthlyEngines.length + 1}>
+												{getMonthlyFuelSourceLabel(source.key)}
+											</th>
+										{/each}
+
+										{#each visibleMonthlyGlobalFuelGroups as group}
+											<th colspan={group.columns.length}>{group.label}</th>
+										{/each}
+									{:else}
+										<th rowspan="2">-</th>
+									{/if}
+								{/if}
+
+								{#if showMonthlySpeedColumns}
+									<th rowspan="2">AVG</th>
+									<th rowspan="2">MAX</th>
+								{/if}
+
+								{#if showMonthlyHighRpmLowSpeedColumns}
+									<th colspan="2">DURATION (HH:MM)</th>
+									<th rowspan="2">TOTAL FUEL (L)</th>
+								{/if}
+							</tr>
+
+							<tr>
+								{#if showMonthlyFuelColumns && hasMonthlyFuelColumns}
 									{#each visibleMonthlyEngineFuelSources as source}
-										<th colspan={monthlyEngines.length + 1}>
-											{getMonthlyFuelSourceLabel(source.key)}
-										</th>
+										{#each monthlyEngines as engine}
+											<th>{engine.name}</th>
+										{/each}
+										<th>TOTAL</th>
 									{/each}
 
 									{#each visibleMonthlyGlobalFuelGroups as group}
-										<th colspan={group.columns.length}>{group.label}</th>
+										{#each group.columns as column}
+											<th>{column.label}</th>
+										{/each}
 									{/each}
-								{:else}
-									<th rowspan="2">-</th>
 								{/if}
-							{/if}
 
-							{#if canViewSpeedStatsTable}
-								<th rowspan="2">AVG</th>
-								<th rowspan="2">MAX</th>
-							{/if}
-
-							{#if canViewHighRpmLowSpeedTable}
-								<th colspan="2">DURATION (HH:MM)</th>
-								<th rowspan="2">TOTAL FUEL (L)</th>
-							{/if}
-						</tr>
-
-						<tr>
-							{#if canViewFuelConsumptionTable && hasMonthlyFuelColumns}
-								{#each visibleMonthlyEngineFuelSources as source}
-									{#each monthlyEngines as engine}
-										<th>{engine.name}</th>
-									{/each}
-									<th>TOTAL</th>
-								{/each}
-
-								{#each visibleMonthlyGlobalFuelGroups as group}
-									{#each group.columns as column}
-										<th>{column.label}</th>
-									{/each}
-								{/each}
-							{/if}
-
-							{#if canViewHighRpmLowSpeedTable}
-								<th>ME PORT</th>
-								<th>ME STBD</th>
-							{/if}
-						</tr>
+								{#if showMonthlyHighRpmLowSpeedColumns}
+									<th>ME PORT</th>
+									<th>ME STBD</th>
+								{/if}
+							</tr>
+						{/if}
 					</thead>
 
 					<tbody>
@@ -1384,9 +1551,11 @@
 
 							<tr class:future-row={isFutureRow}>
 								<td class="sticky-col date-cell">{getDateCell(row)}</td>
-								<td>{isFutureRow ? '-' : getDataReceived(row)}</td>
+								{#if showMonthlyDataReceivedColumn}
+									<td>{isFutureRow ? '-' : getDataReceived(row)}</td>
+								{/if}
 
-								{#if canViewEngineRuntimeTable}
+								{#if showMonthlyRuntimeColumns}
 									{#if monthlyEngines.length}
 										{#each monthlyEngines as engine}
 											<td>{isFutureRow ? '-' : getRuntime(row, engine.key)}</td>
@@ -1396,7 +1565,7 @@
 									{/if}
 								{/if}
 
-								{#if canViewFuelConsumptionTable}
+								{#if showMonthlyFuelColumns}
 									{#if hasMonthlyFuelColumns}
 										{#each visibleMonthlyEngineFuelSources as source}
 											{#each monthlyEngines as engine}
@@ -1419,12 +1588,12 @@
 									{/if}
 								{/if}
 
-								{#if canViewSpeedStatsTable}
+								{#if showMonthlySpeedColumns}
 									<td>{isFutureRow ? '-' : getSpeed(row, 'avg')}</td>
 									<td>{isFutureRow ? '-' : getSpeed(row, 'max')}</td>
 								{/if}
 
-								{#if canViewHighRpmLowSpeedTable}
+								{#if showMonthlyHighRpmLowSpeedColumns}
 									<td>{isFutureRow ? '-' : getHighRpmDuration(row, 'me_port')}</td>
 									<td>{isFutureRow ? '-' : getHighRpmDuration(row, 'me_stbd')}</td>
 									<td class="total-col">{isFutureRow ? '-' : getHighRpmFuel(row)}</td>
@@ -1732,7 +1901,8 @@
 		font-weight: 900;
 	}
 
-	.section-header > strong {
+	.section-header > strong,
+	.section-header-actions > strong {
 		padding: 5px 10px;
 		border-radius: 999px;
 		background: var(--color-accent-muted);
@@ -1740,6 +1910,144 @@
 		color: #1d4ed8;
 		font-size: 11px;
 		font-weight: 900;
+	}
+
+	.section-header-actions {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 10px;
+		min-width: 0;
+	}
+
+	.column-filter-panel {
+		min-width: min(560px, 58vw);
+		padding: 8px 10px;
+		border: 1px solid #dbe6f3;
+		background: var(--color-elevated);
+	}
+
+	.column-filter-title {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		margin-bottom: 7px;
+	}
+
+	.column-filter-title span,
+	.fuel-source-filter-title span {
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 900;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+	}
+
+	.column-filter-title button,
+	.fuel-source-filter-title button {
+		border: none;
+		background: transparent;
+		color: #2563eb;
+		font-size: 10px;
+		font-weight: 900;
+		cursor: pointer;
+	}
+
+	.fuel-source-filter {
+		margin-top: 8px;
+		padding-top: 8px;
+		border-top: 1px solid #dbe6f3;
+	}
+
+	.fuel-source-filter-title {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		margin-bottom: 7px;
+	}
+
+	.column-filter-options {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 6px;
+	}
+
+	.column-filter-option {
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		min-height: 24px;
+		padding: 4px 7px;
+		border: 1px solid #cbd5e1;
+		background: var(--color-surface);
+		color: var(--text-primary);
+		font-size: 10.5px;
+		font-weight: 800;
+		cursor: pointer;
+		user-select: none;
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease,
+			color 0.16s ease,
+			box-shadow 0.16s ease;
+	}
+
+	.column-filter-option input {
+		position: relative;
+		appearance: none;
+		width: 14px;
+		height: 14px;
+		margin: 0;
+		border: 1px solid #64748b;
+		background: rgba(15, 23, 42, 0.28);
+		display: inline-grid;
+		place-items: center;
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease,
+			box-shadow 0.16s ease;
+	}
+
+	.column-filter-option input::after {
+		content: '';
+		width: 7px;
+		height: 4px;
+		border-left: 2px solid #ffffff;
+		border-bottom: 2px solid #ffffff;
+		transform: rotate(-45deg) scale(0);
+		transform-origin: center;
+		transition: transform 0.14s ease;
+	}
+
+	.column-filter-option input:checked {
+		border-color: #60a5fa;
+		background: #2563eb;
+		box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+	}
+
+	.column-filter-option input:checked::after {
+		transform: rotate(-45deg) scale(1);
+	}
+
+	.column-filter-option.is-selected {
+		border-color: rgba(96, 165, 250, 0.8);
+		background: rgba(37, 99, 235, 0.22);
+		color: #dbeafe;
+		box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.18);
+	}
+
+	.fuel-source-option {
+		background: rgba(37, 99, 235, 0.07);
+		border-color: rgba(37, 99, 235, 0.22);
+	}
+
+	.fuel-source-option.is-selected {
+		background: rgba(37, 99, 235, 0.3);
+		border-color: rgba(96, 165, 250, 0.9);
 	}
 
 	.monthly-table-wrapper {
@@ -1892,6 +2200,22 @@
 		.summary-grid {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
+
+		.section-header {
+			align-items: flex-start;
+			flex-direction: column;
+		}
+
+		.section-header-actions {
+			width: 100%;
+			justify-content: space-between;
+			align-items: flex-start;
+		}
+
+		.column-filter-panel {
+			min-width: 0;
+			flex: 1;
+		}
 	}
 
 	@media (max-width: 760px) {
@@ -1930,6 +2254,15 @@
 
 		.filter-hint {
 			grid-column: auto;
+		}
+
+		.section-header-actions {
+			flex-direction: column;
+		}
+
+		.column-filter-panel {
+			width: 100%;
+			box-sizing: border-box;
 		}
 
 		.primary-btn,
