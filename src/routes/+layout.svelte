@@ -34,10 +34,14 @@
 	};
 
 	let isLoginPage = $derived(page.url.pathname === '/');
+	let isAccountLinkPage = $derived(page.url.pathname === '/link');
+	let isPublicPage = $derived(isLoginPage || isAccountLinkPage);
 	let currentPageTitle = $derived(
 		isLoginPage
 			? 'Login'
-			: $activeMenu === 'vessel'
+			: isAccountLinkPage
+				? 'Link Telegram Account'
+				: $activeMenu === 'vessel'
 				? vesselPageTitles[$activeVesselMenu] || pageTitles.vessel
 				: pageTitles[$activeMenu] || 'Dashboard'
 	);
@@ -50,12 +54,12 @@
 	$effect(() => {
 		if (!$authReady) return;
 
-		if (page.url.pathname !== '/' && !$isLoggedIn) {
+		if (!isPublicPage && !$isLoggedIn) {
 			goto('/');
 			return;
 		}
 
-		if (page.url.pathname === '/' && $isLoggedIn) {
+		if (isLoginPage && $isLoggedIn) {
 			goto('/app');
 		}
 	});
@@ -74,7 +78,7 @@
 		<div class="loading-spinner" aria-hidden="true"></div>
 		<span>Initializing...</span>
 	</div>
-{:else if isLoginPage}
+{:else if isPublicPage}
 	{@render children()}
 {:else}
 	<div class:fleet-floating-shell={$activeMenu === 'fleet-view'} class="app-shell">

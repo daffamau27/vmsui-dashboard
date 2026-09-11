@@ -144,9 +144,20 @@
 	let zones = [];
 	let assetsLoading = false;
 	let assetsError = '';
+	let savedRoutePoints = [];
+	let savedRoutePointsLoading = false;
+	let savedRoutePointsError = '';
+	let savedRoutePointSearchTimer = null;
+	let savedRoutePointsRequestToken = 0;
+	let savedRoutePointSearchIndex = null;
+	let routePointNameDropdownCloseTimer = null;
+	let activeRoutePointNameIndex = null;
 	let mapInitializing = false;
 	let routeMapResizeObserver = null;
 	let isRouteMapFullscreen = false;
+
+	const SAVED_ROUTE_POINT_PAGE_SIZE = 100;
+	const SAVED_ROUTE_POINT_SEARCH_DELAY_MS = 1000;
 
 	let pointContextMenu = {
 		visible: false,
@@ -325,11 +336,13 @@
 
 		form.planData = form.planData.map((point, pointIndex) =>
 			pointIndex === index
-				? {
-						...point,
-						latitude: nextLatLng.lat,
-						longitude: nextLatLng.lng
-					}
+					? {
+							...point,
+							saved_point_id: '',
+							source: '',
+							latitude: nextLatLng.lat,
+							longitude: nextLatLng.lng
+						}
 				: point
 		);
 
@@ -477,6 +490,11 @@
 
 	function roundCoord(value) {
 		return Number(Number(value).toFixed(6));
+	}
+
+	function formatCoordinate(value) {
+		const number = Number(value);
+		return Number.isFinite(number) ? number.toFixed(5) : '-';
 	}
 
 	function isFilledCoordinateValue(value) {
@@ -950,11 +968,16 @@
 		});
 	}
 
-	function addRoutePointFromLatLng(latlng, undoLabel = 'Add point') {
+	function addRoutePointFromLatLng(latlng, undoLabel = 'Add point', pointMeta = {}) {
 		pushUndoState(undoLabel);
 
 		const lat = roundCoord(latlng.lat);
 		const lng = roundCoord(latlng.lng);
+		const name = normalizeRoutePointName(pointMeta.name);
+		const savedPointId = pointMeta.saved_point_id || pointMeta.savedPointId || '';
+		const source = normalizePlanRoutePointSource(pointMeta.source, savedPointId);
+		const speedKn =
+			pointMeta.speed_kn === null || pointMeta.speed_kn === undefined ? '' : pointMeta.speed_kn;
 
 		const emptyIndex = form.planData.findIndex(
 			(point) =>
@@ -968,8 +991,12 @@
 					? {
 							...point,
 							order: index + 1,
+							name,
+							saved_point_id: savedPointId,
+							source,
 							latitude: lat,
-							longitude: lng
+							longitude: lng,
+							speed_kn: speedKn !== '' ? speedKn : point.speed_kn
 						}
 					: point
 			);
@@ -978,9 +1005,12 @@
 		} else {
 			const newPoint = {
 				order: form.planData.length + 1,
+				name,
+				saved_point_id: savedPointId,
+				source,
 				latitude: lat,
 				longitude: lng,
-				speed_kn: ''
+				speed_kn: speedKn
 			};
 
 			form.planData = [...form.planData, newPoint];
@@ -1025,7 +1055,12 @@
 			return;
 		}
 
-		addRoutePointFromLatLng(latlng, `Reuse route point ${point.order || point.index + 1}`);
+		addRoutePointFromLatLng(latlng, `Reuse route point ${point.order || point.index + 1}`, {
+			name: point.name,
+			saved_point_id: getPointSavedPointId(point),
+			source: getPointSource(point),
+			speed_kn: point.speed_kn
+		});
 	}
 
 	function updatePointCoordinate(index, latlng) {
@@ -1037,6 +1072,8 @@
 			pointIndex === index
 				? {
 						...point,
+						saved_point_id: '',
+						source: '',
 						latitude: roundCoord(latlng.lat),
 						longitude: roundCoord(latlng.lng)
 					}
@@ -1179,6 +1216,7 @@
 	);
 	$: selectedAssignPlan = getAssignmentPlan(assignForm.voyagePlanId);
 	$: assignableVessels = getAssignableVessels(assignForm.voyagePlanId);
+	$: routePointNameOptions = buildRoutePointNameOptions(savedRoutePoints);
 	$: if (
 		assignForm.vesselId &&
 		assignForm.voyagePlanId &&
@@ -1198,7 +1236,239 @@
 	}
 
 	function createPoint(order = 1) {
-		return { order, latitude: '', longitude: '', speed_kn: '' };
+		return { order, name: '', saved_point_id: '', source: '', latitude: '', longitude: '', speed_kn: '' };
+	}
+
+	function normalizeRoutePointName(value) {
+		return String(value ?? '').trim();
+	}
+
+	function normalizeSavedRoutePointSource(value) {
+		const source = String(value ?? '').trim();
+		return source || 'saved-point';
+	}
+
+	function getSavedRoutePointSourceLabel(source) {
+		const normalizedSource = normalizeSavedRoutePointSource(source).toLowerCase();
+		if (normalizedSource === 'asset') return 'Asset';
+		if (['saved', 'saved-point', 'saved_point'].includes(normalizedSource)) return 'Saved point';
+		return normalizedSource
+			.split(/[-_\s]+/)
+			.filter(Boolean)
+			.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+			.join(' ');
+	}
+
+	function normalizePlanRoutePointSource(source, savedPointId = '') {
+		const normalizedSource = String(source ?? '').trim().toLowerCase();
+		if (normalizedSource === 'asset') return 'asset';
+		if (['saved', 'saved-point', 'saved_point'].includes(normalizedSource)) return 'saved';
+		if (savedPointId) return 'saved';
+		return '';
+	}
+
+	function getPointSource(point = {}) {
+		return (
+			point.source ||
+			point.pointSource ||
+			point.point_source ||
+			point.savedPoint?.source ||
+			point.saved_point?.source ||
+			''
+		);
+	}
+
+	function getPointSavedPointId(point = {}) {
+		return (
+			point.saved_point_id ||
+			point.savedPointId ||
+			point.savedPoint?.id ||
+			point.saved_point?.id ||
+			''
+		);
+	}
+
+	function normalizeSavedRoutePoint(point = {}) {
+		const id = point.id || point._id || point.saved_point_id || point.savedPointId;
+		const name = normalizeRoutePointName(point.name || point.pointName || point.point_name);
+		const latitude = Number(point.latitude ?? point.lat);
+		const longitude = Number(point.longitude ?? point.lng ?? point.lon);
+		const speedKn = point.speed_kn ?? point.speedKn ?? point.speed ?? '';
+		const speed = speedKn === '' || speedKn === null || speedKn === undefined ? '' : Number(speedKn);
+		const source = normalizeSavedRoutePointSource(point.source);
+
+		if (!id || !name || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+		return {
+			id: String(id),
+			name,
+			latitude,
+			longitude,
+			speed_kn: Number.isFinite(speed) ? speed : '',
+			speedKn: Number.isFinite(speed) ? speed : null,
+			source
+		};
+	}
+
+	function buildRoutePointNameOptions(points = []) {
+		return sortByAlpha(
+			points
+				.map(normalizeSavedRoutePoint)
+				.filter(Boolean)
+				.map((savedPoint) => ({
+					...savedPoint,
+					key: `${savedPoint.source}:${savedPoint.id}`,
+					saved_point_id: savedPoint.id,
+					meta: getSavedRoutePointSourceLabel(savedPoint.source)
+				})),
+			(option) => option.name,
+			(option) => option.meta
+		);
+	}
+
+	function findRoutePointNameOption(name, options = routePointNameOptions) {
+		const normalizedName = normalizeRoutePointName(name).toLowerCase();
+		if (!normalizedName) return null;
+
+		const exactMatches = options.filter(
+			(option) => option.name.toLowerCase() === normalizedName
+		);
+
+		return exactMatches[0] || null;
+	}
+
+	function getRoutePointNameSearchOptions(searchValue = '', options = routePointNameOptions) {
+		const searchText = normalizeRoutePointName(searchValue).toLowerCase();
+
+		const matchedOptions = options.filter((option) => {
+			if (!searchText) return true;
+
+			return matchesSearch(searchText, [option.name]);
+		});
+
+		console.log('[VOYAGE_PLANS][SAVED_POINTS][DROPDOWN_OPTIONS]', {
+			search: searchText,
+			totalOptions: options.length,
+			matchedOptions: matchedOptions.length,
+			options: matchedOptions.slice(0, SAVED_ROUTE_POINT_PAGE_SIZE)
+		});
+
+		return matchedOptions.slice(0, SAVED_ROUTE_POINT_PAGE_SIZE);
+	}
+
+	function openRoutePointNameDropdown(index, searchValue = '') {
+		if (editAllowedOnly) return;
+
+		clearTimeout(routePointNameDropdownCloseTimer);
+		activeRoutePointNameIndex = index;
+		scheduleSavedRoutePointSearch(searchValue, index);
+	}
+
+	function closeRoutePointNameDropdown() {
+		clearTimeout(routePointNameDropdownCloseTimer);
+		routePointNameDropdownCloseTimer = setTimeout(() => {
+			activeRoutePointNameIndex = null;
+		}, 120);
+	}
+
+	function selectRoutePointNameOption(index, option) {
+		if (editAllowedOnly || !option) return;
+
+		clearTimeout(routePointNameDropdownCloseTimer);
+
+		form.planData = form.planData.map((point, pointIndex) => {
+			if (pointIndex !== index) return point;
+
+			const nextPoint = {
+				...point,
+				name: option.name,
+				saved_point_id: option.saved_point_id || '',
+				source: normalizePlanRoutePointSource(option.source, option.saved_point_id),
+				latitude: roundCoord(option.latitude),
+				longitude: roundCoord(option.longitude)
+			};
+
+			if (!hasCoordinateValue(point.speed_kn) && option.speed_kn !== '') {
+				nextPoint.speed_kn = option.speed_kn;
+			}
+
+			return nextPoint;
+		});
+
+		selectedPointIndex = index;
+		activeRoutePointNameIndex = null;
+		refreshRouteMap();
+	}
+
+	function getRoutePointNameHint(point = {}, options = routePointNameOptions) {
+		const name = normalizeRoutePointName(point.name);
+		if (!name) return '';
+		if (findRoutePointNameOption(name, options)) return '';
+		return `Save "${name}" as new point when plan is saved.`;
+	}
+
+	function findSavedRoutePointMatch({ name, latitude, longitude, speed_kn } = {}, points = savedRoutePoints) {
+		const normalizedName = normalizeRoutePointName(name).toLowerCase();
+		const lat = Number(latitude);
+		const lng = Number(longitude);
+		const speed = speed_kn === '' || speed_kn === null || speed_kn === undefined ? null : Number(speed_kn);
+
+		if (!normalizedName || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+		return points
+			.map(normalizeSavedRoutePoint)
+			.filter(Boolean)
+			.find((point) => {
+				if (point.name.toLowerCase() !== normalizedName) return false;
+				if (Math.abs(Number(point.latitude) - lat) > 0.000001) return false;
+				if (Math.abs(Number(point.longitude) - lng) > 0.000001) return false;
+
+				const pointSpeed =
+					point.speed_kn === '' || point.speed_kn === null || point.speed_kn === undefined
+						? null
+						: Number(point.speed_kn);
+
+				if (speed === null) return true;
+				return pointSpeed === null || Math.abs(pointSpeed - speed) <= 0.000001;
+			});
+	}
+
+	function scheduleSavedRoutePointSearch(searchValue = '', index = activeRoutePointNameIndex) {
+		if (!canManage || !browser) return;
+
+		savedRoutePointSearchIndex = index;
+		clearTimeout(savedRoutePointSearchTimer);
+		savedRoutePointSearchTimer = setTimeout(() => {
+			loadSavedRoutePoints(searchValue, index);
+		}, SAVED_ROUTE_POINT_SEARCH_DELAY_MS);
+	}
+
+	function updateRoutePointName(index, value) {
+		if (editAllowedOnly) return;
+
+		form.planData = form.planData.map((point, pointIndex) => {
+			if (pointIndex !== index) return point;
+
+			return {
+				...point,
+				name: value,
+				saved_point_id: '',
+				source: ''
+			};
+		});
+
+		selectedPointIndex = index;
+		activeRoutePointNameIndex = index;
+		scheduleSavedRoutePointSearch(value, index);
+		refreshRouteMap();
+	}
+
+	function clearRoutePointSavedPointId(index) {
+		if (editAllowedOnly) return;
+		if (!form.planData[index]) return;
+
+		form.planData[index].saved_point_id = '';
+		form.planData[index].source = '';
 	}
 
 	function resetImportForm() {
@@ -1226,6 +1496,110 @@
 			}
 			throw new Error(message);
 		}
+	}
+
+	function getSavedPointItems(response) {
+		const candidates = [
+			response?.data?.items,
+			response?.data?.points,
+			response?.data?.savedPoints,
+			response?.data?.saved_points,
+			response?.items,
+			response?.points,
+			response?.savedPoints,
+			response?.saved_points,
+			response?.data,
+			response
+		];
+
+		return candidates.find(Array.isArray) || [];
+	}
+
+	async function fetchSavedRoutePoints(searchValue = '') {
+		if (!permissions.has('manage_voyage_plan_fleet')) {
+			console.warn('[VOYAGE_PLANS][SAVED_POINTS][SKIP]', {
+				reason: 'Missing manage_voyage_plan_fleet permission',
+				search: normalizeRoutePointName(searchValue)
+			});
+			return [];
+		}
+
+		const params = new URLSearchParams({
+			page: '1',
+			pageSize: String(SAVED_ROUTE_POINT_PAGE_SIZE)
+		});
+
+		const searchText = normalizeRoutePointName(searchValue);
+		if (searchText) params.set('search', searchText);
+
+		const endpoint = `/voyage-plans/saved-points?${params.toString()}`;
+		const result = await apiFetch(endpoint);
+		const items = getSavedPointItems(result);
+		const normalizedPoints = sortByAlpha(
+			items.map(normalizeSavedRoutePoint).filter(Boolean),
+			(point) => point.name,
+			(point) => point.id
+		);
+
+		console.log('[VOYAGE_PLANS][SAVED_POINTS][RESPONSE]', {
+			endpoint,
+			search: searchText,
+			raw: result,
+			items,
+			normalizedPoints
+		});
+
+		return normalizedPoints;
+	}
+
+	async function loadSavedRoutePoints(searchValue = '', index = null) {
+		if (!permissions.has('manage_voyage_plan_fleet')) return;
+
+		const requestToken = savedRoutePointsRequestToken + 1;
+		savedRoutePointsRequestToken = requestToken;
+		savedRoutePointsLoading = true;
+		savedRoutePointsError = '';
+
+		try {
+			const points = await fetchSavedRoutePoints(searchValue);
+			if (requestToken !== savedRoutePointsRequestToken) return;
+
+			savedRoutePoints = points;
+			if (index !== null && index !== undefined && showForm && !editAllowedOnly) {
+				const currentSearch = normalizeRoutePointName(form.planData[index]?.name);
+				const completedSearch = normalizeRoutePointName(searchValue);
+
+				if (currentSearch === completedSearch && savedRoutePointSearchIndex === index) {
+					activeRoutePointNameIndex = index;
+				}
+			}
+			console.log('[VOYAGE_PLANS][SAVED_POINTS][STATE]', {
+				search: normalizeRoutePointName(searchValue),
+				count: savedRoutePoints.length,
+				savedRoutePoints
+			});
+		} catch (error) {
+			if (requestToken !== savedRoutePointsRequestToken) return;
+
+			console.error('[VOYAGE_PLANS][SAVED_POINTS][ERROR]', error);
+			savedRoutePointsError = error?.message || 'Failed to load saved route points.';
+		} finally {
+			if (requestToken === savedRoutePointsRequestToken) {
+				savedRoutePointsLoading = false;
+			}
+		}
+	}
+
+	async function createSavedRoutePoints(pointsData = []) {
+		if (!pointsData.length) return [];
+
+		const result = await apiFetch('/voyage-plans/saved-points', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ pointsData })
+		});
+
+		return getSavedPointItems(result).map(normalizeSavedRoutePoint).filter(Boolean);
 	}
 
 	function normalizeAsset(asset) {
@@ -1372,7 +1746,17 @@
 					return;
 				}
 
-				addRoutePointFromLatLng(latlng, `Add route point from ${asset.assetName}`);
+				const savedPoint = findSavedRoutePointMatch({
+					name: asset.assetName,
+					latitude: asset.latitude,
+					longitude: asset.longitude
+				});
+
+				addRoutePointFromLatLng(latlng, `Add route point from ${asset.assetName}`, {
+					name: asset.assetName,
+					saved_point_id: savedPoint?.id || '',
+					source: savedPoint?.source || 'asset'
+				});
 			});
 
 			marker.addTo(assetMarkerLayer);
@@ -1420,6 +1804,8 @@
 
 			destroyRouteMap();
 			destroyPlanViewMap();
+			clearTimeout(savedRoutePointSearchTimer);
+			clearTimeout(routePointNameDropdownCloseTimer);
 			cleanupVesselTransferMode();
 		};
 	});
@@ -1468,6 +1854,7 @@
 					loadPlans(),
 					loadVessels(),
 					loadFleetAssets(),
+					permissions.has('manage_voyage_plan_fleet') ? loadSavedRoutePoints() : Promise.resolve(),
 					loadActiveAssignments(),
 					loadActivePlanLocks()
 				]);
@@ -1827,6 +2214,9 @@
 			allowedVesselIds: (selectedPlan.allowedVesselIds || []).map(Number),
 			planData: (selectedPlan.planData || []).map((point, index) => ({
 				order: Number(point.order || index + 1),
+				name: point.name || point.pointName || point.point_name || '',
+				saved_point_id: getPointSavedPointId(point),
+				source: normalizePlanRoutePointSource(getPointSource(point), getPointSavedPointId(point)),
 				latitude: point.latitude ?? '',
 				longitude: point.longitude ?? '',
 				speed_kn: point.speed_kn ?? ''
@@ -2041,7 +2431,15 @@
 				latitude,
 				longitude
 			};
+			const name = normalizeRoutePointName(point.name || point.pointName || point.point_name);
+			const savedPointId = getPointSavedPointId(point);
+			const source = normalizePlanRoutePointSource(getPointSource(point), savedPointId);
+
 			if (speed !== null) normalized.speed_kn = speed;
+			if (name) normalized.name = name;
+			if (savedPointId) normalized.saved_point_id = String(savedPointId);
+			if (source) normalized.source = source;
+
 			return normalized;
 		});
 
@@ -2053,13 +2451,144 @@
 		};
 	}
 
+	function getSavedPointSignature(point = {}) {
+		const name = normalizeRoutePointName(point.name).toLowerCase();
+		const latitude = Number(point.latitude);
+		const longitude = Number(point.longitude);
+		const speed =
+			point.speed_kn === '' || point.speed_kn === null || point.speed_kn === undefined
+				? ''
+				: Number(point.speed_kn);
+
+		return [name, latitude.toFixed(6), longitude.toFixed(6), speed === '' ? '' : speed].join('|');
+	}
+
+	async function attachSavedPointIds(planData = []) {
+		const pendingMap = new Map();
+		const nextPlanData = planData.map((point) => ({ ...point }));
+
+		planData.forEach((point, index) => {
+			const name = normalizeRoutePointName(point.name);
+			if (!name || getPointSavedPointId(point)) return;
+
+			const latitude = Number(point.latitude);
+			const longitude = Number(point.longitude);
+			if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
+			const existingSavedPoint = findSavedRoutePointMatch(point);
+			if (existingSavedPoint?.id) {
+				nextPlanData[index] = {
+					...nextPlanData[index],
+					saved_point_id: String(existingSavedPoint.id),
+					source: normalizePlanRoutePointSource(existingSavedPoint.source, existingSavedPoint.id)
+				};
+				return;
+			}
+
+			const speed =
+				point.speed_kn === '' || point.speed_kn === null || point.speed_kn === undefined
+					? null
+					: Number(point.speed_kn);
+			const signature = getSavedPointSignature(point);
+
+			if (!pendingMap.has(signature)) {
+				pendingMap.set(signature, {
+					indexes: [],
+					point,
+					payload: {
+						name,
+						latitude,
+						longitude,
+						speed_kn: Number.isFinite(speed) ? speed : undefined
+					}
+				});
+			}
+
+			pendingMap.get(signature).indexes.push(index);
+		});
+
+		let pending = [...pendingMap.values()];
+		if (!pending.length) return nextPlanData;
+
+		const unresolvedPending = [];
+
+		for (const entry of pending) {
+			const searchedPoints = await fetchSavedRoutePoints(entry.point.name);
+			const existingSavedPoint = findSavedRoutePointMatch(entry.point, searchedPoints);
+
+			if (existingSavedPoint?.id) {
+				entry.indexes.forEach((index) => {
+					nextPlanData[index] = {
+						...nextPlanData[index],
+						saved_point_id: String(existingSavedPoint.id),
+						source: normalizePlanRoutePointSource(existingSavedPoint.source, existingSavedPoint.id)
+					};
+				});
+				continue;
+			}
+
+			unresolvedPending.push(entry);
+		}
+
+		pending = unresolvedPending;
+		if (!pending.length) return nextPlanData;
+
+		const pointsData = pending.map((entry) => {
+			const payload = { ...entry.payload };
+			if (payload.speed_kn === undefined) delete payload.speed_kn;
+			return payload;
+		});
+
+		const createdPoints = await createSavedRoutePoints(pointsData);
+		const mergedSavedPoints = sortByAlpha(
+			[...savedRoutePoints, ...createdPoints],
+			(point) => point.name,
+			(point) => point.id
+		);
+		savedRoutePoints = mergedSavedPoints;
+
+		await Promise.all(
+			pending.map(async (entry, pendingIndex) => {
+				let savedPoint =
+					findSavedRoutePointMatch(entry.point, createdPoints) ||
+					findSavedRoutePointMatch(entry.point, mergedSavedPoints) ||
+					createdPoints[pendingIndex];
+
+				if (!savedPoint) {
+					const searchedPoints = await fetchSavedRoutePoints(entry.point.name);
+					savedPoint = findSavedRoutePointMatch(entry.point, searchedPoints);
+				}
+
+				if (!savedPoint?.id) return;
+
+				entry.indexes.forEach((index) => {
+					nextPlanData[index] = {
+						...nextPlanData[index],
+						saved_point_id: String(savedPoint.id),
+						source: normalizePlanRoutePointSource(savedPoint.source, savedPoint.id)
+					};
+				});
+			})
+		);
+
+		return nextPlanData;
+	}
+
 	async function submitPlan() {
 		clearMessages();
 		saving = true;
 		try {
-			const payload = editAllowedOnly
+			let payload = editAllowedOnly
 				? { allowedVesselIds: form.allowedVesselIds.map(Number).filter(Number.isFinite) }
 				: validatePlanPayload();
+
+			if (!editAllowedOnly) {
+				payload = {
+					...payload,
+					planData: await attachSavedPointIds(payload.planData)
+				};
+			}
+
 			const path = editMode ? `/voyage-plans/${form.id}` : '/voyage-plans';
 			const method = editMode ? 'PUT' : 'POST';
 			const result = await apiFetch(path, {
@@ -2174,6 +2703,9 @@
 				.sort((a, b) => a.order - b.order)
 				.map((point, index) => ({
 					order: index + 1,
+					name: point.name,
+					saved_point_id: point.saved_point_id,
+					source: point.source,
 					latitude: point.latitude,
 					longitude: point.longitude,
 					speed_kn: point.speed_kn
@@ -2237,6 +2769,9 @@
 	function normalizeExcelRow(row) {
 		return {
 			order: Number(row.order),
+			name: normalizeRoutePointName(row.name || row.point_name || row.pointName),
+			saved_point_id: row.saved_point_id || row.savedPointId || '',
+			source: normalizePlanRoutePointSource(row.source, row.saved_point_id || row.savedPointId || ''),
 			latitude: Number(row.latitude),
 			longitude: Number(row.longitude),
 			speed_kn:
@@ -2558,6 +3093,7 @@
 							<thead>
 								<tr>
 									<th>Order</th>
+									<th>Name</th>
 									<th>Latitude</th>
 									<th>Longitude</th>
 									<th>Speed kn</th>
@@ -2567,6 +3103,7 @@
 								{#each selectedPlan.planData || [] as point}
 									<tr>
 										<td>{point.order}</td>
+										<td>{point.name || '-'}</td>
 										<td>
 											<CopyableCoordinate value={point.latitude} display={point.latitude} label="latitude" compact />
 										</td>
@@ -2582,7 +3119,7 @@
 									</tr>
 								{:else}
 									<tr>
-										<td colspan="4" class="empty-cell">No route points yet.</td>
+										<td colspan="5" class="empty-cell">No route points yet.</td>
 									</tr>
 								{/each}
 							</tbody>
@@ -2895,7 +3432,7 @@
 							<div class="route-import-card">
 								<div class="route-import-copy">
 									<strong>Import route from Excel</strong>
-									<span>Columns: order, latitude, longitude, speed_kn.</span>
+									<span>Columns: order, name, latitude, longitude, speed_kn, source.</span>
 								</div>
 
 								<div class="route-import-actions">
@@ -2930,6 +3467,7 @@
 								<thead>
 									<tr>
 										<th>No</th>
+										<th>Name</th>
 										<th>Latitude</th>
 										<th>Longitude</th>
 										<th>Speed</th>
@@ -2939,6 +3477,12 @@
 
 								<tbody>
 									{#each form.planData as point, index}
+										{@const nameOptions =
+											activeRoutePointNameIndex === index
+												? getRoutePointNameSearchOptions(point.name, routePointNameOptions)
+												: []}
+										{@const pointNameHint =
+											activeRoutePointNameIndex === index ? getRoutePointNameHint(point, routePointNameOptions) : ''}
 										<tr
 											class:selected-point-row={selectedPointIndex === index}
 											on:click={() => selectPoint(index)}
@@ -2953,6 +3497,59 @@
 											</td>
 
 											<td>
+												<div class="route-point-name-field">
+													<input
+														type="text"
+														value={point.name || ''}
+														placeholder="Point name"
+														on:focus|stopPropagation={() => {
+															pushUndoState('Edit point name');
+															openRoutePointNameDropdown(index, point.name || '');
+														}}
+														on:input|stopPropagation={(event) =>
+															updateRoutePointName(index, event.currentTarget.value)}
+														on:blur={closeRoutePointNameDropdown}
+														on:keydown={(event) => {
+															if (event.key === 'Escape') activeRoutePointNameIndex = null;
+														}}
+														disabled={editAllowedOnly}
+													/>
+
+													{#if activeRoutePointNameIndex === index}
+														<div
+															class="route-point-name-menu"
+															on:mousedown|preventDefault|stopPropagation
+															on:click|stopPropagation
+														>
+															{#if nameOptions.length}
+																{#each nameOptions as option (option.key)}
+																	<button
+																		type="button"
+																		class="route-point-name-option"
+																		on:click={() => selectRoutePointNameOption(index, option)}
+																	>
+																		<span>
+																			<strong>{option.name}</strong>
+																			<small>{option.meta}</small>
+																		</span>
+																		<em>{formatCoordinate(option.latitude)}, {formatCoordinate(option.longitude)}</em>
+																	</button>
+																{/each}
+															{:else if normalizeRoutePointName(point.name)}
+																<div class="route-point-name-empty">No matching saved point.</div>
+															{:else}
+																<div class="route-point-name-empty">Type to search saved points.</div>
+															{/if}
+
+															{#if pointNameHint}
+																<div class="route-point-name-new">{pointNameHint}</div>
+															{/if}
+														</div>
+													{/if}
+												</div>
+											</td>
+
+											<td>
 												<div class="coordinate-input-wrap">
 													<input
 														type="number"
@@ -2960,7 +3557,10 @@
 														bind:value={point.latitude}
 														placeholder="-6.1751"
 														on:focus={() => pushUndoState('Edit coordinate')}
-														on:input={() => refreshRouteMap()}
+														on:input={() => {
+															clearRoutePointSavedPointId(index);
+															refreshRouteMap();
+														}}
 														disabled={editAllowedOnly}
 													/>
 													<CopyableCoordinate
@@ -2980,7 +3580,10 @@
 														bind:value={point.longitude}
 														placeholder="106.865"
 														on:focus={() => pushUndoState('Edit coordinate')}
-														on:input={() => refreshRouteMap()}
+														on:input={() => {
+															clearRoutePointSavedPointId(index);
+															refreshRouteMap();
+														}}
 														disabled={editAllowedOnly}
 													/>
 													<CopyableCoordinate
@@ -2999,6 +3602,7 @@
 													bind:value={point.speed_kn}
 													placeholder="8"
 													on:focus={() => pushUndoState('Edit speed')}
+													on:input={() => clearRoutePointSavedPointId(index)}
 													disabled={editAllowedOnly}
 												/>
 											</td>
@@ -3019,6 +3623,12 @@
 									{/each}
 								</tbody>
 							</table>
+
+							{#if savedRoutePointsLoading}
+								<div class="saved-point-status">Loading saved points...</div>
+							{:else if savedRoutePointsError}
+								<div class="saved-point-status error">{savedRoutePointsError}</div>
+							{/if}
 						</div>
 
 					</aside>
@@ -3472,6 +4082,7 @@
 								<thead>
 									<tr>
 										<th>Order</th>
+										<th>Name</th>
 										<th>Latitude</th>
 										<th>Longitude</th>
 										<th>Speed</th>
@@ -3481,6 +4092,7 @@
 									{#each selectedPlan.planData || [] as point}
 										<tr>
 											<td>{point.order}</td>
+											<td>{point.name || '-'}</td>
 											<td>
 												<CopyableCoordinate
 													value={point.latitude}
@@ -3501,7 +4113,7 @@
 										</tr>
 									{:else}
 										<tr>
-											<td colspan="4" class="empty-cell">No route points yet.</td>
+											<td colspan="5" class="empty-cell">No route points yet.</td>
 										</tr>
 									{/each}
 								</tbody>
@@ -6191,19 +6803,27 @@
 	}
 
 	.route-editor th:nth-child(2),
-	.route-editor td:nth-child(2),
+	.route-editor td:nth-child(2) {
+		width: 24%;
+	}
+
 	.route-editor th:nth-child(3),
 	.route-editor td:nth-child(3) {
-		width: 30%;
+		width: 24%;
 	}
 
 	.route-editor th:nth-child(4),
 	.route-editor td:nth-child(4) {
-		width: 66px;
+		width: 24%;
 	}
 
 	.route-editor th:nth-child(5),
 	.route-editor td:nth-child(5) {
+		width: 66px;
+	}
+
+	.route-editor th:nth-child(6),
+	.route-editor td:nth-child(6) {
 		width: 44px;
 	}
 
@@ -6214,6 +6834,106 @@
 		min-height: 30px;
 		padding: 0 6px;
 		font-size: 11px;
+	}
+
+	.route-point-name-field {
+		min-width: 0;
+		position: relative;
+		z-index: 5;
+	}
+
+	.route-editor tr:has(.route-point-name-menu) {
+		position: relative;
+		z-index: 20;
+	}
+
+	.route-point-name-menu {
+		position: absolute;
+		top: calc(100% + 5px);
+		left: 0;
+		z-index: 80;
+		width: max(100%, 260px);
+		max-height: 260px;
+		overflow: auto;
+		border: 1px solid rgba(96, 165, 250, 0.42);
+		background: #0f172a;
+		box-shadow: 0 18px 36px rgba(0, 0, 0, 0.38);
+	}
+
+	.route-point-name-option {
+		width: 100%;
+		min-height: 44px;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 3px;
+		border: 0;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+		background: transparent;
+		color: #e5edf7;
+		padding: 8px 10px;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.route-point-name-option:hover {
+		background: rgba(37, 99, 235, 0.24);
+	}
+
+	.route-point-name-option span {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		min-width: 0;
+	}
+
+	.route-point-name-option strong {
+		min-width: 0;
+		overflow: hidden;
+		font-size: 11.5px;
+		font-weight: 900;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.route-point-name-option small {
+		flex: 0 0 auto;
+		color: #93c5fd;
+		font-size: 9.5px;
+		font-weight: 900;
+		text-transform: uppercase;
+	}
+
+	.route-point-name-option em {
+		color: rgba(203, 213, 225, 0.74);
+		font-size: 10px;
+		font-style: normal;
+		font-weight: 700;
+	}
+
+	.route-point-name-empty,
+	.route-point-name-new {
+		padding: 9px 10px;
+		color: rgba(203, 213, 225, 0.78);
+		font-size: 10.5px;
+		font-weight: 800;
+	}
+
+	.route-point-name-new {
+		border-top: 1px solid rgba(96, 165, 250, 0.2);
+		background: rgba(37, 99, 235, 0.12);
+		color: #bfdbfe;
+	}
+
+	.saved-point-status {
+		padding: 8px 7px;
+		color: rgba(203, 213, 225, 0.86);
+		font-size: 10.5px;
+		font-weight: 800;
+	}
+
+	.saved-point-status.error {
+		color: #fca5a5;
 	}
 
 	.coordinate-input-wrap {
