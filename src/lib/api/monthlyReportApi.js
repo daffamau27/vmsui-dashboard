@@ -18,7 +18,8 @@ export async function getMonthlyReportData({
   startDate = "01",
   endDate = "",
   timezoneMode = "auto",
-  timezoneOffset = ""
+  timezoneOffset = "",
+  columns = ""
 }) {
   if (!vesselId) throw new Error("vesselId required.");
   if (!month) throw new Error("The reporting month must be filled in.");
@@ -29,10 +30,23 @@ export async function getMonthlyReportData({
     startDate,
     endDate,
     timezoneMode,
-    timezoneOffset: timezoneMode === "manual" ? timezoneOffset : ""
+    timezoneOffset: timezoneMode === "manual" ? timezoneOffset : "",
+    columns
   });
 
   const response = await apiRequest(`/monthly-reports/data?${query}`, {
+    method: "GET"
+  });
+
+  return response?.data || response;
+}
+
+export async function getMonthlyReportAvailableColumns({ vesselId }) {
+  if (!vesselId) throw new Error("vesselId required.");
+
+  const query = buildQuery({ vesselId });
+
+  const response = await apiRequest(`/monthly-reports/available-columns?${query}`, {
     method: "GET"
   });
 
@@ -45,7 +59,8 @@ export function getMonthlyReportExcelUrl({
   startDate = "01",
   endDate = "",
   timezoneMode = "auto",
-  timezoneOffset = ""
+  timezoneOffset = "",
+  columns = ""
 }) {
   if (!vesselId) throw new Error("vesselId required.");
   if (!month) throw new Error("The reporting month must be filled in.");
@@ -56,7 +71,8 @@ export function getMonthlyReportExcelUrl({
     startDate,
     endDate,
     timezoneMode,
-    timezoneOffset: timezoneMode === "manual" ? timezoneOffset : ""
+    timezoneOffset: timezoneMode === "manual" ? timezoneOffset : "",
+    columns
   });
 
   return `/monthly-reports/export-excel?${query}`;

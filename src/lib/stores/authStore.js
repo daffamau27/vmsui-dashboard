@@ -5,7 +5,8 @@ import {
   logoutApi,
   getCurrentUserApi,
   clearAuthStorage,
-  getAccessToken
+  getAccessToken,
+  AUTH_SESSION_EXPIRES_AT_KEY
 } from "$lib/api/authApi.js";
 
 export const currentUser = writable(null);
@@ -14,7 +15,119 @@ export const authLoading = writable(false);
 export const authReady = writable(false);
 export const authError = writable("");
 
+const AUTH_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
+const AUTH_ACTIVITY_WRITE_THROTTLE_MS = 1000;
+const AUTH_ACTIVITY_EVENTS = ["click", "keydown", "pointerdown", "scroll", "wheel", "touchstart"];
+
 let initPromise = null;
+let sessionTimeoutId = null;
+let activityListenersAttached = false;
+let lastActivityRecordedAt = 0;
+
+function clearSessionTimeout() {
+  if (sessionTimeoutId) {
+    clearTimeout(sessionTimeoutId);
+    sessionTimeoutId = null;
+  }
+}
+
+function getSessionExpiresAt() {
+  if (typeof localStorage === "undefined") return null;
+
+  const raw = Number(localStorage.getItem(AUTH_SESSION_EXPIRES_AT_KEY));
+  return Number.isFinite(raw) && raw > 0 ? raw : null;
+}
+
+function scheduleSessionTimeout(expiresAt = getSessionExpiresAt()) {
+  clearSessionTimeout();
+
+  if (!expiresAt || typeof window === "undefined") return;
+
+  const remainingMs = Math.max(0, expiresAt - Date.now());
+
+  sessionTimeoutId = setTimeout(() => {
+    authError.set("Session expired. Please log in again.");
+    logout({ preserveAuthError: true });
+  }, remainingMs);
+}
+
+function setSessionExpiresAt(expiresAt = Date.now() + AUTH_INACTIVITY_TIMEOUT_MS) {
+  if (typeof localStorage !== "undefined") {
+    localStorage.setItem(AUTH_SESSION_EXPIRES_AT_KEY, String(expiresAt));
+  }
+
+  scheduleSessionTimeout(expiresAt);
+  return expiresAt;
+}
+
+function isSessionExpired(expiresAt = getSessionExpiresAt()) {
+  return Boolean(expiresAt && Date.now() >= expiresAt);
+}
+
+function recordUserActivity({ force = false } = {}) {
+  if (typeof localStorage === "undefined") return;
+  if (!getAccessToken()) return;
+
+  const now = Date.now();
+  const currentExpiresAt = getSessionExpiresAt();
+
+  if (currentExpiresAt && now >= currentExpiresAt) {
+    authError.set("Session expired. Please log in again.");
+    logout({ preserveAuthError: true });
+    return;
+  }
+
+  const shouldThrottle =
+    !force &&
+    now - lastActivityRecordedAt < AUTH_ACTIVITY_WRITE_THROTTLE_MS &&
+    (!currentExpiresAt || currentExpiresAt - now > AUTH_ACTIVITY_WRITE_THROTTLE_MS);
+
+  if (shouldThrottle) return;
+
+  lastActivityRecordedAt = now;
+  setSessionExpiresAt(now + AUTH_INACTIVITY_TIMEOUT_MS);
+}
+
+function handleUserActivity() {
+  recordUserActivity();
+}
+
+function startActivityTracking() {
+  if (activityListenersAttached || typeof window === "undefined") return;
+
+  AUTH_ACTIVITY_EVENTS.forEach((eventName) => {
+    window.addEventListener(eventName, handleUserActivity, {
+      passive: true,
+      capture: true
+    });
+  });
+
+  activityListenersAttached = true;
+}
+
+function stopActivityTracking() {
+  if (!activityListenersAttached || typeof window === "undefined") return;
+
+  AUTH_ACTIVITY_EVENTS.forEach((eventName) => {
+    window.removeEventListener(eventName, handleUserActivity, {
+      capture: true
+    });
+  });
+
+  activityListenersAttached = false;
+  lastActivityRecordedAt = 0;
+}
+
+function startInactivitySession({ resetExpiry = false } = {}) {
+  startActivityTracking();
+
+  if (resetExpiry || !getSessionExpiresAt()) {
+    recordUserActivity({ force: true });
+    return;
+  }
+
+  scheduleSessionTimeout(getSessionExpiresAt());
+}
 
 function normalizeUser(response) {
   return response?.data || response?.user || response?.currentUser || response || null;
@@ -64,6 +177,8 @@ export async function login(username, password) {
       throw new Error("Login berhasil, tetapi access token tidak ditemukan pada response API.");
     }
 
+    startInactivitySession({ resetExpiry: true });
+
     isLoggedIn.set(true);
     authReady.set(true);
 
@@ -74,6 +189,8 @@ export async function login(username, password) {
     console.error("[LOGIN_ERROR]", error);
 
     clearAuthStorage();
+    clearSessionTimeout();
+    stopActivityTracking();
     currentUser.set(null);
     isLoggedIn.set(false);
     authReady.set(true);
@@ -85,9 +202,13 @@ export async function login(username, password) {
   }
 }
 
-export async function logout() {
+export async function logout({ preserveAuthError = false } = {}) {
+  clearSessionTimeout();
+  stopActivityTracking();
   authLoading.set(true);
-  authError.set("");
+  if (!preserveAuthError) {
+    authError.set("");
+  }
 
   try {
     await logoutApi();
@@ -119,8 +240,26 @@ export async function initAuth() {
 
       if (!token) {
         clearAuthStorage();
+        clearSessionTimeout();
+        stopActivityTracking();
         currentUser.set(null);
         isLoggedIn.set(false);
+        return;
+      }
+
+      let sessionExpiresAt = getSessionExpiresAt();
+
+      if (!sessionExpiresAt) {
+        sessionExpiresAt = setSessionExpiresAt();
+      }
+
+      if (isSessionExpired(sessionExpiresAt)) {
+        clearAuthStorage();
+        clearSessionTimeout();
+        stopActivityTracking();
+        currentUser.set(null);
+        isLoggedIn.set(false);
+        authError.set("Session expired. Please log in again.");
         return;
       }
 
@@ -131,12 +270,15 @@ export async function initAuth() {
       }
 
       isLoggedIn.set(true);
+      startInactivitySession({ resetExpiry: true });
 
       loadCurrentUserInBackground();
     } catch (error) {
       console.warn("[INIT_AUTH_ERROR]", error);
 
       clearAuthStorage();
+      clearSessionTimeout();
+      stopActivityTracking();
       currentUser.set(null);
       isLoggedIn.set(false);
     } finally {

@@ -1,6 +1,8 @@
 import { sortByAlpha } from "$lib/utils/alphaSort.js";
 import { getApiBaseUrl } from "$lib/runtimeConfig.js";
 
+export const AUTH_SESSION_EXPIRES_AT_KEY = "authSessionExpiresAt";
+
 function safeJsonParse(text) {
   try {
     return JSON.parse(text);
@@ -24,6 +26,18 @@ export function getAccessToken() {
 export function getRefreshToken() {
   if (typeof localStorage === "undefined") return null;
   return localStorage.getItem("refreshToken");
+}
+
+export function getAuthSessionExpiresAt() {
+  if (typeof localStorage === "undefined") return null;
+
+  const raw = Number(localStorage.getItem(AUTH_SESSION_EXPIRES_AT_KEY));
+  return Number.isFinite(raw) && raw > 0 ? raw : null;
+}
+
+export function isAuthSessionExpired() {
+  const expiresAt = getAuthSessionExpiresAt();
+  return Boolean(expiresAt && Date.now() >= expiresAt);
 }
 
 export function saveAuthTokens(data) {
@@ -57,6 +71,7 @@ export function clearAuthStorage() {
   localStorage.removeItem("accessToken");
   localStorage.removeItem("refreshToken");
   localStorage.removeItem("currentUser");
+  localStorage.removeItem(AUTH_SESSION_EXPIRES_AT_KEY);
 }
 
 export function redirectToLogin() {
@@ -74,6 +89,18 @@ export function redirectToLogin() {
 export async function apiRequest(path, options = {}) {
   const token = getAccessToken();
   const apiBaseUrl = await getApiBaseUrl();
+  const isAuthEndpoint =
+    path.includes("/auth/") ||
+    path.includes("/auth/refresh");
+
+  if (token && !isAuthEndpoint && isAuthSessionExpired()) {
+    redirectToLogin();
+    throw createApiError(
+      "The login session has expired. Please log in again.",
+      401,
+      null
+    );
+  }
 
   const headers = {
     ...(options.headers || {})
@@ -107,10 +134,6 @@ export async function apiRequest(path, options = {}) {
       data?.error ||
       text ||
       `Request failed with status ${response.status}`;
-
-    const isAuthEndpoint =
-      path.includes("/auth/") ||
-      path.includes("/auth/refresh");
 
     if (response.status === 401 && !isAuthEndpoint) {
       redirectToLogin();

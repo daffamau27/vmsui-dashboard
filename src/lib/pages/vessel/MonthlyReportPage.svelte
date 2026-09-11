@@ -1,7 +1,11 @@
 <script>
 	import { onMount } from 'svelte';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
-	import { getMonthlyReportData, getMonthlyReportExcelUrl } from '$lib/api/monthlyReportApi.js';
+	import {
+		getMonthlyReportAvailableColumns,
+		getMonthlyReportData,
+		getMonthlyReportExcelUrl
+	} from '$lib/api/monthlyReportApi.js';
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import { downloadApiFile, apiRequest } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
@@ -19,9 +23,15 @@
 	let timezoneMode = $state('auto');
 	let timezoneOffset = $state('+07:00');
 	let hasLoadedDateRange = $state(false);
+	let availableMonthlyColumns = $state([]);
+	let availableMonthlyColumnsLoading = $state(false);
+	let availableMonthlyColumnsError = $state('');
+	let availableMonthlyColumnsVesselId = $state('');
+	let availableMonthlyColumnsRequestedVesselId = $state('');
+	let availableMonthlyColumnsRequestToken = 0;
 	const MONTHLY_COLUMN_FILTER_DEFAULTS = [
 		'data_received',
-		'runtime',
+		'runtimes',
 		'fuel',
 		'speed',
 		'high_rpm_low_speed'
@@ -91,21 +101,168 @@
 		return hasPermissionForUser(currentUser, permissionKey);
 	}
 
-	function isMonthlyColumnSelected(key) {
-		return selectedMonthlyColumnKeys.includes(key);
+	function normalizeMonthlyColumnKey(key) {
+		const normalized = String(key || '').trim();
+		if (normalized === 'runtime') return 'runtimes';
+		return normalized;
 	}
 
-	function toggleMonthlyColumn(key) {
-		if (isMonthlyColumnSelected(key)) {
-			selectedMonthlyColumnKeys = selectedMonthlyColumnKeys.filter((item) => item !== key);
+	function getMonthlyFuelSourceColumnKey(sourceKey) {
+		return `fuel_consumption.${sourceKey}`;
+	}
+
+	function getMonthlyFuelSourceKeyFromColumn(columnKey) {
+		const key = normalizeMonthlyColumnKey(columnKey);
+		const prefix = 'fuel_consumption.';
+
+		return key.startsWith(prefix) ? key.slice(prefix.length) : '';
+	}
+
+	function normalizeAvailableMonthlyColumns(payload) {
+		const source =
+			payload?.available_columns ||
+			payload?.availableColumns ||
+			payload?.data?.available_columns ||
+			payload?.data?.availableColumns ||
+			[];
+
+		if (!Array.isArray(source)) return [];
+
+		return source
+			.map((column) => {
+				const key = normalizeMonthlyColumnKey(column?.key);
+
+				return {
+					key,
+					label: column?.label || key
+				};
+			})
+			.filter((column) => column.key);
+	}
+
+	function getAvailableMonthlyColumn(key) {
+		const normalizedKey = normalizeMonthlyColumnKey(key);
+		return availableMonthlyColumns.find((column) => column.key === normalizedKey);
+	}
+
+	function isAvailableMonthlyColumnKey(key) {
+		const normalizedKey = normalizeMonthlyColumnKey(key);
+		if (normalizedKey === 'date') return true;
+
+		if (!availableMonthlyColumnsVesselId) return true;
+
+		return Boolean(getAvailableMonthlyColumn(normalizedKey));
+	}
+
+	function getAvailableMonthlyColumnLabel(key, fallback = '') {
+		return getAvailableMonthlyColumn(key)?.label || fallback || normalizeMonthlyColumnKey(key);
+	}
+
+	function getAvailableMonthlyFuelSourceKeys() {
+		if (!availableMonthlyColumnsVesselId) {
+			return [...MONTHLY_FUEL_SOURCE_FILTER_DEFAULTS];
+		}
+
+		return availableMonthlyColumns
+			.map((column) => getMonthlyFuelSourceKeyFromColumn(column.key))
+			.filter(Boolean);
+	}
+
+	function getDefaultMonthlyColumnKeys() {
+		return MONTHLY_COLUMN_FILTER_DEFAULTS.filter((key) => {
+			if (key === 'fuel') return getAvailableMonthlyFuelSourceKeys().length > 0;
+			return isAvailableMonthlyColumnKey(key);
+		});
+	}
+
+	function syncMonthlyFilterSelectionWithAvailability() {
+		selectedMonthlyColumnKeys = getDefaultMonthlyColumnKeys();
+		selectedMonthlyFuelSourceKeys = getAvailableMonthlyFuelSourceKeys();
+	}
+
+	async function loadAvailableMonthlyColumns(vesselId) {
+		if (!vesselId) {
+			availableMonthlyColumns = [];
+			availableMonthlyColumnsError = '';
+			availableMonthlyColumnsVesselId = '';
+			availableMonthlyColumnsRequestedVesselId = '';
+			syncMonthlyFilterSelectionWithAvailability();
 			return;
 		}
 
-		selectedMonthlyColumnKeys = [...selectedMonthlyColumnKeys, key];
+		const vesselKey = String(vesselId);
+		const requestToken = availableMonthlyColumnsRequestToken + 1;
+		availableMonthlyColumnsRequestToken = requestToken;
+		availableMonthlyColumnsRequestedVesselId = vesselKey;
+		availableMonthlyColumnsLoading = true;
+		availableMonthlyColumnsError = '';
+
+		try {
+			const result = await getMonthlyReportAvailableColumns({ vesselId });
+			if (requestToken !== availableMonthlyColumnsRequestToken) return;
+
+			availableMonthlyColumns = normalizeAvailableMonthlyColumns(result);
+			availableMonthlyColumnsVesselId = vesselKey;
+			syncMonthlyFilterSelectionWithAvailability();
+		} catch (err) {
+			if (requestToken !== availableMonthlyColumnsRequestToken) return;
+
+			console.error('[MONTHLY_AVAILABLE_COLUMNS_ERROR]', err);
+			availableMonthlyColumns = [];
+			availableMonthlyColumnsVesselId = '';
+			availableMonthlyColumnsError =
+				err?.message || 'Failed to load available monthly report columns.';
+			syncMonthlyFilterSelectionWithAvailability();
+		} finally {
+			if (requestToken === availableMonthlyColumnsRequestToken) {
+				availableMonthlyColumnsLoading = false;
+			}
+		}
+	}
+
+	function getSelectedMonthlyApiColumnKeys() {
+		const selectedKeys = ['date'];
+
+		selectedMonthlyColumnKeys.forEach((key) => {
+			const normalizedKey = normalizeMonthlyColumnKey(key);
+
+			if (normalizedKey === 'fuel') return;
+			if (!isAvailableMonthlyColumnKey(normalizedKey)) return;
+
+			selectedKeys.push(normalizedKey);
+		});
+
+		if (isMonthlyColumnSelected('fuel')) {
+			const availableFuelSourceKeys = new Set(getAvailableMonthlyFuelSourceKeys());
+
+			selectedMonthlyFuelSourceKeys.forEach((sourceKey) => {
+				if (!availableFuelSourceKeys.has(sourceKey)) return;
+
+				selectedKeys.push(getMonthlyFuelSourceColumnKey(sourceKey));
+			});
+		}
+
+		return [...new Set(selectedKeys)];
+	}
+
+	function isMonthlyColumnSelected(key) {
+		const normalizedKey = normalizeMonthlyColumnKey(key);
+		return selectedMonthlyColumnKeys.includes(normalizedKey);
+	}
+
+	function toggleMonthlyColumn(key) {
+		const normalizedKey = normalizeMonthlyColumnKey(key);
+
+		if (isMonthlyColumnSelected(normalizedKey)) {
+			selectedMonthlyColumnKeys = selectedMonthlyColumnKeys.filter((item) => item !== normalizedKey);
+			return;
+		}
+
+		selectedMonthlyColumnKeys = [...selectedMonthlyColumnKeys, normalizedKey];
 	}
 
 	function resetMonthlyColumns() {
-		selectedMonthlyColumnKeys = [...MONTHLY_COLUMN_FILTER_DEFAULTS];
+		selectedMonthlyColumnKeys = getDefaultMonthlyColumnKeys();
 	}
 
 	function isMonthlyFuelSourceSelected(key) {
@@ -122,7 +279,7 @@
 	}
 
 	function resetMonthlyFuelSources() {
-		selectedMonthlyFuelSourceKeys = [...MONTHLY_FUEL_SOURCE_FILTER_DEFAULTS];
+		selectedMonthlyFuelSourceKeys = getAvailableMonthlyFuelSourceKeys();
 	}
 
 	let { active = false } = $props();
@@ -734,25 +891,11 @@
 		{ key: 'engine_maker', label: 'Engine Maker' }
 	];
 
-	function engineFuelSourceHasAnyValue(sourceKey) {
-		return monthlyRows.some((row) => {
-			const fuelConsumption = row?.fuel_consumption || row?.fuelConsumption || {};
-
-			const source = fuelConsumption?.[sourceKey] || {};
-			if (!source || typeof source !== 'object') return false;
-
-			return Object.entries(source).some(([key, value]) => {
-				if (!isEngineKey(key)) return false;
-
-				const number = getFuelNumber(value);
-				return Number.isFinite(number) && number > 0;
-			});
-		});
-	}
-
 	let availableMonthlyEngineFuelSources = $derived(
 		monthlyEngineFuelSources.filter(
-			(source) => canViewMonthlyFuelSource(source.key) && engineFuelSourceHasAnyValue(source.key)
+			(source) =>
+				canViewMonthlyFuelSource(source.key) &&
+				isAvailableMonthlyColumnKey(getMonthlyFuelSourceColumnKey(source.key))
 		)
 	);
 
@@ -761,22 +904,14 @@
 	);
 
 	function getMonthlyFuelSourceLabel(sourceKey) {
-		const hasInternal = availableMonthlyEngineFuelSources.some(
-			(source) => source.key === 'ems_internal'
-		);
+		const endpointLabel = getAvailableMonthlyColumn(
+			getMonthlyFuelSourceColumnKey(sourceKey)
+		)?.label;
 
-		const hasExternal = availableMonthlyEngineFuelSources.some(
-			(source) => source.key === 'ems_external'
-		);
+		if (endpointLabel) return endpointLabel;
 
-		if (sourceKey === 'ems_internal') {
-			return hasInternal && hasExternal ? 'VMS' : 'EMS';
-		}
-
-		if (sourceKey === 'ems_external') {
-			return 'EMS';
-		}
-
+		if (sourceKey === 'ems_internal') return 'VMS';
+		if (sourceKey === 'ems_external') return 'EMS';
 		if (sourceKey === 'engine_maker') return 'Engine Maker';
 		if (sourceKey === 'ecu') return 'ECU';
 		if (sourceKey === 'fms') return 'FMS';
@@ -884,15 +1019,45 @@
 
 	let monthlyBunkerColumns = $derived(collectGlobalFuelColumns(monthlyRows, 'fuel_bunker'));
 
+	const monthlyGlobalFuelSources = [
+		{ key: 'fod', label: 'FOD' },
+		{ key: 'fuel_bunker', label: 'Fuel Bunker' }
+	];
+
+	let availableMonthlyGlobalFuelSourceOptions = $derived(
+		monthlyGlobalFuelSources.filter(
+			(source) =>
+				canViewMonthlyFuelSource(source.key) &&
+				isAvailableMonthlyColumnKey(getMonthlyFuelSourceColumnKey(source.key))
+		).map((source) => ({
+			...source,
+			label:
+				getAvailableMonthlyColumn(getMonthlyFuelSourceColumnKey(source.key))?.label ||
+				source.label
+		}))
+	);
+
 	let availableMonthlyGlobalFuelGroups = $derived([
-		...(canViewMonthlyFuelSource('fod') && monthlyFodColumns.length
-			? [{ key: 'fod', label: 'FOD', columns: monthlyFodColumns }]
+		...(canViewMonthlyFuelSource('fod') &&
+		isAvailableMonthlyColumnKey(getMonthlyFuelSourceColumnKey('fod')) &&
+		monthlyFodColumns.length
+			? [
+					{
+						key: 'fod',
+						label: getAvailableMonthlyColumn(getMonthlyFuelSourceColumnKey('fod'))?.label || 'FOD',
+						columns: monthlyFodColumns
+					}
+				]
 			: []),
-		...(canViewMonthlyFuelSource('fuel_bunker') && monthlyBunkerColumns.length
+		...(canViewMonthlyFuelSource('fuel_bunker') &&
+		isAvailableMonthlyColumnKey(getMonthlyFuelSourceColumnKey('fuel_bunker')) &&
+		monthlyBunkerColumns.length
 			? [
 					{
 						key: 'fuel_bunker',
-						label: 'Fuel Bunker',
+						label:
+							getAvailableMonthlyColumn(getMonthlyFuelSourceColumnKey('fuel_bunker'))?.label ||
+							'Fuel Bunker',
 						columns: monthlyBunkerColumns
 					}
 				]
@@ -923,23 +1088,37 @@
 	);
 
 	let hasMonthlyAvailableFuelColumns = $derived(
-		availableMonthlyEngineFuelSources.length > 0 || availableMonthlyGlobalFuelGroups.length > 0
+		availableMonthlyEngineFuelSources.length > 0 ||
+			availableMonthlyGlobalFuelSourceOptions.length > 0
 	);
 
 	let monthlyColumnFilterOptions = $derived(
 		[
-			{ key: 'data_received', label: 'Data Received', available: true },
-			{ key: 'runtime', label: 'Runtime', available: canViewEngineRuntimeTable },
+			{
+				key: 'data_received',
+				label: getAvailableMonthlyColumnLabel('data_received', 'Data Received'),
+				available: isAvailableMonthlyColumnKey('data_received')
+			},
+			{
+				key: 'runtimes',
+				label: getAvailableMonthlyColumnLabel('runtimes', 'Engine Runtimes'),
+				available: canViewEngineRuntimeTable && isAvailableMonthlyColumnKey('runtimes')
+			},
 			{
 				key: 'fuel',
 				label: 'Fuel Consumption',
 				available: canViewFuelConsumptionTable && hasMonthlyAvailableFuelColumns
 			},
-			{ key: 'speed', label: 'Speed', available: canViewSpeedStatsTable },
+			{
+				key: 'speed',
+				label: getAvailableMonthlyColumnLabel('speed', 'Speed'),
+				available: canViewSpeedStatsTable && isAvailableMonthlyColumnKey('speed')
+			},
 			{
 				key: 'high_rpm_low_speed',
-				label: 'High RPM Low Speed',
-				available: canViewHighRpmLowSpeedTable
+				label: getAvailableMonthlyColumnLabel('high_rpm_low_speed', 'High RPM Low Speed'),
+				available:
+					canViewHighRpmLowSpeedTable && isAvailableMonthlyColumnKey('high_rpm_low_speed')
 			}
 		].filter((option) => option.available)
 	);
@@ -949,22 +1128,32 @@
 			key: source.key,
 			label: getMonthlyFuelSourceLabel(source.key)
 		})),
-		...availableMonthlyGlobalFuelGroups.map((group) => ({
-			key: group.key,
-			label: group.label
+		...availableMonthlyGlobalFuelSourceOptions.map((source) => ({
+			key: source.key,
+			label: source.label
 		}))
 	]);
 
-	let showMonthlyDataReceivedColumn = $derived(isMonthlyColumnSelected('data_received'));
+	let showMonthlyDataReceivedColumn = $derived(
+		isMonthlyColumnSelected('data_received') && isAvailableMonthlyColumnKey('data_received')
+	);
 	let showMonthlyRuntimeColumns = $derived(
-		canViewEngineRuntimeTable && isMonthlyColumnSelected('runtime')
+		canViewEngineRuntimeTable &&
+			isMonthlyColumnSelected('runtimes') &&
+			isAvailableMonthlyColumnKey('runtimes')
 	);
 	let showMonthlyFuelColumns = $derived(
 		canViewFuelConsumptionTable && isMonthlyColumnSelected('fuel') && hasMonthlyFuelColumns
 	);
-	let showMonthlySpeedColumns = $derived(canViewSpeedStatsTable && isMonthlyColumnSelected('speed'));
+	let showMonthlySpeedColumns = $derived(
+		canViewSpeedStatsTable &&
+			isMonthlyColumnSelected('speed') &&
+			isAvailableMonthlyColumnKey('speed')
+	);
 	let showMonthlyHighRpmLowSpeedColumns = $derived(
-		canViewHighRpmLowSpeedTable && isMonthlyColumnSelected('high_rpm_low_speed')
+		canViewHighRpmLowSpeedTable &&
+			isMonthlyColumnSelected('high_rpm_low_speed') &&
+			isAvailableMonthlyColumnKey('high_rpm_low_speed')
 	);
 	let hasMonthlyGroupedHeaderRows = $derived(
 		showMonthlyRuntimeColumns ||
@@ -1151,13 +1340,18 @@
 		error = '';
 
 		try {
+			if (String(availableMonthlyColumnsVesselId) !== String($selectedVesselId)) {
+				await loadAvailableMonthlyColumns($selectedVesselId);
+			}
+
 			const result = await getMonthlyReportData({
 				vesselId: $selectedVesselId,
 				month: reportMonth,
 				startDate: rangeValidation.startDate,
 				endDate: rangeValidation.endDate,
 				timezoneMode,
-				timezoneOffset
+				timezoneOffset,
+				columns: getSelectedMonthlyApiColumnKeys().join(',')
 			});
 
 			reportData = result;
@@ -1224,13 +1418,18 @@
 		error = '';
 
 		try {
+			if (String(availableMonthlyColumnsVesselId) !== String($selectedVesselId)) {
+				await loadAvailableMonthlyColumns($selectedVesselId);
+			}
+
 			const url = getMonthlyReportExcelUrl({
 				vesselId: $selectedVesselId,
 				month: reportMonth,
 				startDate: rangeValidation.startDate,
 				endDate: rangeValidation.endDate,
 				timezoneMode,
-				timezoneOffset
+				timezoneOffset,
+				columns: getSelectedMonthlyApiColumnKeys().join(',')
 			});
 
 			const safeVesselName = String(vesselName || 'vessel')
@@ -1260,6 +1459,27 @@
 		if (currentUser || currentUserLoading) return;
 
 		loadCurrentUser();
+	});
+
+	$effect(() => {
+		if (!active) return;
+
+		const vesselId = $selectedVesselId;
+
+		if (!vesselId) {
+			availableMonthlyColumns = [];
+			availableMonthlyColumnsError = '';
+			availableMonthlyColumnsVesselId = '';
+			availableMonthlyColumnsRequestedVesselId = '';
+			syncMonthlyFilterSelectionWithAvailability();
+			return;
+		}
+
+		if (String(availableMonthlyColumnsVesselId) === String(vesselId)) return;
+		if (String(availableMonthlyColumnsRequestedVesselId) === String(vesselId)) return;
+		if (availableMonthlyColumnsLoading) return;
+
+		loadAvailableMonthlyColumns(vesselId);
 	});
 
 </script>
@@ -1337,11 +1557,11 @@
 		{/if}
 
 		<div class="filter-actions">
-			<button type="button" class="primary-btn" onclick={loadMonthlyReport} disabled={loading || !reportMonth || !startDate || !endDate}>
+			<button type="button" class="primary-btn" onclick={loadMonthlyReport} disabled={loading || availableMonthlyColumnsLoading || !reportMonth || !startDate || !endDate}>
 				{loading ? 'Loading...' : 'Load Data'}
 			</button>
 
-			<button type="button" class="export-btn" onclick={handleExportExcel} disabled={exporting || shouldShowDateRangeOverlay}>
+			<button type="button" class="export-btn" onclick={handleExportExcel} disabled={exporting || availableMonthlyColumnsLoading || shouldShowDateRangeOverlay}>
 				{exporting ? 'Exporting...' : 'Export Excel'}
 			</button>
 		</div>
@@ -1408,6 +1628,12 @@
 						<span>Visible Columns</span>
 						<button type="button" onclick={resetMonthlyColumns}>Reset</button>
 					</div>
+
+					{#if availableMonthlyColumnsLoading}
+						<p class="column-filter-status">Loading available columns...</p>
+					{:else if availableMonthlyColumnsError}
+						<p class="column-filter-status is-error">{availableMonthlyColumnsError}</p>
+					{/if}
 
 					<div class="column-filter-options">
 						{#each monthlyColumnFilterOptions as option}
@@ -1952,6 +2178,17 @@
 		font-size: 10px;
 		font-weight: 900;
 		cursor: pointer;
+	}
+
+	.column-filter-status {
+		margin: -2px 0 8px;
+		color: var(--text-secondary);
+		font-size: 10.5px;
+		font-weight: 800;
+	}
+
+	.column-filter-status.is-error {
+		color: #fca5a5;
 	}
 
 	.fuel-source-filter {
