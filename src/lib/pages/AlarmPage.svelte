@@ -544,7 +544,6 @@
               <th>Event Time</th>
               <th>Start Time</th>
               <th>End Time</th>
-              <th>Alarm ID</th>
             </tr>
           </thead>
 
@@ -561,7 +560,6 @@
                 <td>{formatDateTime(row.eventTs)}</td>
                 <td>{formatDateTime(row.startTs)}</td>
                 <td>{row.endTs ? formatDateTime(row.endTs) : "-"}</td>
-                <td>{row.alarmId || row.id || "-"}</td>
               </tr>
             {/each}
           </tbody>
