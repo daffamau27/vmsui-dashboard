@@ -75,7 +75,7 @@
 		{
 			label: 'Voyage Plan',
 			key: 'voyage-plan',
-			permissions: ['view_voyage_planvessel']
+			permissions: ['view_voyage_plan_vessel']
 		},
 		{
 			label: 'Trace',
