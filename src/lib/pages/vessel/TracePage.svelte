@@ -2731,7 +2731,10 @@
 		</section>
 
 		<section class="bottom-panel">
-			<div class="playback-card">
+			<div
+				class="playback-card"
+				class:has-camera-filter={traceMarkCameraOptions.length > 0}
+			>
 				<div class="playback-controls">
 					<button
 						type="button"
@@ -3967,13 +3970,17 @@
 		min-height: 52px;
 		padding: 8px 10px;
 		display: grid;
-		grid-template-columns: auto minmax(0, 1fr) 140px 190px;
+		grid-template-columns: auto minmax(0, 1fr) 190px;
 		align-items: center;
 		gap: 10px;
 		background: var(--color-surface);
 		border: 1px solid #d8dde3;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
 		overflow: visible;
+	}
+
+	.playback-card.has-camera-filter {
+		grid-template-columns: auto minmax(0, 1fr) 140px 190px;
 	}
 
 	.playback-controls {
@@ -4964,7 +4971,8 @@
 			overflow: visible;
 		}
 
-		.playback-card {
+		.playback-card,
+		.playback-card.has-camera-filter {
 			grid-template-columns: auto minmax(0, 1fr);
 			align-items: center;
 		}
@@ -5031,7 +5039,8 @@
 			padding: 8px;
 		}
 
-		.playback-card {
+		.playback-card,
+		.playback-card.has-camera-filter {
 			grid-template-columns: minmax(0, 1fr);
 		}
 
