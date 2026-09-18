@@ -40,6 +40,13 @@
 	let vesselError = $state('');
 	let hireStatusLoading = $state(false);
 	let hireStatusError = $state('');
+	let hireStatusModalOpen = $state(false);
+	let hireStatusTarget = $state(null);
+	let hireStatusForm = $state({
+		effectiveAt: '',
+		reason: '',
+		note: ''
+	});
 
 	let permissionLoading = $state(true);
 	let permissionMode = $state('selected');
@@ -156,15 +163,39 @@
 			null
 	);
 
-	let selectedHireIsOn = $derived(isOnHireStatus(getVesselHireRawValue(selectedVesselRecord)));
-	let selectedHireLabel = $derived(selectedHireIsOn ? 'On Hire' : 'Off Hire');
+	let latestVesselStatus = $state({
+		queue: '-',
+		sdcard: '-',
+		sdCardAvailable: false,
+		sdCardUsed: '-',
+		sdCardCapacity: '-',
+		online: false,
+		hireStatus: null,
+		hireUpcoming: null,
+		hireUpcomingLabel: 'Upcoming',
+		hireChangedBy: '-'
+	});
+
+	let selectedHireStatusKnown = $derived(typeof latestVesselStatus.hireStatus === 'boolean');
+	let selectedHireIsOn = $derived(latestVesselStatus.hireStatus === true);
+	let selectedHireLabel = $derived(
+		selectedHireStatusKnown ? (selectedHireIsOn ? 'On Hire' : 'Off Hire') : '-'
+	);
+	let nextHireStatus = $derived(!selectedHireIsOn);
+	let nextHireStatusLabel = $derived(nextHireStatus ? 'On Hire' : 'Off Hire');
+	let hireReasonOptions = $derived(
+		(hireStatusTarget ?? nextHireStatus)
+			? ['New Contract', 'Done of Breakdown']
+			: ['End of Contract', 'Breakdown']
+	);
 	let canManageHireStatus = $derived(hasPermission(['manage_hire_status']));
 	let hireStatusToggleTitle = $derived(
 		permissionLoading
 			? 'Loading hire status permission...'
 			: !canManageHireStatus
 				? 'Requires manage_hire_status permission'
-				: hireStatusError || `Change to ${selectedHireIsOn ? 'Off Hire' : 'On Hire'}`
+				: hireStatusError ||
+					(selectedHireStatusKnown ? `Change to ${nextHireStatusLabel}` : 'Hire status unavailable')
 	);
 
 	let vesselPageKey = $derived(
@@ -179,15 +210,6 @@
 	let todayDataReceivedStats = $state({
 		received: '-',
 		total: 1440
-	});
-
-	let latestVesselStatus = $state({
-		queue: '-',
-		sdcard: '-',
-		sdCardAvailable: false,
-		sdCardUsed: '-',
-		sdCardCapacity: '-',
-		online: false
 	});
 
 	function normalizeStatusPageKey(rawStatus = {}) {
@@ -655,6 +677,14 @@
 	function normalizeLatestStatus(response) {
 		const data = response?.data || response || {};
 		const sdCardDetails = normalizeSdCardDetails(data.sd_card_stats);
+		const hireStatus = data?.hire_status || {};
+		const rawHireStatus = hireStatus?.status;
+		const hasKnownHireStatus = typeof rawHireStatus === 'boolean';
+		const hireUpcoming = hasKnownHireStatus
+			? rawHireStatus
+				? hireStatus?.off_hire_upcoming
+				: hireStatus?.on_hire_upcoming
+			: null;
 
 		return {
 			queue: data.queue ?? '-',
@@ -662,7 +692,15 @@
 			sdCardAvailable: sdCardDetails.available,
 			sdCardUsed: sdCardDetails.used,
 			sdCardCapacity: sdCardDetails.capacity,
-			online: Boolean(data.online)
+			online: Boolean(data.online),
+			hireStatus: hasKnownHireStatus ? rawHireStatus : null,
+			hireUpcoming: hireUpcoming || null,
+			hireUpcomingLabel: hasKnownHireStatus
+				? rawHireStatus
+					? 'Off Hire Upcoming'
+					: 'On Hire Upcoming'
+				: 'Upcoming',
+			hireChangedBy: hireStatus?.change_by || '-'
 		};
 	}
 
@@ -688,7 +726,11 @@
 				sdCardAvailable: false,
 				sdCardUsed: '-',
 				sdCardCapacity: '-',
-				online: false
+				online: false,
+				hireStatus: null,
+				hireUpcoming: null,
+				hireUpcomingLabel: 'Upcoming',
+				hireChangedBy: '-'
 			};
 
 			return;
@@ -719,7 +761,11 @@
 				sdCardAvailable: false,
 				sdCardUsed: '-',
 				sdCardCapacity: '-',
-				online: false
+				online: false,
+				hireStatus: null,
+				hireUpcoming: null,
+				hireUpcomingLabel: 'Upcoming',
+				hireChangedBy: '-'
 			};
 		}
 	}
@@ -809,8 +855,15 @@
 			sdCardAvailable: false,
 			sdCardUsed: '-',
 			sdCardCapacity: '-',
-			online: false
+			online: false,
+			hireStatus: null,
+			hireUpcoming: null,
+			hireUpcomingLabel: 'Upcoming',
+			hireChangedBy: '-'
 		};
+		hireStatusModalOpen = false;
+		hireStatusTarget = null;
+		hireStatusError = '';
 
 		latestStatusRequestId += 1;
 		todayDataReceivedRequestId += 1;
@@ -982,7 +1035,7 @@
 		}
 	}
 
-	async function toggleSelectedVesselHireStatus() {
+	function openHireStatusModal() {
 		const vesselId = getVesselId(selectedVesselRecord) || $selectedVesselId;
 
 		if (!vesselId || hireStatusLoading) return;
@@ -990,32 +1043,68 @@
 			hireStatusError = 'This account does not have the manage_hire_status permission.';
 			return;
 		}
+		if (!selectedHireStatusKnown) {
+			hireStatusError = 'Latest hire status is not available yet.';
+			return;
+		}
 
-		const nextHireStatus = !selectedHireIsOn;
+		hireStatusTarget = !selectedHireIsOn;
+		hireStatusForm = {
+			effectiveAt: '',
+			reason: '',
+			note: ''
+		};
+		hireStatusError = '';
+		hireStatusModalOpen = true;
+	}
+
+	function closeHireStatusModal() {
+		if (hireStatusLoading) return;
+
+		hireStatusModalOpen = false;
+		hireStatusTarget = null;
+		hireStatusError = '';
+	}
+
+	function handleHireStatusBackdropClick(event) {
+		if (event.target === event.currentTarget) closeHireStatusModal();
+	}
+
+	function handleWindowKeydown(event) {
+		if (event.key === 'Escape' && hireStatusModalOpen) {
+			closeHireStatusModal();
+		}
+	}
+
+	async function submitSelectedVesselHireStatus(event) {
+		event.preventDefault();
+
+		const vesselId = getVesselId(selectedVesselRecord) || $selectedVesselId;
+		if (!vesselId || hireStatusLoading || typeof hireStatusTarget !== 'boolean') return;
+
+		const reason = hireStatusForm.reason.trim();
+		if (!reason) {
+			hireStatusError = 'Reason is required.';
+			return;
+		}
+
+		const effectiveAt = hireStatusForm.effectiveAt.trim().replace('T', ' ');
+		const note = hireStatusForm.note.trim();
+		const payload = {
+			hireStatus: hireStatusTarget,
+			reason,
+			...(effectiveAt ? { effectiveAt } : {}),
+			...(note ? { note } : {})
+		};
+
 		hireStatusLoading = true;
 		hireStatusError = '';
 
 		try {
-			await updateVesselHireStatusApi(vesselId, nextHireStatus);
-
-			const nextLabel = nextHireStatus ? 'On Hire' : 'Off Hire';
-			const updateVessel = (vessel) => ({
-				...vessel,
-				hireStatus: nextLabel,
-				hire_status: nextLabel,
-				onHire: nextHireStatus,
-				on_hire: nextHireStatus,
-				isOnHire: nextHireStatus,
-				is_on_hire: nextHireStatus
-			});
-
-			const updatedSelectedVessel = updateVessel(selectedVesselRecord || {});
-
-			vessels = vessels.map((vessel) =>
-				Number(getVesselId(vessel)) === Number(vesselId) ? updateVessel(vessel) : vessel
-			);
-
-			setSelectedVessel(updatedSelectedVessel);
+			await updateVesselHireStatusApi(vesselId, payload);
+			await loadLatestVesselStatus(vesselId);
+			hireStatusModalOpen = false;
+			hireStatusTarget = null;
 		} catch (error) {
 			console.error('[VESSEL_PAGE][HIRE_STATUS_UPDATE][ERROR]', error);
 			hireStatusError = error?.message || 'Failed to update hire status.';
@@ -1052,6 +1141,8 @@
 		stopLatestStatusPolling();
 	});
 </script>
+
+<svelte:window onkeydown={handleWindowKeydown} />
 
 <section class="vessel-shell">
 	<header class="vessel-topbar" class:dropdown-open={menuOpen || vesselDropdownOpen}>
@@ -1152,20 +1243,32 @@
 			{#if canManageHireStatus}
 				<button
 					type="button"
-					class="hire-status-toggle"
+					class="hire-status-toggle manager-detail"
 					class:on-hire={selectedHireIsOn}
 					class:off-hire={!selectedHireIsOn}
-					onclick={toggleSelectedVesselHireStatus}
-					disabled={!selectedVesselRecord || hireStatusLoading || permissionLoading}
+					onclick={openHireStatusModal}
+					disabled={!selectedVesselRecord || !selectedHireStatusKnown || hireStatusLoading || permissionLoading}
 					aria-pressed={selectedHireIsOn}
 					title={hireStatusToggleTitle}
 				>
 					<span class="hire-toggle-track" aria-hidden="true">
 						<span></span>
 					</span>
-					<span class="hire-toggle-copy">
-						<small>Hire Status</small>
-						<strong>{hireStatusLoading ? 'Updating...' : selectedHireLabel}</strong>
+					<span class="hire-manager-grid">
+						<span class="hire-detail-item status-detail">
+							<small>Hire Status</small>
+							<strong>{hireStatusLoading ? 'Updating...' : selectedHireLabel}</strong>
+						</span>
+						<span class="hire-detail-item upcoming-detail">
+							<small>{latestVesselStatus.hireUpcomingLabel}</small>
+							<strong title={latestVesselStatus.hireUpcoming || '-'}>
+								{latestVesselStatus.hireUpcoming || '-'}
+							</strong>
+						</span>
+						<span class="hire-detail-item changed-by-detail">
+							<small>Changed By</small>
+							<strong title={latestVesselStatus.hireChangedBy}>{latestVesselStatus.hireChangedBy}</strong>
+						</span>
 					</span>
 				</button>
 			{:else}
@@ -1341,6 +1444,85 @@
 		{/if}
 	</main>
 </section>
+
+{#if hireStatusModalOpen}
+	<div
+		class="hire-modal-backdrop"
+		role="presentation"
+		onclick={handleHireStatusBackdropClick}
+	>
+		<div
+			class="hire-modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="hire-modal-title"
+		>
+			<header class="hire-modal-header">
+				<div>
+					<small>Hire Status</small>
+					<h2 id="hire-modal-title">Change to {hireStatusTarget ? 'On Hire' : 'Off Hire'}</h2>
+					<p>{selectedVessel}</p>
+				</div>
+				<button
+					type="button"
+					class="hire-modal-close"
+					onclick={closeHireStatusModal}
+					disabled={hireStatusLoading}
+					aria-label="Close hire status form"
+				>×</button>
+			</header>
+
+			<form class="hire-status-form" onsubmit={submitSelectedVesselHireStatus}>
+				<label>
+					<span>Status</span>
+					<input
+						class:on-hire={hireStatusTarget === true}
+						value={hireStatusTarget ? 'On Hire' : 'Off Hire'}
+						readonly
+					/>
+				</label>
+
+				<label>
+					<span>Reason <b>*</b></span>
+					<select bind:value={hireStatusForm.reason} required>
+						<option value="" disabled>Select reason</option>
+						{#each hireReasonOptions as reason}
+							<option value={reason}>{reason}</option>
+						{/each}
+					</select>
+				</label>
+
+				<label>
+					<span>Effective date & time <b>*</b></span>
+					<input type="datetime-local" bind:value={hireStatusForm.effectiveAt} required/>
+					<small>Leave empty to apply immediately.</small>
+				</label>
+
+				<label>
+					<span>Note <em>Optional</em></span>
+					<textarea
+						rows="4"
+						bind:value={hireStatusForm.note}
+						placeholder="Add a note..."
+					></textarea>
+				</label>
+
+				{#if hireStatusError}
+					<p class="hire-form-error" role="alert">{hireStatusError}</p>
+				{/if}
+
+				<footer class="hire-modal-actions">
+					<button type="button" class="secondary" onclick={closeHireStatusModal} disabled={hireStatusLoading}>
+						Cancel
+					</button>
+					<button type="submit" class="primary" disabled={hireStatusLoading}>
+						{hireStatusLoading ? 'Saving...' : `Save ${hireStatusTarget ? 'On Hire' : 'Off Hire'}`}
+					</button>
+				</footer>
+			</form>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.loading-screen {
@@ -2232,6 +2414,56 @@
 		cursor: pointer;
 	}
 
+	.hire-status-toggle.manager-detail {
+		flex: 0 0 370px;
+		min-width: 370px;
+		padding-inline: 10px;
+	}
+
+	.hire-manager-grid {
+		min-width: 0;
+		flex: 1 1 auto;
+		display: grid;
+		grid-template-columns: minmax(64px, 0.8fr) minmax(130px, 1.6fr) minmax(74px, 1fr);
+		align-items: stretch;
+	}
+
+	.hire-detail-item {
+		min-width: 0;
+		display: grid;
+		align-content: center;
+		gap: 3px;
+		padding: 0 8px;
+		border-left: 1px solid rgba(148, 163, 184, 0.16);
+		text-align: left;
+	}
+
+	.hire-detail-item small {
+		overflow: hidden;
+		color: var(--text-muted);
+		font-size: 7px;
+		font-weight: 850;
+		letter-spacing: 0.05em;
+		line-height: 1.1;
+		text-overflow: ellipsis;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+
+	.hire-detail-item strong {
+		overflow: hidden;
+		color: var(--text-primary);
+		font-size: 10px;
+		font-weight: 800;
+		line-height: 1.15;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.hire-detail-item.status-detail strong {
+		color: currentColor;
+	}
+
 	.hire-status-display {
 		position: relative;
 		display: flex;
@@ -2359,6 +2591,208 @@
 		line-height: 1.15;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.hire-modal-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 30000;
+		display: grid;
+		place-items: center;
+		padding: 20px;
+		background: rgba(2, 6, 23, 0.72);
+		backdrop-filter: blur(8px);
+	}
+
+	.hire-modal {
+		width: min(520px, 100%);
+		max-height: calc(100dvh - 40px);
+		overflow-y: auto;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		border-radius: 16px;
+		background: #111827;
+		box-shadow: 0 26px 80px rgba(0, 0, 0, 0.55);
+		color: var(--text-primary);
+		animation: hireModalIn 160ms ease-out;
+	}
+
+	.hire-modal-header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 16px;
+		padding: 20px 22px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+	}
+
+	.hire-modal-header small {
+		color: #60a5fa;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+	}
+
+	.hire-modal-header h2 {
+		margin: 5px 0 3px;
+		font-size: 19px;
+		line-height: 1.25;
+	}
+
+	.hire-modal-header p {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+
+	.hire-modal-close {
+		display: grid;
+		place-items: center;
+		width: 34px;
+		height: 34px;
+		padding: 0;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		border-radius: 9px;
+		background: rgba(30, 41, 59, 0.72);
+		color: var(--text-secondary);
+		font-size: 22px;
+		line-height: 1;
+		cursor: pointer;
+	}
+
+	.hire-status-form {
+		display: grid;
+		gap: 16px;
+		padding: 22px;
+	}
+
+	.hire-status-form label {
+		display: grid;
+		gap: 7px;
+	}
+
+	.hire-status-form label > span {
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 800;
+		text-transform: uppercase;
+	}
+
+	.hire-status-form label > span b {
+		color: #f87171;
+	}
+
+	.hire-status-form label > span em {
+		margin-left: 5px;
+		color: var(--text-muted);
+		font-size: 9px;
+		font-style: normal;
+		font-weight: 700;
+	}
+
+	.hire-status-form input,
+	.hire-status-form select,
+	.hire-status-form textarea {
+		width: 100%;
+		min-width: 0;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		border-radius: 9px;
+		background: rgba(15, 23, 42, 0.88);
+		color: var(--text-primary);
+		font: inherit;
+		font-size: 12px;
+		outline: none;
+	}
+
+	.hire-status-form input,
+	.hire-status-form select {
+		height: 42px;
+		padding: 0 12px;
+	}
+
+	.hire-status-form textarea {
+		min-height: 94px;
+		padding: 11px 12px;
+		resize: vertical;
+	}
+
+	.hire-status-form input:focus,
+	.hire-status-form select:focus,
+	.hire-status-form textarea:focus {
+		border-color: rgba(59, 130, 246, 0.68);
+		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+	}
+
+	.hire-status-form input[readonly] {
+		color: #fbbf24;
+		font-weight: 800;
+		cursor: default;
+	}
+
+	.hire-status-form input[readonly].on-hire {
+		color: #34d399;
+	}
+
+	.hire-status-form label > small {
+		color: var(--text-muted);
+		font-size: 10px;
+	}
+
+	.hire-form-error {
+		margin: 0;
+		padding: 10px 12px;
+		border: 1px solid rgba(239, 68, 68, 0.25);
+		border-radius: 9px;
+		background: rgba(239, 68, 68, 0.1);
+		color: #fca5a5;
+		font-size: 11px;
+		font-weight: 700;
+	}
+
+	.hire-modal-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 10px;
+		padding-top: 4px;
+	}
+
+	.hire-modal-actions button {
+		min-width: 105px;
+		height: 40px;
+		padding: 0 15px;
+		border-radius: 9px;
+		font-size: 11px;
+		font-weight: 800;
+		cursor: pointer;
+	}
+
+	.hire-modal-actions .secondary {
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		background: rgba(30, 41, 59, 0.72);
+		color: var(--text-secondary);
+	}
+
+	.hire-modal-actions .primary {
+		border: 1px solid rgba(59, 130, 246, 0.55);
+		background: #2563eb;
+		color: #fff;
+	}
+
+	.hire-modal-actions button:disabled,
+	.hire-modal-close:disabled {
+		cursor: not-allowed;
+		opacity: 0.6;
+	}
+
+	@keyframes hireModalIn {
+		from {
+			opacity: 0;
+			transform: translateY(8px) scale(0.985);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0) scale(1);
+		}
 	}
 
 	.dot {
@@ -2692,6 +3126,31 @@
 	}
 
 	@media (max-width: 560px) {
+		.hire-modal-backdrop {
+			align-items: end;
+			padding: 10px;
+		}
+
+		.hire-modal {
+			max-height: calc(100dvh - 20px);
+			border-radius: 14px;
+		}
+
+		.hire-modal-header,
+		.hire-status-form {
+			padding: 16px;
+		}
+
+		.hire-modal-actions {
+			display: grid;
+			grid-template-columns: 1fr 1fr;
+		}
+
+		.hire-modal-actions button {
+			width: 100%;
+			min-width: 0;
+		}
+
 		.vessel-topbar {
 			--vessel-topbar-item-height: 44px;
 			height: 52px;
@@ -2714,6 +3173,15 @@
 			margin-left: 0;
 			min-width: 108px;
 			padding-inline: 8px;
+		}
+
+		.hire-status-toggle.manager-detail {
+			flex-basis: 350px;
+			min-width: 350px;
+		}
+
+		.hire-detail-item {
+			padding-inline: 6px;
 		}
 
 		.dropdown-button {

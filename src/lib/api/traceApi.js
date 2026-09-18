@@ -35,6 +35,73 @@ export async function getVesselTrace({
   return response?.data || response;
 }
 
+export async function getVesselTraceMarkRecords({
+  vesselId,
+  start,
+  end,
+  cameraToken = "",
+  timezoneMode = "auto",
+  timezoneOffset = ""
+}) {
+  if (!vesselId) {
+    throw new Error("vesselId wajib diisi.");
+  }
+
+  if (!start || !end) {
+    throw new Error("Start dan end wajib diisi.");
+  }
+
+  const params = new URLSearchParams({
+    start,
+    end,
+    timezoneMode
+  });
+
+  if (cameraToken) {
+    params.set("cameraToken", cameraToken);
+  }
+
+  if (timezoneOffset) {
+    params.set("timezoneOffset", timezoneOffset);
+  }
+
+  const response = await apiRequest(
+    `/trace/vessels/${vesselId}/mark-records?${params.toString()}`,
+    {
+      method: "GET"
+    }
+  );
+
+  return response?.data || response;
+}
+
+export async function getCctvMotionDetail({
+  recordId,
+  timezoneMode = "auto",
+  timezoneOffset = ""
+}) {
+  if (!recordId) {
+    throw new Error("recordId wajib diisi.");
+  }
+
+  const params = new URLSearchParams({
+    timezoneMode
+  });
+
+  if (timezoneOffset) {
+    params.set("timezoneOffset", timezoneOffset);
+  }
+
+  const response = await apiRequest(
+    `/cctv/motions/${encodeURIComponent(recordId)}?${params.toString()}`,
+    {
+      method: "GET"
+    }
+  );
+
+  return response?.data || response;
+}
+
 export async function getVesselCctvSnapshots({
   vesselId,
   cameraName = "",

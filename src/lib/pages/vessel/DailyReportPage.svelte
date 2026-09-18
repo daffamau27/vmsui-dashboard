@@ -3221,6 +3221,46 @@
 		normalizedReport?.travel_distance || normalizedReport?.travelDistance || {}
 	);
 
+	let dailySummary = $derived(normalizedReport?.summary || {});
+
+	let summaryTotalOperationHours = $derived(
+		dailySummary?.total_operation_hours ?? dailySummary?.totalOperationHours ?? '-'
+	);
+
+	let summaryTopSpeed = $derived(
+		dailySummary?.top_speed ??
+			dailySummary?.topSpeed ??
+			speedSummary?.top_speed ??
+			speedSummary?.topSpeed ??
+			speedSummary?.maxSpeed ??
+			null
+	);
+
+	let summaryAverageSpeed = $derived(
+		dailySummary?.average_speed ??
+			dailySummary?.averageSpeed ??
+			speedSummary?.avg_running_speed ??
+			speedSummary?.averageSpeed ??
+			speedSummary?.avgSpeed ??
+			null
+	);
+
+	let summaryTotalDistanceNm = $derived(
+		dailySummary?.total_distance_nm ??
+			dailySummary?.totalDistanceNm ??
+			travelDistance?.total_distance_nm ??
+			travelDistance?.totalDistanceNm ??
+			null
+	);
+
+	let summaryOutsideDistanceNm = $derived(
+		dailySummary?.total_distance_outside_nm ??
+			dailySummary?.totalDistanceOutsideNm ??
+			travelDistance?.outside_safety_zone_distance_nm ??
+			travelDistance?.outsideSafetyZoneDistanceNm ??
+			null
+	);
+
 	let dailyTripSummary = $derived(buildDailyTripSummary(normalizedReport));
 
 	let fuelSummary = $derived(
@@ -3849,22 +3889,20 @@
 
 		{#if !loading}
 			<section class="summary-grid">
-				<article class="summary-card">
-					<span>Total Runtime</span>
-					<strong>{formatHour(totalRuntimeHours)}</strong>
-				</article>
+				{#if canViewEngineRuntimeTable}
+					<article class="summary-card">
+						<span>Total Operation Hours</span>
+						<strong>{summaryTotalOperationHours}</strong>
+					</article>
+				{/if}
 
 				{#if canViewSpeedStatsTable}
 					<article class="summary-card">
 						<span>Top Speed</span>
 						<strong>
-							{speedSummary?.top_speed !== undefined && speedSummary?.top_speed !== null
-								? `${formatNumber(speedSummary.top_speed, 2)} knot`
-								: speedSummary?.topSpeed !== undefined && speedSummary?.topSpeed !== null
-									? `${formatNumber(speedSummary.topSpeed, 2)} knot`
-									: speedSummary?.maxSpeed !== undefined && speedSummary?.maxSpeed !== null
-										? `${formatNumber(speedSummary.maxSpeed, 2)} knot`
-										: '-'}
+							{summaryTopSpeed !== null && summaryTopSpeed !== undefined
+								? `${formatNumber(summaryTopSpeed, 2)} knot`
+								: '-'}
 						</strong>
 					</article>
 				{/if}
@@ -3873,14 +3911,9 @@
 					<article class="summary-card">
 						<span>Average Speed</span>
 						<strong>
-							{speedSummary?.avg_running_speed !== undefined &&
-							speedSummary?.avg_running_speed !== null
-								? `${formatNumber(speedSummary.avg_running_speed, 2)} knot`
-								: speedSummary?.averageSpeed !== undefined && speedSummary?.averageSpeed !== null
-									? `${formatNumber(speedSummary.averageSpeed, 2)} knot`
-									: speedSummary?.avgSpeed !== undefined && speedSummary?.avgSpeed !== null
-										? `${formatNumber(speedSummary.avgSpeed, 2)} knot`
-										: '-'}
+							{summaryAverageSpeed !== null && summaryAverageSpeed !== undefined
+								? `${formatNumber(summaryAverageSpeed, 2)} knot`
+								: '-'}
 						</strong>
 					</article>
 				{/if}
@@ -3927,8 +3960,8 @@
 						<article>
 							<span>Total Distance</span>
 							<strong>
-								{travelDistance?.total_distance_nm || travelDistance?.totalDistanceNm
-									? `${formatNumber(travelDistance?.total_distance_nm ?? travelDistance?.totalDistanceNm, 3)} NM`
+								{summaryTotalDistanceNm !== null && summaryTotalDistanceNm !== undefined
+									? `${formatNumber(summaryTotalDistanceNm, 3)} NM`
 									: '-'}
 							</strong>
 						</article>
@@ -3936,9 +3969,8 @@
 						<article>
 							<span>Outside Safety Zone</span>
 							<strong>
-								{travelDistance?.outside_safety_zone_distance_nm ||
-								travelDistance?.outsideSafetyZoneDistanceNm
-									? `${formatNumber(travelDistance?.outside_safety_zone_distance_nm ?? travelDistance?.outsideSafetyZoneDistanceNm, 3)} NM`
+								{summaryOutsideDistanceNm !== null && summaryOutsideDistanceNm !== undefined
+									? `${formatNumber(summaryOutsideDistanceNm, 3)} NM`
 									: '-'}
 							</strong>
 						</article>
