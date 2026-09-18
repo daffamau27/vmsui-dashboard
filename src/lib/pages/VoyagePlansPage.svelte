@@ -1,6 +1,5 @@
 <script>
 	import { onMount, tick } from 'svelte';
-	import * as XLSX from 'xlsx';
 	import { apiRequest } from '$lib/api/authApi.js';
 	import { browser } from '$app/environment';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
@@ -101,9 +100,12 @@
 		fileName: '',
 		previewRows: [],
 		importedCount: 0,
+		loading: false,
+		previewReady: false,
 		message: '',
 		error: ''
 	};
+	let importPreviewRequestId = 0;
 
 	let assignForm = {
 		voyagePlanId: '',
@@ -1472,10 +1474,13 @@
 	}
 
 	function resetImportForm() {
+		importPreviewRequestId += 1;
 		importForm = {
 			fileName: '',
 			previewRows: [],
 			importedCount: 0,
+			loading: false,
+			previewReady: false,
 			message: '',
 			error: ''
 		};
@@ -2679,27 +2684,36 @@
 		clearMessages();
 		if (editAllowedOnly) return;
 
-		const file = event.target.files?.[0];
+		const fileInput = event.currentTarget;
+		const file = fileInput.files?.[0];
 		if (!file) return;
+		fileInput.value = '';
+		const requestId = ++importPreviewRequestId;
 
 		importForm = {
 			...importForm,
 			fileName: file.name,
 			previewRows: [],
 			importedCount: 0,
+			loading: true,
+			previewReady: false,
 			message: '',
 			error: ''
 		};
 
 		try {
-			const arrayBuffer = await file.arrayBuffer();
-			const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-			const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-			const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
-			validateExcelRows(rows);
+			const fileBase64 = await fileToBase64(file);
+			const result = await apiFetch('/voyage-plans/import-excel-preview', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ fileBase64 })
+			});
 
-			const importedPoints = rows
-				.map(normalizeExcelRow)
+			if (requestId !== importPreviewRequestId) return;
+
+			const responsePoints = Array.isArray(result?.data?.points) ? result.data.points : [];
+			const importedPoints = responsePoints
+				.map(normalizeExcelPreviewPoint)
 				.sort((a, b) => a.order - b.order)
 				.map((point, index) => ({
 					order: index + 1,
@@ -2725,7 +2739,11 @@
 				...importForm,
 				previewRows: importedPoints.slice(0, 6),
 				importedCount: importedPoints.length,
-				message: `${importedPoints.length} route points imported from Excel.`,
+				loading: false,
+				previewReady: true,
+				message:
+					result?.message ||
+					`${importedPoints.length} route points are ready for preview. Review them before creating the plan.`,
 				error: ''
 			};
 
@@ -2734,50 +2752,62 @@
 				fitRouteMap();
 			}, 80);
 		} catch (error) {
+			if (requestId !== importPreviewRequestId) return;
 			importForm = {
 				...importForm,
 				previewRows: [],
 				importedCount: 0,
+				loading: false,
+				previewReady: false,
 				message: '',
 				error: error.message
 			};
 		}
-
-		event.target.value = '';
 	}
 
-	function validateExcelRows(rows) {
-		if (!rows.length) throw new Error('The Excel file is empty.');
-		const required = ['order', 'latitude', 'longitude'];
-		const headers = Object.keys(rows[0] || {}).map((key) => key.trim());
-		const missing = required.filter((key) => !headers.includes(key));
-		if (missing.length)
-			throw new Error(`Excel columns are incomplete. Required columns: ${missing.join(', ')}.`);
-
-		rows.forEach((row, index) => {
-			const point = normalizeExcelRow(row);
-			if (!Number.isFinite(point.order)) throw new Error(`Order in row ${index + 2} is invalid.`);
-			if (!Number.isFinite(point.latitude) || point.latitude < -90 || point.latitude > 90)
-				throw new Error(`Latitude in row ${index + 2} is invalid.`);
-			if (!Number.isFinite(point.longitude) || point.longitude < -180 || point.longitude > 180)
-				throw new Error(`Longitude in row ${index + 2} is invalid.`);
-			if (point.speed_kn !== '' && (!Number.isFinite(point.speed_kn) || point.speed_kn < 0))
-				throw new Error(`Speed in row ${index + 2} is invalid.`);
+	function fileToBase64(file) {
+		return new Promise((resolve, reject) => {
+			const reader = new FileReader();
+			reader.onload = () => {
+				const result = String(reader.result || '');
+				const fileBase64 = result.includes(',') ? result.split(',').pop() : result;
+				if (!fileBase64) {
+					reject(new Error('The selected Excel file could not be read.'));
+					return;
+				}
+				resolve(fileBase64);
+			};
+			reader.onerror = () => reject(new Error('The selected Excel file could not be read.'));
+			reader.readAsDataURL(file);
 		});
 	}
 
-	function normalizeExcelRow(row) {
+	function normalizeExcelPreviewPoint(row, index) {
+		const order = Number(row?.order ?? index + 1);
+		const latitude = Number(row?.latitude);
+		const longitude = Number(row?.longitude);
+		const rawSpeed = row?.speed_kn ?? row?.speedKn;
+		const speed = rawSpeed === '' || rawSpeed === null || rawSpeed === undefined ? '' : Number(rawSpeed);
+
+		if (!Number.isFinite(order)) throw new Error(`Point ${index + 1} has an invalid order.`);
+		if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+			throw new Error(`Point ${index + 1} has an invalid latitude.`);
+		}
+		if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+			throw new Error(`Point ${index + 1} has an invalid longitude.`);
+		}
+		if (speed !== '' && (!Number.isFinite(speed) || speed < 0)) {
+			throw new Error(`Point ${index + 1} has an invalid speed.`);
+		}
+
 		return {
-			order: Number(row.order),
-			name: normalizeRoutePointName(row.name || row.point_name || row.pointName),
-			saved_point_id: row.saved_point_id || row.savedPointId || '',
-			source: normalizePlanRoutePointSource(row.source, row.saved_point_id || row.savedPointId || ''),
-			latitude: Number(row.latitude),
-			longitude: Number(row.longitude),
-			speed_kn:
-				row.speed_kn === '' || row.speed_kn === null || row.speed_kn === undefined
-					? ''
-					: Number(row.speed_kn)
+			order,
+			name: normalizeRoutePointName(row?.name || row?.point_name || row?.pointName),
+			saved_point_id: '',
+			source: '',
+			latitude,
+			longitude,
+			speed_kn: speed
 		};
 	}
 
@@ -3437,14 +3467,31 @@
 
 								<div class="route-import-actions">
 									<label class="route-import-file">
-										<input type="file" accept=".xlsx,.xls" on:change={handleExcelUpload} />
-										<span>{importForm.fileName || 'Choose Excel'}</span>
+										<input
+											type="file"
+											accept=".xlsx,.xls"
+											on:change={handleExcelUpload}
+											disabled={importForm.loading}
+										/>
+										<span>{importForm.loading ? 'Preparing preview...' : importForm.fileName || 'Choose Excel'}</span>
 									</label>
 
-									<button class="toolbar-button" type="button" on:click={downloadTemplate}>
+									<button
+										class="toolbar-button"
+										type="button"
+										on:click={downloadTemplate}
+										disabled={importForm.loading}
+									>
 										Template
 									</button>
 								</div>
+
+								{#if importForm.loading}
+									<div class="route-import-loading" role="status">
+										<span class="route-import-spinner" aria-hidden="true"></span>
+										<span>Parsing Excel and generating route preview...</span>
+									</div>
+								{/if}
 
 								{#if importForm.message}
 									<div class="route-import-message success">{importForm.message}</div>
@@ -3453,13 +3500,38 @@
 								{#if importForm.error}
 									<div class="route-import-message error">{importForm.error}</div>
 								{/if}
+
+								{#if importForm.previewReady}
+									<div class="route-import-preview">
+										<div class="route-import-preview-head">
+											<span>Excel preview</span>
+											<strong>{importForm.importedCount} route points</strong>
+										</div>
+
+										<div class="route-import-preview-list">
+											{#each importForm.previewRows as point}
+												<small>
+													#{point.order} {point.name || `Point ${point.order}`} ·
+													{Number(point.latitude).toFixed(5)}, {Number(point.longitude).toFixed(5)}
+												</small>
+											{/each}
+											{#if importForm.importedCount > importForm.previewRows.length}
+												<small class="route-import-preview-more">
+													+{importForm.importedCount - importForm.previewRows.length} more points shown in the table and map
+												</small>
+											{/if}
+										</div>
+									</div>
+								{/if}
 							</div>
 						{/if}
 
-						<div class="point-hint">
+						<div class:excel-preview={importForm.previewReady} class="point-hint">
 							{editAllowedOnly
 								? 'Route points are locked while this plan is assigned to an active vessel.'
-								: 'Click the map to add a point. Markers can be moved to update coordinates.'}
+								: importForm.previewReady
+									? 'Excel preview is active. Review or adjust the points below and on the map before confirming the plan.'
+									: 'Click the map to add a point. Markers can be moved to update coordinates.'}
 						</div>
 
 						<div class="route-editor">
@@ -4018,8 +4090,19 @@
 
 			<div class="modal-footer">
 				<button type="button" on:click={closeForm}>Cancel</button>
-				<button class="primary-button" type="button" on:click={submitPlan} disabled={saving}>
-					{saving ? 'Saving...' : editAllowedOnly ? 'Save Allowed Vessels' : 'Save Voyage Plan'}
+				<button
+					class="primary-button"
+					type="button"
+					on:click={submitPlan}
+					disabled={saving || importForm.loading}
+				>
+					{saving
+						? 'Saving...'
+						: editAllowedOnly
+							? 'Save Allowed Vessels'
+							: importForm.previewReady && !editMode
+								? 'Confirm & Create Plan'
+								: 'Save Voyage Plan'}
 				</button>
 			</div>
 		</section>
@@ -6176,6 +6259,10 @@
 		cursor: pointer;
 	}
 
+	.route-import-file input:disabled {
+		cursor: wait;
+	}
+
 	.route-import-file span {
 		overflow: hidden;
 		min-height: 34px;
@@ -6188,6 +6275,35 @@
 		font-weight: 700;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.route-import-file input:disabled + span {
+		border-color: rgba(96, 165, 250, 0.42);
+		color: #bfdbfe;
+		cursor: wait;
+	}
+
+	.route-import-loading {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 8px 10px;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 10px;
+		background: rgba(37, 99, 235, 0.1);
+		color: #bfdbfe;
+		font-size: 11px;
+		font-weight: 700;
+	}
+
+	.route-import-spinner {
+		flex: 0 0 auto;
+		width: 13px;
+		height: 13px;
+		border: 2px solid rgba(147, 197, 253, 0.3);
+		border-top-color: #60a5fa;
+		border-radius: 50%;
+		animation: routeImportSpin 0.7s linear infinite;
 	}
 
 	.route-import-message {
@@ -6224,6 +6340,27 @@
 		gap: 4px;
 	}
 
+	.route-import-preview .route-import-preview-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+	}
+
+	.route-import-preview-head strong {
+		color: #93c5fd;
+		font-size: 11px;
+		font-weight: 850;
+		white-space: nowrap;
+	}
+
+	.route-import-preview .route-import-preview-list {
+		max-height: 94px;
+		overflow-y: auto;
+		gap: 5px;
+		padding-right: 3px;
+	}
+
 	.route-import-preview small {
 		overflow: hidden;
 		color: var(--text-primary);
@@ -6231,6 +6368,11 @@
 		font-weight: 650;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.route-import-preview small.route-import-preview-more {
+		color: #93c5fd;
+		font-style: italic;
 	}
 
 	.point-hint {
@@ -6241,6 +6383,18 @@
 		font-size: 11px;
 		font-weight: 800;
 		line-height: 1.45;
+	}
+
+	.point-hint.excel-preview {
+		border-bottom-color: rgba(96, 165, 250, 0.24);
+		background: rgba(37, 99, 235, 0.09);
+		color: #bfdbfe;
+	}
+
+	@keyframes routeImportSpin {
+		to {
+			transform: rotate(360deg);
+		}
 	}
 
 	.route-map-card {
