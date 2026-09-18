@@ -876,6 +876,58 @@
 
 	let monthlyEngines = $derived(collectEngineKeysFromMonthlyRows(monthlyRows));
 
+	function getHighRpmLowSpeedSource(row = {}) {
+		return row?.high_rpm_low_speed || row?.highRpmLowSpeed || row?.high_rpm || row?.highRpm || {};
+	}
+
+	function addHighRpmEngineKeyToMap(engineMap, rawKey) {
+		if (!isEngineKey(rawKey)) return;
+
+		const key = normalizeEngineKey(rawKey);
+		if (!key.startsWith('me_')) return;
+
+		if (!engineMap.has(key)) {
+			engineMap.set(key, {
+				key,
+				name: getEngineNameFromKey(rawKey),
+				rawKey
+			});
+		}
+	}
+
+	function collectHighRpmEngineKeysFromObject(engineMap, objectValue) {
+		if (!objectValue || typeof objectValue !== 'object' || Array.isArray(objectValue)) return;
+
+		Object.keys(objectValue).forEach((key) => {
+			addHighRpmEngineKeyToMap(engineMap, key);
+		});
+	}
+
+	function collectHighRpmEngineKeysFromMonthlyRows(rows = []) {
+		const engineMap = new Map();
+
+		rows.forEach((row) => {
+			const highRpmLowSpeed = getHighRpmLowSpeedSource(row);
+
+			collectHighRpmEngineKeysFromObject(engineMap, highRpmLowSpeed?.durations);
+			collectHighRpmEngineKeysFromObject(
+				engineMap,
+				highRpmLowSpeed?.duration_minutes || highRpmLowSpeed?.durationMinutes
+			);
+			collectHighRpmEngineKeysFromObject(
+				engineMap,
+				highRpmLowSpeed?.fuel_used_l || highRpmLowSpeed?.fuelUsedL
+			);
+			collectHighRpmEngineKeysFromObject(engineMap, highRpmLowSpeed);
+		});
+
+		return sortMonthlyEngines([...engineMap.values()]);
+	}
+
+	let monthlyHighRpmEngines = $derived(collectHighRpmEngineKeysFromMonthlyRows(monthlyRows));
+	let monthlyHighRpmEngineColspan = $derived(Math.max(monthlyHighRpmEngines.length, 1));
+	let monthlyHighRpmLowSpeedColspan = $derived(monthlyHighRpmEngineColspan * 2 + 1);
+
 	function getRuntime(row, engineKey) {
 		const runtimes = row?.runtimes || row?.runtime || {};
 		const value = getValueByNormalizedKey(runtimes, engineKey);
@@ -1169,7 +1221,7 @@
 			(showMonthlyRuntimeColumns ? Math.max(monthlyEngines.length, 1) : 0) +
 			(showMonthlyFuelColumns ? (hasMonthlyFuelColumns ? monthlyFuelColspan : 1) : 0) +
 			(showMonthlySpeedColumns ? 2 : 0) +
-			(showMonthlyHighRpmLowSpeedColumns ? 3 : 0)
+			(showMonthlyHighRpmLowSpeedColumns ? monthlyHighRpmLowSpeedColspan : 0)
 	);
 
 	function getSpeed(row, type) {
@@ -1199,34 +1251,58 @@
 	}
 
 	function getHighRpmDuration(row, engineKey) {
-		const paths = {
-			me_port: [
-				'highRpmLowSpeed.me_port.duration',
-				'high_rpm_low_speed.me_port.duration',
-				'highRpmLowSpeedMePortDuration',
-				'high_rpm_low_speed_me_port_duration',
-				'mePortHighRpmDuration',
-				'sritiMePortDuration'
-			],
-			me_stbd: [
-				'highRpmLowSpeed.me_stbd.duration',
-				'high_rpm_low_speed.me_stbd.duration',
-				'highRpmLowSpeedMeStbdDuration',
-				'high_rpm_low_speed_me_stbd_duration',
-				'meStbdHighRpmDuration',
-				'sritiMeStbdDuration'
-			]
-		};
+		const highRpmLowSpeed = getHighRpmLowSpeedSource(row);
 
-		return formatDuration(getNested(row, paths[engineKey] || []));
+		return formatDuration(
+			firstValue(
+				getValueByNormalizedKey(highRpmLowSpeed?.durations, engineKey),
+				getValueByNormalizedKey(highRpmLowSpeed?.duration_minutes, engineKey),
+				getValueByNormalizedKey(highRpmLowSpeed?.durationMinutes, engineKey),
+				getNested(row, [
+					`highRpmLowSpeed.${engineKey}.duration`,
+					`high_rpm_low_speed.${engineKey}.duration`,
+					`highRpmLowSpeed.${engineKey}.duration_minutes`,
+					`high_rpm_low_speed.${engineKey}.duration_minutes`
+				])
+			)
+		);
+	}
+
+	function getHighRpmFuelUsed(row, engineKey) {
+		const highRpmLowSpeed = getHighRpmLowSpeedSource(row);
+
+		return formatFuel(
+			firstValue(
+				getValueByNormalizedKey(highRpmLowSpeed?.fuel_used_l, engineKey),
+				getValueByNormalizedKey(highRpmLowSpeed?.fuelUsedL, engineKey),
+				getNested(row, [
+					`highRpmLowSpeed.${engineKey}.fuel_used_l`,
+					`high_rpm_low_speed.${engineKey}.fuel_used_l`,
+					`highRpmLowSpeed.${engineKey}.fuelUsedL`,
+					`high_rpm_low_speed.${engineKey}.fuelUsedL`,
+					`highRpmLowSpeed.${engineKey}.fuel`,
+					`high_rpm_low_speed.${engineKey}.fuel`
+				])
+			)
+		);
 	}
 
 	function getHighRpmFuel(row) {
+		const highRpmLowSpeed = getHighRpmLowSpeedSource(row);
+
 		return formatFuel(
 			firstValue(
+				highRpmLowSpeed?.total_fuel_l,
+				highRpmLowSpeed?.totalFuelL,
+				highRpmLowSpeed?.total_fuel,
+				highRpmLowSpeed?.totalFuel,
 				getNested(row, [
 					'highRpmLowSpeed.totalFuel',
 					'high_rpm_low_speed.totalFuel',
+					'highRpmLowSpeed.totalFuelL',
+					'high_rpm_low_speed.totalFuelL',
+					'highRpmLowSpeed.total_fuel_l',
+					'high_rpm_low_speed.total_fuel_l',
 					'highRpmLowSpeed.fuel',
 					'high_rpm_low_speed.fuel'
 				]),
@@ -1255,6 +1331,15 @@
 	}
 
 	function getSummaryFuel() {
+		const summaryFuel = Number(
+			normalizedReport?.summary?.total_fuel_consumption_l ??
+				normalizedReport?.summary?.totalFuelConsumptionL
+		);
+
+		if (Number.isFinite(summaryFuel)) {
+			return formatFuel(summaryFuel);
+		}
+
 		const total = monthlyRows.reduce((sum, row) => {
 			const fuelConsumption = row?.fuel_consumption || row?.fuelConsumption || {};
 
@@ -1289,6 +1374,14 @@
 	}
 
 	function getSummaryAvgSpeed() {
+		const summaryAverageSpeed = Number(
+			normalizedReport?.summary?.average_speed ?? normalizedReport?.summary?.averageSpeed
+		);
+
+		if (Number.isFinite(summaryAverageSpeed)) {
+			return `${formatNumber(summaryAverageSpeed, 2)} knot`;
+		}
+
 		const values = monthlyRows
 			.map((row) =>
 				Number(row?.speed?.avg ?? row?.speed?.average ?? row?.avgSpeed ?? row?.avg_speed)
@@ -1303,6 +1396,17 @@
 	}
 
 	function getSummaryDistance() {
+		const summaryDistance = Number(
+			normalizedReport?.summary?.total_distance_nm ??
+				normalizedReport?.summary?.totalDistanceNm ??
+				normalizedReport?.summary?.total_distance ??
+				normalizedReport?.summary?.totalDistance
+		);
+
+		if (Number.isFinite(summaryDistance)) {
+			return `${formatNumber(summaryDistance, 2)} NM`;
+		}
+
 		const total = monthlyRows.reduce((sum, row) => {
 			const value = Number(
 				row?.distance_nm ??
@@ -1316,6 +1420,40 @@
 
 		return total > 0 ? `${formatNumber(total, 1)} NM` : '-';
 	}
+
+	function getSummaryEngineRuntimeEntries() {
+		const runningHours =
+			normalizedReport?.summary?.running_hours || normalizedReport?.summary?.runningHours || {};
+
+		if (!runningHours || typeof runningHours !== 'object' || Array.isArray(runningHours)) return [];
+
+		return sortMonthlyEngines(
+			Object.entries(runningHours)
+			.map(([key, value]) => ({
+				key: normalizeEngineKey(key),
+				name: normalizeEngineText(key),
+				label: normalizeEngineText(key),
+				value
+			}))
+			.filter(
+				(entry) =>
+					isEngineKey(entry.key) &&
+					entry.value !== undefined &&
+					entry.value !== null &&
+					entry.value !== ''
+			)
+		);
+	}
+
+	function getSummaryTotalOperationHours() {
+		return (
+			normalizedReport?.summary?.total_operation_hours ??
+			normalizedReport?.summary?.totalOperationHours ??
+			getSummaryRuntime()
+		);
+	}
+
+	let summaryEngineRuntimeEntries = $derived(getSummaryEngineRuntimeEntries());
 
 	async function loadMonthlyReport() {
 		if (!$selectedVesselId) {
@@ -1593,10 +1731,17 @@
 		/>
 	{:else}
 		<section class="summary-grid">
-		{#if canViewFuelConsumptionTable && hasMonthlyAvailableFuelColumns}
+		{#if canViewFuelConsumptionTable}
 			<article class="summary-card">
 				<span>Total Fuel</span>
 				<strong>{getSummaryFuel()} L</strong>
+			</article>
+		{/if}
+
+		{#if canViewTravelDistanceTable}
+			<article class="summary-card">
+				<span>Total Distance</span>
+				<strong>{getSummaryDistance()}</strong>
 			</article>
 		{/if}
 
@@ -1607,10 +1752,24 @@
 			</article>
 		{/if}
 
-		{#if canViewTravelDistanceTable}
+		{#if canViewEngineRuntimeTable}
 			<article class="summary-card">
-				<span>Total Distance</span>
-				<strong>{getSummaryDistance()}</strong>
+				<span>Total Operation Hours</span>
+				<strong>{getSummaryTotalOperationHours()}</strong>
+			</article>
+		{/if}
+
+		{#if canViewEngineRuntimeTable && summaryEngineRuntimeEntries.length}
+			<article class="summary-card engine-runtime-summary-card">
+				<span>Engine Running Hours</span>
+				<div class="engine-runtime-summary-list">
+					{#each summaryEngineRuntimeEntries as runtime}
+						<div class="engine-runtime-summary-item">
+							<small>{runtime.label}</small>
+							<strong>{runtime.value}</strong>
+						</div>
+					{/each}
+				</div>
 			</article>
 		{/if}
 	</section>
@@ -1704,7 +1863,7 @@
 							{/if}
 
 							{#if showMonthlyHighRpmLowSpeedColumns}
-								<th colspan="3">HIGH RPM LOW SPEED</th>
+								<th colspan={monthlyHighRpmLowSpeedColspan}>HIGH RPM LOW SPEED</th>
 							{/if}
 						</tr>
 
@@ -1742,7 +1901,8 @@
 								{/if}
 
 								{#if showMonthlyHighRpmLowSpeedColumns}
-									<th colspan="2">DURATION (HH:MM)</th>
+									<th colspan={monthlyHighRpmEngineColspan}>DURATION (HH:MM)</th>
+									<th colspan={monthlyHighRpmEngineColspan}>FUEL USED (L)</th>
 									<th rowspan="2">TOTAL FUEL (L)</th>
 								{/if}
 							</tr>
@@ -1764,8 +1924,17 @@
 								{/if}
 
 								{#if showMonthlyHighRpmLowSpeedColumns}
-									<th>ME PORT</th>
-									<th>ME STBD</th>
+									{#if monthlyHighRpmEngines.length}
+										{#each monthlyHighRpmEngines as engine}
+											<th>{engine.name}</th>
+										{/each}
+										{#each monthlyHighRpmEngines as engine}
+											<th>{engine.name}</th>
+										{/each}
+									{:else}
+										<th>-</th>
+										<th>-</th>
+									{/if}
 								{/if}
 							</tr>
 						{/if}
@@ -1820,8 +1989,17 @@
 								{/if}
 
 								{#if showMonthlyHighRpmLowSpeedColumns}
-									<td>{isFutureRow ? '-' : getHighRpmDuration(row, 'me_port')}</td>
-									<td>{isFutureRow ? '-' : getHighRpmDuration(row, 'me_stbd')}</td>
+									{#if monthlyHighRpmEngines.length}
+										{#each monthlyHighRpmEngines as engine}
+											<td>{isFutureRow ? '-' : getHighRpmDuration(row, engine.key)}</td>
+										{/each}
+										{#each monthlyHighRpmEngines as engine}
+											<td>{isFutureRow ? '-' : getHighRpmFuelUsed(row, engine.key)}</td>
+										{/each}
+									{:else}
+										<td>-</td>
+										<td>-</td>
+									{/if}
 									<td class="total-col">{isFutureRow ? '-' : getHighRpmFuel(row)}</td>
 								{/if}
 							</tr>
@@ -2077,7 +2255,7 @@
 	.summary-grid {
 		margin-top: 12px;
 		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
 		gap: 12px;
 	}
 
@@ -2102,6 +2280,44 @@
 		font-size: 19px;
 		line-height: 1.1;
 		font-weight: 900;
+	}
+
+	.engine-runtime-summary-card {
+		grid-column: 1 / -1;
+		align-items: stretch;
+		width: 100%;
+	}
+
+	.engine-runtime-summary-list {
+		margin-top: 12px;
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+		gap: 10px;
+	}
+
+	.engine-runtime-summary-item {
+		min-height: 58px;
+		padding: 10px 12px;
+		display: grid;
+		align-content: center;
+		border: 1px solid rgba(191, 219, 254, 0.9);
+		border-radius: 10px;
+		background: rgba(37, 99, 235, 0.08);
+	}
+
+	.engine-runtime-summary-item small {
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 900;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+	}
+
+	.engine-runtime-summary-item strong {
+		margin-top: 6px;
+		color: #1d4ed8;
+		font-size: 17px;
+		line-height: 1.15;
 	}
 
 	.table-section {
@@ -2435,7 +2651,7 @@
 		}
 
 		.summary-grid {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
+			grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
 		}
 
 		.section-header {

@@ -764,17 +764,12 @@
 
 	<section class="summary-grid">
 		<article class="summary-card">
-			<span>Total Runtime</span>
-			<strong>{formatRuntimeHours(totalRuntimeHours)}</strong>
-		</article>
-
-		<article class="summary-card">
 			<span>Total Engine Fuel</span>
 			<strong>{formatLiter(totalEngineFuel)}</strong>
 		</article>
 
 		<article class="summary-card">
-			<span>ROB / Bunker Fuel</span>
+			<span>Bunker Fuel</span>
 			<strong>{formatLiter(totalRobBunkerFuel)}</strong>
 		</article>
 
@@ -876,12 +871,6 @@
 								<td>{formatNumber(row.runtime_hours ?? row.runtimeHours, 2)}</td>
 							</tr>
 						{/each}
-
-						<tr class="total-row">
-							<td>Total</td>
-							<td>{formatRuntimeHours(totalRuntimeHours)}</td>
-							<td>{formatNumber(totalRuntimeHours, 2)}</td>
-						</tr>
 					</tbody>
 				</table>
 			</div>
@@ -1383,10 +1372,12 @@
 	}
 
 	.summary-grid {
+		--periodical-summary-card-min: clamp(160px, 22vw, 260px);
 		margin-top: 14px;
 		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--periodical-summary-card-min)), 1fr));
 		gap: 14px;
+		align-items: stretch;
 	}
 
 	.summary-card {
@@ -1629,9 +1620,10 @@
 	}
 
 	.speed-detail-grid {
+		--periodical-speed-card-min: clamp(170px, 26vw, 280px);
 		padding: 14px;
 		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--periodical-speed-card-min)), 1fr));
 		gap: 12px;
 		background: var(--color-elevated);
 	}
@@ -1687,10 +1679,6 @@
 			grid-column: 1 / -1;
 		}
 
-		.summary-grid {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-		}
-
 		.fod-usage-summary {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
@@ -1706,9 +1694,29 @@
 			align-items: flex-start;
 		}
 
-		.summary-grid,
-		.fod-usage-summary,
+		.summary-grid {
+			--periodical-summary-card-min: clamp(140px, 44vw, 220px);
+			gap: 10px;
+		}
+
 		.speed-detail-grid {
+			--periodical-speed-card-min: clamp(140px, 44vw, 220px);
+			padding: 10px;
+			gap: 10px;
+		}
+
+		.summary-card,
+		.speed-detail-grid article {
+			min-height: 76px;
+			padding: 12px;
+		}
+
+		.summary-card strong,
+		.speed-detail-grid strong {
+			font-size: clamp(15px, 4.2vw, 18px);
+		}
+
+		.fod-usage-summary {
 			grid-template-columns: 1fr;
 		}
 
@@ -1736,6 +1744,13 @@
 		.primary-btn,
 		.export-btn {
 			width: 100%;
+		}
+	}
+
+	@media (max-width: 360px) {
+		.summary-grid,
+		.speed-detail-grid {
+			grid-template-columns: 1fr;
 		}
 	}
 </style>

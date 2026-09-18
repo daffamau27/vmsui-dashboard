@@ -109,16 +109,19 @@ export async function updateVesselAdminApi(id, payload) {
   return unwrap(response);
 }
 
-export async function updateVesselHireStatusAdminApi(id, hireStatus) {
+export async function updateVesselHireStatusAdminApi(id, payload) {
   if (!id) {
     throw new Error("Vessel ID tidak valid.");
   }
 
+  const requestPayload =
+    payload && typeof payload === "object"
+      ? payload
+      : { hireStatus: Boolean(payload) };
+
   const response = await apiRequest(`/vessels/${id}/hire`, {
     method: "PUT",
-    body: JSON.stringify({
-      hireStatus: Boolean(hireStatus)
-    })
+    body: JSON.stringify(requestPayload)
   });
 
   return unwrap(response);

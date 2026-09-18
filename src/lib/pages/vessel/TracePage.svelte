@@ -2,7 +2,12 @@
 	import { flushSync, onDestroy } from 'svelte';
 	import VesselMap from '$lib/VesselMap.svelte';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
-	import { getVesselCctvSnapshots, getVesselTrace } from '$lib/api/traceApi.js';
+	import {
+		getCctvMotionDetail,
+		getVesselCctvSnapshots,
+		getVesselTrace,
+		getVesselTraceMarkRecords
+	} from '$lib/api/traceApi.js';
 	import { fade, scale } from 'svelte/transition';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
@@ -50,6 +55,16 @@
 	let cctvSnapshotBufferPivotPage = $state(1);
 	let selectedCctvPanelKey = $state('');
 	let cctvSnapshotRequestId = 0;
+	let traceMarks = $state([]);
+	let traceMarksError = $state('');
+	let selectedTraceMarkCameraKeys = $state([]);
+	let activeTraceMarkKey = $state('');
+	let traceMarkRequestId = 0;
+	let motionVideoOpen = $state(false);
+	let motionVideoLoading = $state(false);
+	let motionVideoError = $state('');
+	let motionVideoDetail = $state(null);
+	let motionVideoRequestId = 0;
 	let cctvSnapshotPageRequests = new Set();
 	const CCTV_SNAPSHOT_PAGE_SIZE = 50;
 	const ENABLE_CCTV_BACKGROUND_BUFFER = true;
@@ -405,6 +420,104 @@
 			});
 	}
 
+	function normalizeTraceMarkRecords(value) {
+		const payload = value?.data || value || {};
+		const cameras = Array.isArray(payload?.cameras) ? payload.cameras : [];
+
+		return cameras
+			.flatMap((camera, cameraIndex) => {
+				const recordings = Array.isArray(camera?.recordings) ? camera.recordings : [];
+				const cameraName = camera?.cameraName || camera?.camera_name || `Camera ${cameraIndex + 1}`;
+				const cameraToken = camera?.cameraToken || camera?.camera_token || '';
+
+				return recordings.map((recording, recordingIndex) => {
+					const timestampMs = Number.isFinite(Number(recording?.timestamp))
+						? Number(recording.timestamp)
+						: parseDateTimeMs(recording?.startedAt || recording?.started_at);
+					const startedAt = recording?.startedAt || recording?.started_at || '';
+					const id = recording?.id || `${cameraToken || cameraName}-${recordingIndex}`;
+
+					return {
+						key: `${cameraToken || cameraName}|${id}|${timestampMs}`,
+						id,
+						cameraName,
+						cameraToken,
+						timestampMs,
+						startedAt,
+						startedAtText: startedAt || formatTimestampMs(timestampMs),
+						thumbnailUrl: recording?.thumbnailUrl || recording?.thumbnail_url || ''
+					};
+				});
+			})
+			.filter((recording) => Number.isFinite(recording.timestampMs))
+			.sort((a, b) => a.timestampMs - b.timestampMs);
+	}
+
+	function groupTraceMarkRecords(recordings = []) {
+		const groupedMarks = new Map();
+
+		for (const recording of recordings) {
+			const timestampMs = Number(recording?.timestampMs);
+			if (!Number.isFinite(timestampMs)) continue;
+
+			const key = `motion-mark-${timestampMs}`;
+			const existingMark = groupedMarks.get(key);
+
+			if (existingMark) {
+				existingMark.recordings.push(recording);
+				continue;
+			}
+
+			groupedMarks.set(key, {
+				key,
+				timestampMs,
+				startedAtText: recording.startedAtText,
+				recordings: [recording]
+			});
+		}
+
+		return Array.from(groupedMarks.values()).sort((a, b) => a.timestampMs - b.timestampMs);
+	}
+
+	function getTraceMarkCameraKey(recording) {
+		return String(recording?.cameraToken || recording?.cameraName || '').trim();
+	}
+
+	function buildTraceMarkCameraOptions(recordings = []) {
+		const options = new Map();
+
+		for (const recording of recordings) {
+			const key = getTraceMarkCameraKey(recording);
+			if (!key || options.has(key)) continue;
+
+			options.set(key, {
+				key,
+				name: recording.cameraName || 'Unnamed camera'
+			});
+		}
+
+		return Array.from(options.values()).sort((a, b) => a.name.localeCompare(b.name));
+	}
+
+	function toggleTraceMarkCamera(cameraKey, checked) {
+		if (checked) {
+			selectedTraceMarkCameraKeys = Array.from(
+				new Set([...selectedTraceMarkCameraKeys, cameraKey])
+			);
+		} else {
+			selectedTraceMarkCameraKeys = selectedTraceMarkCameraKeys.filter(
+				(key) => key !== cameraKey
+			);
+		}
+
+		activeTraceMarkKey = '';
+	}
+
+	function toggleAllTraceMarkCameras(checked, options) {
+		selectedTraceMarkCameraKeys = checked ? options.map((option) => option.key) : [];
+		activeTraceMarkKey = '';
+	}
+
 	function mergeCctvSnapshots(existingItems = [], nextItems = []) {
 		const map = new Map();
 
@@ -545,6 +658,22 @@
 		if (Number.isFinite(parsed)) return parsed;
 
 		return parseDateTimeMs(value);
+	}
+
+	function getTraceMarkPosition(timestampMs, events = timelineEvents) {
+		let { start, end } = getTimelineBounds(events);
+
+		if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+			start = getRangeTimestampMs(startDateTime);
+			end = getRangeTimestampMs(endDateTime);
+		}
+
+		if (!Number.isFinite(timestampMs) || !Number.isFinite(start) || !Number.isFinite(end)) {
+			return 0;
+		}
+
+		if (end <= start) return 0;
+		return Math.min(100, Math.max(0, ((timestampMs - start) / (end - start)) * 100));
 	}
 
 	function getCctvBufferedPercent(items = cctvItems) {
@@ -1543,6 +1672,18 @@
 
 	let tracePoints = $derived(getTracePoints(traceData));
 	let timelineEvents = $derived(buildMergedTimelineEvents(tracePoints, cctvItems));
+	let traceMarkCameraOptions = $derived(buildTraceMarkCameraOptions(traceMarks));
+	let filteredTraceMarks = $derived(
+		traceMarks.filter((recording) =>
+			selectedTraceMarkCameraKeys.includes(getTraceMarkCameraKey(recording))
+		)
+	);
+	let timelineTraceMarks = $derived(
+		groupTraceMarkRecords(filteredTraceMarks).map((mark) => ({
+			...mark,
+			left: getTraceMarkPosition(mark.timestampMs, timelineEvents)
+		}))
+	);
 	let activeTimelineEvent = $derived(timelineEvents[activeIndex] || timelineEvents[0] || null);
 	let activeTimelineTimestampMs = $derived(
 		Number.isFinite(activePlaybackTimestampMs)
@@ -1656,6 +1797,7 @@
 
 	async function loadTrace() {
 		stopPlayback('load-trace');
+		if (motionVideoOpen) closeMotionVideo();
 
 		if (!startDateTime || !endDateTime) {
 			error = 'Please choose a start and end time first.';
@@ -1671,6 +1813,11 @@
 			cctvSnapshotBufferPivotPage = 1;
 			cctvSnapshotPageRequests.clear();
 			cctvSnapshotRequestId += 1;
+			traceMarks = [];
+			traceMarksError = '';
+			selectedTraceMarkCameraKeys = [];
+			activeTraceMarkKey = '';
+			traceMarkRequestId += 1;
 			return;
 		}
 
@@ -1691,6 +1838,11 @@
 			cctvSnapshotBufferPivotPage = 1;
 			cctvSnapshotPageRequests.clear();
 			cctvSnapshotRequestId += 1;
+			traceMarks = [];
+			traceMarksError = '';
+			selectedTraceMarkCameraKeys = [];
+			activeTraceMarkKey = '';
+			traceMarkRequestId += 1;
 			return;
 		}
 
@@ -1708,6 +1860,11 @@
 			cctvSnapshotBufferPivotPage = 1;
 			cctvSnapshotPageRequests.clear();
 			cctvSnapshotRequestId += 1;
+			traceMarks = [];
+			traceMarksError = '';
+			selectedTraceMarkCameraKeys = [];
+			activeTraceMarkKey = '';
+			traceMarkRequestId += 1;
 			return;
 		}
 
@@ -1715,6 +1872,11 @@
 		error = '';
 		cctvSnapshotsError = '';
 		cctvSnapshotRequestId += 1;
+		traceMarks = [];
+		traceMarksError = '';
+		selectedTraceMarkCameraKeys = [];
+		activeTraceMarkKey = '';
+		const markRequestId = ++traceMarkRequestId;
 
 		try {
 			const traceStart = toApiDateTime(startDateTime);
@@ -1734,7 +1896,7 @@
 				pageSize: CCTV_SNAPSHOT_PAGE_SIZE
 			});
 
-			const [result, snapshotResult] = await Promise.all([
+			const [result] = await Promise.all([
 				getVesselTrace({
 					vesselId: $selectedVesselId,
 					start: traceStart,
@@ -1751,6 +1913,30 @@
 					cctvSnapshotsError =
 						snapshotErr?.message || 'Failed to load CCTV snapshots for this trace range.';
 					return null;
+				}),
+				getVesselTraceMarkRecords({
+					vesselId: $selectedVesselId,
+					start: traceStart,
+					end: traceEnd,
+					timezoneMode,
+					timezoneOffset: timezoneMode === 'manual' ? timezoneOffset : ''
+				})
+					.then((markResult) => {
+						if (markRequestId !== traceMarkRequestId) return null;
+						const normalizedMarks = normalizeTraceMarkRecords(markResult);
+						traceMarks = normalizedMarks;
+						selectedTraceMarkCameraKeys = buildTraceMarkCameraOptions(normalizedMarks).map(
+							(option) => option.key
+						);
+						return markResult;
+					})
+					.catch((markError) => {
+						if (markRequestId !== traceMarkRequestId) return null;
+						console.error('[VESSEL_TRACE_MARK_RECORDS_ERROR]', markError);
+						traceMarks = [];
+						selectedTraceMarkCameraKeys = [];
+						traceMarksError = markError?.message || 'Failed to load CCTV motion marks.';
+						return null;
 				})
 			]);
 
@@ -1813,6 +1999,9 @@
 			cctvSnapshotsLoadedPageNumbers = [];
 			cctvSnapshotBufferPivotPage = 1;
 			cctvSnapshotPageRequests.clear();
+			traceMarks = [];
+			selectedTraceMarkCameraKeys = [];
+			activeTraceMarkKey = '';
 		} finally {
 			loading = false;
 		}
@@ -2136,13 +2325,111 @@
 		setPlaybackTimestamp(timelineEvents[nextIndex]?.timestampMs ?? activePlaybackTimestampMs);
 	}
 
+	function closeMotionVideo() {
+		motionVideoRequestId += 1;
+		motionVideoOpen = false;
+		motionVideoLoading = false;
+		motionVideoError = '';
+		motionVideoDetail = null;
+	}
+
+	function handleMotionVideoBackdropClick(event) {
+		if (event.target === event.currentTarget) closeMotionVideo();
+	}
+
+	function handleTraceWindowKeydown(event) {
+		if (event.key !== 'Escape') return;
+		document.querySelector('.timeline-camera-filter[open]')?.removeAttribute('open');
+
+		if (motionVideoOpen) {
+			closeMotionVideo();
+			return;
+		}
+
+		activeTraceMarkKey = '';
+	}
+
+	function handleTraceWindowClick(event) {
+		if (!event?.target?.closest?.('.timeline-camera-filter')) {
+			document.querySelector('.timeline-camera-filter[open]')?.removeAttribute('open');
+		}
+
+		if (event?.target?.closest?.('.timeline-mark-popup, .timeline-mark-trigger')) return;
+		if (!motionVideoOpen) activeTraceMarkKey = '';
+	}
+
+	function toggleTraceMarkPopup(mark, event) {
+		event?.preventDefault();
+		event?.stopPropagation();
+		activeTraceMarkKey = activeTraceMarkKey === mark?.key ? '' : mark?.key || '';
+	}
+
+	function formatMotionDuration(value) {
+		const seconds = Number(value);
+		if (!Number.isFinite(seconds) || seconds < 0) return '-';
+
+		const minutes = Math.floor(seconds / 60);
+		const remainingSeconds = Math.floor(seconds % 60);
+		return minutes > 0 ? `${minutes}m ${remainingSeconds}s` : `${remainingSeconds}s`;
+	}
+
+	async function openMotionVideo(mark, event) {
+		event?.preventDefault();
+		event?.stopPropagation();
+
+		if (!mark?.id) return;
+		activeTraceMarkKey = '';
+
+		const requestId = ++motionVideoRequestId;
+		motionVideoOpen = true;
+		motionVideoLoading = true;
+		motionVideoError = '';
+		motionVideoDetail = {
+			id: mark.id,
+			cameraName: mark.cameraName,
+			cameraToken: mark.cameraToken,
+			startedAt: mark.startedAt,
+			recordingUrl: ''
+		};
+
+		try {
+			const detail = await getCctvMotionDetail({
+				recordId: mark.id,
+				timezoneMode,
+				timezoneOffset: timezoneMode === 'manual' ? timezoneOffset : ''
+			});
+
+			if (requestId !== motionVideoRequestId) return;
+
+			motionVideoDetail = {
+				...motionVideoDetail,
+				...detail,
+				recordingUrl: detail?.recordingUrl || detail?.recording_url || ''
+			};
+
+			if (!motionVideoDetail.recordingUrl) {
+				motionVideoError = 'Video URL is not available for this recording.';
+			}
+		} catch (videoError) {
+			if (requestId !== motionVideoRequestId) return;
+			console.error('[VESSEL_TRACE_MOTION_VIDEO_ERROR]', videoError);
+			motionVideoError = videoError?.message || 'Failed to load CCTV motion recording.';
+		} finally {
+			if (requestId === motionVideoRequestId) {
+				motionVideoLoading = false;
+			}
+		}
+	}
+
 	onDestroy(() => {
 		clearPlaybackInterval('destroy');
+		motionVideoRequestId += 1;
 	});
 
 	$effect(() => {
 		if (!active) {
 			stopPlayback('inactive-page');
+			if (motionVideoOpen) closeMotionVideo();
 		}
 	});
 
@@ -2181,6 +2468,8 @@
 	});
 
 </script>
+
+<svelte:window onkeydown={handleTraceWindowKeydown} onclick={handleTraceWindowClick} />
 
 <section class="trace-root page-content">
 	<section class="trace-viewport">
@@ -2442,7 +2731,10 @@
 		</section>
 
 		<section class="bottom-panel">
-			<div class="playback-card">
+			<div
+				class="playback-card"
+				class:has-camera-filter={traceMarkCameraOptions.length > 0}
+			>
 				<div class="playback-controls">
 					<button
 						type="button"
@@ -2508,34 +2800,149 @@
 					</button>
 				</div>
 
-				<div
-					class="timeline"
-					role="slider"
-					tabindex="0"
-					aria-label="Trace playback timeline"
-					aria-valuemin="0"
-					aria-valuemax={Math.max(timelineEvents.length - 1, 0)}
-					aria-valuenow={activeIndex}
-					onpointerdown={startTimelineDrag}
-					onpointermove={dragTimeline}
-					onpointerup={stopTimelineDrag}
-					onpointercancel={stopTimelineDrag}
-					onclick={moveTimeline}
-				>
-					<div class="timeline-track"></div>
-					{#each cctvBufferSegments as segment (segment.key)}
-						<div
-							class="timeline-buffer-segment"
-							style={`left: ${segment.left}%; width: ${segment.width}%;`}
-							title={`CCTV page ${segment.startPage}-${segment.endPage} loaded`}
-						></div>
-					{/each}
-					<div class="timeline-progress" style={`width: ${timelineProgress}%`}></div>
-					<div class="timeline-dot" style={`left: ${timelineProgress}%`}></div>
+				<div class="timeline-shell">
+					<div
+						class="timeline"
+						role="slider"
+						tabindex="0"
+						aria-label="Trace playback timeline"
+						aria-valuemin="0"
+						aria-valuemax={Math.max(timelineEvents.length - 1, 0)}
+						aria-valuenow={activeIndex}
+						onpointerdown={startTimelineDrag}
+						onpointermove={dragTimeline}
+						onpointerup={stopTimelineDrag}
+						onpointercancel={stopTimelineDrag}
+						onclick={moveTimeline}
+					>
+						<div class="timeline-track"></div>
+						{#each cctvBufferSegments as segment (segment.key)}
+							<div
+								class="timeline-buffer-segment"
+								style={`left: ${segment.left}%; width: ${segment.width}%;`}
+								title={`CCTV page ${segment.startPage}-${segment.endPage} loaded`}
+							></div>
+						{/each}
+						<div class="timeline-progress" style={`width: ${timelineProgress}%`}></div>
+						<div class="timeline-dot" style={`left: ${timelineProgress}%`}></div>
+					</div>
+
+					<div class="timeline-mark-layer" aria-label="CCTV motion recording marks">
+						{#each timelineTraceMarks as mark (mark.key)}
+							<div
+								class="timeline-mark"
+								class:open={activeTraceMarkKey === mark.key}
+								class:align-left={mark.left < 12}
+								class:align-right={mark.left > 88}
+								style={`left: ${mark.left}%`}
+							>
+								<button
+									type="button"
+									class="timeline-mark-trigger"
+									class:active={activeTraceMarkKey === mark.key}
+									aria-label={`Show ${mark.recordings.length} camera recording${mark.recordings.length === 1 ? '' : 's'} started ${mark.startedAtText}`}
+									aria-expanded={activeTraceMarkKey === mark.key}
+									onpointerdown={(event) => event.stopPropagation()}
+									onclick={(event) => toggleTraceMarkPopup(mark, event)}
+								>
+									<span class="timeline-mark-pin" aria-hidden="true"></span>
+								</button>
+
+								{#if activeTraceMarkKey === mark.key}
+									<div
+										class="timeline-mark-popup"
+										class:single-camera={mark.recordings.length === 1}
+										class:two-cameras={mark.recordings.length === 2}
+										class:four-cameras={mark.recordings.length === 4}
+										role="group"
+										aria-label={`Camera recordings started ${mark.startedAtText}`}
+									>
+										<div class="timeline-mark-popup-header">
+											<strong>{mark.recordings.length} camera{mark.recordings.length === 1 ? '' : 's'}</strong>
+											<small>{mark.startedAtText}</small>
+										</div>
+
+										<div class="timeline-mark-camera-grid">
+											{#each mark.recordings as recording (recording.key)}
+												<button
+													type="button"
+													class="timeline-mark-camera"
+													onclick={(event) => openMotionVideo(recording, event)}
+													aria-label={`Play recording from ${recording.cameraName}`}
+												>
+													<span class="timeline-mark-thumbnail">
+														{#if recording.thumbnailUrl}
+															<img
+																src={recording.thumbnailUrl}
+																alt={`Motion thumbnail from ${recording.cameraName}`}
+																loading="lazy"
+																draggable="false"
+															/>
+														{:else}
+															<span class="timeline-mark-no-image">No thumbnail</span>
+														{/if}
+													</span>
+													<span class="timeline-mark-copy">
+														<strong>{recording.cameraName}</strong>
+														<small>{recording.startedAtText}</small>
+													</span>
+												</button>
+											{/each}
+										</div>
+									</div>
+								{/if}
+							</div>
+						{/each}
+					</div>
 				</div>
 
+				{#if traceMarkCameraOptions.length}
+					<details class="timeline-camera-filter">
+						<summary aria-label="Filter timeline markers by camera">
+							<span class="timeline-camera-filter-title">Camera</span>
+							<strong>
+								{selectedTraceMarkCameraKeys.length === traceMarkCameraOptions.length
+									? 'All'
+									: `${selectedTraceMarkCameraKeys.length} camera${selectedTraceMarkCameraKeys.length === 1 ? '' : 's'}`}
+							</strong>
+							<span class="timeline-camera-filter-chevron" aria-hidden="true">⌄</span>
+						</summary>
+						<div class="timeline-camera-filter-options">
+							<label class="timeline-camera-option all-cameras">
+								<input
+									type="checkbox"
+									checked={selectedTraceMarkCameraKeys.length === traceMarkCameraOptions.length}
+									onchange={(event) =>
+										toggleAllTraceMarkCameras(event.currentTarget.checked, traceMarkCameraOptions)}
+								/>
+								<span class="timeline-camera-checkbox" aria-hidden="true"></span>
+								<span class="timeline-camera-name">All</span>
+							</label>
+
+							{#each traceMarkCameraOptions as camera (camera.key)}
+								<label class="timeline-camera-option" title={camera.name}>
+									<input
+										type="checkbox"
+										checked={selectedTraceMarkCameraKeys.includes(camera.key)}
+										onchange={(event) =>
+											toggleTraceMarkCamera(camera.key, event.currentTarget.checked)}
+									/>
+									<span class="timeline-camera-checkbox" aria-hidden="true"></span>
+									<span class="timeline-camera-name">{camera.name}</span>
+								</label>
+							{/each}
+						</div>
+					</details>
+				{/if}
+
 				<div class="timeline-time">
-					<span>{activeIndex + 1}/{timelineEvents.length || 0} • {activeTimelineSourceLabel}</span>
+					<span
+						>{activeIndex + 1}/{timelineEvents.length || 0} • {activeTimelineSourceLabel}{timelineTraceMarks.length
+							? ` • ${timelineTraceMarks.length} marks`
+							: traceMarksError
+								? ' • marks unavailable'
+								: ''}</span
+					>
 					<strong>{activeTimelineLabel}</strong>
 				</div>
 			</div>
@@ -2568,7 +2975,7 @@
 					</article>
 
 					<article class="info-card">
-						<span>Ocean</span>
+						<span>Ocean current</span>
 						<strong>{vesselInfo.oceanCurrent}</strong>
 					</article>
 
@@ -2617,6 +3024,88 @@
 		</div>
 	</section>
 </section>
+
+{#if motionVideoOpen}
+	<div
+		class="motion-video-backdrop"
+		role="presentation"
+		onclick={handleMotionVideoBackdropClick}
+		transition:fade={{ duration: 140 }}
+	>
+		<div
+			class="motion-video-modal"
+			role="dialog"
+			tabindex="-1"
+			aria-modal="true"
+			aria-labelledby="motion-video-title"
+			in:scale={{ start: 0.97, duration: 160 }}
+		>
+			<header class="motion-video-header">
+				<div>
+					<small>CCTV Motion Recording</small>
+					<h2 id="motion-video-title">
+						{motionVideoDetail?.cameraName || 'Camera recording'}
+					</h2>
+					<p>{motionVideoDetail?.vesselName || vesselInfo.vesselName}</p>
+				</div>
+				<button
+					type="button"
+					class="motion-video-close"
+					onclick={closeMotionVideo}
+					aria-label="Close CCTV recording"
+				>×</button
+				>
+			</header>
+
+			<div class="motion-video-body">
+				{#if motionVideoLoading}
+					<div class="motion-video-loading" role="status">
+						<span class="motion-video-spinner" aria-hidden="true"></span>
+						<strong>Loading recording...</strong>
+					</div>
+				{:else if motionVideoError}
+					<div class="motion-video-error" role="alert">
+						<strong>Recording unavailable</strong>
+						<span>{motionVideoError}</span>
+					</div>
+				{:else if motionVideoDetail?.recordingUrl}
+					<div class="motion-video-player-shell">
+						<!-- svelte-ignore a11y_media_has_caption -->
+						<video
+							src={motionVideoDetail.recordingUrl}
+							poster={traceMarks.find((mark) => mark.id === motionVideoDetail?.id)
+								?.thumbnailUrl || ''}
+							controls
+							playsinline
+							preload="metadata"
+						>
+							Your browser does not support video playback.
+						</video>
+					</div>
+				{/if}
+
+				<div class="motion-video-meta">
+					<div>
+						<span>Camera</span>
+						<strong>{motionVideoDetail?.cameraName || '-'}</strong>
+					</div>
+					<div>
+						<span>Started</span>
+						<strong>{motionVideoDetail?.startedAt || '-'}</strong>
+					</div>
+					<div>
+						<span>Ended</span>
+						<strong>{motionVideoDetail?.endedAt || '-'}</strong>
+					</div>
+					<div>
+						<span>Duration</span>
+						<strong>{formatMotionDuration(motionVideoDetail?.durationSeconds)}</strong>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.trace-root {
@@ -2871,6 +3360,8 @@
 	}
 
 	.main-monitor-grid {
+		position: relative;
+		z-index: 1;
 		min-height: 0;
 		display: grid;
 		grid-template-columns: minmax(420px, 1fr) minmax(0, 1.75fr);
@@ -3455,6 +3946,8 @@
 	}
 
 	.bottom-panel {
+		position: relative;
+		z-index: 1000;
 		min-height: 0;
 		display: grid;
 		grid-template-rows: auto auto;
@@ -3471,6 +3964,8 @@
 	}
 
 	.playback-card {
+		position: relative;
+		z-index: 2;
 		min-width: 0;
 		min-height: 52px;
 		padding: 8px 10px;
@@ -3481,7 +3976,11 @@
 		background: var(--color-surface);
 		border: 1px solid #d8dde3;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
-		overflow: hidden;
+		overflow: visible;
+	}
+
+	.playback-card.has-camera-filter {
+		grid-template-columns: auto minmax(0, 1fr) 140px 190px;
 	}
 
 	.playback-controls {
@@ -3585,6 +4084,12 @@
 		cursor: not-allowed;
 	}
 
+	.timeline-shell {
+		position: relative;
+		min-width: 0;
+		height: 22px;
+	}
+
 	.timeline {
 		position: relative;
 		height: 22px;
@@ -3646,6 +4151,420 @@
 		border: 2px solid #ffffff;
 		box-shadow: 0 0 0 1px #2563eb;
 		transform: translateX(-50%);
+	}
+
+	.timeline-mark-layer {
+		position: absolute;
+		inset: 0;
+		z-index: 3;
+		pointer-events: none;
+	}
+
+	.timeline-mark {
+		position: absolute;
+		top: 1px;
+		width: 12px;
+		height: 20px;
+		pointer-events: none;
+		transform: translateX(-50%);
+		z-index: 1;
+	}
+
+	.timeline-mark.open,
+	.timeline-mark:focus-within {
+		z-index: 5;
+	}
+
+	.timeline-mark.align-left {
+		transform: none;
+	}
+
+	.timeline-mark.align-right {
+		transform: translateX(-100%);
+	}
+
+	.timeline-mark-trigger {
+		position: absolute;
+		inset: 0;
+		width: 12px;
+		height: 20px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: inherit;
+		cursor: pointer;
+		pointer-events: auto;
+	}
+
+	.timeline-mark-trigger:focus-visible {
+		outline: 2px solid #60a5fa;
+		outline-offset: 3px;
+		border-radius: 3px;
+	}
+
+	.timeline-mark-pin {
+		position: absolute;
+		left: 50%;
+		top: 0;
+		width: 8px;
+		height: 8px;
+		border: 2px solid #ffffff;
+		border-radius: 2px 2px 2px 0;
+		background: #f97316;
+		box-shadow:
+			0 0 0 1px #c2410c,
+			0 2px 5px rgba(124, 45, 18, 0.32);
+		transform: translateX(-50%) rotate(-45deg);
+		transition: transform 140ms ease, background 140ms ease;
+	}
+
+	.timeline-mark-trigger:hover .timeline-mark-pin,
+	.timeline-mark-trigger:focus-visible .timeline-mark-pin,
+	.timeline-mark-trigger.active .timeline-mark-pin {
+		background: #fb923c;
+		transform: translateX(-50%) rotate(-45deg) scale(1.2);
+	}
+
+	.timeline-mark-popup {
+		position: absolute;
+		left: 50%;
+		bottom: calc(100% + 8px);
+		width: min(680px, calc(100vw - 56px));
+		max-height: min(680px, calc(100dvh - 100px));
+		padding: 9px;
+		display: grid;
+		gap: 9px;
+		overflow-x: hidden;
+		overflow-y: auto;
+		border: 1px solid #415475;
+		border-radius: 8px;
+		background: #101827;
+		box-shadow: 0 14px 30px rgba(15, 23, 42, 0.38);
+		color: #f8fafc;
+		text-align: left;
+		transform: translateX(-50%);
+		pointer-events: auto;
+		box-sizing: border-box;
+	}
+
+	.timeline-mark-popup.single-camera {
+		width: min(360px, calc(100vw - 56px));
+	}
+
+	.timeline-mark-popup.two-cameras {
+		width: min(520px, calc(100vw - 56px));
+	}
+
+	.timeline-mark-popup::after {
+		content: '';
+		position: absolute;
+		left: 50%;
+		bottom: -5px;
+		width: 9px;
+		height: 9px;
+		border-right: 1px solid #415475;
+		border-bottom: 1px solid #415475;
+		background: #101827;
+		transform: translateX(-50%) rotate(45deg);
+	}
+
+	.timeline-mark-popup-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 1px 2px;
+	}
+
+	.timeline-mark-popup-header strong {
+		font-size: 11px;
+		font-weight: 850;
+	}
+
+	.timeline-mark-popup-header small {
+		overflow: hidden;
+		color: #b8c7dc;
+		font-size: 10px;
+		font-weight: 650;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.timeline-mark-camera-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 8px;
+	}
+
+	.timeline-mark-popup.single-camera .timeline-mark-camera-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.timeline-mark-popup.two-cameras .timeline-mark-camera-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.timeline-mark-popup.four-cameras .timeline-mark-camera-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.timeline-mark-camera {
+		min-width: 0;
+		padding: 6px;
+		display: grid;
+		gap: 6px;
+		border: 1px solid rgba(148, 163, 184, 0.2);
+		border-radius: 7px;
+		background: #172033;
+		color: #f8fafc;
+		text-align: left;
+		cursor: pointer;
+		transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+	}
+
+	.timeline-mark-camera:hover,
+	.timeline-mark-camera:focus-visible {
+		border-color: #60a5fa;
+		background: #1e2c45;
+		outline: none;
+		transform: translateY(-1px);
+	}
+
+	.timeline-mark-thumbnail {
+		display: grid;
+		place-items: center;
+		width: 100%;
+		aspect-ratio: 16 / 9;
+		overflow: hidden;
+		border-radius: 5px;
+		background: #1e293b;
+	}
+
+	.timeline-mark-thumbnail img {
+		display: block;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+
+	.timeline-mark-no-image {
+		color: #94a3b8;
+		font-size: 10px;
+		font-weight: 750;
+	}
+
+	.timeline-mark-copy {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.timeline-mark-copy strong,
+	.timeline-mark-copy small {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.timeline-mark-copy strong {
+		font-size: 11px;
+		font-weight: 850;
+	}
+
+	.timeline-mark-copy small {
+		color: #b8c7dc;
+		font-size: 10px;
+		font-weight: 650;
+	}
+
+	.timeline-camera-filter {
+		position: relative;
+		width: 210px;
+		max-width: 100%;
+		min-width: 0;
+		justify-self: start;
+	}
+
+	.timeline-camera-filter summary {
+		min-height: 34px;
+		padding: 5px 8px;
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 7px;
+		border: 1px solid #34445e;
+		border-radius: 8px;
+		background: linear-gradient(180deg, rgba(30, 41, 59, 0.86), rgba(15, 23, 42, 0.86));
+		cursor: pointer;
+		list-style: none;
+		box-sizing: border-box;
+		transition:
+			border-color 0.18s ease,
+			background 0.18s ease;
+	}
+
+	.timeline-camera-filter summary:hover,
+	.timeline-camera-filter[open] summary {
+		border-color: rgba(96, 165, 250, 0.72);
+		background: linear-gradient(180deg, rgba(37, 52, 75, 0.94), rgba(17, 27, 45, 0.94));
+	}
+
+	.timeline-camera-filter summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.timeline-camera-filter summary:focus-visible {
+		border-color: #60a5fa;
+		outline: 2px solid rgba(96, 165, 250, 0.25);
+		outline-offset: 2px;
+	}
+
+	.timeline-camera-filter-title {
+		color: var(--text-secondary);
+		font-size: 9px;
+		font-weight: 850;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+	}
+
+	.timeline-camera-filter summary strong {
+		justify-self: end;
+		padding: 2px 6px;
+		overflow: hidden;
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.18);
+		color: #93c5fd;
+		font-size: 10px;
+		font-weight: 850;
+		text-align: right;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.timeline-camera-filter-chevron {
+		color: var(--text-secondary);
+		font-size: 15px;
+		line-height: 1;
+		transition: transform 150ms ease;
+	}
+
+	.timeline-camera-filter[open] .timeline-camera-filter-chevron {
+		transform: rotate(180deg);
+	}
+
+	.timeline-camera-filter-options {
+		position: absolute;
+		right: 0;
+		bottom: calc(100% + 7px);
+		z-index: 20;
+		width: min(210px, calc(100vw - 32px));
+		max-height: 240px;
+		padding: 7px;
+		display: grid;
+		gap: 3px;
+		overflow-x: hidden;
+		overflow-y: auto;
+		border: 1px solid #415475;
+		border-radius: 9px;
+		background: #101827;
+		box-shadow: 0 14px 30px rgba(15, 23, 42, 0.38);
+		box-sizing: border-box;
+	}
+
+	.timeline-camera-option {
+		min-width: 0;
+		width: 100%;
+		padding: 8px;
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		border-radius: 6px;
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 750;
+		cursor: pointer;
+		box-sizing: border-box;
+	}
+
+	.timeline-camera-option:hover {
+		background: rgba(96, 165, 250, 0.12);
+		color: #f8fafc;
+	}
+
+	.timeline-camera-option:has(input:checked) {
+		background: rgba(37, 99, 235, 0.13);
+		color: #dbeafe;
+	}
+
+	.timeline-camera-option.all-cameras {
+		margin-bottom: 3px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 6px 6px 0 0;
+		color: #60a5fa;
+		font-weight: 850;
+	}
+
+	.timeline-camera-option input {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		margin: -1px;
+		opacity: 0;
+		pointer-events: none;
+	}
+
+	.timeline-camera-checkbox {
+		position: relative;
+		flex: 0 0 16px;
+		width: 16px;
+		height: 16px;
+		border: 1px solid #64748b;
+		border-radius: 4px;
+		background: #0b1220;
+		box-sizing: border-box;
+		transition:
+			border-color 0.16s ease,
+			background 0.16s ease,
+			box-shadow 0.16s ease;
+	}
+
+	.timeline-camera-checkbox::after {
+		content: '';
+		position: absolute;
+		left: 4px;
+		top: 1px;
+		width: 5px;
+		height: 9px;
+		border-right: 2px solid #ffffff;
+		border-bottom: 2px solid #ffffff;
+		opacity: 0;
+		transform: rotate(45deg) scale(0.72);
+		transition:
+			opacity 0.14s ease,
+			transform 0.14s ease;
+	}
+
+	.timeline-camera-option input:checked + .timeline-camera-checkbox {
+		border-color: #60a5fa;
+		background: #2563eb;
+		box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+	}
+
+	.timeline-camera-option input:checked + .timeline-camera-checkbox::after {
+		opacity: 1;
+		transform: rotate(45deg) scale(1);
+	}
+
+	.timeline-camera-option input:focus-visible + .timeline-camera-checkbox {
+		outline: 2px solid #93c5fd;
+		outline-offset: 2px;
+	}
+
+	.timeline-camera-name {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.timeline-time {
@@ -3784,6 +4703,181 @@
 		text-align: center;
 	}
 
+	.motion-video-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 40000;
+		display: grid;
+		place-items: center;
+		padding: 20px;
+		background: rgba(2, 6, 23, 0.82);
+		backdrop-filter: blur(8px);
+		box-sizing: border-box;
+	}
+
+	.motion-video-modal {
+		width: min(920px, 100%);
+		max-height: calc(100dvh - 40px);
+		overflow: auto;
+		border: 1px solid rgba(148, 163, 184, 0.24);
+		border-radius: 16px;
+		background: #0f172a;
+		box-shadow: 0 28px 90px rgba(0, 0, 0, 0.62);
+		color: #f8fafc;
+	}
+
+	.motion-video-header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 18px;
+		padding: 18px 20px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+	}
+
+	.motion-video-header small {
+		color: #60a5fa;
+		font-size: 10px;
+		font-weight: 850;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+	}
+
+	.motion-video-header h2 {
+		margin: 5px 0 3px;
+		font-size: 19px;
+		line-height: 1.25;
+	}
+
+	.motion-video-header p {
+		margin: 0;
+		color: #94a3b8;
+		font-size: 12px;
+	}
+
+	.motion-video-close {
+		flex: 0 0 auto;
+		display: grid;
+		place-items: center;
+		width: 34px;
+		height: 34px;
+		padding: 0;
+		border: 1px solid rgba(148, 163, 184, 0.2);
+		border-radius: 9px;
+		background: rgba(30, 41, 59, 0.82);
+		color: #cbd5e1;
+		font-size: 22px;
+		line-height: 1;
+		cursor: pointer;
+	}
+
+	.motion-video-close:hover {
+		border-color: rgba(96, 165, 250, 0.72);
+		color: #ffffff;
+	}
+
+	.motion-video-body {
+		display: grid;
+		gap: 14px;
+		padding: 20px;
+	}
+
+	.motion-video-player-shell {
+		width: 100%;
+		overflow: hidden;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		border-radius: 12px;
+		background: #020617;
+		aspect-ratio: 16 / 9;
+	}
+
+	.motion-video-player-shell video {
+		display: block;
+		width: 100%;
+		height: 100%;
+		object-fit: contain;
+		background: #020617;
+	}
+
+	.motion-video-loading,
+	.motion-video-error {
+		min-height: 280px;
+		display: grid;
+		place-items: center;
+		align-content: center;
+		gap: 12px;
+		padding: 24px;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 12px;
+		background: #020617;
+		text-align: center;
+		box-sizing: border-box;
+	}
+
+	.motion-video-loading strong,
+	.motion-video-error strong {
+		font-size: 14px;
+	}
+
+	.motion-video-error strong {
+		color: #fca5a5;
+	}
+
+	.motion-video-error span {
+		max-width: 520px;
+		color: #cbd5e1;
+		font-size: 12px;
+		line-height: 1.5;
+	}
+
+	.motion-video-spinner {
+		width: 30px;
+		height: 30px;
+		border: 3px solid rgba(96, 165, 250, 0.22);
+		border-top-color: #60a5fa;
+		border-radius: 50%;
+		animation: motionVideoSpin 0.8s linear infinite;
+	}
+
+	.motion-video-meta {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 8px;
+	}
+
+	.motion-video-meta > div {
+		min-width: 0;
+		padding: 11px 12px;
+		display: grid;
+		gap: 5px;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 9px;
+		background: rgba(30, 41, 59, 0.62);
+	}
+
+	.motion-video-meta span {
+		color: #94a3b8;
+		font-size: 9px;
+		font-weight: 800;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+	}
+
+	.motion-video-meta strong {
+		overflow: hidden;
+		color: #f1f5f9;
+		font-size: 11px;
+		font-weight: 800;
+		line-height: 1.4;
+		text-overflow: ellipsis;
+	}
+
+	@keyframes motionVideoSpin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
 	.raw-box {
 		margin: 10px;
 		background: #0f172a;
@@ -3806,6 +4900,31 @@
 		border-top: 1px solid #1e293b;
 		font-size: 11px;
 		line-height: 1.45;
+	}
+
+	@media (max-width: 700px) {
+		.motion-video-backdrop {
+			padding: 10px;
+		}
+
+		.motion-video-modal {
+			max-height: calc(100dvh - 20px);
+			border-radius: 12px;
+		}
+
+		.motion-video-header,
+		.motion-video-body {
+			padding: 14px;
+		}
+
+		.motion-video-meta {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.motion-video-loading,
+		.motion-video-error {
+			min-height: 200px;
+		}
 	}
 
 	@media (max-width: 1200px) {
@@ -3852,6 +4971,32 @@
 			overflow: visible;
 		}
 
+		.playback-card,
+		.playback-card.has-camera-filter {
+			grid-template-columns: auto minmax(0, 1fr);
+			align-items: center;
+		}
+
+		.playback-controls {
+			grid-column: 1;
+			grid-row: 1;
+		}
+
+		.timeline-time {
+			grid-column: 2;
+			grid-row: 1;
+		}
+
+		.timeline-shell {
+			grid-column: 1 / -1;
+			grid-row: 2;
+		}
+
+		.timeline-camera-filter {
+			grid-column: 1 / -1;
+			grid-row: 3;
+		}
+
 		.trace-loading-shell {
 			grid-row: auto;
 			display: block;
@@ -3892,6 +5037,36 @@
 	@media (max-width: 760px) {
 		.trace-viewport {
 			padding: 8px;
+		}
+
+		.playback-card,
+		.playback-card.has-camera-filter {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.playback-controls,
+		.timeline-shell,
+		.timeline-camera-filter,
+		.timeline-time {
+			grid-column: 1;
+		}
+
+		.playback-controls {
+			grid-row: 1;
+			flex-wrap: wrap;
+		}
+
+		.timeline-shell {
+			grid-row: 2;
+		}
+
+		.timeline-camera-filter {
+			grid-row: 3;
+		}
+
+		.timeline-time {
+			grid-row: 4;
+			text-align: left;
 		}
 
 		.map-panel {
