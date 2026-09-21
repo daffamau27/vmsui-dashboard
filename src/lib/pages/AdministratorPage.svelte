@@ -275,6 +275,7 @@
 		'view_travel_distance_table',
 		'view_daily_path_map',
 		'view_rpm_vs_fuel_chart',
+		'view_rpm_ranges_runtime_fuel_table',
 		'view_liter_per_nautical_mile_table',
 		'view_high_rpm_outside_safety_zone_table',
 		'view_high_rpm_low_speed_table'
@@ -297,6 +298,7 @@
 		view_travel_distance_table: 'Travel Distance Table',
 		view_daily_path_map: 'Daily Path Map',
 		view_rpm_vs_fuel_chart: 'RPM vs Fuel Chart',
+		view_rpm_ranges_runtime_fuel_table: 'RPM Ranges Runtime & Fuel Table',
 		view_liter_per_nautical_mile_table: 'Liter per Nautical Mile Table',
 		view_high_rpm_outside_safety_zone_table: 'High RPM Outside Safety Zone Table',
 		view_high_rpm_low_speed_table: 'High RPM Low Speed Table'
@@ -327,6 +329,8 @@
 		view_travel_distance_table: 'Shows Travel Distance summary in Dashboard, Daily Report, and reporting content.',
 		view_fuel_consumption_table: 'Shows Fuel Consumption section/table in Dashboard, Daily Report, and reports.',
 		view_rpm_vs_fuel_chart: 'Shows RPM vs Fuel chart in Daily Report and report output.',
+		view_rpm_ranges_runtime_fuel_table:
+			'Shows RPM Range Runtime & Fuel table in Daily and Periodical Reports.',
 		view_liter_per_nautical_mile_table: 'Shows Liter per Nautical Mile metric/table in Daily Report.',
 		view_high_rpm_outside_safety_zone_table:
 			'Shows High RPM Outside Safety Zone table in Daily Report.',

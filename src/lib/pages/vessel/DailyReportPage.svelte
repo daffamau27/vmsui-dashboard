@@ -3421,7 +3421,9 @@
 		}
 	});
 
-	let canViewRpmRangeRuntimeFuel = $derived(visibleRpmCurveTables.length > 0);
+	let canViewRpmRangeRuntimeFuel = $derived(
+		hasPermission('view_rpm_ranges_runtime_fuel_table')
+	);
 
 	let totalRuntimeHours = $derived(
 		runtimeRows.reduce((sum, row) => {
