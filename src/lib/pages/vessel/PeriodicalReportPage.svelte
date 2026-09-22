@@ -5,7 +5,7 @@
 		getPeriodicalReportData,
 		getPeriodicalReportExcelUrl
 	} from '$lib/api/periodicalReportApi.js';
-	import { downloadApiFile } from '$lib/api/authApi.js';
+	import { apiRequest, downloadApiFile } from '$lib/api/authApi.js';
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
@@ -22,11 +22,49 @@
 	let timezoneOffset = $state('+07:00');
 	let hasLoadedDateRange = $state(false);
 	let selectedRpmRuntimeFuelTableKey = $state('');
+	let currentUser = $state(null);
+	let currentUserLoading = $state(false);
+	let currentUserLoaded = $state(false);
 
 	let { active = false } = $props();
 	let shouldShowDateRangeOverlay = $derived(
 		!hasLoadedDateRange || !startDateTime || !endDateTime
 	);
+
+	async function loadCurrentUser() {
+		if (currentUser || currentUserLoading) return currentUser;
+
+		currentUserLoading = true;
+
+		try {
+			const response = await apiRequest('/users/current-user', { method: 'GET' });
+			currentUser = response?.data || response?.user || response || null;
+			return currentUser;
+		} catch (permissionError) {
+			console.error('[PERIODICAL_CURRENT_USER_PERMISSION_ERROR]', permissionError);
+			currentUser = null;
+			return null;
+		} finally {
+			currentUserLoading = false;
+			currentUserLoaded = true;
+		}
+	}
+
+	function hasPermission(permissionKey) {
+		if (!permissionKey) return true;
+
+		const permissionAccess = currentUser?.permissionAccess || {};
+		if (permissionAccess?.mode === 'all') return true;
+
+		if (permissionAccess?.mode === 'selected') {
+			const permissions = Array.isArray(permissionAccess?.permissions)
+				? permissionAccess.permissions
+				: [];
+			return permissions.includes(permissionKey);
+		}
+
+		return false;
+	}
 
 	function pad(value) {
 		return String(value).padStart(2, '0');
@@ -470,6 +508,14 @@
 		Array.isArray(highRpmLowSpeed?.engines) ? highRpmLowSpeed.engines : []
 	);
 
+	let canViewHighRpmLowSpeedTable = $derived(
+		hasPermission('view_high_rpm_low_speed_table')
+	);
+
+	let canViewRpmRangeRuntimeFuelTable = $derived(
+		hasPermission('view_rpm_ranges_runtime_fuel_table')
+	);
+
 	let literPerNauticalMile = $derived(
 		normalizedData?.liter_per_nautical_mile || normalizedData?.literPerNauticalMile || {}
 	);
@@ -672,6 +718,11 @@
 
 		startDateTime = toLocalInputValue(start);
 		endDateTime = toLocalInputValue(end);
+	});
+
+	$effect(() => {
+		if (!active || currentUserLoaded || currentUserLoading) return;
+		loadCurrentUser();
 	});
 
 </script>
@@ -879,6 +930,7 @@
 		{/if}
 	</section>
 
+	{#if canViewRpmRangeRuntimeFuelTable}
 	<section class="table-section">
 		<div class="section-header">
 			<div>
@@ -960,52 +1012,55 @@
 			<div class="empty-box">RPM range data is not available yet.</div>
 		{/if}
 	</section>
+	{/if}
 
-	<section class="table-section">
-		<div class="section-header">
-			<div>
-				<span class="section-kicker">RPM</span>
-				<h2>High RPM Low Speed</h2>
+	{#if canViewHighRpmLowSpeedTable}
+		<section class="table-section">
+			<div class="section-header">
+				<div>
+					<span class="section-kicker">RPM</span>
+					<h2>High RPM Low Speed</h2>
+				</div>
+
+				<strong>{highRpmLowSpeedRows.length} engines</strong>
 			</div>
 
-			<strong>{highRpmLowSpeedRows.length} engines</strong>
-		</div>
-
-		{#if highRpmLowSpeedRows.length}
-			<div class="table-wrapper">
-				<table>
-					<thead>
-						<tr>
-							<th>Engine</th>
-							<th>Duration</th>
-							<th>Duration Minutes</th>
-							<th>Fuel Used</th>
-						</tr>
-					</thead>
-
-					<tbody>
-						{#each highRpmLowSpeedRows as row}
+			{#if highRpmLowSpeedRows.length}
+				<div class="table-wrapper">
+					<table>
+						<thead>
 							<tr>
-								<td>{row.engine_name || row.engineName || '-'}</td>
-								<td>{row.duration_formatted || row.durationFormatted || formatRuntimeFromMinutes(row.duration_minutes ?? row.durationMinutes)}</td>
-								<td>{formatNumber(row.duration_minutes ?? row.durationMinutes, 0)}</td>
-								<td>{formatLiter(row.fuel_used_l ?? row.fuelUsedL ?? row.fuel)}</td>
+								<th>Engine</th>
+								<th>Duration</th>
+								<th>Duration Minutes</th>
+								<th>Fuel Used</th>
 							</tr>
-						{/each}
+						</thead>
 
-						<tr class="total-row">
-							<td>Grand Total</td>
-							<td>{highRpmLowSpeed?.grand_total_duration_formatted || highRpmLowSpeed?.grandTotalDurationFormatted || formatRuntimeFromMinutes(highRpmLowSpeed?.grand_total_duration_minutes ?? highRpmLowSpeed?.grandTotalDurationMinutes)}</td>
-							<td>{formatNumber(highRpmLowSpeed?.grand_total_duration_minutes ?? highRpmLowSpeed?.grandTotalDurationMinutes, 0)}</td>
-							<td>{formatLiter(highRpmLowSpeed?.grand_total_l ?? highRpmLowSpeed?.grandTotalL)}</td>
-						</tr>
-					</tbody>
-				</table>
-			</div>
-		{:else}
-			<div class="empty-box">High RPM low speed data is not available yet.</div>
-		{/if}
-	</section>
+						<tbody>
+							{#each highRpmLowSpeedRows as row}
+								<tr>
+									<td>{row.engine_name || row.engineName || '-'}</td>
+									<td>{row.duration_formatted || row.durationFormatted || formatRuntimeFromMinutes(row.duration_minutes ?? row.durationMinutes)}</td>
+									<td>{formatNumber(row.duration_minutes ?? row.durationMinutes, 0)}</td>
+									<td>{formatLiter(row.fuel_used_l ?? row.fuelUsedL ?? row.fuel)}</td>
+								</tr>
+							{/each}
+
+							<tr class="total-row">
+								<td>Grand Total</td>
+								<td>{highRpmLowSpeed?.grand_total_duration_formatted || highRpmLowSpeed?.grandTotalDurationFormatted || formatRuntimeFromMinutes(highRpmLowSpeed?.grand_total_duration_minutes ?? highRpmLowSpeed?.grandTotalDurationMinutes)}</td>
+								<td>{formatNumber(highRpmLowSpeed?.grand_total_duration_minutes ?? highRpmLowSpeed?.grandTotalDurationMinutes, 0)}</td>
+								<td>{formatLiter(highRpmLowSpeed?.grand_total_l ?? highRpmLowSpeed?.grandTotalL)}</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			{:else}
+				<div class="empty-box">High RPM low speed data is not available yet.</div>
+			{/if}
+		</section>
+	{/if}
 
 	<section class="table-section fuel-section">
 		<div class="section-header">
