@@ -2886,10 +2886,6 @@
 			return 'Password is required when creating a new user.';
 		}
 
-		if (mode === 'edit' && form.assetAccessMode === 'selected' && parseIds(form.assetIdsText).length === 0) {
-			return 'Selected asset access mode requires at least 1 asset ID.';
-		}
-
 		if (form.vesselAccessMode === 'selected' && parseIds(form.vesselIdsText).length === 0) {
 			return 'Selected vessel access mode requires at least 1 vessel ID.';
 		}
