@@ -83,12 +83,55 @@ export async function importFuelVdor({ vesselId, fileBase64 }) {
 	});
 }
 
-export async function downloadVdorTemplate() {
-	return apiRequest('/fuel-management/vdor-template', {
+export async function previewFuelVdor({ vesselId, fileBase64 }) {
+	return apiRequest('/fuel-management/import-vdor-preview', {
+		method: 'POST',
+		body: JSON.stringify({
+			vesselId: Number(vesselId),
+			fileBase64
+		})
+	});
+}
+
+export async function saveFuelVdorImport(payload) {
+	return apiRequest('/fuel-management/import-vdor-save', {
+		method: 'POST',
+		body: JSON.stringify(payload)
+	});
+}
+
+export async function downloadVdorTemplate({
+	vesselId,
+	date,
+	timezoneMode = 'auto',
+	timezoneOffset = ''
+}) {
+	const params = new URLSearchParams({
+		vesselId: String(vesselId),
+		date,
+		timezoneMode
+	});
+
+	if (timezoneMode === 'manual' && timezoneOffset) {
+		params.set('timezoneOffset', timezoneOffset);
+	}
+
+	return apiRequest(`/fuel-management/vdor-template?${params.toString()}`, {
 		method: 'GET',
 		rawResponse: true,
 		headers: {
 			Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 		}
+	});
+}
+
+export async function getFuelVdorComparison({ vesselId, date }) {
+	const params = new URLSearchParams({
+		vesselId: String(vesselId),
+		date: String(date)
+	});
+
+	return apiRequest(`/fuel-management/vdor-comparison?${params.toString()}`, {
+		method: 'GET'
 	});
 }

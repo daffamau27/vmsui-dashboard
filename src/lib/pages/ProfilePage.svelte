@@ -200,6 +200,40 @@
 </svelte:head>
 
 <section class="profile-page">
+	{#if errorMessage || successMessage}
+		<div class="profile-toast-layer" aria-live="polite">
+			{#if errorMessage}
+				<div class="profile-toast danger" role="alert">
+					<div class="profile-toast-copy">
+						<strong>Action failed</strong>
+						<span>{errorMessage}</span>
+					</div>
+					<button
+						type="button"
+						class="profile-toast-close"
+						on:click={() => (errorMessage = '')}
+						aria-label="Close error notification">×</button
+					>
+				</div>
+			{/if}
+
+			{#if successMessage}
+				<div class="profile-toast success" role="status">
+					<div class="profile-toast-copy">
+						<strong>Action success</strong>
+						<span>{successMessage}</span>
+					</div>
+					<button
+						type="button"
+						class="profile-toast-close"
+						on:click={() => (successMessage = '')}
+						aria-label="Close success notification">×</button
+					>
+				</div>
+			{/if}
+		</div>
+	{/if}
+
 	{#if loading}
 		<LoadingSkeleton label="Loading profile data" variant="profile-page" />
 	{:else}
@@ -227,18 +261,6 @@
 
 				<button class="refresh-button" type="button" on:click={loadProfilePage}> Refresh </button>
 			</header>
-
-			{#if errorMessage}
-				<div class="alert error">
-					{errorMessage}
-				</div>
-			{/if}
-
-			{#if successMessage}
-				<div class="alert success">
-					{successMessage}
-				</div>
-			{/if}
 
 			<section class="summary-grid">
 				<article class="summary-card">
@@ -817,23 +839,106 @@
 		font-weight: 800;
 	}
 
-	.alert {
-		padding: 10px 12px;
-		border-radius: 10px;
+	.profile-toast-layer {
+		position: fixed;
+		top: 18px;
+		right: 18px;
+		z-index: 30000;
+		display: grid;
+		gap: 10px;
+		width: min(390px, calc(100vw - 36px));
+		pointer-events: none;
+	}
+
+	.profile-toast {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: start;
+		gap: 10px;
+		padding: 11px 12px;
+		border: 1px solid #d9e2ec;
+		border-radius: 12px;
+		background: rgba(248, 250, 252, 0.98);
+		box-shadow: 0 14px 34px rgba(15, 23, 42, 0.24);
+		backdrop-filter: blur(10px);
+		pointer-events: auto;
+		animation: profile-toast-in 0.22s ease both;
+	}
+
+	.profile-toast-copy {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.profile-toast-copy strong {
+		color: #0f172a !important;
 		font-size: 12px;
 		font-weight: 900;
 	}
 
-	.alert.error {
-		background: var(--color-danger-muted);
-		color: #b91c1c;
-		border: 1px solid #fecaca;
+	.profile-toast-copy span {
+		overflow-wrap: anywhere;
+		color: #334155 !important;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 1.35;
+		text-transform: none;
 	}
 
-	.alert.success {
-		background: var(--color-success-muted);
-		color: #047857;
-		border: 1px solid #bbf7d0;
+	.profile-toast.success {
+		border-color: #bbf7d0;
+		background: rgba(240, 253, 244, 0.98);
+	}
+
+	.profile-toast.success .profile-toast-copy strong {
+		color: #052e16 !important;
+	}
+
+	.profile-toast.success .profile-toast-copy span {
+		color: #14532d !important;
+	}
+
+	.profile-toast.danger {
+		border-color: #fecaca;
+		background: rgba(255, 241, 242, 0.98);
+	}
+
+	.profile-toast.danger .profile-toast-copy strong {
+		color: #881337 !important;
+	}
+
+	.profile-toast.danger .profile-toast-copy span {
+		color: #9f1239 !important;
+	}
+
+	.profile-toast-close {
+		width: 24px;
+		height: 24px;
+		padding: 0;
+		border: 0;
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.08);
+		color: #334155 !important;
+		font-size: 17px;
+		font-weight: 900;
+		line-height: 1;
+	}
+
+	.profile-toast-close:hover:not(:disabled) {
+		background: rgba(15, 23, 42, 0.14);
+	}
+
+	@keyframes profile-toast-in {
+		from {
+			opacity: 0;
+			transform: translateY(-8px);
+		}
+
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
 	}
 
 	.loading-card {

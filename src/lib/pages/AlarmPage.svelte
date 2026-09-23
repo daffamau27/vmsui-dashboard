@@ -366,7 +366,7 @@
         onclick={handleMarkAllRead}
         disabled={acknowledging}
       >
-        {acknowledging ? "Acknowledging..." : "Mark All Read"}
+        {acknowledging ? "Acknowledging..." : "Acknowledge All"}
       </button>
     </div>
   </section>

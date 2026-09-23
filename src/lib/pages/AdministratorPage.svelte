@@ -3175,13 +3175,24 @@
 	</section>
 
 	{#if alert}
-		<div
-			class:success-alert={alert.type === 'success'}
-			class:error-alert={alert.type === 'error'}
-			class="alert-card"
-		>
-			<span>{alert.message}</span>
-			<button type="button" on:click={clearAlert}>×</button>
+		<div class="admin-toast-layer" aria-live="polite">
+			<div
+				class:success={alert.type === 'success'}
+				class:danger={alert.type === 'error'}
+				class="admin-toast"
+				role={alert.type === 'error' ? 'alert' : 'status'}
+			>
+				<div class="admin-toast-copy">
+					<strong>{alert.type === 'success' ? 'Action success' : 'Action failed'}</strong>
+					<span>{alert.message}</span>
+				</div>
+				<button
+					type="button"
+					class="admin-toast-close"
+					on:click={clearAlert}
+					aria-label="Close notification">×</button
+				>
+			</div>
 		</div>
 	{/if}
 
@@ -5591,39 +5602,105 @@
 		box-shadow: 0 14px 25px rgba(22, 163, 74, 0.18);
 	}
 
-	.alert-card {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 14px;
-		margin-top: 12px;
-		padding: 12px 14px;
-		border-radius: 16px;
-		font-size: 13px;
-		font-weight: 700;
+	.admin-toast-layer {
+		position: fixed;
+		top: 18px;
+		right: 18px;
+		z-index: 30000;
+		display: grid;
+		width: min(390px, calc(100vw - 36px));
+		pointer-events: none;
 	}
 
-	.alert-card button {
-		width: 28px;
-		height: 28px;
+	.admin-toast {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: start;
+		gap: 10px;
+		padding: 11px 12px;
+		border: 1px solid #d9e2ec;
+		border-radius: 12px;
+		background: rgba(248, 250, 252, 0.98);
+		box-shadow: 0 14px 34px rgba(15, 23, 42, 0.24);
+		backdrop-filter: blur(10px);
+		pointer-events: auto;
+		animation: admin-toast-in 0.22s ease both;
+	}
+
+	.admin-toast-copy {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	.admin-toast-copy strong {
+		color: #0f172a !important;
+		font-size: 12px;
+		font-weight: 900;
+	}
+
+	.admin-toast-copy span {
+		overflow-wrap: anywhere;
+		color: #334155 !important;
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 1.35;
+		text-transform: none;
+	}
+
+	.admin-toast.success {
+		border-color: #bbf7d0;
+		background: rgba(240, 253, 244, 0.98);
+	}
+
+	.admin-toast.success .admin-toast-copy strong {
+		color: #052e16 !important;
+	}
+
+	.admin-toast.success .admin-toast-copy span {
+		color: #14532d !important;
+	}
+
+	.admin-toast.danger {
+		border-color: #fecaca;
+		background: rgba(255, 241, 242, 0.98);
+	}
+
+	.admin-toast.danger .admin-toast-copy strong {
+		color: #881337 !important;
+	}
+
+	.admin-toast.danger .admin-toast-copy span {
+		color: #9f1239 !important;
+	}
+
+	.admin-toast-close {
+		width: 24px;
+		height: 24px;
+		padding: 0;
 		border: 0;
 		border-radius: 999px;
-		background: rgba(255, 255, 255, 0.65);
-		color: inherit;
-		font-size: 18px;
+		background: rgba(15, 23, 42, 0.08);
+		color: #334155;
+		font-size: 17px;
+		font-weight: 900;
 		line-height: 1;
 	}
 
-	.success-alert {
-		color: #14532d;
-		background: #dcfce7;
-		border: 1px solid #bbf7d0;
+	.admin-toast-close:hover:not(:disabled) {
+		background: rgba(15, 23, 42, 0.14);
 	}
 
-	.error-alert {
-		color: #7f1d1d;
-		background: var(--color-danger-muted);
-		border: 1px solid #fecaca;
+	@keyframes admin-toast-in {
+		from {
+			opacity: 0;
+			transform: translateY(-8px);
+		}
+
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
 	}
 
 	.state-card {
@@ -8653,32 +8730,12 @@
 		filter: brightness(0.98);
 	}
 
-	.alert-card,
 	.status-box {
 		margin-top: 14px;
 		border-radius: 10px;
 		padding: 10px 12px;
 		font-size: 12px;
 		font-weight: 900;
-	}
-
-	.alert-card button {
-		width: 24px;
-		height: 24px;
-		border-radius: 999px;
-		font-size: 16px;
-	}
-
-	.success-alert {
-		background: var(--color-success-muted);
-		border: 1px solid #bbf7d0;
-		color: #047857;
-	}
-
-	.error-alert {
-		background: var(--color-danger-muted);
-		border: 1px solid #fecaca;
-		color: #b91c1c;
 	}
 
 	.loader {
