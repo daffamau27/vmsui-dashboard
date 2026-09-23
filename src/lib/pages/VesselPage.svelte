@@ -430,7 +430,11 @@
 		return selectedIndex >= 0 ? selectedIndex : 0;
 	}
 
-	async function scrollVesselOptionIntoView(index = focusedVesselIndex, block = 'nearest') {
+	async function scrollVesselOptionIntoView(
+		index = focusedVesselIndex,
+		block = 'nearest',
+		behavior = 'smooth'
+	) {
 		if (!vesselDropdownOpen || index < 0) return;
 
 		await tick();
@@ -442,7 +446,7 @@
 		option?.scrollIntoView?.({
 			block,
 			inline: 'nearest',
-			behavior: 'smooth'
+			behavior
 		});
 	}
 
@@ -450,12 +454,12 @@
 		await tick();
 
 		focusedVesselIndex = getActiveVesselIndex();
-		await scrollVesselOptionIntoView(focusedVesselIndex, scrollBlock);
 
 		if (focusSearch) {
-			await tick();
-			vesselSearchInputElement?.focus?.();
+			vesselSearchInputElement?.focus?.({ preventScroll: true });
 		}
+
+		await scrollVesselOptionIntoView(focusedVesselIndex, scrollBlock, 'auto');
 	}
 
 	function openVesselDropdown({ focusSearch = true } = {}) {
@@ -1554,6 +1558,7 @@
 	}
 
 	.vessel-shell {
+		--vessel-topbar-height: 62px;
 		width: 100%;
 		height: 100%;
 		min-width: 0;
@@ -1943,6 +1948,10 @@
 	}
 
 	@media (max-width: 900px) {
+		.vessel-shell {
+			--vessel-topbar-height: 56px;
+		}
+
 		.vessel-topbar {
 			overflow: visible;
 		}
@@ -3126,6 +3135,10 @@
 	}
 
 	@media (max-width: 560px) {
+		.vessel-shell {
+			--vessel-topbar-height: 52px;
+		}
+
 		.hire-modal-backdrop {
 			align-items: end;
 			padding: 10px;

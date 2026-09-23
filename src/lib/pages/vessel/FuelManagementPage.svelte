@@ -9,8 +9,10 @@
 		saveFuelRob,
 		applyFuelTransaction,
 		deleteFuelTransaction,
-		importFuelVdor,
-		downloadVdorTemplate
+		previewFuelVdor,
+		saveFuelVdorImport,
+		downloadVdorTemplate,
+		getFuelVdorComparison
 	} from '$lib/api/fuelManagementApi.js';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
@@ -29,7 +31,9 @@
 	let currentUserLoading = $state(false);
 	let currentUserError = $state('');
 	let actionLoading = $state('');
-	let importLoading = $state(false);
+	let importPreviewLoading = $state(false);
+	let importSaveLoading = $state(false);
+	let vdorComparisonLoading = $state(false);
 
 	let dashboardData = $state(null);
 	let historyRows = $state([]);
@@ -59,6 +63,14 @@
 
 	let selectedImportFile = $state(null);
 	let selectedImportFileName = $state('');
+	let vdorDate = $state(todayDate());
+	let vdorPreview = $state(null);
+	let vdorStoredComparison = $state(null);
+	let vdorComparisonError = $state('');
+	let vdorImportNote = $state('Import VDOR Crew Report');
+	let vdorPreviewRequestId = 0;
+	let vdorComparisonRequestId = 0;
+	let vdorFormVesselId = $state(0);
 	let lastDashboardLoadKey = $state('');
 	$effect(() => {
 		if (!active) return;
@@ -130,7 +142,126 @@
 	let report = $derived(dashboardData || null);
 	let fuelConsumption = $derived(report?.fuel_consumption || {});
 	let perEngine = $derived(report?.fuel_consumption_per_engine || {});
-	let comparison = $derived(perEngine?.comparison || null);
+	let vdorPreviewData = $derived(vdorPreview?.data || vdorPreview || null);
+	let vdorPreviewConsumption = $derived(
+		vdorPreviewData?.vdorConsumption ||
+			vdorPreviewData?.vdor_consumption ||
+			vdorPreviewData?.consumptionBreakdown ||
+			vdorPreviewData?.consumption_breakdown ||
+			vdorPreviewData?.parsed?.vdorConsumption ||
+			vdorPreviewData?.parsed?.vdor_consumption ||
+			null
+	);
+	let vdorPreviewDailyBlock = $derived(
+		vdorPreviewData?.dailyConsumption ||
+			vdorPreviewData?.daily_consumption ||
+			vdorPreviewData?.vdorDailyConsumption ||
+			vdorPreviewData?.vdor_daily_consumption ||
+			vdorPreviewData?.dailyConsumptionBlock ||
+			vdorPreviewData?.daily_consumption_block ||
+			vdorPreviewData?.dailyBlock ||
+			vdorPreviewData?.daily_block ||
+			vdorPreviewData?.parsed?.dailyConsumption ||
+			vdorPreviewData?.parsed?.daily_consumption ||
+			null
+	);
+	let vdorPreviewLegacyComparison = $derived(
+		normalizeVdorComparison(
+			vdorPreviewData?.comparison || vdorPreviewData?.parsed?.comparison || null
+		)
+	);
+	let vdorPreviewSystemComparison = $derived(
+		vdorPreviewData?.systemComparison ||
+			vdorPreviewData?.system_comparison ||
+			vdorPreviewData?.parsed?.systemComparison ||
+			vdorPreviewData?.parsed?.system_comparison ||
+			null
+	);
+	let vdorPreviewSystemDaily = $derived(
+		vdorPreviewSystemComparison?.dailySystem ||
+			vdorPreviewSystemComparison?.daily_system ||
+			null
+	);
+	let vdorPreviewIsFod = $derived(
+		Boolean(
+			vdorPreviewData?.isFod ??
+				vdorPreviewData?.is_fod ??
+				vdorPreviewSystemDaily?.isFod ??
+				vdorPreviewSystemDaily?.is_fod
+		)
+	);
+	let vdorPreviewVdorTotal = $derived(getStoredComparisonTotal(vdorPreviewConsumption || {}));
+	let vdorPreviewSystemTotal = $derived(
+		firstFuelNumber(
+			vdorPreviewSystemComparison?.system_consumption_l,
+			vdorPreviewSystemComparison?.systemConsumptionL,
+			vdorPreviewSystemComparison?.daily_system_l,
+			vdorPreviewSystemComparison?.dailySystemL,
+			vdorPreviewLegacyComparison?.system_total,
+			getStoredComparisonTotal(vdorPreviewSystemDaily || {})
+		) ?? 0
+	);
+	let vdorPreviewDifference = $derived(
+		firstFuelNumber(vdorPreviewLegacyComparison?.delta) ??
+			vdorPreviewVdorTotal - vdorPreviewSystemTotal
+	);
+	let vdorPreviewDifferencePercent = $derived(
+		firstFuelNumber(vdorPreviewLegacyComparison?.delta_percentage) ??
+			(vdorPreviewSystemTotal
+				? (vdorPreviewDifference / vdorPreviewSystemTotal) * 100
+				: vdorPreviewDifference === 0
+					? 0
+					: null)
+	);
+	let vdorPreviewDifferenceRows = $derived(
+		getPreviewComparisonRows(
+			vdorPreviewConsumption || {},
+			vdorPreviewSystemDaily || {},
+			vdorPreviewIsFod
+		)
+	);
+	let vdorDailySourceRows = $derived.by(() => [
+		{
+			key: 'lastNightRob',
+			label: 'Fuel Last Night ROB',
+			vdor: optionalFuelNumber(getVdorDailyValue('lastNightRob', 'last_night_rob')),
+			system: optionalFuelNumber(getPreviewSystemValue('lastNightRob'))
+		},
+		{
+			key: 'consumption',
+			label: 'Consumption',
+			vdor: optionalFuelNumber(getVdorDailyValue('consumption', 'consumption')),
+			system: optionalFuelNumber(getPreviewSystemValue('consumption'))
+		},
+		{
+			key: 'received',
+			label: 'Received',
+			vdor: optionalFuelNumber(getVdorDailyValue('received', 'received')),
+			system: optionalFuelNumber(getPreviewSystemValue('received'))
+		}
+	]);
+	let vdorStoredComparisonData = $derived(
+		vdorStoredComparison?.data || vdorStoredComparison || null
+	);
+	let vdorStoredVdor = $derived(vdorStoredComparisonData?.vdor || {});
+	let vdorStoredSystem = $derived(
+		vdorStoredComparisonData?.daily_system || vdorStoredComparisonData?.dailySystem || {}
+	);
+	let vdorStoredVariance = $derived(vdorStoredComparisonData?.comparison || {});
+	let vdorStoredIsFod = $derived(
+		Boolean(vdorStoredComparisonData?.is_fod ?? vdorStoredComparisonData?.isFod)
+	);
+	let vdorStoredVdorTotal = $derived(getStoredComparisonTotal(vdorStoredVdor));
+	let vdorStoredSystemTotal = $derived(getStoredComparisonTotal(vdorStoredSystem));
+	let vdorStoredDifference = $derived(
+		vdorStoredVariance?.total_difference_l ??
+			vdorStoredVariance?.totalDifferenceL ??
+			vdorStoredVdorTotal - vdorStoredSystemTotal
+	);
+	let vdorStoredPercentDifference = $derived(
+		vdorStoredVariance?.total_percent_diff ?? vdorStoredVariance?.totalPercentDiff ?? null
+	);
+	let vdorStoredDifferenceRows = $derived(getStoredComparisonRows(vdorStoredVariance));
 	let latestRobHeader = $derived(formatLiter(fuelConsumption?.fuel_rob));
 
 	let canAccessDailyReport = $derived(hasPermission('access_daily_report'));
@@ -395,6 +526,22 @@
 
 		lastDashboardLoadKey = dashboardLoadKey;
 		loadDashboardCurrent();
+	});
+
+	$effect(() => {
+		const vesselId = Number(currentVesselId || 0);
+		if (vesselId === vdorFormVesselId) return;
+
+		vdorFormVesselId = vesselId;
+		vdorPreviewRequestId += 1;
+		vdorComparisonRequestId += 1;
+		importPreviewLoading = false;
+		vdorComparisonLoading = false;
+		selectedImportFile = null;
+		selectedImportFileName = '';
+		vdorPreview = null;
+		vdorStoredComparison = null;
+		vdorComparisonError = '';
 	});
 
 	function todayDate() {
@@ -983,6 +1130,52 @@
 		const file = event?.target?.files?.[0];
 		selectedImportFile = file || null;
 		selectedImportFileName = file?.name || '';
+		vdorPreviewRequestId += 1;
+		importPreviewLoading = false;
+		vdorPreview = null;
+	}
+
+	function handleVdorDateChange() {
+		clearMessages();
+		vdorStoredComparison = null;
+		vdorComparisonError = '';
+	}
+
+	async function loadStoredVdorComparison(vesselId = currentVesselId, date = vdorDate) {
+		const effectiveVesselId = Number(vesselId || 0);
+		const effectiveDate = String(date || '').trim();
+
+		if (!effectiveVesselId || !effectiveDate || !canImportVdor) return;
+
+		const requestId = ++vdorComparisonRequestId;
+		vdorComparisonLoading = true;
+		vdorComparisonError = '';
+
+		try {
+			const response = await getFuelVdorComparison({
+				vesselId: effectiveVesselId,
+				date: effectiveDate
+			});
+
+			if (requestId !== vdorComparisonRequestId) return;
+			vdorStoredComparison = response;
+		} catch (err) {
+			if (requestId !== vdorComparisonRequestId) return;
+			console.error('[FUEL_MANAGEMENT][VDOR_COMPARISON][ERROR]', err);
+			vdorStoredComparison = null;
+			vdorComparisonError = getErrorMessage(
+				err,
+				'Failed to load VDOR and system data for this date.'
+			);
+		} finally {
+			if (requestId === vdorComparisonRequestId) vdorComparisonLoading = false;
+		}
+	}
+
+	function refreshStoredVdorComparison() {
+		if (!currentVesselId || !vdorDate || vdorComparisonLoading) return;
+
+		void loadStoredVdorComparison(currentVesselId, vdorDate);
 	}
 
 	function fileToBase64(file) {
@@ -997,7 +1190,264 @@
 		});
 	}
 
-	async function submitImportVdor() {
+	function normalizeDateOnly(value) {
+		const text = String(value || '').trim();
+		if (!text) return '';
+
+		const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+		if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+
+		const localMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+		if (localMatch) {
+			return `${localMatch[3]}-${String(localMatch[2]).padStart(2, '0')}-${String(localMatch[1]).padStart(2, '0')}`;
+		}
+
+		return '';
+	}
+
+	function getVdorPreviewDate(payload = vdorPreviewData) {
+		return normalizeDateOnly(
+			payload?.date ||
+				payload?.reportDate ||
+				payload?.report_date ||
+				payload?.targetDate ||
+				payload?.target_date ||
+				payload?.dailyConsumption?.date ||
+				payload?.daily_consumption?.date ||
+				payload?.parsed?.date ||
+				payload?.parsed?.reportDate ||
+				payload?.parsed?.report_date
+		);
+	}
+
+	function optionalFuelNumber(value) {
+		const number = parseFuelNumber(value);
+		return Number.isFinite(number) ? number : null;
+	}
+
+	function firstFuelNumber(...values) {
+		for (const value of values) {
+			const number = optionalFuelNumber(value);
+			if (number !== null) return number;
+		}
+
+		return null;
+	}
+
+	function getVdorDetail(source, camelKey, snakeKey) {
+		return source?.[camelKey] || source?.[snakeKey] || {};
+	}
+
+	function getVdorBreakdown(detail) {
+		return Array.isArray(detail?.breakdown)
+			? detail.breakdown
+			: Array.isArray(detail?.details)
+				? detail.details
+				: [];
+	}
+
+	function getStoredComparisonTotal(source) {
+		return (
+			optionalFuelNumber(
+				source?.total_consumption_l ??
+					source?.totalConsumptionL ??
+					source?.total_engines_consumption_l ??
+					source?.totalEnginesConsumptionL ??
+					source?.total_fuel_consumption_l ??
+					source?.totalFuelConsumptionL ??
+					source?.total_tank_consumption_l ??
+					source?.totalTankConsumptionL ??
+					source?.total_tanks_consumption_l ??
+					source?.totalTanksConsumptionL
+			) ?? 0
+		);
+	}
+
+	function getStoredComparisonRows(comparison) {
+		const rows =
+			comparison?.per_engine_diff ??
+			comparison?.perEngineDiff ??
+			comparison?.per_tank_diff ??
+			comparison?.perTankDiff ??
+			[];
+
+		if (!Array.isArray(rows)) return [];
+
+		return rows.map((item) => {
+			const vdorValue =
+				optionalFuelNumber(item?.vdor_consumption_l ?? item?.vdorConsumptionL) ?? 0;
+			const systemValue =
+				optionalFuelNumber(
+					item?.daily_system_consumption_l ??
+						item?.dailySystemConsumptionL ??
+						item?.system_consumption_l ??
+						item?.systemConsumptionL
+				) ?? 0;
+
+			return {
+				label: item?.label || item?.engine_name || item?.engineName || item?.tank_name || item?.tankName || '-',
+				vdor: vdorValue,
+				system: systemValue,
+				difference:
+					optionalFuelNumber(item?.difference_l ?? item?.differenceL) ?? vdorValue - systemValue
+			};
+		});
+	}
+
+	function normalizeVdorDetailForSave(detail, includeHours = false) {
+		const breakdown = getVdorBreakdown(detail).map((item) => {
+			const normalized = {
+				label: item?.label || item?.engineName || item?.engine_name || item?.tankName || item?.tank_name || '-',
+				consumption_l: optionalFuelNumber(
+					item?.consumption_l ?? item?.consumptionL ?? item?.consumption
+				) ?? 0
+			};
+
+			if (includeHours) normalized.hours = String(item?.hours ?? item?.runtime ?? '');
+			return normalized;
+		});
+
+		return {
+			total:
+				optionalFuelNumber(detail?.total ?? detail?.total_l ?? detail?.totalL) ??
+				breakdown.reduce((sum, item) => sum + Number(item.consumption_l || 0), 0),
+			breakdown
+		};
+	}
+
+	function buildVdorConsumptionForSave() {
+		const source = vdorPreviewConsumption || vdorPreviewData || {};
+		const mainEnginesDetail = normalizeVdorDetailForSave(
+			getVdorDetail(source, 'mainEnginesDetail', 'main_engines_detail'),
+			true
+		);
+		const otherEnginesDetail = normalizeVdorDetailForSave(
+			getVdorDetail(source, 'otherEnginesDetail', 'other_engines_detail'),
+			true
+		);
+		const tankDetail = normalizeVdorDetailForSave(
+			getVdorDetail(source, 'tankDetail', 'tank_detail')
+		);
+		const calculatedTotal = mainEnginesDetail.total + otherEnginesDetail.total + tankDetail.total;
+
+		return {
+			totalEnginesConsumption:
+				optionalFuelNumber(
+					source?.totalEnginesConsumption ??
+						source?.total_engines_consumption ??
+						source?.totalConsumption ??
+						source?.total_consumption
+				) ?? calculatedTotal,
+			mainEnginesDetail,
+			otherEnginesDetail,
+			tankDetail
+		};
+	}
+
+	function normalizeVdorComparison(value) {
+		if (!value || typeof value !== 'object') return null;
+
+		return {
+			system_total:
+				value?.system_total ??
+				value?.systemTotal ??
+				value?.current_system_total ??
+				value?.currentSystemTotal ??
+				value?.system_consumption_l ??
+				value?.systemConsumptionL,
+			vdor_basis:
+				value?.vdor_basis ??
+				value?.vdorBasis ??
+				value?.vdor_consumption_l ??
+				value?.vdorConsumptionL ??
+				value?.vdor_total ??
+				value?.vdorTotal,
+			delta: value?.delta ?? value?.difference_l ?? value?.differenceL ?? value?.difference,
+			delta_percentage:
+				value?.delta_percentage ??
+				value?.deltaPercentage ??
+				value?.difference_percentage ??
+				value?.differencePercentage
+		};
+	}
+
+	function getVdorDailyValue(camelKey, snakeKey) {
+		const directValue =
+			vdorPreviewDailyBlock?.[camelKey] ??
+			vdorPreviewDailyBlock?.[snakeKey] ??
+			vdorPreviewData?.[camelKey] ??
+			vdorPreviewData?.[snakeKey];
+
+		if (directValue !== undefined && directValue !== null) return directValue;
+
+		if (camelKey === 'consumption') {
+			return (
+				vdorPreviewDailyBlock?.consumptionTransaction ??
+				vdorPreviewDailyBlock?.consumption_transaction ??
+				null
+			);
+		}
+
+		if (camelKey === 'received') {
+			return (
+				vdorPreviewDailyBlock?.receivedTransaction ??
+				vdorPreviewDailyBlock?.received_transaction ??
+				null
+			);
+		}
+
+		return null;
+	}
+
+	function getPreviewSystemValue(key) {
+		if (key === 'lastNightRob') {
+			return firstFuelNumber(
+				vdorPreviewSystemComparison?.system_opening_rob,
+				vdorPreviewSystemComparison?.systemOpeningRob,
+				vdorPreviewSystemDaily?.opening_rob_l,
+				vdorPreviewSystemDaily?.openingRobL
+			);
+		}
+
+		if (key === 'consumption') {
+			return firstFuelNumber(
+				vdorPreviewSystemComparison?.system_consumption_l,
+				vdorPreviewSystemComparison?.systemConsumptionL,
+				vdorPreviewSystemComparison?.daily_system_l,
+				vdorPreviewSystemComparison?.dailySystemL,
+				vdorPreviewSystemDaily?.total_consumption_l,
+				vdorPreviewSystemDaily?.totalConsumptionL
+			);
+		}
+
+		if (key === 'received') {
+			return firstFuelNumber(
+				vdorPreviewSystemComparison?.system_received_l,
+				vdorPreviewSystemComparison?.systemReceivedL,
+				vdorPreviewSystemDaily?.received_l,
+				vdorPreviewSystemDaily?.receivedL,
+				vdorPreviewSystemDaily?.received
+			);
+		}
+
+		if (key === 'midnightRob') {
+			return firstFuelNumber(
+				vdorPreviewSystemComparison?.system_closing_rob,
+				vdorPreviewSystemComparison?.systemClosingRob,
+				vdorPreviewSystemDaily?.closing_rob_l,
+				vdorPreviewSystemDaily?.closingRobL
+			);
+		}
+
+		return null;
+	}
+
+	function getSystemDailyValue(key) {
+		const row = vdorDailySourceRows.find((item) => item.key === key);
+		return row?.system ?? null;
+	}
+
+	async function previewImportVdor() {
 		clearMessages();
 
 		if (!canImportVdor) {
@@ -1015,24 +1465,72 @@
 			return;
 		}
 
-		importLoading = true;
+		importPreviewLoading = true;
+		vdorPreview = null;
+		const requestId = ++vdorPreviewRequestId;
 
 		try {
 			const fileBase64 = await fileToBase64(selectedImportFile);
-			const response = await importFuelVdor({ vesselId: currentVesselId, fileBase64 });
+			const response = await previewFuelVdor({ vesselId: currentVesselId, fileBase64 });
+			if (requestId !== vdorPreviewRequestId) return;
 
-			successMessage = response?.message || 'VDOR imported successfully.';
-			selectedImportFile = null;
-			selectedImportFileName = '';
-			await refreshCurrent();
+			vdorPreview = response;
+			successMessage = response?.message || 'VDOR preview generated successfully.';
 		} catch (err) {
-			console.error('[FUEL_MANAGEMENT][IMPORT_VDOR][ERROR]', err);
+			if (requestId !== vdorPreviewRequestId) return;
+			console.error('[FUEL_MANAGEMENT][PREVIEW_VDOR][ERROR]', err);
 			errorMessage = getErrorMessage(
 				err,
-				'Failed to import VDOR. Make sure the file uses the correct Excel template.'
+				'Failed to preview VDOR. Make sure the file uses the correct Excel template.'
 			);
 		} finally {
-			importLoading = false;
+			if (requestId === vdorPreviewRequestId) importPreviewLoading = false;
+		}
+	}
+
+	async function submitImportVdor() {
+		clearMessages();
+
+		if (!canImportVdor || !currentVesselId || !vdorPreviewData) {
+			errorMessage = 'Generate and review the VDOR preview before importing.';
+			return;
+		}
+
+		const previewDate = getVdorPreviewDate();
+		if (!previewDate) {
+			errorMessage = 'The VDOR preview does not contain a valid report date.';
+			return;
+		}
+
+		importSaveLoading = true;
+
+		try {
+			const lastNightRob = getSystemDailyValue('lastNightRob');
+			const consumptionTransaction = getSystemDailyValue('consumption');
+			const receivedTransaction = getSystemDailyValue('received');
+
+			const response = await saveFuelVdorImport({
+				vesselId: Number(currentVesselId),
+				date: previewDate,
+				vdorConsumption: buildVdorConsumptionForSave(),
+				lastNightRob,
+				consumptionTransaction,
+				receivedTransaction,
+				note: vdorImportNote.trim() || 'Import VDOR Crew Report'
+			});
+
+			successMessage = response?.message || 'VDOR data saved successfully.';
+			selectedImportFile = null;
+			selectedImportFileName = '';
+			vdorPreview = null;
+			vdorDate = previewDate;
+			await refreshCurrent();
+			await loadStoredVdorComparison(currentVesselId, previewDate);
+		} catch (err) {
+			console.error('[FUEL_MANAGEMENT][SAVE_VDOR][ERROR]', err);
+			errorMessage = getErrorMessage(err, 'Failed to save the VDOR import.');
+		} finally {
+			importSaveLoading = false;
 		}
 	}
 
@@ -1044,10 +1542,20 @@
 			return;
 		}
 
+		if (!currentVesselId || !vdorDate) {
+			errorMessage = 'Please select a vessel and VDOR date first.';
+			return;
+		}
+
 		actionLoading = 'template';
 
 		try {
-			const response = await downloadVdorTemplate();
+			const response = await downloadVdorTemplate({
+				vesselId: currentVesselId,
+				date: vdorDate,
+				timezoneMode,
+				timezoneOffset
+			});
 
 			if (!(response instanceof Response)) {
 				throw new Error('The VDOR template endpoint did not return a file response.');
@@ -1089,9 +1597,12 @@
 			const encodedFileName =
 				contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1] ||
 				contentDisposition.match(/filename="?([^";]+)"?/i)?.[1];
+			const safeVesselName = String(currentVesselName || 'vessel')
+				.replace(/[^a-z0-9_-]+/gi, '_')
+				.replace(/^_+|_+$/g, '');
 			const fileName = encodedFileName
 				? decodeURIComponent(encodedFileName)
-				: 'vdor_import_template.xlsx';
+				: `vdor_${safeVesselName || 'vessel'}_${vdorDate}.xlsx`;
 
 			const url = URL.createObjectURL(blob);
 			const link = document.createElement('a');
@@ -1102,7 +1613,7 @@
 			link.remove();
 			window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 
-			successMessage = 'VDOR template downloaded successfully.';
+			successMessage = `VDOR template for ${vdorDate} downloaded. Complete it, then upload the file in step 02.`;
 		} catch (err) {
 			console.error('[FUEL_MANAGEMENT][DOWNLOAD_TEMPLATE][ERROR]', err);
 			errorMessage = getErrorMessage(err, 'Failed to download the VDOR template.');
@@ -1170,6 +1681,58 @@
 	function hasPositiveFuelValue(value) {
 		const number = parseFuelNumber(value);
 		return Number.isFinite(number) && number > 0;
+	}
+
+	function flattenVdorComparisonRows(source, isFod = false) {
+		const groups = isFod
+			? [{ key: 'tank', detail: getVdorDetail(source, 'tankDetail', 'tank_detail') }]
+			: [
+					{
+						key: 'main',
+						detail: getVdorDetail(source, 'mainEnginesDetail', 'main_engines_detail')
+					},
+					{
+						key: 'other',
+						detail: getVdorDetail(source, 'otherEnginesDetail', 'other_engines_detail')
+					}
+				];
+
+		return groups.flatMap(({ key, detail }) =>
+			getVdorBreakdown(detail).map((item) => {
+				const label =
+					item?.label || item?.engine_name || item?.engineName || item?.tank_name || item?.tankName || '-';
+
+				return {
+					key: `${key}:${String(label).trim().toLowerCase()}`,
+					label,
+					value:
+						optionalFuelNumber(
+							item?.consumption_l ?? item?.consumptionL ?? item?.consumption
+						) ?? 0
+				};
+			})
+		);
+	}
+
+	function getPreviewComparisonRows(vdorSource, systemSource, isFod = false) {
+		const vdorRows = flattenVdorComparisonRows(vdorSource, isFod);
+		const systemRows = flattenVdorComparisonRows(systemSource, isFod);
+		const rowsByKey = new Map();
+
+		for (const row of vdorRows) {
+			rowsByKey.set(row.key, { label: row.label, vdor: row.value, system: 0 });
+		}
+
+		for (const row of systemRows) {
+			const existing = rowsByKey.get(row.key) || { label: row.label, vdor: 0, system: 0 };
+			existing.system = row.value;
+			rowsByKey.set(row.key, existing);
+		}
+
+		return [...rowsByKey.values()].map((row) => ({
+			...row,
+			difference: Number(row.vdor || 0) - Number(row.system || 0)
+		}));
 	}
 
 	function deltaClass(value) {
@@ -1261,45 +1824,6 @@
 				</article>
 			{/each}
 		{/if}
-	</section>
-
-	<section class="main-grid">
-		<article class="panel comparison-panel full-width-panel">
-			<div class="panel-header">
-				<div>
-					<h2>Comparison</h2>
-					<p>System total compared with VDOR basis.</p>
-				</div>
-			</div>
-
-			{#if loadingData}
-				<LoadingSkeleton label="Loading fuel comparison" variant="fuel-comparison" />
-			{:else if comparison}
-				<div class="comparison-grid">
-					<div>
-						<span>System Total</span>
-						<strong>{formatLiter(comparison.system_total)}</strong>
-					</div>
-					<div>
-						<span>VDOR Basis</span>
-						<strong>{formatLiter(comparison.vdor_basis)}</strong>
-					</div>
-					<div class={deltaClass(comparison.delta)}>
-						<span>Delta</span>
-						<strong>{formatLiter(comparison.delta)}</strong>
-					</div>
-					<div class={deltaClass(comparison.delta_percentage)}>
-						<span>Delta %</span>
-						<strong>{formatNumber(comparison.delta_percentage)}%</strong>
-					</div>
-				</div>
-			{:else}
-				<div class="empty-state">
-					Comparison data is not available for your permissions or this date.
-				</div>
-			{/if}
-		</article>
-
 	</section>
 
 	<section class="table-grid">
@@ -1677,16 +2201,261 @@
 							{/if}
 
 							{#if canImportVdor}
-								<div class="mini-form">
-									<h3>VDOR Import</h3>
-									<label class="file-picker">
-										<span>Excel file</span>
-										<input type="file" accept=".xlsx" onchange={handleFileInput} />
-										<small>{selectedImportFileName || 'No file selected'}</small>
-									</label>
-									<button type="button" onclick={submitImportVdor} disabled={importLoading}>
-										{importLoading ? 'Importing...' : 'Import VDOR'}
-									</button>
+								<div class="mini-form vdor-import-form">
+									<div class="vdor-import-heading">
+										<div>
+											<h3>VDOR vs System</h3>
+											<p>Review an existing comparison by date, or preview a new VDOR file before saving it.</p>
+										</div>
+										<span class="vdor-step-badge">Comparison workspace</span>
+									</div>
+
+									<section class="vdor-date-context">
+										<div class="vdor-context-copy">
+											<span class="vdor-context-icon" aria-hidden="true">01</span>
+											<div>
+												<strong>Existing comparison</strong>
+												<small>Select a date to compare the saved VDOR against the system calculation for that day.</small>
+											</div>
+										</div>
+
+										<div class="vdor-context-actions">
+											<label>
+												<span>VDOR date</span>
+												<input type="date" bind:value={vdorDate} onchange={handleVdorDateChange} />
+											</label>
+											<button
+												type="button"
+												class="vdor-refresh-button"
+												onclick={refreshStoredVdorComparison}
+												disabled={vdorComparisonLoading || !vdorDate}
+											>
+												{vdorComparisonLoading ? 'Comparing...' : 'Get Comparison'}
+											</button>
+										</div>
+									</section>
+
+									<section class="vdor-stored-comparison">
+										<header class="vdor-stored-heading">
+											<div>
+												<span class="section-kicker">Existing VDOR lookup</span>
+												<h4>{currentVesselName} · {vdorStoredComparisonData?.date || vdorDate}</h4>
+												<p>When VDOR data exists, its fuel is compared label-by-label with the daily system calculation.</p>
+											</div>
+											{#if vdorStoredComparisonData}
+												<div class="vdor-comparison-badges">
+													<span>{vdorStoredIsFod ? 'Tank basis' : 'Engine basis'}</span>
+													<span>Source: {formatFuelSourceLabel(vdorStoredSystem?.fuel_source ?? vdorStoredSystem?.fuelSource)}</span>
+													<span class:available={Boolean(vdorStoredVdor?.present)}>
+														{vdorStoredVdor?.present ? 'VDOR available' : 'No VDOR'}
+													</span>
+												</div>
+											{/if}
+										</header>
+
+										{#if vdorComparisonLoading}
+											<LoadingSkeleton label="Loading VDOR and system data" variant="fuel-comparison" />
+										{:else if vdorComparisonError}
+											<div class="vdor-comparison-state error">
+												<div><strong>Data unavailable</strong><span>{vdorComparisonError}</span></div>
+												<button type="button" class="secondary-button" onclick={refreshStoredVdorComparison}>Try Again</button>
+											</div>
+										{:else if vdorStoredComparisonData}
+											<div class="vdor-stored-metrics">
+												<article class="vdor-comparison-metric">
+													<span>VDOR Total Consumption</span><strong>{formatLiter(vdorStoredVdorTotal)}</strong>
+													<small>{vdorStoredVdor?.present ? 'Imported crew report' : 'Not imported'}</small>
+												</article>
+												<article class="vdor-comparison-metric">
+													<span>System Total Consumption</span><strong>{formatLiter(vdorStoredSystemTotal)}</strong>
+													<small>{formatFuelSourceLabel(vdorStoredSystem?.fuel_source ?? vdorStoredSystem?.fuelSource)} calculation</small>
+												</article>
+												<article class="vdor-comparison-metric" class:variance={Boolean(vdorStoredVariance?.has_variance ?? vdorStoredVariance?.hasVariance)}>
+													<span>Total Difference</span><strong>{formatLiter(vdorStoredDifference)}</strong>
+													<small>{vdorStoredVariance?.has_variance ?? vdorStoredVariance?.hasVariance ? 'Variance detected' : 'No variance detected'}</small>
+												</article>
+												<article class="vdor-comparison-metric" class:variance={Boolean(vdorStoredVariance?.has_variance ?? vdorStoredVariance?.hasVariance)}>
+													<span>Difference %</span><strong>{vdorStoredPercentDifference === null ? '-' : `${formatNumber(vdorStoredPercentDifference)}%`}</strong>
+													<small>VDOR against system</small>
+												</article>
+											</div>
+
+											{#if !vdorStoredVdor?.present}
+												<div class="vdor-missing-guide">
+													<div class="vdor-missing-guide-copy">
+														<strong>No VDOR imported for {vdorDate}</strong>
+														<span>A comparison cannot be created until a VDOR file is imported.</span>
+														<div class="vdor-missing-steps">
+															<span><b>1</b> Download the template for this date</span>
+															<span><b>2</b> Complete the VDOR values in Excel</span>
+															<span><b>3</b> Upload it in Preview Excel below</span>
+														</div>
+													</div>
+													<button
+														type="button"
+														class="vdor-empty-download-button"
+														onclick={downloadTemplate}
+														disabled={actionLoading === 'template' || !vdorDate}
+													>
+														{actionLoading === 'template' ? 'Downloading...' : 'Download VDOR Template'}
+													</button>
+												</div>
+											{:else if vdorStoredDifferenceRows.length}
+												<div class="vdor-difference-table-wrap">
+													<table class="vdor-difference-table">
+														<thead><tr><th>{vdorStoredIsFod ? 'Tank' : 'Engine'}</th><th>VDOR</th><th>System</th><th>Difference</th></tr></thead>
+														<tbody>
+															{#each vdorStoredDifferenceRows as row}
+																<tr><td>{row.label}</td><td>{formatLiter(row.vdor)}</td><td>{formatLiter(row.system)}</td><td class={deltaClass(row.difference)}>{formatLiter(row.difference)}</td></tr>
+															{/each}
+														</tbody>
+													</table>
+												</div>
+											{/if}
+
+											{#if vdorStoredSystem?.opening_rob_l !== undefined || vdorStoredSystem?.openingRobL !== undefined || vdorStoredSystem?.closing_rob_l !== undefined || vdorStoredSystem?.closingRobL !== undefined}
+												<div class="vdor-system-context">
+													<div><span>System Opening ROB</span><strong>{formatLiter(vdorStoredSystem?.opening_rob_l ?? vdorStoredSystem?.openingRobL)}</strong></div>
+													<div><span>System Closing ROB</span><strong>{formatLiter(vdorStoredSystem?.closing_rob_l ?? vdorStoredSystem?.closingRobL)}</strong></div>
+												</div>
+											{/if}
+														{:else}
+															<div class="vdor-comparison-state empty"><div><strong>Ready to compare</strong><span>Select a date and click Get Comparison to load VDOR and system values.</span></div></div>
+														{/if}
+									</section>
+
+									<section class="vdor-upload-workflow">
+										<div class="vdor-workflow-heading">
+											<span>02</span>
+											<div>
+												<strong>Preview a new comparison</strong>
+												<small>Upload a completed VDOR Excel file. Its report date is read from the file and compared with system data.</small>
+											</div>
+										</div>
+
+										<div class="vdor-workflow-actions preview-actions">
+											<label class="vdor-file-picker">
+												<input type="file" accept=".xlsx" onchange={handleFileInput} disabled={importPreviewLoading || importSaveLoading} />
+												<span>Choose Excel</span>
+												<strong>{selectedImportFileName || 'No file selected'}</strong>
+											</label>
+											<button type="button" class="vdor-preview-button" onclick={previewImportVdor} disabled={importPreviewLoading || importSaveLoading || !selectedImportFile}>
+												{importPreviewLoading ? 'Generating...' : 'Preview VDOR'}
+											</button>
+										</div>
+									</section>
+
+									{#if importPreviewLoading}
+										<LoadingSkeleton label="Parsing VDOR and preparing comparison" variant="fuel-comparison" />
+									{:else if vdorPreviewData}
+										<section class="vdor-preview-panel">
+											<div class="vdor-preview-header">
+												<div>
+													<span class="section-kicker">New import preview</span>
+													<h4>{currentVesselName} · {getVdorPreviewDate() || 'Date unavailable'}</h4>
+												</div>
+												<strong>{formatLiter(buildVdorConsumptionForSave().totalEnginesConsumption)}</strong>
+											</div>
+
+											<section class="vdor-source-selection">
+												<header class="vdor-source-selection-heading">
+													<div>
+														<span class="section-kicker">Daily values comparison</span>
+														<h4>VDOR vs System daily values</h4>
+														<p>Compare the daily values side by side. System values are used when the VDOR is saved.</p>
+													</div>
+													<span class="vdor-source-help">System used on save</span>
+												</header>
+
+												<div class="vdor-source-grid">
+													{#each vdorDailySourceRows as row}
+														<article class="vdor-source-option uses-system">
+															<div class="vdor-source-option-head">
+																<span>{row.label}</span>
+																<span class="vdor-system-badge">System</span>
+															</div>
+
+															<div class="vdor-source-values">
+																<div class="selected"><span>System</span><strong>{formatLiter(row.system)}</strong></div>
+																<div class="vdor-reference"><span>VDOR</span><strong>{formatLiter(row.vdor)}</strong></div>
+															</div>
+														</article>
+													{/each}
+												</div>
+
+												<div class="vdor-midnight-reference">
+													<div><span>Midnight ROB</span><small>Reference only; it is not sent as a save option.</small></div>
+													<div><span>VDOR</span><strong>{formatLiter(getVdorDailyValue('midnightRob', 'midnight_rob'))}</strong></div>
+													<div><span>System</span><strong>{formatLiter(getPreviewSystemValue('midnightRob'))}</strong></div>
+												</div>
+											</section>
+
+											<section class="vdor-preview-comparison">
+												<header class="vdor-preview-comparison-heading">
+													<div>
+														<span class="section-kicker">Import preview comparison</span>
+														<h4>Excel VDOR vs Daily System</h4>
+														<p>This comparison comes from the uploaded file date, before anything is saved.</p>
+													</div>
+													<div class="vdor-comparison-badges">
+														<span>Preview only</span>
+														<span>{vdorPreviewIsFod ? 'Tank basis' : 'Engine basis'}</span>
+														<span>Source: {formatFuelSourceLabel(vdorPreviewSystemComparison?.system_fuel_source ?? vdorPreviewSystemComparison?.systemFuelSource ?? vdorPreviewSystemDaily?.fuel_source)}</span>
+													</div>
+												</header>
+
+												<div class="vdor-stored-metrics preview-metrics">
+													<article class="vdor-comparison-metric">
+														<span>Excel VDOR</span><strong>{formatLiter(vdorPreviewVdorTotal)}</strong><small>Uploaded file</small>
+													</article>
+													<article class="vdor-comparison-metric">
+														<span>Daily System</span><strong>{formatLiter(vdorPreviewSystemTotal)}</strong><small>{formatFuelSourceLabel(vdorPreviewSystemComparison?.system_fuel_source ?? vdorPreviewSystemComparison?.systemFuelSource ?? vdorPreviewSystemDaily?.fuel_source)} calculation</small>
+													</article>
+													<article class="vdor-comparison-metric" class:variance={vdorPreviewDifference !== 0}>
+														<span>Difference</span><strong>{formatLiter(vdorPreviewDifference)}</strong><small>{vdorPreviewDifference === 0 ? 'Values match' : 'Review variance'}</small>
+													</article>
+													<article class="vdor-comparison-metric" class:variance={vdorPreviewDifference !== 0}>
+														<span>Difference %</span><strong>{vdorPreviewDifferencePercent === null ? '-' : `${formatNumber(vdorPreviewDifferencePercent)}%`}</strong><small>Excel against system</small>
+													</article>
+												</div>
+
+												{#if vdorPreviewDifferenceRows.length}
+													<div class="vdor-difference-table-wrap">
+														<table class="vdor-difference-table">
+															<thead><tr><th>{vdorPreviewIsFod ? 'Tank' : 'Engine'}</th><th>Excel VDOR</th><th>System</th><th>Difference</th></tr></thead>
+															<tbody>
+																{#each vdorPreviewDifferenceRows as row}
+																	<tr><td>{row.label}</td><td>{formatLiter(row.vdor)}</td><td>{formatLiter(row.system)}</td><td class={deltaClass(row.difference)}>{formatLiter(row.difference)}</td></tr>
+																{/each}
+															</tbody>
+														</table>
+													</div>
+												{:else}
+													<div class="vdor-comparison-empty">No per-{vdorPreviewIsFod ? 'tank' : 'engine'} comparison rows were returned.</div>
+												{/if}
+											</section>
+
+											<section class="vdor-save-workflow">
+												<div class="vdor-workflow-heading compact">
+													<span>03</span>
+													<div><strong>Save reviewed VDOR</strong><small>Save only after the VDOR and system differences have been reviewed.</small></div>
+												</div>
+												<div class="vdor-confirm-row">
+													<label>
+														<span>Import note</span>
+														<input type="text" bind:value={vdorImportNote} />
+													</label>
+													<button type="button" onclick={submitImportVdor} disabled={importSaveLoading}>
+														{importSaveLoading ? 'Saving...' : 'Save VDOR'}
+													</button>
+												</div>
+											</section>
+										</section>
+									{:else}
+										<div class="vdor-preview-placeholder">
+											Comparison and parsed VDOR values will appear here after preview.
+										</div>
+									{/if}
 								</div>
 							{/if}
 						</div>
@@ -2017,7 +2786,7 @@
 		padding: 11px 12px;
 		border: 1px solid #d9e2ec;
 		border-radius: 12px;
-		background: rgba(17, 24, 39, 0.94);
+		background: rgba(248, 250, 252, 0.98);
 		box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14);
 		backdrop-filter: blur(10px);
 		pointer-events: auto;
@@ -2033,14 +2802,14 @@
 	.fuel-toast strong {
 		font-size: 12px;
 		font-weight: 900;
-		color: var(--text-primary);
+		color: #0f172a !important;
 	}
 
 	.fuel-toast span {
 		font-size: 12px;
 		font-weight: 700;
 		line-height: 1.35;
-		color: var(--text-secondary);
+		color: #334155 !important;
 		text-transform: none;
 	}
 
@@ -2081,7 +2850,7 @@
 		border: 0;
 		border-radius: 999px;
 		background: rgba(15, 23, 42, 0.08);
-		color: var(--text-secondary);
+		color: #334155 !important;
 		font-size: 17px;
 		font-weight: 900;
 		line-height: 1;
@@ -2302,6 +3071,899 @@
 		font-weight: 900;
 	}
 
+	.vdor-import-form {
+		grid-column: 1 / -1;
+		gap: 14px;
+		padding: 16px;
+		border-color: rgba(96, 165, 250, 0.28);
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.09), transparent 38%),
+			var(--color-surface);
+	}
+
+	.vdor-import-heading,
+	.vdor-preview-header,
+	.vdor-comparison-heading {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 14px;
+	}
+
+	.vdor-import-heading p,
+	.vdor-comparison-heading p {
+		margin: 5px 0 0;
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 650;
+		line-height: 1.45;
+	}
+
+	.vdor-step-badge {
+		flex: 0 0 auto;
+		padding: 5px 9px;
+		border: 1px solid rgba(96, 165, 250, 0.34);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.14);
+		color: #93c5fd;
+		font-size: 10px;
+		font-weight: 850;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.vdor-flow-rail {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 8px;
+	}
+
+	.vdor-flow-rail > div {
+		display: flex;
+		align-items: center;
+		gap: 9px;
+		min-width: 0;
+		padding: 9px 10px;
+		border: 1px solid rgba(148, 163, 184, 0.14);
+		border-radius: 10px;
+		background: rgba(15, 23, 42, 0.28);
+		opacity: 0.68;
+	}
+
+	.vdor-flow-rail > div.active {
+		border-color: rgba(96, 165, 250, 0.34);
+		background: rgba(37, 99, 235, 0.09);
+		opacity: 1;
+	}
+
+	.vdor-flow-rail > div > span {
+		flex: 0 0 25px;
+		display: grid;
+		place-items: center;
+		width: 25px;
+		height: 25px;
+		border-radius: 50%;
+		background: rgba(71, 85, 105, 0.7);
+		color: #cbd5e1;
+		font-size: 9px;
+		font-weight: 900;
+	}
+
+	.vdor-flow-rail > div.active > span {
+		background: #2563eb;
+		color: #ffffff;
+	}
+
+	.vdor-flow-rail > div > div {
+		min-width: 0;
+		display: grid;
+		gap: 2px;
+	}
+
+	.vdor-flow-rail strong,
+	.vdor-flow-rail small {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.vdor-flow-rail strong {
+		color: var(--text-primary);
+		font-size: 10px;
+		font-weight: 900;
+	}
+
+	.vdor-flow-rail small {
+		color: var(--text-secondary);
+		font-size: 9px;
+		font-weight: 650;
+	}
+
+	.vdor-date-context {
+		min-width: 0;
+		display: grid;
+		grid-template-columns: minmax(240px, 1fr) minmax(300px, auto);
+		align-items: end;
+		gap: 16px;
+		padding: 14px;
+		border: 1px solid rgba(96, 165, 250, 0.28);
+		border-radius: 14px;
+		background:
+			linear-gradient(120deg, rgba(37, 99, 235, 0.13), transparent 52%),
+			rgba(15, 23, 42, 0.38);
+	}
+
+	.vdor-context-copy {
+		min-width: 0;
+		display: flex;
+		align-items: flex-start;
+		gap: 11px;
+	}
+
+	.vdor-context-icon {
+		flex: 0 0 34px;
+		display: grid;
+		place-items: center;
+		width: 34px;
+		height: 34px;
+		border: 1px solid rgba(96, 165, 250, 0.36);
+		border-radius: 10px;
+		background: rgba(37, 99, 235, 0.18);
+		color: #bfdbfe;
+		font-size: 11px;
+		font-weight: 900;
+	}
+
+	.vdor-context-copy > div {
+		min-width: 0;
+		display: grid;
+		gap: 4px;
+	}
+
+	.vdor-context-copy strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		font-weight: 900;
+	}
+
+	.vdor-context-copy small {
+		max-width: 560px;
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 650;
+		line-height: 1.45;
+	}
+
+	.vdor-context-actions {
+		display: grid;
+		grid-template-columns: minmax(160px, 1fr) auto;
+		align-items: end;
+		gap: 8px;
+	}
+
+	.vdor-context-actions > button {
+		min-height: 38px;
+		padding-inline: 13px;
+		white-space: nowrap;
+	}
+
+	.vdor-refresh-button {
+		border: 1px solid rgba(96, 165, 250, 0.36) !important;
+		background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+		color: #ffffff !important;
+	}
+
+	.vdor-stored-comparison {
+		display: grid;
+		gap: 12px;
+		padding: 14px;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		border-radius: 14px;
+		background: rgba(2, 6, 23, 0.24);
+	}
+
+	.vdor-stored-heading {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 14px;
+	}
+
+	.vdor-stored-heading h4 {
+		margin: 4px 0 0;
+		color: var(--text-primary);
+		font-size: 14px;
+		font-weight: 900;
+	}
+
+	.vdor-stored-heading p {
+		margin: 5px 0 0;
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 650;
+		line-height: 1.45;
+	}
+
+	.vdor-comparison-badges {
+		display: flex;
+		justify-content: flex-end;
+		gap: 6px;
+		flex-wrap: wrap;
+	}
+
+	.vdor-comparison-badges span {
+		padding: 5px 8px;
+		border: 1px solid rgba(148, 163, 184, 0.2);
+		border-radius: 999px;
+		background: rgba(30, 41, 59, 0.72);
+		color: #cbd5e1;
+		font-size: 9px;
+		font-weight: 850;
+		white-space: nowrap;
+	}
+
+	.vdor-comparison-badges span.available {
+		border-color: rgba(52, 211, 153, 0.34);
+		background: rgba(16, 185, 129, 0.13);
+		color: #6ee7b7;
+	}
+
+	.vdor-stored-metrics {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+		gap: 8px;
+	}
+
+	.vdor-comparison-metric {
+		min-width: 0;
+		padding: 11px;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 11px;
+		background: rgba(30, 41, 59, 0.48);
+	}
+
+	.vdor-comparison-metric > span,
+	.vdor-system-context span {
+		color: var(--text-secondary);
+		font-size: 9px;
+		font-weight: 850;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+	}
+
+	.vdor-comparison-metric strong {
+		display: block;
+		margin-top: 7px;
+		color: var(--text-primary);
+		font-size: 16px;
+		font-weight: 900;
+	}
+
+	.vdor-comparison-metric small {
+		display: block;
+		margin-top: 5px;
+		color: var(--text-secondary);
+		font-size: 9px;
+		font-weight: 650;
+	}
+
+	.vdor-comparison-metric.variance {
+		border-color: rgba(251, 146, 60, 0.35);
+		background: rgba(194, 65, 12, 0.12);
+	}
+
+	.vdor-comparison-state {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 12px;
+		border: 1px dashed rgba(96, 165, 250, 0.3);
+		border-radius: 11px;
+		background: rgba(37, 99, 235, 0.08);
+	}
+
+	.vdor-comparison-state > div {
+		display: grid;
+		gap: 3px;
+	}
+
+	.vdor-comparison-state strong {
+		color: #dbeafe;
+		font-size: 11px;
+		font-weight: 900;
+	}
+
+	.vdor-comparison-state span {
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 650;
+	}
+
+	.vdor-comparison-state.error {
+		border-color: rgba(248, 113, 113, 0.32);
+		background: rgba(127, 29, 29, 0.14);
+	}
+
+	.vdor-comparison-state.error strong {
+		color: #fecaca;
+	}
+
+	.vdor-missing-guide {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		padding: 14px;
+		border: 1px solid rgba(251, 191, 36, 0.28);
+		border-radius: 12px;
+		background: linear-gradient(120deg, rgba(180, 83, 9, 0.13), rgba(15, 23, 42, 0.28));
+	}
+
+	.vdor-missing-guide-copy {
+		min-width: 0;
+		display: grid;
+		gap: 5px;
+	}
+
+	.vdor-missing-guide-copy > strong {
+		color: #fde68a;
+		font-size: 12px;
+		font-weight: 900;
+	}
+
+	.vdor-missing-guide-copy > span {
+		color: #cbd5e1;
+		font-size: 10px;
+		font-weight: 650;
+	}
+
+	.vdor-missing-steps {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		margin-top: 5px;
+	}
+
+	.vdor-missing-steps span {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		padding: 5px 7px;
+		border: 1px solid rgba(251, 191, 36, 0.17);
+		border-radius: 7px;
+		background: rgba(15, 23, 42, 0.32);
+		color: #dbeafe;
+		font-size: 9px;
+		font-weight: 750;
+	}
+
+	.vdor-missing-steps b {
+		display: grid;
+		place-items: center;
+		width: 16px;
+		height: 16px;
+		border-radius: 50%;
+		background: #d97706;
+		color: #ffffff;
+		font-size: 8px;
+		font-weight: 900;
+	}
+
+	.vdor-empty-download-button {
+		flex: 0 0 auto;
+		min-height: 38px;
+		padding-inline: 14px;
+		border: 1px solid rgba(251, 191, 36, 0.42) !important;
+		background: linear-gradient(135deg, #d97706, #b45309) !important;
+		color: #ffffff !important;
+		white-space: nowrap;
+	}
+
+	.vdor-difference-table-wrap {
+		overflow: auto;
+		border: 1px solid rgba(148, 163, 184, 0.14);
+		border-radius: 11px;
+	}
+
+	.vdor-difference-table {
+		width: 100%;
+		min-width: 560px;
+		border-collapse: collapse;
+	}
+
+	.vdor-difference-table th,
+	.vdor-difference-table td {
+		padding: 9px 11px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.11);
+		font-size: 10px;
+		text-align: right;
+	}
+
+	.vdor-difference-table th:first-child,
+	.vdor-difference-table td:first-child {
+		text-align: left;
+	}
+
+	.vdor-difference-table th {
+		background: rgba(30, 41, 59, 0.82);
+		color: #94a3b8;
+		font-size: 9px;
+		font-weight: 850;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+	}
+
+	.vdor-difference-table td {
+		color: #cbd5e1;
+		font-weight: 700;
+	}
+
+	.vdor-difference-table td.positive,
+	.vdor-difference-table td.negative {
+		color: #fca5a5;
+		font-weight: 900;
+	}
+
+	.vdor-difference-table td.neutral {
+		color: #86efac;
+	}
+
+	.vdor-system-context {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 8px;
+	}
+
+	.vdor-system-context > div {
+		padding: 9px 11px;
+		border: 1px solid rgba(148, 163, 184, 0.13);
+		border-radius: 10px;
+		background: rgba(15, 23, 42, 0.32);
+	}
+
+	.vdor-system-context strong {
+		display: block;
+		margin-top: 5px;
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 900;
+	}
+
+	.vdor-upload-workflow {
+		min-width: 0;
+		display: grid;
+		grid-template-columns: minmax(230px, 0.72fr) minmax(380px, 1.28fr);
+		align-items: center;
+		gap: 16px;
+		padding: 13px;
+		border: 1px solid rgba(148, 163, 184, 0.17);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.32);
+	}
+
+	.vdor-workflow-heading {
+		display: flex;
+		align-items: flex-start;
+		gap: 10px;
+	}
+
+	.vdor-workflow-heading > span {
+		flex: 0 0 24px;
+		display: grid;
+		place-items: center;
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		background: #2563eb;
+		color: #ffffff;
+		font-size: 11px;
+		font-weight: 900;
+	}
+
+	.vdor-workflow-heading div {
+		min-width: 0;
+		display: grid;
+		gap: 3px;
+	}
+
+	.vdor-workflow-heading strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 900;
+	}
+
+	.vdor-workflow-heading small {
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 650;
+		line-height: 1.4;
+	}
+
+	.vdor-workflow-actions {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: end;
+		gap: 8px;
+	}
+
+	.vdor-workflow-actions > button {
+		min-height: 38px;
+		padding-inline: 14px;
+		white-space: nowrap;
+	}
+
+	.vdor-file-picker {
+		position: relative;
+		min-width: 0;
+		min-height: 38px;
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
+		align-items: center;
+		gap: 9px;
+		padding: 4px;
+		border: 1px solid rgba(148, 163, 184, 0.24);
+		border-radius: 9px;
+		background: rgba(15, 23, 42, 0.38);
+		cursor: pointer;
+		box-sizing: border-box;
+	}
+
+	.vdor-file-picker input {
+		position: absolute;
+		inset: 0;
+		opacity: 0;
+		cursor: pointer;
+	}
+
+	.vdor-file-picker:has(input:disabled) {
+		opacity: 0.58;
+		cursor: not-allowed;
+	}
+
+	.vdor-file-picker > span {
+		padding: 6px 9px;
+		background: rgba(51, 65, 85, 0.88);
+		color: #dbeafe;
+		font-size: 10px;
+		font-weight: 850;
+		white-space: nowrap;
+	}
+
+	.vdor-file-picker > strong {
+		min-width: 0;
+		overflow: hidden;
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 700;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.vdor-preview-button {
+		background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+		color: #ffffff !important;
+	}
+
+	.vdor-preview-panel {
+		display: grid;
+		gap: 12px;
+		padding: 14px;
+		border: 1px solid rgba(45, 212, 191, 0.28);
+		border-radius: 14px;
+		background:
+			linear-gradient(145deg, rgba(13, 148, 136, 0.08), transparent 38%),
+			rgba(15, 23, 42, 0.35);
+	}
+
+	.vdor-preview-header {
+		align-items: center;
+	}
+
+	.vdor-preview-header h4,
+	.vdor-comparison-heading h4 {
+		margin: 4px 0 0;
+		color: var(--text-primary);
+		font-size: 14px;
+		font-weight: 900;
+	}
+
+	.vdor-preview-header > strong {
+		color: #86efac;
+		font-size: 18px;
+		font-weight: 900;
+		white-space: nowrap;
+	}
+
+	.vdor-source-selection {
+		display: grid;
+		gap: 10px;
+		padding: 12px;
+		border: 1px solid rgba(45, 212, 191, 0.18);
+		border-radius: 12px;
+		background: rgba(2, 6, 23, 0.22);
+	}
+
+	.vdor-source-selection-heading,
+	.vdor-preview-comparison-heading {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.vdor-source-selection-heading h4,
+	.vdor-preview-comparison-heading h4 {
+		margin: 4px 0 0;
+		color: var(--text-primary);
+		font-size: 13px;
+		font-weight: 900;
+	}
+
+	.vdor-source-selection-heading p,
+	.vdor-preview-comparison-heading p {
+		margin: 4px 0 0;
+		color: var(--text-secondary);
+		font-size: 10.5px;
+		font-weight: 650;
+		line-height: 1.45;
+	}
+
+	.vdor-source-help {
+		flex: 0 0 auto;
+		padding: 5px 8px;
+		border: 1px solid rgba(45, 212, 191, 0.3);
+		border-radius: 999px;
+		background: rgba(13, 148, 136, 0.12);
+		color: #99f6e4;
+		font-size: 9px;
+		font-weight: 850;
+		letter-spacing: 0.03em;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+
+	.vdor-source-grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 9px;
+	}
+
+	.vdor-source-option {
+		display: grid;
+		gap: 9px;
+		min-width: 0;
+		padding: 10px;
+		border: 1px solid rgba(148, 163, 184, 0.17);
+		border-radius: 10px;
+		background: rgba(30, 41, 59, 0.46);
+		transition: border-color 150ms ease, background 150ms ease;
+	}
+
+	.vdor-source-option.uses-system {
+		border-color: rgba(96, 165, 250, 0.32);
+		background: rgba(37, 99, 235, 0.07);
+	}
+
+	.vdor-source-option-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.vdor-source-option-head > span {
+		color: var(--text-secondary);
+		font-size: 9px;
+		font-weight: 850;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+	}
+
+	.vdor-system-badge {
+		display: inline-flex;
+		align-items: center;
+		min-height: 22px;
+		padding: 3px 7px;
+		border: 1px solid rgba(96, 165, 250, 0.34);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.1);
+		color: #bfdbfe;
+		font-size: 9px;
+		font-weight: 900;
+		letter-spacing: 0.03em;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+
+	.vdor-source-values {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 6px;
+	}
+
+	.vdor-source-values > div {
+		min-width: 0;
+		padding: 7px;
+		border: 1px solid rgba(148, 163, 184, 0.12);
+		border-radius: 8px;
+		background: rgba(2, 6, 23, 0.2);
+		opacity: 0.64;
+	}
+
+	.vdor-source-values > div.selected {
+		border-color: rgba(96, 165, 250, 0.34);
+		background: rgba(37, 99, 235, 0.1);
+		opacity: 1;
+	}
+
+	.vdor-source-values > div.vdor-reference {
+		border-color: rgba(45, 212, 191, 0.3);
+		background: rgba(13, 148, 136, 0.09);
+		opacity: 1;
+	}
+
+	.vdor-source-values > div.vdor-reference span {
+		color: #99f6e4;
+	}
+
+	.vdor-source-values span,
+	.vdor-source-selected span,
+	.vdor-midnight-reference span {
+		display: block;
+		color: var(--text-secondary);
+		font-size: 8.5px;
+		font-weight: 850;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+	}
+
+	.vdor-source-values strong {
+		display: block;
+		margin-top: 4px;
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 900;
+		white-space: nowrap;
+	}
+
+	.vdor-source-selected {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto auto;
+		align-items: center;
+		gap: 7px;
+		padding-top: 8px;
+		border-top: 1px solid rgba(148, 163, 184, 0.12);
+	}
+
+	.vdor-source-selected strong {
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 900;
+		white-space: nowrap;
+	}
+
+	.vdor-source-selected small {
+		padding: 3px 5px;
+		border-radius: 5px;
+		background: rgba(45, 212, 191, 0.13);
+		color: #99f6e4;
+		font-size: 8px;
+		font-weight: 900;
+		text-transform: uppercase;
+	}
+
+	.uses-system .vdor-source-selected small {
+		background: rgba(59, 130, 246, 0.14);
+		color: #bfdbfe;
+	}
+
+	.vdor-midnight-reference {
+		display: grid;
+		grid-template-columns: minmax(180px, 1fr) auto auto;
+		align-items: center;
+		gap: 20px;
+		padding: 9px 10px;
+		border: 1px dashed rgba(148, 163, 184, 0.22);
+		border-radius: 9px;
+		background: rgba(15, 23, 42, 0.32);
+	}
+
+	.vdor-midnight-reference small {
+		display: block;
+		margin-top: 3px;
+		color: var(--text-secondary);
+		font-size: 9px;
+	}
+
+	.vdor-midnight-reference strong {
+		display: block;
+		margin-top: 3px;
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 900;
+		white-space: nowrap;
+	}
+
+	.vdor-preview-comparison {
+		display: grid;
+		gap: 10px;
+		padding: 12px;
+		border: 1px solid rgba(96, 165, 250, 0.2);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.28);
+	}
+
+	.vdor-preview-comparison-heading {
+		padding-bottom: 10px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+	}
+
+	.vdor-comparison-card {
+		overflow: hidden;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		border-radius: 12px;
+		background: rgba(2, 6, 23, 0.2);
+	}
+
+	.vdor-comparison-heading {
+		padding: 11px 12px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+	}
+
+	.vdor-comparison-card .comparison-grid {
+		padding: 10px;
+		background: transparent;
+	}
+
+	.vdor-comparison-empty,
+	.vdor-preview-placeholder {
+		padding: 13px;
+		border: 1px dashed rgba(148, 163, 184, 0.28);
+		border-radius: 10px;
+		background: rgba(15, 23, 42, 0.25);
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 700;
+		text-align: center;
+	}
+
+	.vdor-comparison-empty {
+		margin: 10px;
+	}
+
+	.vdor-save-workflow {
+		display: grid;
+		gap: 11px;
+		padding: 12px;
+		border: 1px solid rgba(34, 197, 94, 0.24);
+		border-radius: 12px;
+		background: rgba(22, 163, 74, 0.06);
+	}
+
+	.vdor-workflow-heading.compact {
+		align-items: center;
+	}
+
+	.vdor-workflow-heading.compact > span {
+		background: #16a34a;
+	}
+
+	.vdor-confirm-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: end;
+		gap: 10px;
+	}
+
+	.vdor-confirm-row button {
+		min-height: 38px;
+		padding-inline: 18px;
+		background: linear-gradient(135deg, #16a34a, #15803d) !important;
+		color: #ffffff !important;
+		white-space: nowrap;
+	}
+
 	.split-fields {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2459,11 +4121,12 @@
 
 	.fuel-operation-modal-backdrop {
 		position: fixed;
-		inset: 0;
+		inset: var(--vessel-topbar-height, 62px) 0 0;
 		z-index: 82;
 		display: grid;
-		place-items: center;
-		padding: 20px;
+		place-items: start center;
+		padding: 16px 20px 20px;
+		overflow-y: auto;
 		background: rgba(3, 7, 18, 0.68);
 		backdrop-filter: blur(9px);
 	}
@@ -2482,7 +4145,7 @@
 
 	.fuel-operation-modal-card {
 		width: min(1120px, calc(100vw - 40px));
-		max-height: min(760px, calc(100vh - 40px));
+		max-height: min(760px, calc(100dvh - var(--vessel-topbar-height, 62px) - 36px));
 		overflow: hidden;
 		border: 1px solid rgba(148, 163, 184, 0.24);
 		border-radius: 24px;
@@ -2567,7 +4230,9 @@
 	}
 
 	.fuel-operation-modal-body {
-		max-height: calc(min(760px, calc(100vh - 40px)) - 88px);
+		max-height: calc(
+			min(700px, calc(100dvh - var(--vessel-topbar-height, 62px) - 36px)) - 88px
+		);
 		overflow: auto;
 		padding: 16px;
 		background:
@@ -2577,7 +4242,7 @@
 
 	.modal-operation-grid {
 		padding: 0;
-		grid-template-columns: repeat(3, minmax(250px, 1fr));
+		grid-template-columns: repeat(2, minmax(280px, 1fr));
 		background: transparent;
 	}
 
@@ -2722,6 +4387,11 @@
 		.table-grid {
 			grid-template-columns: 1fr;
 		}
+
+		.vdor-date-context,
+		.vdor-upload-workflow {
+			grid-template-columns: 1fr;
+		}
 	}
 
 	@media (max-width: 760px) {
@@ -2758,8 +4428,44 @@
 		.summary-grid,
 		.operation-grid,
 		.comparison-grid,
+		.vdor-flow-rail,
+		.vdor-source-grid,
+		.vdor-confirm-row,
+		.vdor-workflow-actions,
+		.vdor-context-actions,
+		.vdor-system-context,
+		.vdor-midnight-reference,
 		.split-fields {
 			grid-template-columns: 1fr;
+		}
+
+		.vdor-import-heading,
+		.vdor-preview-header,
+		.vdor-comparison-heading,
+		.vdor-stored-heading,
+		.vdor-source-selection-heading,
+		.vdor-preview-comparison-heading {
+			align-items: stretch;
+			flex-direction: column;
+		}
+
+		.vdor-comparison-badges {
+			justify-content: flex-start;
+		}
+
+		.vdor-comparison-state,
+		.vdor-missing-guide {
+			align-items: stretch;
+			flex-direction: column;
+		}
+
+		.vdor-comparison-state > button,
+		.vdor-missing-guide > button {
+			width: 100%;
+		}
+
+		.vdor-step-badge {
+			align-self: flex-start;
 		}
 
 		.fuel-operation-modal-backdrop {
@@ -2768,7 +4474,7 @@
 
 		.fuel-operation-modal-card {
 			width: 100%;
-			max-height: calc(100vh - 20px);
+			max-height: calc(100dvh - var(--vessel-topbar-height, 56px) - 20px);
 			border-radius: 18px;
 		}
 
@@ -2777,7 +4483,7 @@
 		}
 
 		.fuel-operation-modal-body {
-			max-height: calc(100vh - 118px);
+			max-height: calc(100dvh - var(--vessel-topbar-height, 56px) - 118px);
 			padding: 12px;
 		}
 
