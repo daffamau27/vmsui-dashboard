@@ -100,7 +100,6 @@
 			permission: 'view_fuel_ems_internal',
 			columns: [
 				{ label: 'Engine', field: 'engine', align: 'left' },
-				{ label: 'Class', field: 'class', align: 'left' },
 				{ label: 'Total', field: 'total', type: 'liter', align: 'right' }
 			]
 		},
@@ -111,7 +110,6 @@
 			permission: 'view_fuel_ems_external',
 			columns: [
 				{ label: 'Engine', field: 'engine', align: 'left' },
-				{ label: 'Class', field: 'class', align: 'left' },
 				{ label: 'Total', field: 'total', type: 'liter', align: 'right' }
 			]
 		},
@@ -122,7 +120,6 @@
 			permission: 'view_fuel_engine_maker',
 			columns: [
 				{ label: 'Engine', field: 'engine', align: 'left' },
-				{ label: 'Class', field: 'class', align: 'left' },
 				{ label: 'Total', field: 'total', type: 'liter', align: 'right' }
 			]
 		}
