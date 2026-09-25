@@ -1577,6 +1577,7 @@
 	async function openVesselPopupFromInteraction(id, { zoom = 7, keepSidebarOpen = false } = {}) {
 		const normalizedId = String(id);
 		const previousId = selectedVesselId ? String(selectedVesselId) : null;
+		const keepDetailPanelOpen = showDetailPanel;
 
 		if (previousId && previousId !== normalizedId) {
 			const previousMarker = markers.get(previousId);
@@ -1589,15 +1590,25 @@
 
 		selectedVesselId = normalizedId;
 		selectedVesselDetail = null;
-		showDetailPanel = false;
+		showDetailPanel = keepDetailPanelOpen;
 		if (!keepSidebarOpen) {
 			isSidebarOpen = false;
 		}
 
 		refreshMarkerSelection();
-		focusVessel(normalizedId, zoom, true);
+		focusVessel(normalizedId, zoom, !keepDetailPanelOpen);
 		setTimeout(() => {
 			const marker = markers.get(normalizedId);
+
+			if (keepDetailPanelOpen) {
+				if (marker?.isPopupOpen?.()) {
+					ignoreNextPopupCloseForVesselId = normalizedId;
+					marker.closePopup?.();
+				}
+
+				return;
+			}
+
 			marker?.openPopup?.();
 		}, 0);
 		void scrollSidebarToVessel(normalizedId);

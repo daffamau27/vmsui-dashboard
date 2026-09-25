@@ -270,8 +270,10 @@
 			Object.keys(row || {}).forEach((key) => keys.add(key));
 		}
 
-		const preferred = selectedColumns.filter((key) => keys.has(key));
-		const extras = [...keys].filter((key) => !preferred.includes(key));
+		const preferred = DEFAULT_DATA_LOG_COLUMNS.filter((key) => keys.has(key));
+		const extras = [...keys]
+			.filter((key) => !preferred.includes(key))
+			.sort((left, right) => String(left).localeCompare(String(right)));
 
 		return [...preferred, ...extras];
 	}
@@ -359,7 +361,7 @@
 		return parts.join(' ');
 	}
 
-	let selectedColumns = $state([
+	const DEFAULT_DATA_LOG_COLUMNS = [
 		'timestamp',
 		'latitude',
 		'longitude',
@@ -382,7 +384,10 @@
 		'ae_stbd_rpm',
 		'ae_stbd_load',
 		'ae_stbd_f_used'
-	]);
+	];
+
+	let selectedColumns = $state([...DEFAULT_DATA_LOG_COLUMNS]);
+	let columnSelectionVesselId = $state(null);
 
 	let apiAvailableColumns = $derived(
 		filterDisplayColumns(
@@ -397,18 +402,18 @@
 	let responseColumns = $derived(filterDisplayColumns(getPayloadColumns(normalizedData)));
 
 	let visibleColumns = $derived(
-		responseColumns.length
-			? responseColumns
-			: apiAvailableColumns.length
-				? apiAvailableColumns
-				: filterDisplayColumns(selectedColumns)
+		apiAvailableColumns.length
+			? apiAvailableColumns
+			: responseColumns.length
+				? responseColumns
+				: filterDisplayColumns(DEFAULT_DATA_LOG_COLUMNS)
 	);
 
 	let displaySelectedColumns = $derived(
-		filterDisplayColumns(selectedColumns).filter((column) => visibleColumns.includes(column)).length
-			? filterDisplayColumns(selectedColumns).filter((column) => visibleColumns.includes(column))
+		visibleColumns.filter((column) => selectedColumns.includes(column)).length
+			? visibleColumns.filter((column) => selectedColumns.includes(column))
 			: responseColumns.length
-				? responseColumns
+				? responseColumns.filter((column) => visibleColumns.includes(column))
 				: visibleColumns
 	);
 
@@ -843,8 +848,9 @@
 			availableColumnsVesselId = $selectedVesselId;
 
 			const columns = filterDisplayColumns(payload?.available_columns || []);
-			if (columns.length) {
+			if (columns.length && columnSelectionVesselId !== $selectedVesselId) {
 				selectedColumns = columns;
+				columnSelectionVesselId = $selectedVesselId;
 			}
 
 			return payload;
@@ -989,10 +995,15 @@
 			});
 
 			const payloadColumns = filterDisplayColumns(getPayloadColumns(payload));
-			if (payloadColumns.length && !append) {
-				selectedColumns = payloadColumns;
-			} else if (Array.isArray(payload.available_columns) && payload.available_columns.length) {
-				selectedColumns = filterDisplayColumns(payload.available_columns);
+			if (!append && columnSelectionVesselId !== $selectedVesselId) {
+				const initialColumns = Array.isArray(payload.available_columns) && payload.available_columns.length
+					? filterDisplayColumns(payload.available_columns)
+					: payloadColumns;
+
+				if (initialColumns.length) {
+					selectedColumns = initialColumns;
+					columnSelectionVesselId = $selectedVesselId;
+				}
 			}
 
 			if (!append && canManageDataLogOverride) {
@@ -1095,7 +1106,7 @@
 
 		await loadCurrentUser();
 
-		const requestedColumns = filterDisplayColumns(selectedColumns);
+		const requestedColumns = [...displaySelectedColumns];
 
 		exporting = true;
 		error = '';
@@ -1738,7 +1749,7 @@
 		{/if}
 
 		<div class="column-grid">
-			{#each visibleColumns as column}
+			{#each visibleColumns as column (column)}
 				<label class="column-item" class:is-checked={selectedColumns.includes(column)}>
 					<input
 						type="checkbox"
@@ -1898,7 +1909,7 @@
 					<table class="data-log-table">
 						<thead>
 							<tr>
-								{#each displaySelectedColumns as column}
+								{#each displaySelectedColumns as column (column)}
 									<th class:sticky-col={column === 'timestamp'}>
 										{getColumnLabel(column, displaySelectedColumns)}
 									</th>
@@ -1909,7 +1920,7 @@
 						<tbody>
 							{#each dataRows as row}
 								<tr>
-									{#each displaySelectedColumns as column}
+									{#each displaySelectedColumns as column (column)}
 										<td class:sticky-col={column === 'timestamp'}>
 											{formatCellValue(getRowColumnValue(row, column), column)}
 										</td>

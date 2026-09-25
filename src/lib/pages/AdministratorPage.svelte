@@ -684,10 +684,10 @@
 		);
 	}
 
-	function hasTelegramVessel(vesselId) {
+	function hasTelegramVessel(vesselId, selectedVesselIds = telegramForm.vesselIds) {
 		const target = Number(vesselId);
 
-		return normalizeIds(telegramForm.vesselIds).includes(target);
+		return normalizeIds(selectedVesselIds).includes(target);
 	}
 
 	function toggleTelegramVessel(vesselId, checked) {
@@ -4279,7 +4279,7 @@
 						{:else if filteredReportingVessels.length === 0}
 							<div class="empty-box">Reporting vessel not found.</div>
 						{:else}
-							{#each filteredReportingVessels as vessel}
+							{#each filteredReportingVessels as vessel (vessel.id)}
 								<button
 									type="button"
 									class:selected-user={selectedReportingVessel?.id === vessel.id}
@@ -5007,7 +5007,7 @@
 						{:else if filteredReportingVessels.length === 0}
 							<div class="empty-box">Alarm vessel not found.</div>
 						{:else}
-							{#each filteredReportingVessels as vessel}
+							{#each filteredReportingVessels as vessel (vessel.id)}
 								<button
 									type="button"
 									class:selected-user={selectedReportingVessel?.id === vessel.id}
@@ -5189,7 +5189,7 @@
 
 										{#if telegramForm.vesselIds.length > 0}
 											<div class="selected-recipient-list">
-												{#each telegramForm.vesselIds as vesselId}
+												{#each telegramForm.vesselIds as vesselId (vesselId)}
 													<span class="selected-pill">
 														{getTelegramVesselName(vesselId)}
 														<button
@@ -5209,11 +5209,11 @@
 											{:else if filteredTelegramVesselOptions.length === 0}
 												<div class="empty-box">Vessel not found.</div>
 											{:else}
-												{#each filteredTelegramVesselOptions as vessel}
+												{#each filteredTelegramVesselOptions as vessel (vessel.id)}
 													<label class="option-chip">
 														<input
 															type="checkbox"
-															checked={hasTelegramVessel(vessel.id)}
+																	checked={hasTelegramVessel(vessel.id, telegramForm.vesselIds)}
 															on:change={(event) =>
 																toggleTelegramVessel(vessel.id, event.currentTarget.checked)}
 														/>
