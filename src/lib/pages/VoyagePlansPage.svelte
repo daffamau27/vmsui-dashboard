@@ -1366,11 +1366,29 @@
 		scheduleSavedRoutePointSearch(searchValue, index);
 	}
 
-	function closeRoutePointNameDropdown() {
+	function dismissRoutePointNameDropdown() {
 		clearTimeout(routePointNameDropdownCloseTimer);
+		clearTimeout(savedRoutePointSearchTimer);
+		savedRoutePointSearchIndex = null;
+		activeRoutePointNameIndex = null;
+	}
+
+	function closeRoutePointNameDropdown(index = activeRoutePointNameIndex) {
+		clearTimeout(routePointNameDropdownCloseTimer);
+		clearTimeout(savedRoutePointSearchTimer);
+		savedRoutePointSearchIndex = null;
 		routePointNameDropdownCloseTimer = setTimeout(() => {
-			activeRoutePointNameIndex = null;
+			if (activeRoutePointNameIndex === index) {
+				activeRoutePointNameIndex = null;
+			}
 		}, 120);
+	}
+
+	function handleRoutePointNameOutsidePointerDown(event) {
+		if (activeRoutePointNameIndex === null || activeRoutePointNameIndex === undefined) return;
+		if (event.target?.closest?.('.route-point-name-field')) return;
+
+		dismissRoutePointNameDropdown();
 	}
 
 	function selectRoutePointNameOption(index, option) {
@@ -1398,7 +1416,7 @@
 		});
 
 		selectedPointIndex = index;
-		activeRoutePointNameIndex = null;
+		dismissRoutePointNameDropdown();
 		refreshRouteMap();
 	}
 
@@ -1789,6 +1807,7 @@
 		if (browser) {
 			activeMapSourceId = getMapSourceId();
 			window.addEventListener('keydown', handleRouteEditorKeydown);
+			document.addEventListener('pointerdown', handleRoutePointNameOutsidePointerDown);
 			document.addEventListener('fullscreenchange', handleRouteMapFullscreenChange);
 			document.addEventListener('webkitfullscreenchange', handleRouteMapFullscreenChange);
 			document.addEventListener('mozfullscreenchange', handleRouteMapFullscreenChange);
@@ -1801,6 +1820,7 @@
 		return () => {
 			if (browser) {
 				window.removeEventListener('keydown', handleRouteEditorKeydown);
+				document.removeEventListener('pointerdown', handleRoutePointNameOutsidePointerDown);
 				document.removeEventListener('fullscreenchange', handleRouteMapFullscreenChange);
 				document.removeEventListener('webkitfullscreenchange', handleRouteMapFullscreenChange);
 				document.removeEventListener('mozfullscreenchange', handleRouteMapFullscreenChange);
@@ -3580,9 +3600,9 @@
 														}}
 														on:input|stopPropagation={(event) =>
 															updateRoutePointName(index, event.currentTarget.value)}
-														on:blur={closeRoutePointNameDropdown}
+														on:blur={() => closeRoutePointNameDropdown(index)}
 														on:keydown={(event) => {
-															if (event.key === 'Escape') activeRoutePointNameIndex = null;
+															if (event.key === 'Escape') dismissRoutePointNameDropdown();
 														}}
 														disabled={editAllowedOnly}
 													/>
