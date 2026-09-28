@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { apiRequest } from "$lib/api/authApi.js";
   import LoadingSkeleton from "$lib/components/LoadingSkeleton.svelte";
   import { sortByAlpha } from "$lib/utils/alphaSort.js";
@@ -14,6 +14,19 @@
 
   let monitorRows = $state([]);
   let eventRows = $state([]);
+  let deviationRows = $state([]);
+  let deviationPagination = $state({
+    page: 1,
+    pageSize: 20,
+    totalItems: 0,
+    totalPages: 1,
+    hasNext: false,
+    hasPrevious: false
+  });
+  let loadingDeviations = $state(false);
+  let showDeviationOverlay = $state(false);
+  let deviationAcknowledged = $state(false);
+  let deviationAcknowledgeError = $state("");
   let pagination = $state({
     page: 1,
     pageSize: 20,
@@ -25,9 +38,11 @@
 
   let selectedVesselId = $state("");
   let selectedStatus = $state("");
-  let selectedAlarmType = $state("");
+  let selectedAlarmTypes = $state([]);
   let page = $state(1);
   let pageSize = $state(20);
+  let alarmEventsSectionElement = $state(null);
+  let alarmTypeFilterElement = $state(null);
 
   const alarmTypeOptions = [
     {
@@ -49,10 +64,35 @@
     {
       value: "ENGINE_HEALTH",
       label: "Engine Health"
+    },
+    {
+      value: "VOYAGE_PLAN_DEVIATION",
+      label: "Voyage Plan Deviation"
+    },
+    {
+      value: "JUMPING_DATA",
+      label: "Jumping Data"
+    },
+    {
+      value: "SPIKE_RPM",
+      label: "Spike RPM"
+    },
+    {
+      value: "OUTRANGE_RPM",
+      label: "Outrange RPM"
+    },
+    {
+      value: "RPM_BLANK",
+      label: "RPM Blank"
+    },
+    {
+      value: "UNALIGNED_RPM_ENGINES",
+      label: "Unaligned RPM Engines"
     }
   ];
 
   let refreshTimer = null;
+  let deviationRefreshTimer = null;
 
   let activeMonitorRows = $derived(
     monitorRows.filter((row) => String(row?.status || "").toUpperCase() === "ACTIVE")
@@ -126,6 +166,80 @@
       .toUpperCase();
   }
 
+  function getDeviationDescription(type) {
+    const descriptions = {
+      JUMPING_DATA: "No telemetry data has been received for more than 5 minutes.",
+      SPIKE_RPM: "Engine RPM spiked from 0 to 1000 RPM or higher.",
+      OUTRANGE_RPM: "Engine RPM is outside the configured operating limits.",
+      RPM_BLANK: "Telemetry is available, but the engine RPM value is missing or unreadable."
+    };
+
+    return descriptions[String(type || "").toUpperCase()] || "A telemetry data deviation was detected.";
+  }
+
+  function closeDeviationOverlay() {
+    showDeviationOverlay = false;
+  }
+
+  function handleDeviationOverlayKeydown(event) {
+    if (event.key !== "Escape") return;
+
+    if (showDeviationOverlay) closeDeviationOverlay();
+    closeAlarmTypeDropdown();
+  }
+
+  function closeAlarmTypeDropdown() {
+    alarmTypeFilterElement?.removeAttribute?.("open");
+  }
+
+  function handleAlarmTypeOutsidePointerDown(event) {
+    if (event.target?.closest?.(".alarm-type-filter")) return;
+    closeAlarmTypeDropdown();
+  }
+
+  function toggleAlarmType(alarmType, checked) {
+    const normalizedType = String(alarmType || "").trim().toUpperCase();
+    if (!normalizedType) return;
+
+    selectedAlarmTypes = checked
+      ? [...new Set([...selectedAlarmTypes, normalizedType])]
+      : selectedAlarmTypes.filter((type) => type !== normalizedType);
+  }
+
+  async function viewDeviationHistory() {
+    const visibleDeviationTypes = new Set(
+      deviationRows
+        .map((row) => String(row?.type || "").trim().toUpperCase())
+        .filter(Boolean)
+    );
+
+    selectedAlarmTypes = alarmTypeOptions
+      .map((option) => option.value)
+      .filter((type) => visibleDeviationTypes.has(type));
+    selectedVesselId = "";
+    selectedStatus = "";
+    page = 1;
+    closeDeviationOverlay();
+    closeAlarmTypeDropdown();
+
+    await loadAlarmEvents();
+    await tick();
+    alarmEventsSectionElement?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  }
+
+  async function handleDeviationAcknowledge() {
+    deviationAcknowledgeError = "";
+
+    const acknowledged = await handleMarkAllRead();
+
+    if (acknowledged) {
+      deviationAcknowledged = true;
+      return;
+    }
+
+    deviationAcknowledgeError = error || "Failed to acknowledge alarms.";
+  }
+
   function getVesselName(row) {
     return (
       row?.vesselName ||
@@ -156,8 +270,8 @@
       params.set("status", selectedStatus);
     }
 
-    if (selectedAlarmType.trim()) {
-      params.set("alarmType", selectedAlarmType.trim());
+    if (selectedAlarmTypes.length) {
+      params.set("alarmType", selectedAlarmTypes.join(","));
     }
 
     params.set("page", String(page));
@@ -192,6 +306,53 @@
       monitorRows = [];
     } finally {
       loadingMonitor = false;
+    }
+  }
+
+  async function loadMonitorDeviations() {
+    if (loadingDeviations) return;
+
+    loadingDeviations = true;
+
+    try {
+      const response = await apiRequest("/alarm/monitor-deviations?page=1&pageSize=20", {
+        method: "GET"
+      });
+      const payload = response?.data || {};
+
+      const nextDeviationRows = Array.isArray(payload?.monitor)
+        ? payload.monitor
+        : Array.isArray(response?.monitor)
+          ? response.monitor
+          : [];
+
+      const nextDeviationPagination = {
+        page: payload?.pagination?.page ?? 1,
+        pageSize: payload?.pagination?.pageSize ?? 20,
+        totalItems: payload?.pagination?.totalItems ?? nextDeviationRows.length,
+        totalPages: payload?.pagination?.totalPages ?? 1,
+        hasNext: Boolean(payload?.pagination?.hasNext),
+        hasPrevious: Boolean(payload?.pagination?.hasPrevious)
+      };
+
+      if (nextDeviationRows.length > 0) {
+        deviationRows = nextDeviationRows;
+        deviationPagination = nextDeviationPagination;
+        deviationAcknowledged = false;
+        deviationAcknowledgeError = "";
+        showDeviationOverlay = true;
+      } else if (!showDeviationOverlay) {
+        deviationRows = [];
+        deviationPagination = nextDeviationPagination;
+      }
+    } catch (err) {
+      if (!showDeviationOverlay) deviationRows = [];
+
+      if (Number(err?.status) !== 403) {
+        console.error("[ALARM_MONITOR_DEVIATIONS_ERROR]", err);
+      }
+    } finally {
+      loadingDeviations = false;
     }
   }
 
@@ -258,15 +419,17 @@
 
   async function handleApplyFilter() {
     page = 1;
+    closeAlarmTypeDropdown();
     await loadAlarmEvents();
   }
 
   async function handleResetFilter() {
     selectedVesselId = "";
     selectedStatus = "";
-    selectedAlarmType = "";
+    selectedAlarmTypes = [];
     page = 1;
     pageSize = 20;
+    closeAlarmTypeDropdown();
     await loadAlarmEvents();
   }
 
@@ -297,9 +460,11 @@
       successMessage = "All alarms acknowledged successfully.";
 
       await loadAllAlarmData();
+      return true;
     } catch (err) {
       console.error("[ALARM_MARK_ALL_READ_ERROR]", err);
       error = err?.message || "Failed to acknowledge all alarms.";
+      return false;
     } finally {
       acknowledging = false;
     }
@@ -321,12 +486,32 @@
     }
   }
 
+  function startDeviationAutoRefresh() {
+    stopDeviationAutoRefresh();
+
+    deviationRefreshTimer = setInterval(() => {
+      loadMonitorDeviations();
+    }, 60000);
+  }
+
+  function stopDeviationAutoRefresh() {
+    if (deviationRefreshTimer) {
+      clearInterval(deviationRefreshTimer);
+      deviationRefreshTimer = null;
+    }
+  }
+
   onMount(() => {
+    document.addEventListener("pointerdown", handleAlarmTypeOutsidePointerDown);
     loadAllAlarmData();
+    loadMonitorDeviations();
     startAutoRefresh();
+    startDeviationAutoRefresh();
 
     return () => {
+      document.removeEventListener("pointerdown", handleAlarmTypeOutsidePointerDown);
       stopAutoRefresh();
+      stopDeviationAutoRefresh();
     };
   });
 
@@ -339,6 +524,113 @@
     }
   });
 </script>
+
+<svelte:window onkeydown={handleDeviationOverlayKeydown} />
+
+{#if showDeviationOverlay && deviationRows.length}
+  <button
+    type="button"
+    class="deviation-overlay-backdrop"
+    aria-label="Close data deviation alert"
+    onclick={closeDeviationOverlay}
+  ></button>
+
+  <section
+    class="deviation-alert-dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="deviation-alert-title"
+  >
+    <header class="deviation-alert-header">
+      <div class="deviation-alert-icon" aria-hidden="true">!</div>
+
+      <div class="deviation-alert-title">
+        <span>Unread data deviations</span>
+        <h2 id="deviation-alert-title">
+          {deviationPagination.totalItems || deviationRows.length} active deviation{(deviationPagination.totalItems || deviationRows.length) === 1 ? "" : "s"}
+        </h2>
+        <p>Review these telemetry issues from vessels assigned to you.</p>
+      </div>
+
+      <button
+        type="button"
+        class="deviation-alert-close"
+        aria-label="Close data deviation alert"
+        title="Close"
+        onclick={closeDeviationOverlay}
+      >
+        &times;
+      </button>
+    </header>
+
+    <div class="deviation-alert-list">
+      {#each deviationRows as row (row.alarmId)}
+        <article class="deviation-alert-item">
+          <div class="deviation-item-heading">
+            <div>
+              <span>Vessel</span>
+              <strong>{getVesselName(row)}</strong>
+            </div>
+
+            <span class="deviation-type-pill">{formatAlarmType(row.type)}</span>
+          </div>
+
+          <p>{getDeviationDescription(row.type)}</p>
+
+          <div class="deviation-item-meta">
+            <div>
+              <span>Started</span>
+              <strong>{row.start || formatDateTime(row.startTs)}</strong>
+            </div>
+
+            <div>
+              <span>Duration</span>
+              <strong>{row.duration || `${row.durationSeconds ?? 0}s`}</strong>
+            </div>
+
+            <div>
+              <span>Device ID</span>
+              <strong>{row.deviceId || "-"}</strong>
+            </div>
+          </div>
+        </article>
+      {/each}
+    </div>
+
+    <footer class="deviation-alert-footer">
+      <div class="deviation-alert-feedback">
+        <span>
+          Showing {deviationRows.length} of {deviationPagination.totalItems || deviationRows.length} unread deviations.
+        </span>
+
+        {#if deviationAcknowledged}
+          <strong>Alarms acknowledged. You can still review this alert.</strong>
+        {:else if deviationAcknowledgeError}
+          <em>{deviationAcknowledgeError}</em>
+        {/if}
+      </div>
+
+      <div class="deviation-alert-actions">
+        <button type="button" class="secondary-btn" onclick={closeDeviationOverlay}>
+          Continue
+        </button>
+
+        <button
+          type="button"
+          class="deviation-acknowledge-btn"
+          onclick={handleDeviationAcknowledge}
+          disabled={acknowledging || deviationAcknowledged}
+        >
+          {acknowledging ? "Acknowledging..." : deviationAcknowledged ? "Acknowledged" : "Acknowledge"}
+        </button>
+
+        <button type="button" class="deviation-history-btn" onclick={viewDeviationHistory}>
+          View History
+        </button>
+      </div>
+    </footer>
+  </section>
+{/if}
 
 <section class="alarm-page">
   <section class="alarm-header-card">
@@ -371,15 +663,41 @@
     </div>
   </section>
 
-  {#if error}
-    <div class="status-box error-box">
-      {error}
-    </div>
-  {/if}
+  {#if error || successMessage}
+    <div class="alarm-toast-layer" aria-live="polite">
+      {#if error}
+        <div class="alarm-toast danger" role="alert">
+          <div class="alarm-toast-copy">
+            <strong>Action failed</strong>
+            <span>{error}</span>
+          </div>
+          <button
+            type="button"
+            class="alarm-toast-close"
+            aria-label="Close error notification"
+            onclick={() => (error = "")}
+          >
+            &times;
+          </button>
+        </div>
+      {/if}
 
-  {#if successMessage}
-    <div class="status-box success-box">
-      {successMessage}
+      {#if successMessage}
+        <div class="alarm-toast success" role="status">
+          <div class="alarm-toast-copy">
+            <strong>Action success</strong>
+            <span>{successMessage}</span>
+          </div>
+          <button
+            type="button"
+            class="alarm-toast-close"
+            aria-label="Close success notification"
+            onclick={() => (successMessage = "")}
+          >
+            &times;
+          </button>
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -455,7 +773,7 @@
     {/if}
   </section>
 
-  <section class="table-section alarm-events-section">
+  <section class="table-section alarm-events-section" bind:this={alarmEventsSectionElement}>
     <div class="section-header">
       <div>
         <span class="section-kicker">History</span>
@@ -488,19 +806,6 @@
       </label>
 
       <label>
-        <span>Alarm Type</span>
-        <select bind:value={selectedAlarmType}>
-          <option value="">All Alarm Types</option>
-
-          {#each alarmTypeOptions as alarmType}
-            <option value={alarmType.value}>
-              {alarmType.label}
-            </option>
-          {/each}
-        </select>
-      </label>
-
-      <label>
         <span>Page Size</span>
         <select bind:value={pageSize}>
           <option value={10}>10</option>
@@ -509,6 +814,41 @@
           <option value={100}>100</option>
         </select>
       </label>
+
+      <details class="alarm-type-filter" bind:this={alarmTypeFilterElement}>
+        <summary>
+          <span>
+            <small>Alarm Type</small>
+            <strong>
+              {selectedAlarmTypes.length ? `${selectedAlarmTypes.length} types selected` : "All types"}
+            </strong>
+          </span>
+          <span class="alarm-type-chevron" aria-hidden="true">&#8964;</span>
+        </summary>
+
+        <div class="alarm-type-dropdown">
+          <div class="alarm-type-dropdown-head">
+            <span>Select alarm types</span>
+            {#if selectedAlarmTypes.length}
+              <button type="button" onclick={() => (selectedAlarmTypes = [])}>Clear</button>
+            {/if}
+          </div>
+
+          <div class="alarm-type-checkboxes">
+            {#each alarmTypeOptions as alarmType (alarmType.value)}
+              <label class:checked={selectedAlarmTypes.includes(alarmType.value)}>
+                <input
+                  type="checkbox"
+                  checked={selectedAlarmTypes.includes(alarmType.value)}
+                  onchange={(event) => toggleAlarmType(alarmType.value, event.currentTarget.checked)}
+                />
+                <span class="alarm-type-checkbox-mark" aria-hidden="true"></span>
+                <span class="alarm-type-checkbox-label">{alarmType.label}</span>
+              </label>
+            {/each}
+          </div>
+        </div>
+      </details>
 
       <div class="filter-actions">
         <button
@@ -596,6 +936,286 @@
 </section>
 
 <style>
+  .deviation-overlay-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 5000;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background: rgba(2, 6, 23, 0.76);
+    backdrop-filter: blur(4px);
+    cursor: default;
+  }
+
+  .deviation-alert-dialog {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    z-index: 5001;
+    width: min(780px, calc(100vw - 32px));
+    max-height: min(760px, calc(100vh - 32px));
+    transform: translate(-50%, -50%);
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    overflow: hidden;
+    border: 1px solid rgba(251, 146, 60, 0.46);
+    border-radius: 18px;
+    background: var(--color-surface);
+    color: var(--text-primary);
+    box-shadow: 0 28px 80px rgba(2, 6, 23, 0.52), 0 0 0 1px rgba(249, 115, 22, 0.08);
+  }
+
+  .deviation-alert-header {
+    padding: 18px 20px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 13px;
+    border-bottom: 1px solid rgba(251, 146, 60, 0.24);
+    background: linear-gradient(135deg, rgba(249, 115, 22, 0.17), rgba(245, 158, 11, 0.05));
+  }
+
+  .deviation-alert-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 11px;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    background: #f97316;
+    color: #ffffff;
+    box-shadow: 0 8px 22px rgba(249, 115, 22, 0.28);
+    font-size: 22px;
+    line-height: 1;
+    font-weight: 950;
+  }
+
+  .deviation-alert-title {
+    min-width: 0;
+  }
+
+  .deviation-alert-title > span {
+    color: #fb923c;
+    font-size: 10px;
+    line-height: 1.2;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .deviation-alert-title h2 {
+    margin: 4px 0 0;
+    color: var(--text-primary);
+    font-size: clamp(18px, 2.5vw, 24px);
+    line-height: 1.2;
+    font-weight: 900;
+  }
+
+  .deviation-alert-title p {
+    margin: 6px 0 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.45;
+    font-weight: 700;
+  }
+
+  .deviation-alert-close {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    background: rgba(15, 23, 42, 0.42);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 22px;
+    line-height: 1;
+  }
+
+  .deviation-alert-close:hover {
+    border-color: rgba(251, 146, 60, 0.68);
+    background: rgba(249, 115, 22, 0.14);
+    color: #fb923c;
+  }
+
+  .deviation-alert-list {
+    min-height: 0;
+    padding: 14px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    display: grid;
+    align-content: start;
+    gap: 10px;
+    background: var(--color-base);
+  }
+
+  .deviation-alert-item {
+    padding: 14px;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-left: 4px solid #f97316;
+    border-radius: 12px;
+    background: var(--color-surface);
+    box-shadow: 0 4px 12px rgba(2, 6, 23, 0.12);
+  }
+
+  .deviation-item-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .deviation-item-heading > div > span,
+  .deviation-item-meta span {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 9px;
+    line-height: 1.2;
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .deviation-item-heading strong {
+    display: block;
+    margin-top: 4px;
+    color: var(--text-primary);
+    font-size: 15px;
+    line-height: 1.25;
+    font-weight: 900;
+  }
+
+  .deviation-type-pill {
+    max-width: 48%;
+    padding: 5px 9px;
+    border: 1px solid rgba(251, 146, 60, 0.42);
+    border-radius: 999px;
+    background: rgba(249, 115, 22, 0.12);
+    color: #fb923c;
+    font-size: 9px;
+    line-height: 1.2;
+    font-weight: 900;
+    text-align: center;
+    white-space: normal;
+  }
+
+  .deviation-alert-item > p {
+    margin: 10px 0 0;
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.5;
+    font-weight: 700;
+  }
+
+  .deviation-item-meta {
+    margin-top: 12px;
+    padding-top: 11px;
+    border-top: 1px solid rgba(148, 163, 184, 0.18);
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .deviation-item-meta strong {
+    display: block;
+    margin-top: 4px;
+    color: var(--text-primary);
+    font-size: 11px;
+    line-height: 1.4;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+  }
+
+  .deviation-alert-footer {
+    padding: 12px 16px;
+    border-top: 1px solid rgba(148, 163, 184, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    background: var(--color-surface);
+  }
+
+  .deviation-alert-feedback {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+  }
+
+  .deviation-alert-feedback > span {
+    color: var(--text-secondary);
+    font-size: 10px;
+    line-height: 1.4;
+    font-weight: 700;
+  }
+
+  .deviation-alert-feedback > strong,
+  .deviation-alert-feedback > em {
+    font-size: 10px;
+    line-height: 1.4;
+    font-style: normal;
+    font-weight: 850;
+  }
+
+  .deviation-alert-feedback > strong {
+    color: #34d399;
+  }
+
+  .deviation-alert-feedback > em {
+    color: #f87171;
+  }
+
+  .deviation-alert-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex: 0 0 auto;
+  }
+
+  .deviation-history-btn {
+    height: 32px;
+    padding: 0 14px;
+    border: 1px solid #f97316;
+    background: #f97316;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 900;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .deviation-history-btn:hover {
+    border-color: #ea580c;
+    background: #ea580c;
+  }
+
+  .deviation-acknowledge-btn {
+    height: 32px;
+    padding: 0 14px;
+    border: 1px solid #2563eb;
+    background: rgba(37, 99, 235, 0.15);
+    color: #60a5fa;
+    font-size: 11px;
+    font-weight: 900;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .deviation-acknowledge-btn:hover:not(:disabled) {
+    background: #2563eb;
+    color: #ffffff;
+  }
+
+  .deviation-acknowledge-btn:disabled {
+    opacity: 0.58;
+    cursor: not-allowed;
+  }
+
   .alarm-page {
     width: 100%;
     height: 100%;
@@ -611,7 +1231,6 @@
 
   .alarm-header-card,
   .table-section,
-  .status-box,
   .summary-card {
     background: var(--color-surface);
     border: 1px solid #d9e2ec;
@@ -698,24 +1317,109 @@
     cursor: not-allowed;
   }
 
-  .status-box {
-    margin-top: 14px;
-    padding: 10px 12px;
-    border-radius: 10px;
+  .alarm-toast-layer {
+    position: fixed;
+    top: 18px;
+    right: 18px;
+    z-index: 30000;
+    width: min(390px, calc(100vw - 36px));
+    display: grid;
+    gap: 10px;
+    pointer-events: none;
+  }
+
+  .alarm-toast {
+    padding: 11px 12px;
+    border: 1px solid #d9e2ec;
+    border-radius: 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+    background: rgba(248, 250, 252, 0.98);
+    box-shadow: 0 14px 34px rgba(15, 23, 42, 0.28);
+    backdrop-filter: blur(10px);
+    pointer-events: auto;
+    animation: alarm-toast-in 0.22s ease both;
+  }
+
+  .alarm-toast-copy {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+  }
+
+  .alarm-toast-copy strong {
+    color: #0f172a !important;
     font-size: 12px;
     font-weight: 900;
   }
 
-  .error-box {
-    background: var(--color-danger-muted);
-    color: #b91c1c;
-    border-color: #fecaca;
+  .alarm-toast-copy span {
+    color: #334155 !important;
+    font-size: 12px;
+    line-height: 1.35;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+    text-transform: none;
   }
 
-  .success-box {
-    background: var(--color-success-muted);
-    color: #047857;
-    border-color: #bbf7d0;
+  .alarm-toast.success {
+    border-color: #86efac;
+    background: rgba(240, 253, 244, 0.98);
+  }
+
+  .alarm-toast.success .alarm-toast-copy strong {
+    color: #052e16 !important;
+  }
+
+  .alarm-toast.success .alarm-toast-copy span {
+    color: #14532d !important;
+  }
+
+  .alarm-toast.danger {
+    border-color: #fda4af;
+    background: rgba(255, 241, 242, 0.98);
+  }
+
+  .alarm-toast.danger .alarm-toast-copy strong {
+    color: #881337 !important;
+  }
+
+  .alarm-toast.danger .alarm-toast-copy span {
+    color: #9f1239 !important;
+  }
+
+  .alarm-toast-close {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    background: rgba(15, 23, 42, 0.08);
+    color: #334155 !important;
+    font-size: 17px;
+    line-height: 1;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .alarm-toast-close:hover {
+    background: rgba(15, 23, 42, 0.14);
+  }
+
+  @keyframes alarm-toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(-8px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   .alarm-summary-grid {
@@ -753,6 +1457,10 @@
   .table-section {
     margin-top: 14px;
     overflow: hidden;
+  }
+
+  .alarm-events-section {
+    overflow: visible;
   }
 
   .section-header {
@@ -906,20 +1614,20 @@
     border-bottom: 1px solid #e2e8f0;
   }
 
-  .event-filter-card label {
+  .event-filter-card > label {
     display: grid;
     gap: 5px;
   }
 
-  .event-filter-card label span {
+  .event-filter-card > label > span {
     color: var(--text-secondary);
     font-size: 10px;
     font-weight: 900;
     text-transform: uppercase;
   }
 
-  .event-filter-card input,
-  .event-filter-card select {
+  .event-filter-card > label > input,
+  .event-filter-card > label > select {
     height: 32px;
     min-width: 150px;
     border: 1px solid #cbd5e1;
@@ -932,18 +1640,227 @@
     color-scheme: dark;
   }
 
-  .event-filter-card select option,
-  .event-filter-card select optgroup {
+  .event-filter-card > label > select option,
+  .event-filter-card > label > select optgroup {
     background: #111827;
     color: #f1f5f9;
     font-size: 12px;
     font-weight: 700;
   }
 
-  .event-filter-card input:focus,
-  .event-filter-card select:focus {
+  .event-filter-card > label > input:focus,
+  .event-filter-card > label > select:focus {
     border-color: #2563eb;
     box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  }
+
+  .alarm-type-filter {
+    position: relative;
+    flex: 1 1 250px;
+    max-width: 340px;
+    min-width: 0;
+    align-self: flex-end;
+  }
+
+  .alarm-type-filter summary {
+    height: 32px;
+    padding: 0 9px;
+    border: 1px solid #cbd5e1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: var(--color-surface);
+    color: var(--text-primary);
+    cursor: pointer;
+    list-style: none;
+    box-sizing: border-box;
+  }
+
+  .alarm-type-filter summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .alarm-type-filter summary:focus-visible,
+  .alarm-type-filter[open] summary {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+    outline: none;
+  }
+
+  .alarm-type-filter summary > span:first-child {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .alarm-type-filter summary small {
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .alarm-type-filter summary strong {
+    min-width: 0;
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 800;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .alarm-type-chevron {
+    flex: 0 0 auto;
+    color: var(--text-secondary);
+    font-size: 15px;
+    line-height: 1;
+    transition: transform 140ms ease;
+  }
+
+  .alarm-type-filter[open] .alarm-type-chevron {
+    transform: rotate(180deg);
+  }
+
+  .alarm-type-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 120;
+    width: min(360px, calc(100vw - 48px));
+    padding: 8px;
+    border: 1px solid rgba(96, 165, 250, 0.42);
+    border-radius: 10px;
+    background: var(--color-surface);
+    box-shadow: 0 18px 42px rgba(2, 6, 23, 0.34);
+  }
+
+  .alarm-type-dropdown-head {
+    min-height: 28px;
+    padding: 0 3px 7px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .alarm-type-dropdown-head > span {
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .alarm-type-dropdown-head button {
+    padding: 3px 7px;
+    border: 0;
+    border-radius: 6px;
+    background: rgba(37, 99, 235, 0.14);
+    color: #60a5fa;
+    font-size: 9px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .alarm-type-checkboxes {
+    max-height: 285px;
+    margin-top: 7px;
+    overflow-y: auto;
+    display: grid;
+    gap: 5px;
+  }
+
+  .alarm-type-checkboxes label {
+    width: 100%;
+    min-height: 32px;
+    padding: 6px 8px;
+    border: 1px solid rgba(148, 163, 184, 0.26);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: var(--color-elevated);
+    color: var(--text-secondary);
+    cursor: pointer;
+    box-sizing: border-box;
+    transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+  }
+
+  .alarm-type-checkboxes label:hover {
+    border-color: rgba(96, 165, 250, 0.58);
+  }
+
+  .alarm-type-checkboxes label.checked {
+    border-color: rgba(37, 99, 235, 0.78);
+    background: rgba(37, 99, 235, 0.15);
+    color: var(--text-primary);
+  }
+
+  .alarm-type-checkboxes input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .alarm-type-checkbox-mark {
+    position: relative;
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    border: 1px solid #64748b;
+    border-radius: 4px;
+    display: grid;
+    place-items: center;
+    background: #0f172a;
+    box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.42);
+    box-sizing: border-box;
+    transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+  }
+
+  .alarm-type-checkbox-mark::after {
+    content: "";
+    width: 4px;
+    height: 8px;
+    margin-top: -2px;
+    border: solid #ffffff;
+    border-width: 0 2px 2px 0;
+    opacity: 0;
+    transform: rotate(45deg) scale(0.65);
+    transition: opacity 120ms ease, transform 120ms ease;
+  }
+
+  .alarm-type-checkboxes input:checked + .alarm-type-checkbox-mark {
+    border-color: #60a5fa;
+    background: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+  }
+
+  .alarm-type-checkboxes input:checked + .alarm-type-checkbox-mark::after {
+    opacity: 1;
+    transform: rotate(45deg) scale(1);
+  }
+
+  .alarm-type-checkboxes input:focus-visible + .alarm-type-checkbox-mark {
+    border-color: #93c5fd;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.32);
+  }
+
+  .alarm-type-checkbox-label {
+    color: inherit;
+    font-size: 10px;
+    line-height: 1.2;
+    font-weight: 800;
+    text-transform: none;
   }
 
   .filter-actions {
@@ -1021,6 +1938,72 @@
   }
 
   @media (max-width: 760px) {
+    .alarm-toast-layer {
+      top: 48px;
+      right: 10px;
+      width: calc(100vw - 20px);
+    }
+
+    .deviation-alert-dialog {
+      width: calc(100vw - 20px);
+      max-height: calc(100vh - 20px);
+      border-radius: 14px;
+    }
+
+    .deviation-alert-header {
+      padding: 14px;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 10px;
+    }
+
+    .deviation-alert-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 9px;
+      font-size: 18px;
+    }
+
+    .deviation-alert-list {
+      padding: 10px;
+    }
+
+    .deviation-item-heading,
+    .deviation-alert-footer {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .deviation-type-pill {
+      max-width: 100%;
+      width: fit-content;
+    }
+
+    .deviation-item-meta {
+      grid-template-columns: 1fr;
+      gap: 9px;
+    }
+
+    .deviation-alert-actions,
+    .deviation-alert-actions button {
+      width: 100%;
+    }
+
+    .deviation-alert-actions {
+      flex-direction: column-reverse;
+      align-items: stretch;
+    }
+
+    .alarm-type-filter {
+      width: 100%;
+      max-width: none;
+      align-self: stretch;
+    }
+
+    .alarm-type-dropdown {
+      width: 100%;
+      box-sizing: border-box;
+    }
+
     .alarm-page {
       padding: 10px;
     }
@@ -1053,8 +2036,8 @@
       padding: 10px;
     }
 
-    .event-filter-card input,
-    .event-filter-card select,
+    .event-filter-card > label > input,
+    .event-filter-card > label > select,
     .primary-btn,
     .secondary-btn {
       width: 100%;
