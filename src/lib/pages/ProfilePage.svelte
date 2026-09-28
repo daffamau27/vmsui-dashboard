@@ -23,6 +23,8 @@
 	let assets = [];
 	let auditRefreshToken = 0;
 
+	const telegramAiBotUrl = 'https://web.telegram.org/k/#@vmsui_ai_bot';
+
 	let profileForm = {
 		name: '',
 		username: '',
@@ -259,7 +261,19 @@
 					</div>
 				</div>
 
-				<button class="refresh-button" type="button" on:click={loadProfilePage}> Refresh </button>
+				<div class="hero-actions">
+					<a
+						class="telegram-bot-button"
+						href={telegramAiBotUrl}
+						target="_blank"
+						rel="noopener noreferrer"
+						aria-label="Open VMSUI AI Telegram bot"
+					>
+						Open AI Telegram Bot
+					</a>
+
+					<button class="refresh-button" type="button" on:click={loadProfilePage}> Refresh </button>
+				</div>
 			</header>
 
 			<section class="summary-grid">
@@ -562,13 +576,51 @@
 	}
 
 	.refresh-button,
-	.primary-button {
+	.primary-button,
+	.telegram-bot-button {
 		height: 32px;
 		padding: 0 12px;
 		border: none;
 		font-size: 11px;
 		font-weight: 900;
 		cursor: pointer;
+		text-decoration: none;
+		box-sizing: border-box;
+	}
+
+	.hero-actions {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 8px;
+		flex-shrink: 0;
+	}
+
+	.telegram-bot-button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 7px;
+		background: #229ed9;
+		color: #ffffff;
+		box-shadow: 0 8px 18px rgba(34, 158, 217, 0.18);
+	}
+
+	.telegram-bot-button::before {
+		content: 'AI';
+		display: inline-grid;
+		place-items: center;
+		width: 20px;
+		height: 20px;
+		border-radius: 999px;
+		background: rgba(255, 255, 255, 0.16);
+		font-size: 9px;
+		line-height: 1;
+	}
+
+	.telegram-bot-button:hover {
+		background: #1d8ec4;
+		box-shadow: 0 10px 22px rgba(34, 158, 217, 0.24);
 	}
 
 	.refresh-button {
@@ -1013,6 +1065,16 @@
 		}
 
 		.refresh-button {
+			width: 100%;
+		}
+
+		.hero-actions {
+			width: 100%;
+			flex-direction: column;
+			align-items: stretch;
+		}
+
+		.telegram-bot-button {
 			width: 100%;
 		}
 

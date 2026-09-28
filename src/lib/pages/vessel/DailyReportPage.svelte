@@ -1617,6 +1617,8 @@
 		return (
 			Array.isArray(values) &&
 			values.some((value) => {
+				if (value === undefined || value === null || value === '' || value === '-') return false;
+
 				const number = Number(value);
 
 				return Number.isFinite(number);
@@ -1796,9 +1798,11 @@
 			toNullableChartNumber(row?.fuel_fod_stbd ?? row?.fuelFodStbd)
 		);
 
-		const hasSingle = hasFiniteChartData(singleData);
-		const hasPort = hasFiniteChartData(portData);
-		const hasStbd = hasFiniteChartData(stbdData);
+		const hasSingleValues = hasFiniteChartData(singleData);
+		const hasSplitValues = hasPositiveChartData(portData) || hasPositiveChartData(stbdData);
+		const hasSingle = hasSingleValues && !hasSplitValues;
+		const hasPort = !hasSingle && hasFiniteChartData(portData);
+		const hasStbd = !hasSingle && hasFiniteChartData(stbdData);
 
 		if (!hasSingle && !hasPort && !hasStbd) return null;
 
@@ -4674,13 +4678,13 @@
 											{#if fodChartGroup.hasPort || fodChartGroup.hasStbd}
 												FOD Port / FOD STBD
 											{:else}
-												FOD Single
+												FOD
 											{/if}
 										</strong>
 									</div>
 
 									<div class="rpm-fuel-chart-badges">
-										{#if fodChartGroup.hasSingle}<span>FOD Single</span>{/if}
+										{#if fodChartGroup.hasSingle}<span>FOD</span>{/if}
 										{#if fodChartGroup.hasPort}<span>FOD Port</span>{/if}
 										{#if fodChartGroup.hasStbd}<span>FOD STBD</span>{/if}
 									</div>
