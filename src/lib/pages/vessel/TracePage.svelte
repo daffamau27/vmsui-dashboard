@@ -233,14 +233,9 @@
 
 		if (Number.isNaN(date.getTime())) return '-';
 
-		return date.toLocaleString('en-US', {
-			day: '2-digit',
-			month: 'short',
-			year: 'numeric',
-			hour: '2-digit',
-			minute: '2-digit',
-			second: '2-digit'
-		});
+		return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${pad(
+			date.getHours()
+		)}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 	}
 
 	function parseDateTimeMs(value) {
@@ -444,7 +439,7 @@
 						cameraToken,
 						timestampMs,
 						startedAt,
-						startedAtText: startedAt || formatTimestampMs(timestampMs),
+						startedAtText: startedAt ? formatDateTime(startedAt) : formatTimestampMs(timestampMs),
 						thumbnailUrl: recording?.thumbnailUrl || recording?.thumbnail_url || ''
 					};
 				});
@@ -908,7 +903,7 @@
 
 			event.hasTrace = true;
 			event.traceIndex = index;
-			event.label = point?.timestamp || event.label;
+			event.label = point?.timestamp ? formatDateTime(point.timestamp) : event.label;
 		});
 
 		snapshots.forEach((snapshot) => {
