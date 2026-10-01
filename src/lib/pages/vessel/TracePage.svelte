@@ -74,7 +74,18 @@
 	const PLAYBACK_SPEED_OPTIONS = [1, 2, 5, 10];
 	const MAX_TRACE_POINT_JUMP_NM = 1000;
 	const MAX_TRACE_POINT_SPEED_KN = 80;
+	const MAX_TIMELINE_TRACE_MARKS = 24;
 	const TRACE_DEBUG = false;
+	const TRACE_MARK_CAMERA_COLORS = [
+		{ pin: '#f97316', hover: '#fb923c', soft: 'rgba(249, 115, 22, 0.14)' },
+		{ pin: '#06b6d4', hover: '#22d3ee', soft: 'rgba(6, 182, 212, 0.14)' },
+		{ pin: '#8b5cf6', hover: '#a78bfa', soft: 'rgba(139, 92, 246, 0.14)' },
+		{ pin: '#22c55e', hover: '#4ade80', soft: 'rgba(34, 197, 94, 0.14)' },
+		{ pin: '#f43f5e', hover: '#fb7185', soft: 'rgba(244, 63, 94, 0.14)' },
+		{ pin: '#eab308', hover: '#facc15', soft: 'rgba(234, 179, 8, 0.14)' },
+		{ pin: '#3b82f6', hover: '#60a5fa', soft: 'rgba(59, 130, 246, 0.14)' },
+		{ pin: '#d946ef', hover: '#e879f9', soft: 'rgba(217, 70, 239, 0.14)' }
+	];
 
 	function traceDebug(...args) {
 		if (TRACE_DEBUG) console.log(...args);
@@ -448,36 +459,101 @@
 			.sort((a, b) => a.timestampMs - b.timestampMs);
 	}
 
-	function groupTraceMarkRecords(recordings = []) {
+	/**
+	 * @param {Array<any>} recordings
+	 * @param {Array<any>} events
+	 */
+	function groupTraceMarkRecords(recordings = [], events = []) {
 		const groupedMarks = new Map();
+		const validRecordings = recordings
+			.filter((recording) => Number.isFinite(Number(recording?.timestampMs)))
+			.sort((a, b) => Number(a.timestampMs) - Number(b.timestampMs));
 
-		for (const recording of recordings) {
+		if (!validRecordings.length) return [];
+
+		const eventBounds = getTimelineBounds(events);
+		const recordingStart = Number(validRecordings[0]?.timestampMs);
+		const recordingEnd = Number(validRecordings.at(-1)?.timestampMs);
+		const rangeStart = Number.isFinite(eventBounds.start)
+			? eventBounds.start
+			: Number.isFinite(getRangeTimestampMs(startDateTime))
+				? getRangeTimestampMs(startDateTime)
+				: recordingStart;
+		const rangeEnd = Number.isFinite(eventBounds.end)
+			? eventBounds.end
+			: Number.isFinite(getRangeTimestampMs(endDateTime))
+				? getRangeTimestampMs(endDateTime)
+				: recordingEnd;
+		const rangeDuration = rangeEnd - rangeStart;
+		const bucketDuration = rangeDuration > 0 ? rangeDuration / MAX_TIMELINE_TRACE_MARKS : 0;
+
+		for (const recording of validRecordings) {
 			const timestampMs = Number(recording?.timestampMs);
-			if (!Number.isFinite(timestampMs)) continue;
-
-			const key = `motion-mark-${timestampMs}`;
+			const bucketIndex =
+				bucketDuration > 0
+					? Math.min(
+							MAX_TIMELINE_TRACE_MARKS - 1,
+							Math.max(0, Math.floor((timestampMs - rangeStart) / bucketDuration))
+						)
+					: 0;
+			const bucketStart = bucketDuration > 0 ? rangeStart + bucketIndex * bucketDuration : timestampMs;
+			const bucketEnd =
+				bucketDuration > 0 ? Math.min(rangeEnd, bucketStart + bucketDuration) : timestampMs;
+			const key = `motion-mark-bucket-${bucketIndex}`;
 			const existingMark = groupedMarks.get(key);
 
 			if (existingMark) {
 				existingMark.recordings.push(recording);
+				existingMark.firstTimestampMs = Math.min(existingMark.firstTimestampMs, timestampMs);
+				existingMark.lastTimestampMs = Math.max(existingMark.lastTimestampMs, timestampMs);
 				continue;
 			}
 
 			groupedMarks.set(key, {
 				key,
 				timestampMs,
-				startedAtText: recording.startedAtText,
+				bucketStart,
+				bucketEnd,
+				firstTimestampMs: timestampMs,
+				lastTimestampMs: timestampMs,
 				recordings: [recording]
 			});
 		}
 
-		return Array.from(groupedMarks.values()).sort((a, b) => a.timestampMs - b.timestampMs);
+		return Array.from(groupedMarks.values())
+			.map((mark) => ({
+				...mark,
+				cameraCount: new Set(mark.recordings.map(getTraceMarkCameraKey)).size,
+				startedAtText: getTraceMarkGroupTimeText(mark),
+				pinStyle: getTraceMarkPinStyle(mark.recordings)
+			}))
+			.sort((a, b) => a.timestampMs - b.timestampMs);
 	}
 
+	/** @param {any} mark */
+	function getTraceMarkGroupTimeText(mark) {
+		const firstTimestampMs = Number(mark?.firstTimestampMs);
+		const lastTimestampMs = Number(mark?.lastTimestampMs);
+
+		if (!Number.isFinite(firstTimestampMs)) return '-';
+		if (!Number.isFinite(lastTimestampMs) || Math.abs(lastTimestampMs - firstTimestampMs) < 1000) {
+			return formatTimestampMs(firstTimestampMs);
+		}
+
+		return `${formatTimestampMs(firstTimestampMs)} - ${formatTimestampMs(lastTimestampMs)}`;
+	}
+
+	/** @param {any} recording */
 	function getTraceMarkCameraKey(recording) {
 		return String(recording?.cameraToken || recording?.cameraName || '').trim();
 	}
 
+	/** @param {number} index */
+	function getTraceMarkCameraPalette(index = 0) {
+		return TRACE_MARK_CAMERA_COLORS[index % TRACE_MARK_CAMERA_COLORS.length];
+	}
+
+	/** @param {Array<any>} recordings */
 	function buildTraceMarkCameraOptions(recordings = []) {
 		const options = new Map();
 
@@ -491,7 +567,105 @@
 			});
 		}
 
-		return Array.from(options.values()).sort((a, b) => a.name.localeCompare(b.name));
+		return Array.from(options.values())
+			.sort((a, b) => a.name.localeCompare(b.name))
+			.map((option, index) => {
+				const palette = getTraceMarkCameraPalette(index);
+
+				return {
+					...option,
+					pinColor: palette.pin,
+					pinHoverColor: palette.hover,
+					pinSoftColor: palette.soft,
+					optionStyle: `--camera-color: ${palette.pin}; --camera-hover-color: ${palette.hover}; --camera-soft-color: ${palette.soft};`
+				};
+			});
+	}
+
+	/** @param {Array<any>} options */
+	function buildTraceMarkCameraColorMap(options = []) {
+		const colorMap = new Map();
+
+		for (const option of options) {
+			colorMap.set(option.key, {
+				pin: option.pinColor,
+				hover: option.pinHoverColor,
+				soft: option.pinSoftColor
+			});
+		}
+
+		return colorMap;
+	}
+
+	/**
+	 * @param {any} recording
+	 * @param {Map<string, { pin: string; hover: string; soft: string }>} colorMap
+	 */
+	function getTraceMarkRecordingColor(recording, colorMap = traceMarkCameraColorMap) {
+		const cameraKey = getTraceMarkCameraKey(recording);
+		const palette = colorMap.get(cameraKey);
+		return palette || getTraceMarkCameraPalette(0);
+	}
+
+	/** @param {any} recording */
+	function getTraceMarkRecordingStyle(recording) {
+		const palette = recording?.cameraPalette || getTraceMarkRecordingColor(recording);
+
+		return `--camera-color: ${palette.pin}; --camera-hover-color: ${palette.hover}; --camera-soft-color: ${palette.soft};`;
+	}
+
+	/** @param {string} hex */
+	function hexToRgb(hex) {
+		const normalizedHex = String(hex || '').replace('#', '').trim();
+		if (!/^[0-9a-f]{6}$/i.test(normalizedHex)) return null;
+
+		return {
+			r: Number.parseInt(normalizedHex.slice(0, 2), 16),
+			g: Number.parseInt(normalizedHex.slice(2, 4), 16),
+			b: Number.parseInt(normalizedHex.slice(4, 6), 16)
+		};
+	}
+
+	/** @param {Array<string>} colors */
+	function mixHexColors(colors = []) {
+		const rgbColors = colors.map(hexToRgb).filter(Boolean);
+		if (!rgbColors.length) return '#f97316';
+
+		const mixed = rgbColors.reduce(
+			(total, color) => ({
+				r: total.r + color.r,
+				g: total.g + color.g,
+				b: total.b + color.b
+			}),
+			{ r: 0, g: 0, b: 0 }
+		);
+
+		return `#${[mixed.r, mixed.g, mixed.b]
+			.map((value) => Math.round(value / rgbColors.length).toString(16).padStart(2, '0'))
+			.join('')}`;
+	}
+
+	/** @param {Array<any>} recordings */
+	function getTraceMarkPinStyle(recordings = []) {
+		const palettes = recordings.map((recording) => recording?.cameraPalette).filter(Boolean);
+		const uniquePalettes = [];
+		const seenColors = new Set();
+
+		for (const palette of palettes) {
+			if (!palette?.pin || seenColors.has(palette.pin)) continue;
+			seenColors.add(palette.pin);
+			uniquePalettes.push(palette);
+		}
+
+		if (uniquePalettes.length <= 1) {
+			const palette = uniquePalettes[0] || getTraceMarkCameraPalette(0);
+			return `--mark-pin-color: ${palette.pin}; --mark-pin-hover-color: ${palette.hover}; --mark-pin-shadow-color: ${palette.pin};`;
+		}
+
+		const mixedPinColor = mixHexColors(uniquePalettes.map((palette) => palette.pin));
+		const mixedHoverColor = mixHexColors(uniquePalettes.map((palette) => palette.hover));
+
+		return `--mark-pin-color: ${mixedPinColor}; --mark-pin-hover-color: ${mixedHoverColor}; --mark-pin-shadow-color: ${mixedPinColor};`;
 	}
 
 	function toggleTraceMarkCamera(cameraKey, checked) {
@@ -1668,13 +1842,19 @@
 	let tracePoints = $derived(getTracePoints(traceData));
 	let timelineEvents = $derived(buildMergedTimelineEvents(tracePoints, cctvItems));
 	let traceMarkCameraOptions = $derived(buildTraceMarkCameraOptions(traceMarks));
+	let traceMarkCameraColorMap = $derived(buildTraceMarkCameraColorMap(traceMarkCameraOptions));
 	let filteredTraceMarks = $derived(
-		traceMarks.filter((recording) =>
-			selectedTraceMarkCameraKeys.includes(getTraceMarkCameraKey(recording))
-		)
+		traceMarks
+			.filter((recording) =>
+				selectedTraceMarkCameraKeys.includes(getTraceMarkCameraKey(recording))
+			)
+			.map((recording) => ({
+				...recording,
+				cameraPalette: getTraceMarkRecordingColor(recording, traceMarkCameraColorMap)
+			}))
 	);
 	let timelineTraceMarks = $derived(
-		groupTraceMarkRecords(filteredTraceMarks).map((mark) => ({
+		groupTraceMarkRecords(filteredTraceMarks, timelineEvents).map((mark) => ({
 			...mark,
 			left: getTraceMarkPosition(mark.timestampMs, timelineEvents)
 		}))
@@ -2829,13 +3009,13 @@
 								class:open={activeTraceMarkKey === mark.key}
 								class:align-left={mark.left < 12}
 								class:align-right={mark.left > 88}
-								style={`left: ${mark.left}%`}
+								style={`left: ${mark.left}%; ${mark.pinStyle}`}
 							>
 								<button
 									type="button"
 									class="timeline-mark-trigger"
 									class:active={activeTraceMarkKey === mark.key}
-									aria-label={`Show ${mark.recordings.length} camera recording${mark.recordings.length === 1 ? '' : 's'} started ${mark.startedAtText}`}
+									aria-label={`Show ${mark.recordings.length} recording${mark.recordings.length === 1 ? '' : 's'} grouped around ${mark.startedAtText}`}
 									aria-expanded={activeTraceMarkKey === mark.key}
 									onpointerdown={(event) => event.stopPropagation()}
 									onclick={(event) => toggleTraceMarkPopup(mark, event)}
@@ -2849,12 +3029,13 @@
 										class:single-camera={mark.recordings.length === 1}
 										class:two-cameras={mark.recordings.length === 2}
 										class:four-cameras={mark.recordings.length === 4}
+										class:many-recordings={mark.recordings.length > 4}
 										role="group"
-										aria-label={`Camera recordings started ${mark.startedAtText}`}
+										aria-label={`Camera recording group around ${mark.startedAtText}`}
 									>
 										<div class="timeline-mark-popup-header">
-											<strong>{mark.recordings.length} camera{mark.recordings.length === 1 ? '' : 's'}</strong>
-											<small>{mark.startedAtText}</small>
+											<strong>{mark.recordings.length} recording{mark.recordings.length === 1 ? '' : 's'}</strong>
+											<small>{mark.cameraCount} camera{mark.cameraCount === 1 ? '' : 's'} - {mark.startedAtText}</small>
 										</div>
 
 										<div class="timeline-mark-camera-grid">
@@ -2862,6 +3043,7 @@
 												<button
 													type="button"
 													class="timeline-mark-camera"
+													style={getTraceMarkRecordingStyle(recording)}
 													onclick={(event) => openMotionVideo(recording, event)}
 													aria-label={`Play recording from ${recording.cameraName}`}
 												>
@@ -2885,6 +3067,7 @@
 											{/each}
 										</div>
 									</div>
+									<span class="timeline-mark-popup-pointer" aria-hidden="true"></span>
 								{/if}
 							</div>
 						{/each}
@@ -2915,7 +3098,7 @@
 							</label>
 
 							{#each traceMarkCameraOptions as camera (camera.key)}
-								<label class="timeline-camera-option" title={camera.name}>
+								<label class="timeline-camera-option" style={camera.optionStyle} title={camera.name}>
 									<input
 										type="checkbox"
 										checked={selectedTraceMarkCameraKeys.includes(camera.key)}
@@ -4112,6 +4295,7 @@
 		left: 0;
 		right: 0;
 		top: 9px;
+		z-index: 1;
 		height: 3px;
 		background: #d5dbe3;
 	}
@@ -4119,6 +4303,7 @@
 	.timeline-buffer-segment {
 		position: absolute;
 		top: 9px;
+		z-index: 2;
 		height: 3px;
 		background: #64748b;
 		opacity: 0.72;
@@ -4132,6 +4317,7 @@
 		position: absolute;
 		left: 0;
 		top: 9px;
+		z-index: 3;
 		height: 3px;
 		background: #2563eb;
 	}
@@ -4139,6 +4325,7 @@
 	.timeline-dot {
 		position: absolute;
 		top: 4px;
+		z-index: 5;
 		width: 12px;
 		height: 12px;
 		border-radius: 50%;
@@ -4151,15 +4338,15 @@
 	.timeline-mark-layer {
 		position: absolute;
 		inset: 0;
-		z-index: 3;
+		z-index: 4;
 		pointer-events: none;
 	}
 
 	.timeline-mark {
 		position: absolute;
-		top: 1px;
+		top: -8px;
 		width: 12px;
-		height: 20px;
+		height: 18px;
 		pointer-events: none;
 		transform: translateX(-50%);
 		z-index: 1;
@@ -4182,7 +4369,7 @@
 		position: absolute;
 		inset: 0;
 		width: 12px;
-		height: 20px;
+		height: 18px;
 		padding: 0;
 		border: 0;
 		background: transparent;
@@ -4205,9 +4392,9 @@
 		height: 8px;
 		border: 2px solid #ffffff;
 		border-radius: 2px 2px 2px 0;
-		background: #f97316;
+		background: var(--mark-pin-color, #f97316);
 		box-shadow:
-			0 0 0 1px #c2410c,
+			0 0 0 1px var(--mark-pin-shadow-color, #c2410c),
 			0 2px 5px rgba(124, 45, 18, 0.32);
 		transform: translateX(-50%) rotate(-45deg);
 		transition: transform 140ms ease, background 140ms ease;
@@ -4216,7 +4403,7 @@
 	.timeline-mark-trigger:hover .timeline-mark-pin,
 	.timeline-mark-trigger:focus-visible .timeline-mark-pin,
 	.timeline-mark-trigger.active .timeline-mark-pin {
-		background: #fb923c;
+		background: var(--mark-pin-hover-color, #fb923c);
 		transform: translateX(-50%) rotate(-45deg) scale(1.2);
 	}
 
@@ -4251,6 +4438,7 @@
 	}
 
 	.timeline-mark-popup::after {
+		display: none;
 		content: '';
 		position: absolute;
 		left: 50%;
@@ -4261,6 +4449,35 @@
 		border-bottom: 1px solid #415475;
 		background: #101827;
 		transform: translateX(-50%) rotate(45deg);
+	}
+
+	.timeline-mark-popup-pointer {
+		position: absolute;
+		left: 50%;
+		bottom: calc(100% + 3px);
+		z-index: 6;
+		width: 10px;
+		height: 10px;
+		border-right: 1px solid #415475;
+		border-bottom: 1px solid #415475;
+		background: #101827;
+		box-shadow: 4px 4px 8px rgba(15, 23, 42, 0.18);
+		transform: translateX(-50%) rotate(45deg);
+		pointer-events: none;
+	}
+
+	.timeline-mark-popup-pointer::after {
+		content: '';
+		position: absolute;
+		right: 7px;
+		bottom: 7px;
+		width: 2px;
+		height: 10px;
+		border-radius: 999px;
+		background: var(--mark-pin-color, #f97316);
+		transform: rotate(-45deg);
+		transform-origin: bottom center;
+		opacity: 0.82;
 	}
 
 	.timeline-mark-popup-header {
@@ -4303,14 +4520,21 @@
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 
+	.timeline-mark-popup.many-recordings .timeline-mark-camera-grid {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
+
 	.timeline-mark-camera {
 		min-width: 0;
 		padding: 6px;
 		display: grid;
 		gap: 6px;
-		border: 1px solid rgba(148, 163, 184, 0.2);
+		border: 1px solid color-mix(in srgb, var(--camera-color, #60a5fa) 42%, transparent);
+		border-left: 3px solid var(--camera-color, #60a5fa);
 		border-radius: 7px;
-		background: #172033;
+		background:
+			linear-gradient(90deg, var(--camera-soft-color, rgba(96, 165, 250, 0.12)), transparent 46%),
+			#172033;
 		color: #f8fafc;
 		text-align: left;
 		cursor: pointer;
@@ -4319,8 +4543,10 @@
 
 	.timeline-mark-camera:hover,
 	.timeline-mark-camera:focus-visible {
-		border-color: #60a5fa;
-		background: #1e2c45;
+		border-color: var(--camera-hover-color, #60a5fa);
+		background:
+			linear-gradient(90deg, var(--camera-soft-color, rgba(96, 165, 250, 0.12)), transparent 58%),
+			#1e2c45;
 		outline: none;
 		transform: translateY(-1px);
 	}
@@ -4362,6 +4588,7 @@
 	}
 
 	.timeline-mark-copy strong {
+		color: var(--camera-hover-color, #f8fafc);
 		font-size: 11px;
 		font-weight: 850;
 	}
@@ -4467,6 +4694,7 @@
 	}
 
 	.timeline-camera-option {
+		position: relative;
 		min-width: 0;
 		width: 100%;
 		padding: 8px;
@@ -4482,12 +4710,12 @@
 	}
 
 	.timeline-camera-option:hover {
-		background: rgba(96, 165, 250, 0.12);
+		background: var(--camera-soft-color, rgba(96, 165, 250, 0.12));
 		color: #f8fafc;
 	}
 
 	.timeline-camera-option:has(input:checked) {
-		background: rgba(37, 99, 235, 0.13);
+		background: var(--camera-soft-color, rgba(37, 99, 235, 0.13));
 		color: #dbeafe;
 	}
 
@@ -4540,9 +4768,9 @@
 	}
 
 	.timeline-camera-option input:checked + .timeline-camera-checkbox {
-		border-color: #60a5fa;
-		background: #2563eb;
-		box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+		border-color: var(--camera-hover-color, #60a5fa);
+		background: var(--camera-color, #2563eb);
+		box-shadow: 0 0 0 2px var(--camera-soft-color, rgba(37, 99, 235, 0.2));
 	}
 
 	.timeline-camera-option input:checked + .timeline-camera-checkbox::after {
