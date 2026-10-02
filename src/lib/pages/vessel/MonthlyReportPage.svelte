@@ -18,8 +18,12 @@
 	let reportData = $state(null);
 
 	let reportMonth = $state('');
-	let startDate = $state('01');
+	let startDate = $state('');
 	let endDate = $state('');
+	let dateRangeDropdownOpen = $state(false);
+	let hoveredCalendarDay = $state('');
+	let hoveredCalendarKind = $state('');
+	let monthlyDayClickCount = $state(0);
 	let timezoneMode = $state('auto');
 	let timezoneOffset = $state('+07:00');
 	let hasLoadedDateRange = $state(false);
@@ -345,6 +349,47 @@
 		return lastDay;
 	}
 
+	const MONTHLY_WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+	/**
+	 * @param {string} monthValue
+	 * @param {string | number} [minDay]
+	 */
+	function getMonthlyCalendarDays(monthValue, minDay = '1') {
+		const parts = getMonthParts(monthValue);
+		if (!parts) return [];
+
+		const maxSelectableDay = getMaxSelectableDay(monthValue);
+		if (maxSelectableDay <= 0) return [];
+
+		const lastDay = Number(getLastDayOfMonth(monthValue));
+		const minSelectableDay = Math.max(1, normalizeMonthlyDay(minDay, 1));
+		const firstDate = new Date(parts.year, parts.month - 1, 1);
+		const firstWeekday = firstDate.getDay();
+		const totalCells = Math.ceil((firstWeekday + lastDay) / 7) * 7;
+
+		return Array.from({ length: totalCells }, (_, index) => {
+			const dayNumber = index - firstWeekday + 1;
+			const inMonth = dayNumber >= 1 && dayNumber <= lastDay;
+			const selectable = inMonth && dayNumber >= minSelectableDay && dayNumber <= maxSelectableDay;
+
+			return {
+				key: `${monthValue}-${index}`,
+				label: inMonth ? String(dayNumber) : '',
+				value: inMonth ? pad(dayNumber) : '',
+				inMonth,
+				selectable
+			};
+		});
+	}
+
+	let monthlyStartCalendarDays = $derived(getMonthlyCalendarDays(reportMonth));
+	let monthlyEndCalendarDays = $derived(getMonthlyCalendarDays(reportMonth));
+	let nextMonthlyDaySelection = $derived(monthlyDayClickCount % 2 === 0 ? 'start' : 'end');
+	let activeMonthlyCalendarDays = $derived(
+		nextMonthlyDaySelection === 'start' ? monthlyStartCalendarDays : monthlyEndCalendarDays
+	);
+
 	function getMonthlyRangeLimitText() {
 		if (!reportMonth) return 'Select a month first.';
 
@@ -382,6 +427,10 @@
 		const start = normalizeMonthlyDay(startDate, 1);
 		const end = normalizeMonthlyDay(endDate, maxDay);
 
+		if (!String(startDate || '').trim() || !String(endDate || '').trim()) {
+			return { valid: false, message: 'Date range is required.' };
+		}
+
 		if (start < 1 || end < 1) {
 			return { valid: false, message: 'Start day and end day must be at least 1.' };
 		}
@@ -411,16 +460,102 @@
 		};
 	}
 
-	function syncMonthlyRangeToBounds() {
+	function resetMonthlyDateRange() {
 		hasLoadedDateRange = false;
+		startDate = '';
+		endDate = '';
+		monthlyDayClickCount = 0;
+		dateRangeDropdownOpen = false;
+		hoveredCalendarDay = '';
+		hoveredCalendarKind = '';
+	}
+
+	/**
+	 * @param {string} day
+	 */
+	function selectMonthlyDay(day) {
+		const selectionKind = nextMonthlyDaySelection;
 		const maxDay = getMaxSelectableDay(reportMonth);
 		if (maxDay <= 0) return;
 
-		const start = Math.min(Math.max(normalizeMonthlyDay(startDate, 1), 1), maxDay);
-		const end = Math.min(Math.max(normalizeMonthlyDay(endDate, maxDay), 1), maxDay);
+		const selectedDay = pad(Math.min(Math.max(normalizeMonthlyDay(day, 1), 1), maxDay));
 
-		startDate = pad(start);
-		endDate = pad(Math.max(start, end));
+		if (selectionKind === 'start') {
+			startDate = selectedDay;
+			endDate = '';
+		} else {
+			const start = normalizeMonthlyDay(startDate, 1);
+			const end = normalizeMonthlyDay(selectedDay, start);
+			startDate = pad(Math.min(start, end));
+			endDate = pad(Math.min(Math.max(start, end), maxDay));
+			dateRangeDropdownOpen = false;
+		}
+
+		hasLoadedDateRange = false;
+		monthlyDayClickCount += 1;
+		hoveredCalendarDay = '';
+		hoveredCalendarKind = '';
+	}
+
+	/**
+	 * @param {string} kind
+	 * @param {{ selectable?: boolean, value?: string }} day
+	 */
+	function setMonthlyDayHover(kind, day) {
+		if (!day?.selectable || !day?.value) return;
+
+		hoveredCalendarKind = kind;
+		hoveredCalendarDay = day.value;
+	}
+
+	/**
+	 * @param {string} kind
+	 */
+	function clearMonthlyDayHover(kind) {
+		if (hoveredCalendarKind !== kind) return;
+
+		hoveredCalendarDay = '';
+		hoveredCalendarKind = '';
+	}
+
+	/**
+	 * @param {{ inMonth?: boolean, value?: string }} day
+	 * @param {string} [kind]
+	 */
+	function getMonthlyDayRangeState(day, kind = '') {
+		if (!day?.inMonth || !day?.value) {
+			return {
+				isStart: false,
+				isEnd: false,
+				isInRange: false
+			};
+		}
+
+		const dayNumber = Number(day.value);
+		const hoverNumber = normalizeMonthlyDay(hoveredCalendarDay, 0);
+		const isHoveringThisCalendar = hoveredCalendarKind === kind && hoverNumber > 0;
+		const hasStartDate = Boolean(String(startDate || '').trim());
+		const hasEndDate = Boolean(String(endDate || '').trim());
+		const shouldPreviewEndRange = isHoveringThisCalendar && kind === 'end' && hasStartDate;
+		const startNumber = hasStartDate ? normalizeMonthlyDay(startDate, 1) : 0;
+		const endNumber =
+			shouldPreviewEndRange
+				? hoverNumber
+				: hasEndDate
+					? normalizeMonthlyDay(endDate, startNumber || 1)
+					: startNumber;
+		const rangeStart = Math.min(startNumber, endNumber);
+		const rangeEnd = Math.max(startNumber, endNumber);
+
+		return {
+			isStart: hasStartDate && dayNumber === startNumber,
+			isEnd: hasEndDate && dayNumber === endNumber,
+			isOpenStart:
+				hasStartDate && !hasEndDate && !shouldPreviewEndRange && dayNumber === startNumber,
+			isPreviewEnd: shouldPreviewEndRange && dayNumber === endNumber,
+			isInRange: hasStartDate && hasEndDate && dayNumber > rangeStart && dayNumber < rangeEnd,
+			isPreview: shouldPreviewEndRange && dayNumber >= rangeStart && dayNumber <= rangeEnd
+		};
 	}
 
 	function normalizeDay(value) {
@@ -1698,8 +1833,6 @@
 
 	onMount(() => {
 		reportMonth = currentMonth();
-		startDate = '01';
-		endDate = pad(getMaxSelectableDay(reportMonth));
 	});
 
 	$effect(() => {
@@ -1763,32 +1896,64 @@
 				type="month"
 				bind:value={reportMonth}
 				max={currentMonth()}
-				onchange={syncMonthlyRangeToBounds}
+				onchange={() => {
+					resetMonthlyDateRange();
+				}}
 			/>
 		</label>
 
 		<label>
-			<span>Start Day</span>
-			<input
-				type="number"
-				bind:value={startDate}
-				min="1"
-				max={Math.max(getMaxSelectableDay(reportMonth), 1)}
-				placeholder="01"
-				onchange={syncMonthlyRangeToBounds}
-			/>
-		</label>
+			<span>Date Range</span>
+			<div class="date-range-combo">
+				<button
+					type="button"
+					class="date-range-trigger"
+					class:is-open={dateRangeDropdownOpen}
+					aria-label="Open date range calendar"
+					aria-expanded={dateRangeDropdownOpen}
+					onclick={() => (dateRangeDropdownOpen = !dateRangeDropdownOpen)}
+				>
+					<span class="date-range-value" class:is-placeholder={!startDate && !endDate}>
+						{#if startDate && endDate}
+							{startDate} - {endDate}
+						{:else if startDate}
+							{startDate} -
+						{:else}
+							Select date range
+						{/if}
+					</span>
+					<span class="date-range-caret">v</span>
+				</button>
 
-		<label>
-			<span>End Day</span>
-			<input
-				type="number"
-				bind:value={endDate}
-				min="1"
-				max={Math.max(getMaxSelectableDay(reportMonth), 1)}
-				placeholder={getLastDayOfMonth(reportMonth)}
-				onchange={syncMonthlyRangeToBounds}
-			/>
+				{#if dateRangeDropdownOpen}
+					<div class="day-dropdown-menu">
+						{#each MONTHLY_WEEKDAY_LABELS as label}
+							<span class="day-calendar-weekday">{label}</span>
+						{/each}
+						{#each activeMonthlyCalendarDays as day}
+							{@const rangeState = getMonthlyDayRangeState(day, nextMonthlyDaySelection)}
+							<button
+								type="button"
+								disabled={!day.selectable}
+								class:is-muted={!day.inMonth || !day.selectable}
+								class:is-in-range={rangeState.isInRange}
+								class:is-preview-range={rangeState.isPreview}
+								class:is-range-start={rangeState.isStart}
+								class:is-range-end={rangeState.isEnd}
+								class:is-range-open-start={rangeState.isOpenStart}
+								class:is-preview-end={rangeState.isPreviewEnd}
+								class:is-selected={rangeState.isStart || rangeState.isEnd}
+								onmousedown={(event) => event.preventDefault()}
+								onmouseenter={() => setMonthlyDayHover(nextMonthlyDaySelection, day)}
+								onmouseleave={() => clearMonthlyDayHover(nextMonthlyDaySelection)}
+								onclick={() => day.selectable && selectMonthlyDay(day.value)}
+							>
+								{day.label}
+							</button>
+						{/each}
+					</div>
+				{/if}
+			</div>
 		</label>
 
 		<label>
@@ -2170,7 +2335,7 @@
 					<span class="section-kicker">Waiting for date range</span>
 					<h2>Choose a monthly range first</h2>
 					<p>
-						Select month, start day, end day, and timezone above, then click
+						Select month, date range, and timezone above, then click
 						<strong>Load Data</strong> to display the monthly report.
 					</p>
 				</div>
@@ -2280,19 +2445,17 @@
 		display: grid;
 		grid-template-columns:
 			minmax(140px, 0.9fr)
-			minmax(95px, 0.55fr)
-			minmax(95px, 0.55fr)
+			minmax(180px, 1fr)
 			minmax(175px, 1fr)
 			auto;
 		align-items: end;
 		gap: 10px;
 	}
 
-	.filter-card:has(label:nth-of-type(5)) {
+	.filter-card:has(label:nth-of-type(4)) {
 		grid-template-columns:
 			minmax(130px, 0.8fr)
-			minmax(82px, 0.5fr)
-			minmax(82px, 0.5fr)
+			minmax(180px, 0.95fr)
 			minmax(150px, 0.85fr)
 			minmax(130px, 0.7fr)
 			auto;
@@ -2345,6 +2508,252 @@
 		font-size: 12px;
 		font-weight: 700;
 		outline: none;
+	}
+
+	.date-range-combo {
+		position: relative;
+	}
+
+	.date-range-trigger {
+		height: 32px;
+		width: 100%;
+		min-width: 0;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto auto;
+		align-items: center;
+		gap: 8px;
+		border: 1px solid #cbd5e1;
+		background: var(--color-surface);
+		padding: 0 8px 0 9px;
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 800;
+		text-align: left;
+		cursor: pointer;
+		outline: none;
+		transition:
+			border-color 0.18s ease,
+			box-shadow 0.18s ease,
+			background 0.18s ease;
+	}
+
+	.date-range-trigger:hover,
+	.date-range-trigger.is-open {
+		border-color: #60a5fa;
+		box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.14);
+	}
+
+	.date-range-trigger .date-range-value {
+		overflow: hidden;
+		color: var(--text-primary);
+		font-size: 14px;
+		font-weight: 900;
+		line-height: 1;
+		text-transform: none;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.date-range-trigger .date-range-value.is-placeholder {
+		color: var(--text-secondary);
+		font-weight: 800;
+	}
+
+	.date-range-step {
+		display: inline-flex;
+		align-items: center;
+		min-height: 18px;
+		padding: 0 7px;
+		border: 1px solid rgba(96, 165, 250, 0.32);
+		border-radius: 999px;
+		background: rgba(37, 99, 235, 0.14);
+		color: #bfdbfe;
+		font-size: 10px;
+		font-weight: 900;
+		text-transform: uppercase;
+	}
+
+	.date-range-caret {
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 900;
+	}
+
+	.day-dropdown-menu {
+		position: absolute;
+		z-index: 30;
+		top: calc(100% + 6px);
+		left: 0;
+		width: 282px;
+		border: 1px solid #cbd5e1;
+		background: #111827;
+		box-shadow: 0 16px 34px rgba(15, 23, 42, 0.22);
+		display: grid;
+		grid-template-columns: repeat(7, 1fr);
+		column-gap: 0;
+		row-gap: 6px;
+		padding: 12px;
+	}
+
+	.day-calendar-weekday {
+		height: 24px;
+		display: grid;
+		place-items: center;
+		color: #e5e7eb;
+		font-size: 11px;
+		font-weight: 900;
+	}
+
+	.day-dropdown-menu button {
+		position: relative;
+		isolation: isolate;
+		aspect-ratio: 1;
+		display: grid;
+		place-items: center;
+		border: 1px solid transparent;
+		border-radius: 999px;
+		background: transparent;
+		color: #f8fafc;
+		font-size: 12px;
+		font-weight: 800;
+		cursor: pointer;
+		transition:
+			background 0.18s ease,
+			border-color 0.18s ease,
+			color 0.18s ease,
+			box-shadow 0.18s ease,
+			transform 0.18s ease;
+	}
+
+	.day-dropdown-menu button::after {
+		content: '';
+		position: absolute;
+		z-index: -1;
+		top: 50%;
+		left: 50%;
+		width: 30px;
+		height: 30px;
+		border: 1px solid transparent;
+		border-radius: 999px;
+		background: transparent;
+		opacity: 0;
+		transform: translate(-50%, -50%) scale(0.86);
+		transition:
+			background 0.18s ease,
+			opacity 0.18s ease,
+			transform 0.18s ease;
+	}
+
+	.day-dropdown-menu button::before {
+		content: '';
+		position: absolute;
+		z-index: -1;
+		top: 2px;
+		bottom: 2px;
+		left: -1px;
+		right: -1px;
+		background: transparent;
+		/* transform: scaleX(0.72); */
+		opacity: 0;
+		transition:
+			background 0.18s ease,
+			border-radius 0.18s ease,
+			opacity 0.18s ease,
+			transform 0.18s ease;
+	}
+
+	.day-dropdown-menu button.is-muted {
+		color: rgba(148, 163, 184, 0.7);
+		cursor: default;
+	}
+
+	.day-dropdown-menu button:disabled {
+		cursor: default;
+	}
+
+	.day-dropdown-menu button.is-in-range {
+		color: #dbeafe;
+		animation: dayRangeFade 0.22s ease both;
+	}
+
+	.day-dropdown-menu button.is-in-range::before,
+	.day-dropdown-menu button.is-preview-range::before,
+	.day-dropdown-menu button.is-range-start::before,
+	.day-dropdown-menu button.is-range-end::before {
+		background: rgba(96, 165, 250, 0.2);
+		opacity: 1;
+		transform: scaleX(1);
+	}
+
+	.day-dropdown-menu button.is-preview-range::before {
+		background: rgba(96, 165, 250, 0.28);
+	}
+
+	.day-dropdown-menu button.is-range-start,
+	.day-dropdown-menu button.is-range-end {
+		box-shadow: none;
+		transform: scale(1.04);
+	}
+
+	.day-dropdown-menu button.is-range-start::before {
+		border-radius: 999px 0 0 999px;
+	}
+
+	.day-dropdown-menu button.is-range-end::before {
+		border-radius: 0 999px 999px 0;
+	}
+
+	.day-dropdown-menu button.is-range-open-start::before {
+		border-radius: 999px;
+	}
+
+	.day-dropdown-menu button.is-preview-end::before {
+		border-radius: 0 999px 999px 0;
+	}
+
+	.day-dropdown-menu button.is-range-start.is-preview-end::before {
+		border-radius: 999px;
+	}
+
+	.day-dropdown-menu button.is-range-start.is-range-end::before {
+		border-radius: 999px;
+	}
+
+	.day-dropdown-menu button:hover,
+	.day-dropdown-menu button.is-selected {
+		border-color: transparent;
+		background: transparent;
+		color: #111827;
+	}
+
+	.day-dropdown-menu button:hover::after,
+	.day-dropdown-menu button.is-selected::after {
+		border-color: #e5e7eb;
+		background: #e5e7eb;
+		box-shadow: 0 0 0 4px rgba(229, 231, 235, 0.12);
+		opacity: 1;
+		transform: translate(-50%, -50%) scale(1);
+	}
+
+	.day-dropdown-menu button:disabled:hover {
+		border-color: transparent;
+		background: transparent;
+		color: rgba(148, 163, 184, 0.7);
+	}
+
+	.day-dropdown-menu button:disabled:hover::after {
+		opacity: 0;
+	}
+
+	@keyframes dayRangeFade {
+		from {
+			opacity: 0.4;
+			transform: scale(0.96);
+		}
+		to {
+			opacity: 1;
+			transform: scale(1);
+		}
 	}
 
 	.filter-actions {
@@ -2805,7 +3214,7 @@
 		}
 
 		.filter-card,
-		.filter-card:has(label:nth-of-type(5)) {
+		.filter-card:has(label:nth-of-type(4)) {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
 
@@ -2854,7 +3263,7 @@
 		}
 
 		.filter-card,
-		.filter-card:has(label:nth-of-type(5)) {
+		.filter-card:has(label:nth-of-type(4)) {
 			grid-template-columns: 1fr;
 		}
 

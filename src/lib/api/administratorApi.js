@@ -79,8 +79,17 @@ export async function activateUserApi(id) {
   return unwrap(response);
 }
 
-export async function getAllVesselsAdminApi() {
-  const response = await apiRequest("/vessels", {
+export async function getAllVesselsAdminApi({ search = "", hireStatus = "", companyId = "" } = {}) {
+  const params = new URLSearchParams();
+
+  if (search) params.set("search", String(search));
+  if (hireStatus !== "" && hireStatus !== null && hireStatus !== undefined) {
+    params.set("hireStatus", String(hireStatus));
+  }
+  if (companyId) params.set("companyId", String(companyId));
+
+  const query = params.toString();
+  const response = await apiRequest(`/vessels${query ? `?${query}` : ""}`, {
     method: "GET"
   });
 

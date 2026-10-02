@@ -91,6 +91,8 @@
 	let selectedVessel = null;
 	let vesselMode = 'create';
 	let searchVessel = '';
+	let vesselCompanyFilterOpen = false;
+	let selectedVesselCompanyIds = [];
 	const FUEL_CONSUMPTION_SOURCE_OPTIONS = [
 		{ value: 'fm', label: 'FM' },
 		{ value: 'ecu', label: 'ECU' },
@@ -516,6 +518,51 @@
 		if (company) return `${getCompanyDisplayName(company)}`;
 
 		return 'No Company';
+	}
+
+	function getVesselCompanyId(vessel) {
+		const id = Number(vessel?.companyId ?? vessel?.company_id ?? vessel?.company?.id);
+
+		return Number.isFinite(id) && id > 0 ? id : null;
+	}
+
+	function isVesselCompanySelected(companyId) {
+		const id = Number(companyId);
+
+		return selectedVesselCompanyIds.includes(id);
+	}
+
+	function toggleVesselCompanyFilter(companyId) {
+		const id = Number(companyId);
+
+		if (!Number.isFinite(id) || id <= 0) return;
+
+		if (isVesselCompanySelected(id)) {
+			selectedVesselCompanyIds = selectedVesselCompanyIds.filter((item) => item !== id);
+			return;
+		}
+
+		selectedVesselCompanyIds = [...selectedVesselCompanyIds, id];
+	}
+
+	function selectAllVesselCompanies() {
+		selectedVesselCompanyIds = vesselCompanyFilterOptions.map((company) => Number(company.id));
+	}
+
+	function clearVesselCompanyFilters() {
+		selectedVesselCompanyIds = [];
+	}
+
+	function getVesselCompanyFilterLabel() {
+		const count = selectedVesselCompanyIds.length;
+
+		if (!count) return 'All Companies';
+		if (count === 1) {
+			const company = getCompanyById(selectedVesselCompanyIds[0]);
+			return getCompanyDisplayName(company || { id: selectedVesselCompanyIds[0] });
+		}
+
+		return `${count} Companies`;
 	}
 
 	function getAutoReportConfig(vessel) {
@@ -1677,15 +1724,21 @@
 
 	let vesselForm = createEmptyVesselForm();
 
+	$: vesselCompanyFilterOptions = sortByAlpha(companies, getCompanyDisplayName);
+
 	$: filteredVessels = sortByAlpha(vessels, getVesselDisplayName, (vessel) => {
-		const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
+		const company = vessel?.company || getCompanyById(vessel?.companyId ?? vessel?.company_id);
 		return getCompanyDisplayName(company);
 	}).filter((vessel) => {
 		const keyword = searchVessel.trim().toLowerCase();
+		const selectedCompanySet = new Set(selectedVesselCompanyIds.map(Number));
+		const companyId = getVesselCompanyId(vessel);
+
+		if (selectedCompanySet.size && !selectedCompanySet.has(companyId)) return false;
 
 		if (!keyword) return true;
 
-		const company = getCompanyById(vessel?.companyId ?? vessel?.company_id);
+		const company = vessel?.company || getCompanyById(vessel?.companyId ?? vessel?.company_id);
 
 		return matchesSearch(keyword, [
 			vessel?.vesselName,
@@ -3638,12 +3691,57 @@
 						{/if}
 					</div>
 
-					<input
-						class="search-input"
-						type="search"
-						bind:value={searchVessel}
-						placeholder="Search vessel or company name..."
-					/>
+					<div class="vessel-filter-row">
+						<input
+							class="search-input"
+							type="search"
+							bind:value={searchVessel}
+							placeholder="Search vessel..."
+						/>
+
+						<div class="vessel-company-filter">
+							<button
+								type="button"
+								class="company-filter-trigger"
+								class:is-active={selectedVesselCompanyIds.length > 0}
+								on:click={() => (vesselCompanyFilterOpen = !vesselCompanyFilterOpen)}
+							>
+								<span>Company</span>
+								<strong>{getVesselCompanyFilterLabel()}</strong>
+							</button>
+
+							{#if vesselCompanyFilterOpen}
+								<div class="company-filter-menu" transition:fade={{ duration: 120 }}>
+									<div class="company-filter-actions">
+										<button type="button" on:click={selectAllVesselCompanies}>All</button>
+										<button type="button" on:click={clearVesselCompanyFilters}>Clear</button>
+									</div>
+
+									{#if companiesLoading}
+										<LoadingSkeleton label="Loading companies" variant="inline" compact />
+									{:else if vesselCompanyFilterOptions.length === 0}
+										<div class="company-filter-empty">No companies found.</div>
+									{:else}
+										<div class="company-filter-options">
+											{#each vesselCompanyFilterOptions as company}
+												<label
+													class="company-filter-option"
+													class:is-selected={isVesselCompanySelected(company.id)}
+												>
+													<input
+														type="checkbox"
+														checked={isVesselCompanySelected(company.id)}
+														on:change={() => toggleVesselCompanyFilter(company.id)}
+													/>
+													<span>{getCompanyDisplayName(company)}</span>
+												</label>
+											{/each}
+										</div>
+									{/if}
+								</div>
+							{/if}
+						</div>
+					</div>
 
 					<div class="vessel-list">
 						{#if vesselsLoading}
@@ -6485,6 +6583,139 @@
 		color: var(--text-primary);
 		background: var(--color-elevated);
 		outline: none;
+	}
+
+	.vessel-filter-row {
+		margin: 0 16px 12px;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(132px, 0.58fr);
+		gap: 8px;
+		align-items: start;
+	}
+
+	.vessel-filter-row .search-input {
+		width: 100%;
+		margin: 0;
+	}
+
+	.vessel-company-filter {
+		position: relative;
+		min-width: 0;
+	}
+
+	.company-filter-trigger {
+		width: 100%;
+		min-height: 40px;
+		padding: 7px 10px;
+		border: 1px solid #dbe4ee;
+		border-radius: 14px;
+		background: var(--color-elevated);
+		color: var(--text-primary);
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.company-filter-trigger span {
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 900;
+		text-transform: uppercase;
+	}
+
+	.company-filter-trigger strong {
+		min-width: 0;
+		overflow: hidden;
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 900;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.company-filter-trigger.is-active {
+		border-color: #bfdbfe;
+		background: var(--color-accent-muted);
+	}
+
+	.company-filter-menu {
+		margin-top: 8px;
+		border: 1px solid #dbe4ee;
+		border-radius: 16px;
+		background: var(--color-surface);
+		box-shadow: 0 14px 26px rgba(15, 23, 42, 0.08);
+		overflow: hidden;
+	}
+
+	.company-filter-actions {
+		padding: 8px;
+		display: flex;
+		gap: 8px;
+		border-bottom: 1px solid #eef2f7;
+		background: var(--color-elevated);
+	}
+
+	.company-filter-actions button {
+		flex: 1;
+		min-height: 28px;
+		border: 1px solid #cbd5e1;
+		border-radius: 10px;
+		background: var(--color-surface);
+		color: var(--text-primary);
+		font-size: 11px;
+		font-weight: 900;
+		cursor: pointer;
+	}
+
+	.company-filter-options {
+		max-height: 210px;
+		overflow: auto;
+		padding: 8px;
+		display: grid;
+		gap: 6px;
+	}
+
+	.company-filter-option {
+		min-height: 32px;
+		padding: 6px 8px;
+		border: 1px solid transparent;
+		border-radius: 10px;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 800;
+		cursor: pointer;
+	}
+
+	.company-filter-option input {
+		width: 14px;
+		height: 14px;
+		margin: 0;
+		accent-color: #2563eb;
+	}
+
+	.company-filter-option.is-selected {
+		border-color: #bfdbfe;
+		background: var(--color-accent-muted);
+	}
+
+	.company-filter-empty {
+		padding: 12px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 800;
+		text-align: center;
+	}
+
+	@media (max-width: 640px) {
+		.vessel-filter-row {
+			grid-template-columns: 1fr;
+		}
 	}
 
 	.search-input:focus,
