@@ -502,7 +502,7 @@ function clearTraceLayers() {
       if (passedIndex > 0) {
         drawColoredTraceSegments(validPoints, {
           layerGroup: traceProgressLayerGroup,
-          fromIndex: Math.max(1, passedIndex - 10),
+          fromIndex: 1,
           untilIndex: passedIndex,
           weight: 7,
           opacity: 0.98

@@ -28,6 +28,8 @@
 	let availableMonthlyColumnsError = $state('');
 	let availableMonthlyColumnsVesselId = $state('');
 	let availableMonthlyColumnsRequestedVesselId = $state('');
+	let availableMonthlyColumnsMonth = $state('');
+	let availableMonthlyColumnsRequestedMonth = $state('');
 	let availableMonthlyColumnsRequestToken = 0;
 	const MONTHLY_COLUMN_FILTER_DEFAULTS = [
 		'data_received',
@@ -64,8 +66,6 @@
 			});
 
 			currentUser = response?.data || response?.user || response || null;
-
-			console.log('[MONTHLY][CURRENT_USER_PERMISSION]', currentUser);
 
 			return currentUser;
 		} catch (err) {
@@ -180,29 +180,34 @@
 		selectedMonthlyFuelSourceKeys = getAvailableMonthlyFuelSourceKeys();
 	}
 
-	async function loadAvailableMonthlyColumns(vesselId) {
+	async function loadAvailableMonthlyColumns(vesselId, monthValue = reportMonth) {
 		if (!vesselId) {
 			availableMonthlyColumns = [];
 			availableMonthlyColumnsError = '';
 			availableMonthlyColumnsVesselId = '';
 			availableMonthlyColumnsRequestedVesselId = '';
+			availableMonthlyColumnsMonth = '';
+			availableMonthlyColumnsRequestedMonth = '';
 			syncMonthlyFilterSelectionWithAvailability();
 			return;
 		}
 
 		const vesselKey = String(vesselId);
+		const monthKey = String(monthValue || '');
 		const requestToken = availableMonthlyColumnsRequestToken + 1;
 		availableMonthlyColumnsRequestToken = requestToken;
 		availableMonthlyColumnsRequestedVesselId = vesselKey;
+		availableMonthlyColumnsRequestedMonth = monthKey;
 		availableMonthlyColumnsLoading = true;
 		availableMonthlyColumnsError = '';
 
 		try {
-			const result = await getMonthlyReportAvailableColumns({ vesselId });
+			const result = await getMonthlyReportAvailableColumns({ vesselId, month: monthValue });
 			if (requestToken !== availableMonthlyColumnsRequestToken) return;
 
 			availableMonthlyColumns = normalizeAvailableMonthlyColumns(result);
 			availableMonthlyColumnsVesselId = vesselKey;
+			availableMonthlyColumnsMonth = monthKey;
 			syncMonthlyFilterSelectionWithAvailability();
 		} catch (err) {
 			if (requestToken !== availableMonthlyColumnsRequestToken) return;
@@ -210,6 +215,7 @@
 			console.error('[MONTHLY_AVAILABLE_COLUMNS_ERROR]', err);
 			availableMonthlyColumns = [];
 			availableMonthlyColumnsVesselId = '';
+			availableMonthlyColumnsMonth = '';
 			availableMonthlyColumnsError =
 				err?.message || 'Failed to load available monthly report columns.';
 			syncMonthlyFilterSelectionWithAvailability();
@@ -466,6 +472,17 @@
 
 	function formatFuel(value) {
 		return formatNumber(value, 1);
+	}
+
+	function formatWholeNumber(value) {
+		return formatNumber(value, 0);
+	}
+
+	function parseReportNumber(value) {
+		if (value === undefined || value === null || value === '') return null;
+
+		const number = Number(String(value).replace(/,/g, ''));
+		return Number.isFinite(number) ? number : null;
 	}
 
 	function pickArray(...values) {
@@ -747,6 +764,93 @@
 		return '-';
 	}
 
+	function getDataReceivedMetric(row = {}) {
+		const stats = row?.data_received_stats || row?.dataReceivedStats || null;
+
+		if (stats && typeof stats === 'object') {
+			const received = parseReportNumber(
+				firstValue(
+					stats?.received_minutes,
+					stats?.receivedMinutes,
+					stats?.received,
+					stats?.receivedCount
+				)
+			);
+			const total = parseReportNumber(
+				firstValue(
+					stats?.total_minutes,
+					stats?.totalMinutes,
+					stats?.total,
+					stats?.expected,
+					stats?.expectedMinutes
+				)
+			);
+			const percentage = parseReportNumber(
+				firstValue(stats?.percentage, stats?.percent, stats?.data_percentage)
+			);
+
+			if (Number.isFinite(received) || Number.isFinite(total)) {
+				return { received: received || 0, total: total || 0, percentage };
+			}
+		}
+
+		const value = firstValue(
+			row?.dataReceived,
+			row?.data_received,
+			row?.dataCompleteness,
+			row?.data_completeness,
+			row?.completeness
+		);
+
+		if (typeof value === 'string') {
+			const ratioMatch = value.match(/([\d,.]+)\s*\/\s*([\d,.]+)/);
+			const percentMatch = value.match(/\(([\d,.]+)\s*%\)/);
+
+			if (ratioMatch) {
+				return {
+					received: parseReportNumber(ratioMatch[1]) || 0,
+					total: parseReportNumber(ratioMatch[2]) || 0,
+					percentage: parseReportNumber(percentMatch?.[1])
+				};
+			}
+		}
+
+		const received = parseReportNumber(
+			firstValue(row?.receivedMinutes, row?.received_minutes, row?.receivedCount)
+		);
+		const total = parseReportNumber(
+			firstValue(row?.expectedMinutes, row?.expected_minutes, row?.expectedCount)
+		);
+
+		if (Number.isFinite(received) || Number.isFinite(total)) {
+			return { received: received || 0, total: total || 0, percentage: null };
+		}
+
+		return null;
+	}
+
+	function getSummaryDataReceived(rows = monthlyRows) {
+		let received = 0;
+		let total = 0;
+		let hasMetric = false;
+
+		const safeRows = Array.isArray(rows) ? rows : [];
+
+		safeRows.forEach((row) => {
+			const metric = getDataReceivedMetric(row);
+			if (!metric) return;
+
+			received += metric.received;
+			total += metric.total;
+			hasMetric = true;
+		});
+
+		if (!hasMetric || total <= 0) return '-';
+
+		const percentage = (received / total) * 100;
+		return `${formatWholeNumber(received)} / ${formatWholeNumber(total)} (${formatNumber(percentage, 1)}%)`;
+	}
+
 	function normalizeEngineText(value) {
 		return String(value || '')
 			.replace(/_/g, ' ')
@@ -1015,11 +1119,22 @@
 
 		if (normalized === 'fod_port_l') return 'FOD Port';
 		if (normalized === 'fod_stbd_l') return 'FOD STBD';
-		if (normalized === 'fod_single_l') return 'FOD Single';
+		if (normalized === 'fod_single_l') return 'FOD';
 		if (normalized === 'total_fod_l') return 'Total FOD';
 		if (normalized === 'bunker_l') return 'Bunker';
 
 		return normalizeEngineText(key);
+	}
+
+	function normalizeFodColumns(columns = []) {
+		const hasSingleFod = columns.some((column) => column.key === 'fod_single_l');
+		const hasSplitFod = columns.some(
+			(column) => column.key === 'fod_port_l' || column.key === 'fod_stbd_l'
+		);
+
+		if (!hasSingleFod || hasSplitFod) return columns;
+
+		return columns.filter((column) => column.key === 'fod_single_l');
 	}
 
 	function collectGlobalFuelColumns(rows = [], sourceKey) {
@@ -1051,9 +1166,11 @@
 			});
 		});
 
+		const columns =
+			sourceKey === 'fod' ? normalizeFodColumns([...columnMap.values()]) : [...columnMap.values()];
 		const order = ['fod_port_l', 'fod_stbd_l', 'fod_single_l', 'total_fod_l', 'bunker_l'];
 
-		return [...columnMap.values()].sort((a, b) => {
+		return columns.sort((a, b) => {
 			const indexA = order.indexOf(a.key);
 			const indexB = order.indexOf(b.key);
 
@@ -1123,6 +1240,15 @@
 	function getGlobalFuelValue(row, sourceKey, columnKey) {
 		const source = getGlobalFuelSource(row, sourceKey);
 		return formatFuel(getValueByNormalizedKey(source, columnKey));
+	}
+
+	function shouldCollapseGlobalFuelGroupHeader(group) {
+		if (!group || group.columns?.length !== 1) return false;
+
+		const groupLabel = String(group.label || '').trim().toLowerCase();
+		const columnLabel = String(group.columns[0]?.label || '').trim().toLowerCase();
+
+		return Boolean(groupLabel && groupLabel === columnLabel);
 	}
 
 	let monthlyFuelColspan = $derived(
@@ -1478,8 +1604,11 @@
 		error = '';
 
 		try {
-			if (String(availableMonthlyColumnsVesselId) !== String($selectedVesselId)) {
-				await loadAvailableMonthlyColumns($selectedVesselId);
+			if (
+				String(availableMonthlyColumnsVesselId) !== String($selectedVesselId) ||
+				String(availableMonthlyColumnsMonth) !== String(reportMonth || '')
+			) {
+				await loadAvailableMonthlyColumns($selectedVesselId, reportMonth);
 			}
 
 			const result = await getMonthlyReportData({
@@ -1497,36 +1626,14 @@
 
 			const payload = result?.data || result || {};
 			const rows = Array.isArray(payload?.details) ? payload.details : [];
-
-			const received = rows.reduce((sum, row) => {
-				return (
-					sum +
-					Number(
-						row?.data_received_stats?.received_minutes ||
-							row?.dataReceivedStats?.receivedMinutes ||
-							0
-					)
-				);
-			}, 0);
-
-			const total = rows.reduce((sum, row) => {
-				return (
-					sum +
-					Number(
-						row?.data_received_stats?.total_minutes || row?.dataReceivedStats?.totalMinutes || 0
-					)
-				);
-			}, 0);
-
-			const percentage = total ? ((received / total) * 100).toFixed(1) : '-';
+			const dataReceivedSummary = getSummaryDataReceived(rows);
 
 			setPageStatus({
 				pageKey: 'monthly-report',
-				dataReceived: total > 0 ? `${received} of ${total} (${percentage}%)` : '-',
+				dataReceived: dataReceivedSummary,
 				sourcePage: 'Monthly Report'
 			});
 
-			console.log('[MONTHLY_REPORT_DATA]', result);
 		} catch (err) {
 			console.error('[MONTHLY_REPORT_ERROR]', err);
 			error = err?.message || 'Failed to load monthly report.';
@@ -1556,8 +1663,11 @@
 		error = '';
 
 		try {
-			if (String(availableMonthlyColumnsVesselId) !== String($selectedVesselId)) {
-				await loadAvailableMonthlyColumns($selectedVesselId);
+			if (
+				String(availableMonthlyColumnsVesselId) !== String($selectedVesselId) ||
+				String(availableMonthlyColumnsMonth) !== String(reportMonth || '')
+			) {
+				await loadAvailableMonthlyColumns($selectedVesselId, reportMonth);
 			}
 
 			const url = getMonthlyReportExcelUrl({
@@ -1609,15 +1719,27 @@
 			availableMonthlyColumnsError = '';
 			availableMonthlyColumnsVesselId = '';
 			availableMonthlyColumnsRequestedVesselId = '';
+			availableMonthlyColumnsMonth = '';
+			availableMonthlyColumnsRequestedMonth = '';
 			syncMonthlyFilterSelectionWithAvailability();
 			return;
 		}
 
-		if (String(availableMonthlyColumnsVesselId) === String(vesselId)) return;
-		if (String(availableMonthlyColumnsRequestedVesselId) === String(vesselId)) return;
+		if (!reportMonth) return;
+
+		const monthKey = String(reportMonth || '');
+
+		if (
+			String(availableMonthlyColumnsVesselId) === String(vesselId) &&
+			String(availableMonthlyColumnsMonth) === monthKey
+		) return;
+		if (
+			String(availableMonthlyColumnsRequestedVesselId) === String(vesselId) &&
+			String(availableMonthlyColumnsRequestedMonth) === monthKey
+		) return;
 		if (availableMonthlyColumnsLoading) return;
 
-		loadAvailableMonthlyColumns(vesselId);
+		loadAvailableMonthlyColumns(vesselId, reportMonth);
 	});
 
 </script>
@@ -1709,6 +1831,75 @@
 		</div>
 	</section>
 
+	<section class="table-section monthly-column-options-section">
+		<div class="section-header">
+			<div>
+				<span class="section-kicker">Columns</span>
+				<h2>Visible Columns</h2>
+			</div>
+
+			<div class="section-header-actions">
+				<strong>{getSelectedMonthlyApiColumnKeys().length} selected</strong>
+			</div>
+		</div>
+
+		<div class="monthly-column-options-body">
+			<div class="column-filter-panel">
+				<div class="column-filter-title">
+					<span>Visible Columns</span>
+					<button type="button" onclick={resetMonthlyColumns}>Reset</button>
+				</div>
+
+				{#if availableMonthlyColumnsLoading}
+					<p class="column-filter-status">Loading available columns...</p>
+				{:else if availableMonthlyColumnsError}
+					<p class="column-filter-status is-error">{availableMonthlyColumnsError}</p>
+				{/if}
+
+				<div class="column-filter-options">
+					{#each monthlyColumnFilterOptions as option}
+						<label
+							class="column-filter-option"
+							class:is-selected={isMonthlyColumnSelected(option.key)}
+						>
+							<input
+								type="checkbox"
+								checked={isMonthlyColumnSelected(option.key)}
+								onchange={() => toggleMonthlyColumn(option.key)}
+							/>
+							<span>{option.label}</span>
+						</label>
+					{/each}
+				</div>
+
+				{#if isMonthlyColumnSelected('fuel') && monthlyFuelSourceFilterOptions.length}
+					<div class="fuel-source-filter">
+						<div class="fuel-source-filter-title">
+							<span>Fuel Sources</span>
+							<button type="button" onclick={resetMonthlyFuelSources}>Reset sources</button>
+						</div>
+
+						<div class="column-filter-options">
+							{#each monthlyFuelSourceFilterOptions as source}
+								<label
+									class="column-filter-option fuel-source-option"
+									class:is-selected={isMonthlyFuelSourceSelected(source.key)}
+								>
+									<input
+										type="checkbox"
+										checked={isMonthlyFuelSourceSelected(source.key)}
+										onchange={() => toggleMonthlyFuelSource(source.key)}
+									/>
+									<span>{source.label}</span>
+								</label>
+							{/each}
+						</div>
+					</div>
+				{/if}
+			</div>
+		</div>
+	</section>
+
 	<div class="load-required-area" class:is-locked={shouldShowDateRangeOverlay}>
 	{#if error}
 		<div class="status-box error-box">{error}</div>
@@ -1731,6 +1922,13 @@
 		/>
 	{:else}
 		<section class="summary-grid">
+		{#if isAvailableMonthlyColumnKey('data_received')}
+			<article class="summary-card">
+				<span>Data Received</span>
+				<strong>{getSummaryDataReceived()}</strong>
+			</article>
+		{/if}
+
 		{#if canViewFuelConsumptionTable}
 			<article class="summary-card">
 				<span>Total Fuel</span>
@@ -1782,60 +1980,6 @@
 			</div>
 
 			<div class="section-header-actions">
-				<div class="column-filter-panel">
-					<div class="column-filter-title">
-						<span>Visible Columns</span>
-						<button type="button" onclick={resetMonthlyColumns}>Reset</button>
-					</div>
-
-					{#if availableMonthlyColumnsLoading}
-						<p class="column-filter-status">Loading available columns...</p>
-					{:else if availableMonthlyColumnsError}
-						<p class="column-filter-status is-error">{availableMonthlyColumnsError}</p>
-					{/if}
-
-					<div class="column-filter-options">
-						{#each monthlyColumnFilterOptions as option}
-							<label
-								class="column-filter-option"
-								class:is-selected={isMonthlyColumnSelected(option.key)}
-							>
-								<input
-									type="checkbox"
-									checked={isMonthlyColumnSelected(option.key)}
-									onchange={() => toggleMonthlyColumn(option.key)}
-								/>
-								<span>{option.label}</span>
-							</label>
-						{/each}
-					</div>
-
-					{#if isMonthlyColumnSelected('fuel') && monthlyFuelSourceFilterOptions.length}
-						<div class="fuel-source-filter">
-							<div class="fuel-source-filter-title">
-								<span>Fuel Sources</span>
-								<button type="button" onclick={resetMonthlyFuelSources}>Reset sources</button>
-							</div>
-
-							<div class="column-filter-options">
-								{#each monthlyFuelSourceFilterOptions as source}
-									<label
-										class="column-filter-option fuel-source-option"
-										class:is-selected={isMonthlyFuelSourceSelected(source.key)}
-									>
-										<input
-											type="checkbox"
-											checked={isMonthlyFuelSourceSelected(source.key)}
-											onchange={() => toggleMonthlyFuelSource(source.key)}
-										/>
-										<span>{source.label}</span>
-									</label>
-								{/each}
-							</div>
-						</div>
-					{/if}
-				</div>
-
 				<strong>{monthlyRows.length} rows</strong>
 			</div>
 		</div>
@@ -1888,7 +2032,11 @@
 										{/each}
 
 										{#each visibleMonthlyGlobalFuelGroups as group}
-											<th colspan={group.columns.length}>{group.label}</th>
+											{#if shouldCollapseGlobalFuelGroupHeader(group)}
+												<th rowspan="2">{group.label}</th>
+											{:else}
+												<th colspan={group.columns.length}>{group.label}</th>
+											{/if}
 										{/each}
 									{:else}
 										<th rowspan="2">-</th>
@@ -1917,9 +2065,11 @@
 									{/each}
 
 									{#each visibleMonthlyGlobalFuelGroups as group}
-										{#each group.columns as column}
-											<th>{column.label}</th>
-										{/each}
+										{#if !shouldCollapseGlobalFuelGroupHeader(group)}
+											{#each group.columns as column}
+												<th>{column.label}</th>
+											{/each}
+										{/if}
 									{/each}
 								{/if}
 
@@ -2367,6 +2517,20 @@
 		padding: 8px 10px;
 		border: 1px solid #dbe6f3;
 		background: var(--color-elevated);
+	}
+
+	.monthly-column-options-section {
+		overflow: visible;
+	}
+
+	.monthly-column-options-body {
+		padding: 12px 13px;
+		background: var(--color-surface);
+	}
+
+	.monthly-column-options-body .column-filter-panel {
+		width: 100%;
+		min-width: 0;
 	}
 
 	.column-filter-title {

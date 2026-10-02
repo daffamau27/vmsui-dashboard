@@ -28,6 +28,7 @@ export const MAP_SOURCES = {
 		options: {
 			minZoom: 2,
 			maxZoom: 19,
+			maxNativeZoom: 14,
 			detectRetina: false,
 			attribution:
 				'Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom'

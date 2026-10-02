@@ -34,19 +34,21 @@ export async function getMonthlyReportData({
     columns
   });
 
-  const response = await apiRequest(`/monthly-reports/data?${query}`, {
+  const endpoint = `/monthly-reports/data?${query}`;
+  const response = await apiRequest(endpoint, {
     method: "GET"
   });
 
   return response?.data || response;
 }
 
-export async function getMonthlyReportAvailableColumns({ vesselId }) {
+export async function getMonthlyReportAvailableColumns({ vesselId, month = "" }) {
   if (!vesselId) throw new Error("vesselId required.");
 
-  const query = buildQuery({ vesselId });
+  const query = buildQuery({ vesselId, month });
 
-  const response = await apiRequest(`/monthly-reports/available-columns?${query}`, {
+  const endpoint = `/monthly-reports/available-columns?${query}`;
+  const response = await apiRequest(endpoint, {
     method: "GET"
   });
 
