@@ -527,7 +527,10 @@
 			return {
 				isStart: false,
 				isEnd: false,
-				isInRange: false
+				isRangeStart: false,
+				isRangeEnd: false,
+				isInRange: false,
+				isPreview: false
 			};
 		}
 
@@ -550,9 +553,9 @@
 		return {
 			isStart: hasStartDate && dayNumber === startNumber,
 			isEnd: hasEndDate && dayNumber === endNumber,
-			isOpenStart:
-				hasStartDate && !hasEndDate && !shouldPreviewEndRange && dayNumber === startNumber,
-			isPreviewEnd: shouldPreviewEndRange && dayNumber === endNumber,
+			// Round the chronological boundaries, including when End is hovered before Start.
+			isRangeStart: hasStartDate && dayNumber === rangeStart,
+			isRangeEnd: hasStartDate && dayNumber === rangeEnd,
 			isInRange: hasStartDate && hasEndDate && dayNumber > rangeStart && dayNumber < rangeEnd,
 			isPreview: shouldPreviewEndRange && dayNumber >= rangeStart && dayNumber <= rangeEnd
 		};
@@ -1938,10 +1941,8 @@
 								class:is-muted={!day.inMonth || !day.selectable}
 								class:is-in-range={rangeState.isInRange}
 								class:is-preview-range={rangeState.isPreview}
-								class:is-range-start={rangeState.isStart}
-								class:is-range-end={rangeState.isEnd}
-								class:is-range-open-start={rangeState.isOpenStart}
-								class:is-preview-end={rangeState.isPreviewEnd}
+								class:is-range-start={rangeState.isRangeStart}
+								class:is-range-end={rangeState.isRangeEnd}
 								class:is-selected={rangeState.isStart || rangeState.isEnd}
 								onmousedown={(event) => event.preventDefault()}
 								onmouseenter={() => setMonthlyDayHover(nextMonthlyDaySelection, day)}
@@ -2701,18 +2702,6 @@
 
 	.day-dropdown-menu button.is-range-end::before {
 		border-radius: 0 999px 999px 0;
-	}
-
-	.day-dropdown-menu button.is-range-open-start::before {
-		border-radius: 999px;
-	}
-
-	.day-dropdown-menu button.is-preview-end::before {
-		border-radius: 0 999px 999px 0;
-	}
-
-	.day-dropdown-menu button.is-range-start.is-preview-end::before {
-		border-radius: 999px;
 	}
 
 	.day-dropdown-menu button.is-range-start.is-range-end::before {
