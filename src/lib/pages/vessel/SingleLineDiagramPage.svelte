@@ -67,7 +67,8 @@
 	let eip = $derived(mcp?.eip || null);
 	let ei = $derived(normalizeEi(eip?.ei));
 	let router = $derived(mcp?.router || {});
-	let mastGps = $derived(mcp?.gps || {});
+	let semarGps = $derived(mcp?.gps_semar || {});
+	let vesselGps = $derived(mcp?.gps_vessel || {});
 	let dbAc220v = $derived(mcp?.db_ac_220v || mcp?.dbAc220v || {});
 	let hasEip = $derived(Boolean(eip));
 	let hasWayjunFuelSource = $derived(
@@ -498,8 +499,8 @@
 					]
 				: []),
 
-			makeNode('vessel-gps', 'VESSEL GPS', 116, 105, {
-				online: mastGps?.online,
+			makeNode('vessel-gps', vesselGps?.name || 'GPS Vessel', 116, 105, {
+				online: vesselGps?.online,
 				icon: '/assets/gps.png',
 				variant: 'sensor',
 				width: 132,
@@ -537,10 +538,10 @@
 				height: 104,
 				handles: [makePort('in', 'target', 'left', 50)]
 			}),
-			makeNode('mast-gps', mastGps?.name || 'GPS', 1280, 118, {
-				online: mastGps?.online,
+			makeNode('mast-gps', semarGps?.name || 'GPS Semar', 1280, 118, {
+				online: semarGps?.online,
 				logo: '/assets/SeMAR.png',
-				subtitle: mastGps?.name || 'GPS',
+				subtitle: semarGps?.name || 'GPS Semar',
 				width: 148,
 				height: 106,
 				handles: [makePort('in', 'target', 'left', 50)]
