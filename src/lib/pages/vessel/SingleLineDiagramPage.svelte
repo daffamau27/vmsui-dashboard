@@ -67,6 +67,7 @@
 	let eip = $derived(mcp?.eip || null);
 	let ei = $derived(normalizeEi(eip?.ei));
 	let router = $derived(mcp?.router || {});
+	let routerType = $derived(typeof router?.type === 'string' ? router.type.trim() || '-' : '-');
 	let semarGps = $derived(mcp?.gps_semar || {});
 	let vesselGps = $derived(mcp?.gps_vessel || {});
 	let dbAc220v = $derived(mcp?.db_ac_220v || mcp?.dbAc220v || {});
@@ -533,9 +534,10 @@
 			}),
 			makeNode('router', router?.name || 'ROUTER', 755, 205, {
 				online: router?.online,
+				subtitle: routerType,
 				icon: '/assets/router.png',
 				width: 146,
-				height: 104,
+				height: 128,
 				handles: [makePort('in', 'target', 'left', 50)]
 			}),
 			makeNode('mast-gps', semarGps?.name || 'GPS Semar', 1280, 118, {
