@@ -16,6 +16,8 @@
 		deactivateUserApi,
 		activateUserApi,
 		getAllVesselsAdminApi,
+		getAvailableVesselFeaturesAdminApi,
+		getVesselDetailAdminApi,
 		createVesselAdminApi,
 		updateVesselAdminApi,
 		deleteVesselAdminApi,
@@ -93,6 +95,14 @@
 	let searchVessel = '';
 	let vesselCompanyFilterOpen = false;
 	let selectedVesselCompanyIds = [];
+	let availableVesselFeatures = [];
+	let vesselFeatureCatalogLoading = false;
+	let vesselFeatureCatalogLoaded = false;
+	let vesselFeatureCatalogError = '';
+	let vesselFeaturesLoading = false;
+	let vesselFeaturesLoaded = false;
+	let vesselFeaturesError = '';
+	let vesselFeaturesRequestId = 0;
 	const FUEL_CONSUMPTION_SOURCE_OPTIONS = [
 		{ value: 'fm', label: 'FM' },
 		{ value: 'ecu', label: 'ECU' },
@@ -1718,7 +1728,8 @@
 			deviceId: '',
 			vesselName: '',
 			companyId: '',
-			fuelConsumptionSource: 'fm'
+			fuelConsumptionSource: 'fm',
+			features: []
 		};
 	}
 
@@ -2045,6 +2056,61 @@
 		}
 	}
 
+	async function loadVesselFeatureCatalog() {
+		if (vesselFeatureCatalogLoading || vesselFeatureCatalogLoaded) return;
+		vesselFeatureCatalogLoading = true;
+		vesselFeatureCatalogError = '';
+
+		try {
+			const features = await getAvailableVesselFeaturesAdminApi();
+			if (!Array.isArray(features)) throw new Error('Unable to load vessel features. Please retry.');
+			availableVesselFeatures = sortByAlpha(
+				features.filter((feature) => typeof feature?.key === 'string' && feature.key.trim()),
+				(feature) => feature.module,
+				(feature) => feature.label || feature.key
+			);
+			vesselFeatureCatalogLoaded = true;
+		} catch (error) {
+			vesselFeatureCatalogError = error.message || 'Failed to load available vessel features.';
+		} finally {
+			vesselFeatureCatalogLoading = false;
+		}
+	}
+
+	async function loadSelectedVesselFeatures() {
+		const vesselId = selectedVessel?.id;
+		if (vesselMode !== 'edit' || !vesselId || vesselFeaturesLoading) return;
+		const requestId = ++vesselFeaturesRequestId;
+		vesselFeaturesLoading = true;
+		vesselFeaturesError = '';
+
+		try {
+			const vessel = await getVesselDetailAdminApi(vesselId);
+			if (requestId !== vesselFeaturesRequestId) return;
+			vesselForm = {
+				...vesselForm,
+				features: Array.isArray(vessel?.features) ? [...vessel.features] : []
+			};
+			vesselFeaturesLoaded = true;
+		} catch (error) {
+			if (requestId !== vesselFeaturesRequestId) return;
+			vesselFeaturesError = error.message || 'Failed to load current vessel features.';
+		} finally {
+			if (requestId === vesselFeaturesRequestId) vesselFeaturesLoading = false;
+		}
+	}
+
+	function toggleVesselFeature(key, checked) {
+		if (vesselSaving || !vesselFeaturesLoaded || !vesselFeatureCatalogLoaded) return;
+		if (!availableVesselFeatures.some((feature) => feature.key === key)) return;
+		vesselForm = {
+			...vesselForm,
+			features: checked
+				? [...new Set([...vesselForm.features, key])]
+				: vesselForm.features.filter((feature) => feature !== key)
+		};
+	}
+
 	function createEmptyCctvCamera(index = 0) {
 		return {
 			id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${index}`,
@@ -2300,15 +2366,23 @@
 	}
 
 	function openCreateVesselForm() {
+		vesselFeaturesRequestId += 1;
+		vesselFeaturesLoading = false;
+		vesselFeaturesLoaded = false;
+		vesselFeaturesError = '';
 		vesselMode = 'create';
 		selectedVessel = null;
 		vesselForm = createEmptyVesselForm();
 		clearAlert();
 	}
 
-	function openEditVesselForm(vessel) {
+	function openEditVesselForm(vessel, shouldClearAlert = true) {
 		if (!vessel?.id) return;
 
+		vesselFeaturesRequestId += 1;
+		vesselFeaturesLoading = false;
+		vesselFeaturesLoaded = Array.isArray(vessel.features);
+		vesselFeaturesError = '';
 		vesselMode = 'edit';
 		selectedVessel = vessel;
 
@@ -2316,10 +2390,13 @@
 			deviceId: vessel?.deviceId || '',
 			vesselName: vessel?.vesselName || '',
 			companyId: vessel?.companyId ?? '',
-			fuelConsumptionSource: getFuelConsumptionSourceValue(vessel)
+			fuelConsumptionSource: getFuelConsumptionSourceValue(vessel),
+			features: vesselFeaturesLoaded ? [...vessel.features] : []
 		};
 
-		clearAlert();
+		if (shouldClearAlert) clearAlert();
+		loadVesselFeatureCatalog();
+		if (!vesselFeaturesLoaded) loadSelectedVesselFeatures();
 	}
 
 	function validateVesselForm() {
@@ -2341,7 +2418,10 @@
 			deviceId: vesselForm.deviceId.trim(),
 			vesselName: vesselForm.vesselName.trim(),
 			companyId: companyIdText ? Number(companyIdText) : null,
-			fuelConsumptionSource: getFuelConsumptionSourceValue(vesselForm.fuelConsumptionSource)
+			fuelConsumptionSource: getFuelConsumptionSourceValue(vesselForm.fuelConsumptionSource),
+			...(vesselMode === 'edit' && vesselFeaturesLoaded
+				? { features: [...new Set(vesselForm.features)] }
+				: {})
 		};
 	}
 
@@ -2373,7 +2453,8 @@
 				const refreshed = vessels.find((vessel) => Number(vessel?.id) === Number(createdId)) || created;
 				openEditVesselForm(refreshed);
 			} else if (selectedVessel?.id) {
-				const updated = await updateVesselAdminApi(selectedVessel.id, payload);
+				const vesselId = selectedVessel.id;
+				const updated = await updateVesselAdminApi(vesselId, payload);
 
 				showAlert(
 					'success',
@@ -2382,8 +2463,18 @@
 
 				await loadVessels();
 				const refreshed =
-					vessels.find((vessel) => Number(vessel?.id) === Number(selectedVessel.id)) || updated;
-				openEditVesselForm(refreshed);
+					vessels.find((vessel) => Number(vessel?.id) === Number(vesselId)) || updated;
+				const savedVessel = {
+					...refreshed,
+					...updated,
+					features: updated?.features ?? payload.features ?? refreshed?.features
+				};
+				vessels = vessels.map((vessel) =>
+					Number(vessel.id) === Number(vesselId) ? savedVessel : vessel
+				);
+				if (vesselMode === 'edit' && selectedVessel?.id === vesselId) {
+					openEditVesselForm(savedVessel, false);
+				}
 			}
 		} catch (error) {
 			showAlert('error', error.message || 'Failed to save vessel.');
@@ -3843,6 +3934,52 @@
 								<small class="field-help">Saved as <code>fuelConsumptionSource</code> on <code>/vessels</code>.</small>
 							</label>
 						</div>
+
+						{#if vesselMode === 'edit'}
+							<section class="vessel-features" aria-labelledby="vessel-features-title">
+								<div class="vessel-features-heading">
+									<div>
+										<h3 id="vessel-features-title">Vessel Features</h3>
+										<p>Select the features available for this vessel, then save your changes.</p>
+									</div>
+									{#if vesselFeaturesLoaded}
+										<span class="vessel-features-count">{vesselForm.features.length} enabled</span>
+									{/if}
+								</div>
+
+								{#if vesselFeatureCatalogLoading || vesselFeaturesLoading}
+									<LoadingSkeleton label="Loading vessel features" variant="inline" compact />
+								{:else if vesselFeatureCatalogError || vesselFeaturesError}
+									<div class="vessel-features-feedback" role="status">
+										<p>{vesselFeatureCatalogError || vesselFeaturesError}</p>
+										<button type="button" class="ghost-button small" on:click={() => {
+											loadVesselFeatureCatalog();
+											if (!vesselFeaturesLoaded) loadSelectedVesselFeatures();
+										}} disabled={vesselSaving}>Retry</button>
+									</div>
+								{:else if !availableVesselFeatures.length}
+									<p class="vessel-features-feedback">No vessel features are currently available.</p>
+								{:else}
+									<div class="vessel-feature-list">
+										{#each availableVesselFeatures as feature (feature.key)}
+											<label class="vessel-feature-option" class:checked={vesselForm.features.includes(feature.key)}>
+												<input
+													type="checkbox"
+													checked={vesselForm.features.includes(feature.key)}
+													on:change={(event) => toggleVesselFeature(feature.key, event.currentTarget.checked)}
+													disabled={vesselSaving || !vesselFeaturesLoaded}
+												/>
+												<span class="vessel-feature-copy">
+													<strong>{feature.label || prettify(feature.key)}</strong>
+													{#if feature.module}<small class="vessel-feature-module">{prettify(feature.module)}</small>{/if}
+													{#if feature.description}<small>{feature.description}</small>{/if}
+												</span>
+											</label>
+										{/each}
+									</div>
+								{/if}
+							</section>
+						{/if}
 
 						<div class="vessel-note">
 							<strong>Note:</strong>
@@ -6946,6 +7083,98 @@
 
 	.vessel-form-grid {
 		grid-template-columns: 1.4fr 1fr 180px;
+	}
+
+	.vessel-features {
+		margin-top: 18px;
+		padding: 14px;
+		border: 1px solid rgba(148, 163, 184, 0.3);
+		border-radius: 12px;
+		background: var(--color-surface);
+	}
+
+	.vessel-features-heading,
+	.vessel-features-feedback {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		flex-wrap: wrap;
+		gap: 10px;
+	}
+
+	.vessel-features-heading {
+		margin-bottom: 12px;
+	}
+
+	.vessel-features-heading h3 {
+		color: var(--text-primary);
+		font-size: 14px;
+	}
+
+	.vessel-features-heading p,
+	.vessel-features-feedback {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 1.5;
+	}
+
+	.vessel-features-heading p {
+		margin-top: 4px;
+	}
+
+	.vessel-features-count {
+		padding: 4px 9px;
+		border-radius: 999px;
+		background: var(--color-accent-muted);
+		color: var(--text-primary);
+		font-size: 11px;
+		font-weight: 800;
+		white-space: nowrap;
+	}
+
+	.vessel-feature-list {
+		display: grid;
+		gap: 8px;
+	}
+
+	.vessel-feature-option {
+		display: flex;
+		align-items: flex-start;
+		gap: 12px;
+		padding: 12px;
+		border: 1px solid rgba(148, 163, 184, 0.3);
+		border-radius: 8px;
+		cursor: pointer;
+	}
+
+	.vessel-feature-option:hover,
+	.vessel-feature-option.checked {
+		border-color: #60a5fa;
+		background: var(--color-accent-muted);
+	}
+
+	.vessel-feature-option .vessel-feature-copy {
+		display: grid;
+		gap: 4px;
+		min-width: 0;
+		margin: 0;
+		overflow-wrap: anywhere;
+	}
+
+	.vessel-feature-copy strong {
+		color: var(--text-primary);
+		font-size: 13px;
+	}
+
+	.vessel-feature-copy small {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 500;
+		line-height: 1.5;
+	}
+
+	.vessel-feature-copy .vessel-feature-module {
+		font-weight: 800;
 	}
 
 	.asset-form-grid {
