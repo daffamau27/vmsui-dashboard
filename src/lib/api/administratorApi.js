@@ -105,6 +105,26 @@ export async function createVesselAdminApi(payload) {
   return unwrap(response);
 }
 
+export async function getAvailableVesselFeaturesAdminApi() {
+  const response = await apiRequest("/vessels/available-features", {
+    method: "GET"
+  });
+
+  return unwrap(response);
+}
+
+export async function getVesselDetailAdminApi(id) {
+  if (!id) {
+    throw new Error("Vessel ID tidak valid.");
+  }
+
+  const response = await apiRequest(`/vessels/${id}`, {
+    method: "GET"
+  });
+
+  return unwrap(response);
+}
+
 export async function updateVesselAdminApi(id, payload) {
   if (!id) {
     throw new Error("Vessel ID tidak valid.");

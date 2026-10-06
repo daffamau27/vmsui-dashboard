@@ -3221,6 +3221,17 @@
 			{}
 	);
 
+	let hourlyAverageSpeedRows = $derived(
+		Array.isArray(normalizedReport?.hourly_average_speed)
+			? normalizedReport.hourly_average_speed
+					.filter((row) => row && typeof row === 'object')
+					.map((row) => ({
+						hour: row.hour || '-',
+						averageSpeed: toNullableChartNumber(row.avg_speed)
+					}))
+			: null
+	);
+
 	let travelDistance = $derived(
 		normalizedReport?.travel_distance || normalizedReport?.travelDistance || {}
 	);
@@ -4467,6 +4478,50 @@
 				</section>
 			{/if}
 
+			{#if canViewSpeedStatsTable && hourlyAverageSpeedRows}
+				<section class="table-section hourly-speed-section" aria-labelledby="hourly-speed-title">
+					<div class="section-header">
+						<div>
+							<span class="section-kicker">Speed</span>
+							<h2 id="hourly-speed-title">Hourly Average Speed</h2>
+							<p>Average speed per hour (knots)</p>
+						</div>
+						{#if normalizedReport.timezone}
+							<strong>{normalizedReport.timezone}</strong>
+						{/if}
+					</div>
+
+					{#if hourlyAverageSpeedRows.length}
+						<div class="table-wrapper">
+							<table class="hourly-speed-table" aria-labelledby="hourly-speed-title">
+								<thead>
+									<tr>
+										<th scope="col">Time Range</th>
+										<th scope="col">Average Speed (kn)</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each hourlyAverageSpeedRows as row}
+										<tr>
+											<td>{row.hour}</td>
+											<td>
+												{#if row.averageSpeed !== null}
+													{formatNumber(row.averageSpeed, 2)}
+												{:else}
+													<span aria-label="No speed data">-</span>
+												{/if}
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					{:else}
+						<div class="empty-box">Hourly average speed data is not available for this date.</div>
+					{/if}
+				</section>
+			{/if}
+
 			{#if canViewEngineRpmStatsTable}
 				<section class="table-section">
 					<div class="section-header">
@@ -5574,6 +5629,26 @@
 	.table-section {
 		margin-top: 14px;
 		overflow: hidden;
+	}
+
+	.hourly-speed-section .section-header {
+		flex-wrap: wrap;
+	}
+
+	.hourly-speed-section .section-header p {
+		margin: 6px 0 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+
+	.hourly-speed-table th {
+		white-space: normal;
+	}
+
+	.hourly-speed-table th:last-child,
+	.hourly-speed-table td:last-child {
+		text-align: right;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.section-header {
