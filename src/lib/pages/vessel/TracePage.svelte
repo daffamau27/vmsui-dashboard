@@ -14,6 +14,7 @@
 	import CctvSnapshotImage from '$lib/components/CctvSnapshotImage.svelte';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
+	import { formatTraceDateTime, getTraceTimezone, parseTraceDateTimeMs } from '$lib/utils/traceDateTime.js';
 
 	let { active = false } = $props();
 
@@ -36,6 +37,7 @@
 	let endDateTime = $state('');
 	let timezoneMode = $state('auto');
 	let timezoneOffset = $state('+07:00');
+	let loadedTimezone = $state('');
 	let activeTimePreset = $state('');
 	let hasLoadedDateRange = $state(false);
 	let shouldShowDateRangeOverlay = $derived(
@@ -44,6 +46,10 @@
 	let autoTimezoneLabel = $derived(
 		getAutoTimezoneLabelFromSources(traceData, traceData?.data, $selectedVesselInfo)
 	);
+	let displayTimezone = $derived(getTraceTimezone(
+		traceData,
+		loadedTimezone || (timezoneMode === 'manual' ? timezoneOffset : autoTimezoneLabel)
+	));
 
 	let cctvItems = $state([]);
 	let cctvSnapshotsError = $state('');
@@ -228,89 +234,15 @@
 	}
 
 	function formatDateTime(value) {
-		if (!value) return '-';
-
-		const timestampMs = parseDateTimeMs(value);
-
-		if (Number.isFinite(timestampMs)) {
-			return formatTimestampMs(timestampMs);
-		}
-
-		return value;
+		return formatTraceDateTime(value, displayTimezone);
 	}
 
 	function formatTimestampMs(timestampMs) {
-		const date = new Date(timestampMs);
-
-		if (Number.isNaN(date.getTime())) return '-';
-
-		return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${pad(
-			date.getHours()
-		)}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+		return formatDateTime(timestampMs);
 	}
 
 	function parseDateTimeMs(value) {
-		if (!value) return NaN;
-
-		const rawValue = String(value).trim();
-
-		if (/^\d+(?:\.\d+)?$/.test(rawValue)) {
-			const number = Number(rawValue);
-			return Number.isFinite(number) ? number : NaN;
-		}
-
-		const timezoneMatch = rawValue.match(/\(UTC([+-])(\d{1,2})(?::?(\d{2}))?\)/i);
-		const timezoneOffsetMinutes = timezoneMatch
-			? (timezoneMatch[1] === '-' ? -1 : 1) *
-				(Number(timezoneMatch[2]) * 60 + Number(timezoneMatch[3] || 0))
-			: null;
-		const cleanedValue = rawValue.replace(/\s*\(UTC[+-]\d{1,2}(?::?\d{2})?\)\s*$/i, '').trim();
-
-		const makeTimestamp = (year, month, day, hour, minute, second) => {
-			if (Number.isFinite(timezoneOffsetMinutes)) {
-				return (
-					Date.UTC(
-						Number(year),
-						Number(month) - 1,
-						Number(day),
-						Number(hour),
-						Number(minute),
-						Number(second)
-					) -
-					timezoneOffsetMinutes * 60 * 1000
-				);
-			}
-
-			return new Date(
-				Number(year),
-				Number(month) - 1,
-				Number(day),
-				Number(hour),
-				Number(minute),
-				Number(second)
-			).getTime();
-		};
-
-		const dmyMatch = cleanedValue.match(
-			/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/
-		);
-
-		if (dmyMatch) {
-			const [, day, month, year, hour, minute, second = '00'] = dmyMatch;
-			return makeTimestamp(year, month, day, hour, minute, second);
-		}
-
-		const ymdMatch = cleanedValue.match(
-			/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/
-		);
-
-		if (ymdMatch) {
-			const [, year, month, day, hour, minute, second = '00'] = ymdMatch;
-			return makeTimestamp(year, month, day, hour, minute, second);
-		}
-
-		const parsed = new Date(cleanedValue).getTime();
-		return Number.isNaN(parsed) ? NaN : parsed;
+		return parseTraceDateTimeMs(value, displayTimezone);
 	}
 
 	function formatFileSize(value) {
@@ -821,12 +753,7 @@
 	}
 
 	function getRangeTimestampMs(value) {
-		if (!value) return NaN;
-
-		const parsed = new Date(value).getTime();
-		if (Number.isFinite(parsed)) return parsed;
-
-		return parseDateTimeMs(value);
+		return parseTraceDateTimeMs(value, timezoneMode === 'manual' ? timezoneOffset : autoTimezoneLabel);
 	}
 
 	function getTraceMarkPosition(timestampMs, events = timelineEvents) {
@@ -1029,7 +956,7 @@
 				traceIndex: findClosestTraceIndexByTime(timestampMs),
 				cctvKey: snapshot?.key || '',
 				cameraName: snapshot?.name || 'CCTV',
-				label: snapshot?.capturedAtText || formatDateTime(timestampMs),
+				label: formatDateTime(timestampMs),
 				sourceLabel: snapshot?.name ? `CCTV • ${snapshot.name}` : 'CCTV snapshot'
 			});
 		});
@@ -1090,7 +1017,7 @@
 			event.hasCctv = true;
 			if (event.traceIndex < 0) event.traceIndex = findClosestTraceIndexByTime(timestampMs, points);
 			if (snapshot?.name) event.cameraNames.add(snapshot.name);
-			if (!event.hasTrace) event.label = snapshot?.capturedAtText || event.label;
+			if (!event.hasTrace) event.label = formatDateTime(timestampMs);
 		});
 
 		return Array.from(eventMap.values())
@@ -1850,6 +1777,7 @@
 			)
 			.map((recording) => ({
 				...recording,
+				startedAtText: formatDateTime(recording.startedAt || recording.timestampMs),
 				cameraPalette: getTraceMarkRecordingColor(recording, traceMarkCameraColorMap)
 			}))
 	);
@@ -2054,6 +1982,7 @@
 		const markRequestId = ++traceMarkRequestId;
 
 		try {
+			loadedTimezone = timezoneMode === 'manual' ? timezoneOffset : autoTimezoneLabel;
 			const traceStart = toApiDateTime(startDateTime);
 			const traceEnd = toApiDateTime(endDateTime);
 			const cctvStart = toSnapshotApiDateTime(startDateTime);
@@ -2792,7 +2721,7 @@
 
 									<div class="cctv-camera-info">
 										<strong>{mainCctvPanel.name}</strong>
-										<span>{framePending ? 'Loading frame...' : activeFrame?.capturedAtText || 'No frame yet'}</span>
+										<span>{framePending ? 'Loading frame...' : activeFrame ? formatDateTime(activeFrame.timestampMs) : 'No frame yet'}</span>
 										<small>{mainCctvPanel.loadedCount} frames loaded</small>
 									</div>
 								</article>
@@ -3269,11 +3198,11 @@
 					</div>
 					<div>
 						<span>Started</span>
-						<strong>{motionVideoDetail?.startedAt || '-'}</strong>
+						<strong>{formatDateTime(motionVideoDetail?.startedAt)}</strong>
 					</div>
 					<div>
 						<span>Ended</span>
-						<strong>{motionVideoDetail?.endedAt || '-'}</strong>
+						<strong>{formatDateTime(motionVideoDetail?.endedAt)}</strong>
 					</div>
 					<div>
 						<span>Duration</span>
