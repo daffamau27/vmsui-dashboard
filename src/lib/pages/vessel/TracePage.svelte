@@ -1,5 +1,5 @@
 <script>
-	import { flushSync, onDestroy } from 'svelte';
+	import { flushSync, onDestroy, untrack } from 'svelte';
 	import VesselMap from '$lib/VesselMap.svelte';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
 	import {
@@ -15,6 +15,8 @@
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
 	import { formatTraceDateTime, getTraceTimezone, parseTraceDateTimeMs } from '$lib/utils/traceDateTime.js';
+	import { TRACE_CCTV_PAGE_SIZE, summarizeCctvPage, getCctvPagesToLoad, getCctvLookAheadPages } from '$lib/utils/traceCctvBuffer.js';
+	import { createSnapshotImageBuffer } from '$lib/utils/snapshotImageBuffer.js';
 
 	let { active = false } = $props();
 
@@ -56,9 +58,17 @@
 	let cctvSnapshotsTotal = $state(0);
 	let cctvSnapshotsTotalPages = $state(1);
 	let cctvSnapshotsBuffering = $state(false);
+	let cctvPlaybackBuffering = $state(false);
+	let cctvImageBufferRevision = $state(0);
+	let cctvPageRequestRevision = $state(0);
+	const cctvImageBuffer = createSnapshotImageBuffer({
+		onChange: () => { cctvImageBufferRevision += 1; }
+	});
 	let cctvSnapshotsLoadedPages = $state(0);
 	let cctvSnapshotsLoadedPageNumbers = $state([]);
-	let cctvSnapshotBufferPivotPage = $state(1);
+	let cctvSnapshotQuery = $state(null);
+	let cctvSnapshotPages = new Map();
+	let cctvSnapshotRetryAfter = new Map();
 	let selectedCctvPanelKey = $state('');
 	let cctvSnapshotRequestId = 0;
 	let traceMarks = $state([]);
@@ -72,9 +82,7 @@
 	let motionVideoDetail = $state(null);
 	let motionVideoRequestId = 0;
 	let cctvSnapshotPageRequests = new Set();
-	const CCTV_SNAPSHOT_PAGE_SIZE = 50;
-	const ENABLE_CCTV_BACKGROUND_BUFFER = true;
-	const CCTV_BACKGROUND_PAGE_DELAY_MS = 900;
+	const CCTV_SNAPSHOT_PAGE_SIZE = TRACE_CCTV_PAGE_SIZE;
 	const TRACE_MS_PER_REAL_MS = 60;
 	const PLAYBACK_TICK_INTERVAL_MS = 100;
 	const PLAYBACK_SPEED_OPTIONS = [1, 2, 5, 10];
@@ -95,21 +103,6 @@
 
 	function traceDebug(...args) {
 		if (TRACE_DEBUG) console.log(...args);
-	}
-
-	function sleep(ms) {
-		return new Promise((resolve) => setTimeout(resolve, ms));
-	}
-
-	function waitForIdle(timeout = 900) {
-		return new Promise((resolve) => {
-			if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-				window.requestIdleCallback(() => resolve(), { timeout });
-				return;
-			}
-
-			setTimeout(resolve, timeout);
-		});
 	}
 
 	function pad(value) {
@@ -663,55 +656,6 @@
 		return Number.isInteger(pageNumber) && cctvSnapshotsLoadedPageNumbers.includes(pageNumber);
 	}
 
-	function isCctvPageRequesting(page, requestId = cctvSnapshotRequestId) {
-		const pageNumber = Number(page);
-		return (
-			Number.isInteger(pageNumber) &&
-			cctvSnapshotPageRequests.has(`${requestId}|${pageNumber}`)
-		);
-	}
-
-	function getNextCctvBufferPage(totalPages = getCctvTotalPages(), requestId = cctvSnapshotRequestId) {
-		const normalizedTotalPages = Math.max(1, Number(totalPages) || 1);
-		const pivotPage = Math.min(
-			normalizedTotalPages,
-			Math.max(1, Number(cctvSnapshotBufferPivotPage) || 1)
-		);
-
-		for (let distance = 0; distance < normalizedTotalPages; distance += 1) {
-			const candidates =
-				distance === 0
-					? [pivotPage]
-					: [pivotPage + distance, pivotPage - distance];
-
-			for (const page of candidates) {
-				if (page < 1 || page > normalizedTotalPages) continue;
-				if (isCctvPageLoaded(page) || isCctvPageRequesting(page, requestId)) continue;
-				return page;
-			}
-		}
-
-		return null;
-	}
-
-	function getCctvPageForTimestamp(timestampMs) {
-		const startMs = getRangeTimestampMs(startDateTime);
-		const endMs = getRangeTimestampMs(endDateTime);
-		const totalPages = getCctvTotalPages();
-
-		if (
-			!Number.isFinite(timestampMs) ||
-			!Number.isFinite(startMs) ||
-			!Number.isFinite(endMs) ||
-			endMs <= startMs ||
-			totalPages <= 1
-		) {
-			return 1;
-		}
-
-		const ratio = Math.min(1, Math.max(0, (timestampMs - startMs) / (endMs - startMs)));
-		return Math.min(totalPages, Math.max(1, Math.floor(ratio * totalPages) + 1));
-	}
 
 	function getCctvBufferSegments() {
 		const totalPages = getCctvTotalPages();
@@ -878,10 +822,11 @@
 
 	function getCctvCameraPanels(cameraIndex = [], timestampMs = NaN, renderTick = 0) {
 		renderTick;
+		const displayTimestamp = getCctvDisplayTimestamp(timestampMs);
 
 		return cameraIndex.map((panel) => {
 			const snapshots = panel.snapshots || [];
-			const activeSnapshot = findPlaybackCctvSnapshot(snapshots, timestampMs);
+			const activeSnapshot = findPlaybackCctvSnapshot(snapshots, displayTimestamp);
 
 			return {
 				...panel,
@@ -892,19 +837,63 @@
 		});
 	}
 
-	function isCctvPanelFramePending(panel, timestampMs = activeTraceTimestampMs) {
-		if (!cctvSnapshotsBuffering) return false;
-		if (cctvSnapshotsTotal && cctvItems.length >= cctvSnapshotsTotal) return false;
-		if (!Number.isFinite(timestampMs) || !panel?.snapshots?.length) return false;
+	function getCctvDisplayTimestamp(timestampMs) {
+		if (!isPlaying || playbackSpeedMultiplier < 5 || !Number.isFinite(timestampMs)) return timestampMs;
+		// High-speed replay samples up to four frames/second per camera. Loading
+		// every skipped frame at x10 would overwhelm the connection and decoder.
+		const step = 250 * TRACE_MS_PER_REAL_MS * playbackSpeedMultiplier;
+		const origin = parseDateTimeMs(cctvSnapshotQuery?.startTime) || 0;
+		return origin + Math.floor((timestampMs - origin) / step) * step;
+	}
 
-		const loadedTimestamps = panel.snapshots
-			.map((snapshot) => snapshot?.timestampMs)
-			.filter((timestamp) => Number.isFinite(timestamp));
+	function prepareCctvImages(timestampMs, playing = isPlaying) {
+		const urls = [];
+		for (const camera of cctvCameraIndex) {
+			const current = findPlaybackCctvSnapshot(camera.snapshots, getCctvDisplayTimestamp(activeTraceTimestampMs));
+			if (current?.url) urls.push(current.url);
+		}
+		const displayTime = getCctvDisplayTimestamp(timestampMs);
+		const step = 250 * TRACE_MS_PER_REAL_MS * playbackSpeedMultiplier * playbackDirection;
+		for (let ahead = 0; ahead <= (playing ? 6 : 0); ahead += 1) {
+			for (const camera of cctvCameraIndex) {
+				const frame = findPlaybackCctvSnapshot(camera.snapshots, displayTime + ahead * step);
+				if (frame?.url) urls.push(frame.url);
+			}
+		}
+		cctvImageBuffer.setWindow(urls);
+	}
 
-		if (!loadedTimestamps.length) return false;
+	function isCctvPanelFramePending(panel) {
+		cctvImageBufferRevision;
+		const url = panel?.activeSnapshot?.url;
+		return Boolean(url && !['ready', 'error'].includes(cctvImageBuffer.status(url)));
+	}
 
-		const latestLoadedTimestamp = Math.max(...loadedTimestamps);
-		return Number.isFinite(latestLoadedTimestamp) && timestampMs > latestLoadedTimestamp;
+	function isCctvPanelFrameFailed(panel) {
+		cctvImageBufferRevision;
+		return cctvImageBuffer.status(panel?.activeSnapshot?.url) === 'error';
+	}
+
+	function isCctvPlaybackReadyAt(timestampMs) {
+		if (!cctvSnapshotQuery || !cctvItems.length) return true;
+		const missingPages = getCctvPagesToLoad({
+			timestampMs,
+			pages: [...cctvSnapshotPages.values()],
+			totalPages: getCctvTotalPages(),
+			rangeStart: parseDateTimeMs(cctvSnapshotQuery.startTime),
+			rangeEnd: parseDateTimeMs(cctvSnapshotQuery.endTime),
+			playing: false,
+			direction: playbackDirection
+		});
+		if (missingPages.length) {
+			void ensureCctvPageForTimestamp(timestampMs);
+			return false;
+		}
+		prepareCctvImages(timestampMs);
+		return cctvCameraIndex.every((camera) => {
+			const frame = findPlaybackCctvSnapshot(camera.snapshots, getCctvDisplayTimestamp(timestampMs));
+			return !frame?.url || ['ready', 'error'].includes(cctvImageBuffer.status(frame.url));
+		});
 	}
 
 	function findClosestTraceIndexByTime(timestampMs, points = tracePoints) {
@@ -1111,6 +1100,14 @@
 
 	function getTimelineBounds(events = timelineEvents) {
 		const validEvents = events.filter((event) => Number.isFinite(event?.timestampMs));
+		// Without telemetry, the loaded CCTV cache must not truncate playback
+		// at the last frame of page 1 while later pages are still unloaded.
+		if (!tracePoints.length && cctvSnapshotQuery && getCctvTotalPages() > 1) {
+			return {
+				start: parseDateTimeMs(cctvSnapshotQuery.startTime),
+				end: parseDateTimeMs(cctvSnapshotQuery.endTime)
+			};
+		}
 
 		return {
 			start: validEvents[0]?.timestampMs ?? NaN,
@@ -1176,6 +1173,7 @@
 		if (cctvSnapshotPageRequests.has(requestKey)) return null;
 
 		cctvSnapshotPageRequests.add(requestKey);
+		cctvSnapshotsBuffering = true;
 
 		try {
 			traceDebug('[TRACE_CCTV_PAGE_REQUEST]', {
@@ -1200,6 +1198,7 @@
 			if (requestId !== cctvSnapshotRequestId) return null;
 
 			const nextItems = normalizeCctvSnapshots(result);
+			cctvSnapshotPages.set(pageNumber, summarizeCctvPage(pageNumber, nextItems));
 			const beforeMergeCount = cctvItems.length;
 			applyCctvItems(mergeCctvSnapshots(cctvItems, nextItems), { preserveTimeline });
 			markCctvPageLoaded(pageNumber);
@@ -1215,176 +1214,93 @@
 			});
 
 			return result;
+		} catch (err) {
+			if (requestId === cctvSnapshotRequestId) cctvSnapshotRetryAfter.set(pageNumber, Date.now() + 5000);
+			throw err;
 		} finally {
 			cctvSnapshotPageRequests.delete(requestKey);
-		}
-	}
-
-	async function bufferRemainingCctvSnapshots({
-		requestId,
-		vesselId,
-		startTime,
-		endTime,
-		totalPages
-	}) {
-		if (totalPages <= 1) return;
-
-		cctvSnapshotsBuffering = true;
-
-		try {
-			while (cctvSnapshotsLoadedPageNumbers.length < totalPages) {
-				const page = getNextCctvBufferPage(totalPages, requestId);
-				if (!page) return;
-
-				if (requestId !== cctvSnapshotRequestId) {
-					traceDebug('[TRACE_CCTV_PAGE_SKIP_STALE]', {
-						page,
-						requestId,
-						activeRequestId: cctvSnapshotRequestId
-					});
-					return;
-				}
-
-				await waitForIdle();
-				await sleep(CCTV_BACKGROUND_PAGE_DELAY_MS);
-
-				if (requestId !== cctvSnapshotRequestId) return;
-				if (isCctvPageLoaded(page)) continue;
-
-				const result = await loadCctvSnapshotPage({
-					requestId,
-					vesselId,
-					startTime,
-					endTime,
-					page,
-					preserveTimeline: true,
-					source: 'background-buffer'
-				});
-
-				if (requestId !== cctvSnapshotRequestId) return;
-				if (!result) continue;
-			}
-		} catch (err) {
-			console.error('[VESSEL_TRACE_CCTV_BUFFER_ERROR]', err);
-			cctvSnapshotsError = err?.message || 'Failed to buffer remaining CCTV snapshots.';
-		} finally {
 			if (requestId === cctvSnapshotRequestId) {
-				cctvSnapshotsBuffering = false;
-				traceDebug('[TRACE_CCTV_BUFFER_DONE]', {
-					loadedPages: cctvSnapshotsLoadedPages,
-					loadedItems: cctvItems.length,
-					totalSnapshots: cctvSnapshotsTotal
-				});
+				cctvSnapshotsBuffering = [...cctvSnapshotPageRequests].some((key) => key.startsWith(`${requestId}|`));
+				cctvPageRequestRevision += 1;
 			}
 		}
 	}
 
 	async function loadTraceCctvSnapshots({ vesselId, startTime, endTime }) {
 		const requestId = ++cctvSnapshotRequestId;
-
+		cctvImageBuffer.clear();
+		cctvImageBufferRevision += 1;
+		cctvPlaybackBuffering = false;
+		cctvSnapshotQuery = { requestId, vesselId, startTime, endTime };
 		cctvItems = [];
 		cctvSnapshotsTotal = 0;
 		cctvSnapshotsTotalPages = 1;
 		cctvSnapshotsLoadedPages = 0;
 		cctvSnapshotsLoadedPageNumbers = [];
-		cctvSnapshotBufferPivotPage = 1;
+		cctvSnapshotPages.clear();
+		cctvSnapshotRetryAfter.clear();
 		cctvSnapshotPageRequests.clear();
-		cctvSnapshotsBuffering = false;
-
-		traceDebug('[TRACE_CCTV_PAGE_REQUEST]', {
-			page: 1,
-			totalPages: null,
-			pageSize: CCTV_SNAPSHOT_PAGE_SIZE,
-			loadedBefore: 0,
-			vesselId,
-			startTime,
-			endTime
-		});
-
-		const firstPageResult = await getVesselCctvSnapshots({
-			vesselId,
-			startTime,
-			endTime,
-			page: 1,
-			pageSize: CCTV_SNAPSHOT_PAGE_SIZE
-		});
-
-		if (requestId !== cctvSnapshotRequestId) return null;
-
-		const firstItems = normalizeCctvSnapshots(firstPageResult);
-		applyCctvItems(firstItems, { preserveTimeline: false });
-		markCctvPageLoaded(1);
-
-		const totalPages = getCctvTotalPages();
-
-		traceDebug('[TRACE_CCTV_PAGE_LOADED]', {
-			page: 1,
-			totalPages,
-			normalizedItems: firstItems.length,
-			beforeMergeCount: 0,
-			afterMergeCount: cctvItems.length,
-			totalSnapshots: cctvSnapshotsTotal
-		});
-
-		if (totalPages > 1 && ENABLE_CCTV_BACKGROUND_BUFFER) {
-			traceDebug('[TRACE_CCTV_BUFFER_START]', {
-				totalPages,
-				pivotPage: cctvSnapshotBufferPivotPage,
-				totalSnapshots: cctvSnapshotsTotal,
-				pageSize: CCTV_SNAPSHOT_PAGE_SIZE
-			});
-
-			bufferRemainingCctvSnapshots({
-				requestId,
-				vesselId,
-				startTime,
-				endTime,
-				totalPages
-			});
-		} else if (totalPages > 1) {
-			traceDebug('[TRACE_CCTV_BUFFER_SKIPPED_FOR_FIRST_PAGE_TEST]', {
-				totalPages,
-				loadedPages: cctvSnapshotsLoadedPages,
-				loadedItems: cctvItems.length,
-				totalSnapshots: cctvSnapshotsTotal
-			});
-		}
-
-		return firstPageResult;
-	}
-
-	async function ensureCctvPageForTimestamp(timestampMs, source = 'timeline-seek') {
-		if (!Number.isFinite(timestampMs)) return;
-		if (!$selectedVesselId || !startDateTime || !endDateTime) return;
-		if (!cctvSnapshotsTotal || getCctvTotalPages() <= 1) return;
-
-		const targetPage = getCctvPageForTimestamp(timestampMs);
-		cctvSnapshotBufferPivotPage = targetPage;
-		if (isCctvPageLoaded(targetPage)) return;
-
-		const requestId = cctvSnapshotRequestId;
-		const cctvStart = toSnapshotApiDateTime(startDateTime);
-		const cctvEnd = toSnapshotApiDateTime(endDateTime);
+		cctvSnapshotsBuffering = true;
 
 		try {
-			await loadCctvSnapshotPage({
-				requestId,
-				vesselId: $selectedVesselId,
-				startTime: cctvStart,
-				endTime: cctvEnd,
-				page: targetPage,
-				preserveTimeline: true,
-				source
+			// Only fetch the first batch. Further requests are driven by playback.
+			return await loadCctvSnapshotPage({
+				...cctvSnapshotQuery,
+				page: 1,
+				preserveTimeline: false,
+				source: 'initial'
 			});
-		} catch (err) {
-			console.error('[VESSEL_TRACE_CCTV_SEEK_PAGE_ERROR]', err);
-			cctvSnapshotsError = err?.message || 'Failed to load CCTV snapshots near selected time.';
+		} finally {
+			if (requestId === cctvSnapshotRequestId) cctvSnapshotsBuffering = false;
 		}
 	}
 
-	function ensureCctvPageForCurrentTimeline(source = 'timeline-seek') {
-		const timestampMs = getCurrentTimelineTimestampMs();
-		void ensureCctvPageForTimestamp(timestampMs, source);
+	async function ensureCctvPageForTimestamp(timestampMs, {
+		playing = isPlaying,
+		direction = playbackDirection,
+		speed = playbackSpeedMultiplier
+	} = {}) {
+		const query = cctvSnapshotQuery;
+		if (!query || query.requestId !== cctvSnapshotRequestId) return;
+		if (query.vesselId !== $selectedVesselId || !active || loading || !hasLoadedDateRange) return;
+		if (!cctvSnapshotsTotal || !Number.isFinite(timestampMs)) return;
+		const inflight = [...cctvSnapshotPageRequests].filter((key) => key.startsWith(`${query.requestId}|`)).length;
+		const slots = Math.max(0, (playing ? getCctvLookAheadPages(speed) : 1) - inflight);
+		if (!slots) return;
+
+		const pages = getCctvPagesToLoad({
+			timestampMs,
+			pages: [...cctvSnapshotPages.values()],
+			totalPages: getCctvTotalPages(),
+			rangeStart: parseDateTimeMs(query.startTime),
+			rangeEnd: parseDateTimeMs(query.endTime),
+			playing,
+			direction,
+			speed,
+			traceMsPerRealMs: TRACE_MS_PER_REAL_MS
+		}).filter((page) => !isCctvPageLoaded(page) &&
+			!cctvSnapshotPageRequests.has(`${query.requestId}|${page}`) &&
+			(cctvSnapshotRetryAfter.get(page) || 0) <= Date.now()
+		).slice(0, slots);
+
+		await Promise.all(pages.map(async (page) => {
+			try {
+				await loadCctvSnapshotPage({
+					...query,
+					page,
+					source: playing ? 'playback-buffer' : 'timeline-seek'
+				});
+				if (query.requestId === cctvSnapshotRequestId) {
+					cctvSnapshotRetryAfter.delete(page);
+					if (!cctvSnapshotRetryAfter.size) cctvSnapshotsError = '';
+				}
+			} catch (err) {
+				if (query.requestId !== cctvSnapshotRequestId) return;
+				cctvSnapshotRetryAfter.set(page, Date.now() + 5000);
+				cctvSnapshotsError = err?.message || 'Failed to load CCTV snapshots near playback time.';
+				console.error('[VESSEL_TRACE_CCTV_PAGE_ERROR]', err);
+			}
+		}));
 	}
 
 	function normalizeRpm(value) {
@@ -1913,7 +1829,7 @@
 			cctvSnapshotsBuffering = false;
 			cctvSnapshotsLoadedPages = 0;
 			cctvSnapshotsLoadedPageNumbers = [];
-			cctvSnapshotBufferPivotPage = 1;
+			cctvSnapshotQuery = null;
 			cctvSnapshotPageRequests.clear();
 			cctvSnapshotRequestId += 1;
 			traceMarks = [];
@@ -1938,7 +1854,7 @@
 			cctvSnapshotsBuffering = false;
 			cctvSnapshotsLoadedPages = 0;
 			cctvSnapshotsLoadedPageNumbers = [];
-			cctvSnapshotBufferPivotPage = 1;
+			cctvSnapshotQuery = null;
 			cctvSnapshotPageRequests.clear();
 			cctvSnapshotRequestId += 1;
 			traceMarks = [];
@@ -1960,7 +1876,7 @@
 			cctvSnapshotsBuffering = false;
 			cctvSnapshotsLoadedPages = 0;
 			cctvSnapshotsLoadedPageNumbers = [];
-			cctvSnapshotBufferPivotPage = 1;
+			cctvSnapshotQuery = null;
 			cctvSnapshotPageRequests.clear();
 			cctvSnapshotRequestId += 1;
 			traceMarks = [];
@@ -2101,7 +2017,7 @@
 			cctvSnapshotsTotal = 0;
 			cctvSnapshotsTotalPages = 1;
 			cctvSnapshotsLoadedPageNumbers = [];
-			cctvSnapshotBufferPivotPage = 1;
+			cctvSnapshotQuery = null;
 			cctvSnapshotPageRequests.clear();
 			traceMarks = [];
 			selectedTraceMarkCameraKeys = [];
@@ -2164,6 +2080,16 @@
 			baseTraceTime + elapsedRealMs * TRACE_MS_PER_REAL_MS * playbackSpeedMultiplier * direction;
 		const nextTime = direction === -1 ? Math.max(start, rawNextTime) : Math.min(end, rawNextTime);
 		const nextIndex = findTimelineIndexAtOrBefore(timelineEvents, nextTime);
+
+		if (!isCctvPlaybackReadyAt(nextTime)) {
+			cctvPlaybackBuffering = true;
+			// Do not accumulate wall-clock time while waiting: resuming must not
+			// jump ahead again and leave all prefetched frames behind.
+			playbackClockStartedAtTraceMs = getCurrentTimelineTimestampMs();
+			playbackClockStartedAtRealMs = Date.now();
+			return;
+		}
+		cctvPlaybackBuffering = false;
 
 		if ((direction === 1 && nextTime >= end) || (direction === -1 && nextTime <= start)) {
 			const boundaryTime = direction === -1 ? start : end;
@@ -2289,6 +2215,7 @@
 	function stopPlayback(reason = 'toggle') {
 		clearPlaybackInterval(reason);
 		isPlaying = false;
+		cctvPlaybackBuffering = false;
 	}
 
 	function setPlaybackSpeed(multiplier) {
@@ -2395,7 +2322,6 @@
 
 	function moveTimeline(event) {
 		updateTimelineFromPointer(event);
-		ensureCctvPageForCurrentTimeline('timeline-click');
 	}
 
 	function startTimelineDrag(event) {
@@ -2419,7 +2345,6 @@
 
 		isDraggingTimeline = false;
 		event.currentTarget.releasePointerCapture?.(event.pointerId);
-		ensureCctvPageForCurrentTimeline('timeline-drag-release');
 	}
 
 	function moveStep(direction) {
@@ -2527,7 +2452,33 @@
 
 	onDestroy(() => {
 		clearPlaybackInterval('destroy');
+		cctvSnapshotRequestId += 1;
+		cctvImageBuffer.clear();
 		motionVideoRequestId += 1;
+	});
+
+	$effect(() => {
+		if (!active || loading || !hasLoadedDateRange || isDraggingTimeline) return;
+		const timestampMs = activeTraceTimestampMs;
+		const options = { playing: isPlaying, direction: playbackDirection, speed: playbackSpeedMultiplier };
+		cctvSnapshotsLoadedPageNumbers;
+		cctvPageRequestRevision;
+		// Re-evaluate after each tick, seek, speed change, or page completion.
+		// Look-ahead stays anchored to this position: x1/x2 = 1, x5 = 2, x10 = 3 pages.
+		untrack(() => { void ensureCctvPageForTimestamp(timestampMs, options); });
+	});
+
+	$effect(() => {
+		if (!active || loading || !hasLoadedDateRange || isDraggingTimeline) {
+			untrack(() => cctvImageBuffer.setWindow([]));
+			return;
+		}
+		const timestampMs = activeTraceTimestampMs;
+		const playing = isPlaying;
+		playbackSpeedMultiplier;
+		playbackDirection;
+		cctvCameraIndex;
+		untrack(() => prepareCctvImages(timestampMs, playing));
 	});
 
 	$effect(() => {
@@ -2677,7 +2628,7 @@
 						<div class="card-title">CCTV Monitoring</div>
 						<div class="card-subtitle" class:cctv-error-text={Boolean(cctvSnapshotsError)}>
 							{cctvSnapshotsError ||
-								`${cctvItems.length}/${cctvSnapshotsTotal || cctvItems.length} snapshots loaded${cctvSnapshotsBuffering ? ' • buffering...' : ''}`}
+								`${cctvItems.length}/${cctvSnapshotsTotal || cctvItems.length} snapshot records loaded${cctvPlaybackBuffering ? ' • preparing playback...' : cctvSnapshotsBuffering ? ' • loading next pages...' : ''}`}
 						</div>
 					</div>
 				</div>
@@ -2688,16 +2639,17 @@
 							{#if mainCctvPanel}
 								{@const activeFrame = mainCctvPanel.activeSnapshot}
 								{@const framePending = isCctvPanelFramePending(mainCctvPanel)}
+								{@const imageFailed = isCctvPanelFrameFailed(mainCctvPanel)}
 								<article
 									class="cctv-camera-panel cctv-camera-main"
 									data-render-tick={playbackRenderTick}
-									class:offline={!activeFrame?.online}
+									class:offline={!activeFrame?.online || imageFailed}
 									class:has-snapshot={Boolean(activeFrame?.url)}
 									class:frame-pending={framePending}
 									in:scale={{ start: 0.98, duration: 150 }}
 								>
 									<div class="cctv-camera-frame">
-										{#if activeFrame?.url}
+										{#if activeFrame?.url && !imageFailed}
 											<CctvSnapshotImage
 												class="cctv-camera-image"
 												src={activeFrame.url}
@@ -2706,6 +2658,7 @@
 												renderTick={playbackRenderTick}
 												alt={`${mainCctvPanel.name} snapshot`}
 												loading="eager"
+												loadImage={cctvImageBuffer.load}
 											/>
 										{/if}
 
@@ -2714,6 +2667,8 @@
 												<span aria-hidden="true"></span>
 												<small>Loading frame...</small>
 											</div>
+										{:else if imageFailed}
+											<div class="cctv-frame-loading"><small>Snapshot unavailable</small></div>
 										{/if}
 
 										<div class="cctv-scanline"></div>
@@ -2722,7 +2677,7 @@
 									<div class="cctv-camera-info">
 										<strong>{mainCctvPanel.name}</strong>
 										<span>{framePending ? 'Loading frame...' : activeFrame ? formatDateTime(activeFrame.timestampMs) : 'No frame yet'}</span>
-										<small>{mainCctvPanel.loadedCount} frames loaded</small>
+										<small>{mainCctvPanel.loadedCount} snapshots available</small>
 									</div>
 								</article>
 							{/if}
@@ -2732,18 +2687,19 @@
 									{#each miniCctvPanels as panel (panel.key)}
 										{@const activeFrame = panel.activeSnapshot}
 										{@const framePending = isCctvPanelFramePending(panel)}
+										{@const imageFailed = isCctvPanelFrameFailed(panel)}
 										<button
 											type="button"
 											class="cctv-camera-panel cctv-camera-thumb"
 											data-render-tick={playbackRenderTick}
-											class:offline={!activeFrame?.online}
+											class:offline={!activeFrame?.online || imageFailed}
 											class:has-snapshot={Boolean(activeFrame?.url)}
 											class:frame-pending={framePending}
 											onclick={() => selectCctvPanel(panel)}
 											title={`Show ${panel.name}`}
 										>
 											<div class="cctv-camera-frame">
-												{#if activeFrame?.url}
+												{#if activeFrame?.url && !imageFailed}
 													<CctvSnapshotImage
 														class="cctv-camera-image"
 														src={activeFrame.url}
@@ -2752,6 +2708,7 @@
 														renderTick={playbackRenderTick}
 														alt={`${panel.name} snapshot`}
 														loading="eager"
+														loadImage={cctvImageBuffer.load}
 													/>
 												{/if}
 
@@ -2759,6 +2716,8 @@
 													<div class="cctv-frame-loading compact" aria-live="polite">
 														<span aria-hidden="true"></span>
 													</div>
+												{:else if imageFailed}
+													<div class="cctv-frame-loading compact"><small>Snapshot unavailable</small></div>
 												{/if}
 
 												<div class="cctv-scanline"></div>
