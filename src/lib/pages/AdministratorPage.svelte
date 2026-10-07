@@ -7,6 +7,7 @@
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
 	import { matchesSearch, sortByAlpha } from '$lib/utils/alphaSort.js';
+	import { getAccessCompanyFields, groupAccessOptions } from '$lib/utils/companyAccessGroups.js';
 	import {
 		getPermissionCatalogApi,
 		getAllUsersApi,
@@ -1895,20 +1896,12 @@
 		return matchesSearch(keyword, [user?.name, user?.username, user?.email]);
 	});
 
-	function matchAccessOption(option, keyword = '') {
-		if (!keyword) return true;
-
-		return matchesSearch(keyword, option?.searchValues || [option?.label]);
-	}
-
 	$: assetAccessKeyword = searchUserAssetAccess.trim().toLowerCase();
 	$: vesselAccessKeyword = searchUserVesselAccess.trim().toLowerCase();
-	$: filteredAssetOptions = sortByAlpha(assetOptions, (asset) => asset.label, (asset) => asset.sublabel).filter((asset) =>
-		matchAccessOption(asset, assetAccessKeyword)
-	);
-	$: filteredVesselOptions = sortByAlpha(vesselOptions, (vessel) => vessel.label, (vessel) => vessel.sublabel).filter((vessel) =>
-		matchAccessOption(vessel, vesselAccessKeyword)
-	);
+	$: assetCompanyGroups = groupAccessOptions(assetOptions, companies, assetAccessKeyword);
+	$: vesselCompanyGroups = groupAccessOptions(vesselOptions, companies, vesselAccessKeyword);
+	$: filteredAssetOptions = assetCompanyGroups.flatMap((group) => group.visibleOptions);
+	$: filteredVesselOptions = vesselCompanyGroups.flatMap((group) => group.visibleOptions);
 
 	$: activeUsers = users.filter((user) => !user.deletedAt).length;
 	$: inactiveUsers = users.filter((user) => user.deletedAt).length;
@@ -1970,6 +1963,7 @@
 			const vesselDetails = data?.vesselAccess?.details || [];
 
 			assetOptions = sortByAlpha(assetDetails.map((asset) => ({
+				...getAccessCompanyFields(asset),
 				id: Number(asset.id),
 				label: asset.assetName || asset.thingsboardName || asset.assetId || `Asset ${asset.id}`,
 				sublabel: [
@@ -1982,6 +1976,7 @@
 			})), (asset) => asset.label, (asset) => asset.sublabel);
 
 			vesselOptions = sortByAlpha(vesselDetails.map((vessel) => ({
+				...getAccessCompanyFields(vessel),
 				id: Number(vessel.id),
 				label: vessel.vesselName || vessel.deviceName || vessel.deviceId || `Vessel ${vessel.id}`,
 				sublabel: vessel.deviceName || vessel.deviceId || '',
@@ -2046,10 +2041,11 @@
 			vessels = await getAllVesselsAdminApi();
 
 			vesselOptions = sortByAlpha(vessels.map((vessel) => ({
+				...getAccessCompanyFields(vessel),
 				id: Number(vessel.id),
 				label: vessel.vesselName || vessel.deviceName || vessel.deviceId || `Vessel ${vessel.id}`,
 				sublabel: vessel.deviceId || '',
-				searchValues: [vessel.vesselName, vessel.vessel_name, vessel.name, getVesselCompanyLabel(vessel)]
+				searchValues: [vessel.vesselName, vessel.vessel_name, vessel.name]
 			})), (vessel) => vessel.label, (vessel) => vessel.sublabel);
 		} finally {
 			vesselsLoading = false;
@@ -2519,6 +2515,7 @@
 			assets = await getAllAssetsAdminApi();
 
 			assetOptions = assets.map((asset) => ({
+				...getAccessCompanyFields(asset),
 				id: Number(asset.id),
 				label: asset.assetName || asset.thingsboardName || asset.assetId || `Asset ${asset.id}`,
 				sublabel: [
@@ -3051,7 +3048,7 @@
 		};
 
 		// The latest POST /users API endpoint does not accept assetAccess.
-		// Asset access is only sent during edit/update so user creation does not fail with 400 Invalid fields.
+		// Creation saves asset access with a follow-up PUT once the new user ID is available.
 		if (mode === 'edit') {
 			payload.assetAccess = buildAccessPayload('asset');
 		}
@@ -3083,16 +3080,37 @@
 
 		try {
 			const payload = buildPayload();
+			const assetAccess = buildAccessPayload('asset');
+			const submittedForm = { ...form };
 
 			if (mode === 'create') {
 				const response = await createUserApi(payload);
 				const created = unwrapApiData(response);
 
-				await loadUsers();
-
-				if (created?.id) {
-					await openEditForm({ id: created.id });
+				if (!created?.id) {
+					openCreateForm();
+					throw new Error(
+						'User was created, but the API did not return its ID, so asset access could not be saved. Refresh the user list and edit the created user to set its asset access.'
+					);
 				}
+
+				// Switch to edit before the second request so retries cannot create a duplicate user.
+				selectedUser = created;
+				mode = 'edit';
+				form = { ...submittedForm, password: '' };
+
+				try {
+					await updateUserApi(created.id, { assetAccess });
+				} catch (error) {
+					showAlert(
+						'error',
+						`User was created, but asset access could not be saved and may still be All. Your selection is retained; click Save Changes to retry. ${error.message || ''}`
+					);
+					return;
+				}
+
+				await loadUsers();
+				await openEditForm({ id: created.id });
 
 				showAlert('success', 'User created successfully.');
 			} else if (selectedUser?.id) {
@@ -3148,6 +3166,19 @@
 		} finally {
 			actionLoadingId = null;
 		}
+	}
+
+	function toggleAccessCompany(type, group, checked) {
+		const idsKey = type === 'asset' ? 'selectedAssetIds' : 'selectedVesselIds';
+		const textKey = type === 'asset' ? 'assetIdsText' : 'vesselIdsText';
+		const selected = new Set(form[idsKey]);
+		// Company selection includes all members, even when search hides some of them.
+		for (const option of group.options) {
+			if (checked) selected.add(option.id);
+			else selected.delete(option.id);
+		}
+		const ids = [...selected];
+		form = { ...form, [idsKey]: ids, [textKey]: idsToText(ids) };
 	}
 
 	function toggleId(type, id) {
@@ -3564,25 +3595,45 @@
 										<input
 											type="search"
 											bind:value={searchUserAssetAccess}
-											placeholder="Search asset name or type..."
+											placeholder="Search asset, type, or company..."
 										/>
 										<span>{filteredAssetOptions.length} of {assetOptions.length}</span>
 									</div>
-									<div class="option-list">
-										{#each filteredAssetOptions as asset}
-											<label class="option-chip">
-												<input
-													type="checkbox"
-													checked={form.selectedAssetIds.includes(asset.id)}
-													on:change={() => toggleId('asset', asset.id)}
-												/>
-												<span>
-													<strong>{asset.label}</strong>
-													<small>
-														ID {asset.id}{asset.sublabel ? ` • ${asset.sublabel}` : ''}
-													</small>
-												</span>
-											</label>
+									<div class="option-list company-access-list">
+										{#each assetCompanyGroups as group (group.key)}
+											{@const selectedCount = group.options.filter((option) => form.selectedAssetIds.includes(option.id)).length}
+											<div class="company-access-group">
+												<label class="company-access-heading">
+													<input
+														type="checkbox"
+														aria-label={'Select all assets in ' + group.companyName}
+														checked={selectedCount === group.options.length}
+														indeterminate={selectedCount > 0 && selectedCount < group.options.length}
+														on:change={(event) => toggleAccessCompany('asset', group, event.currentTarget.checked)}
+													/>
+													<span>
+														<strong>{group.companyName}</strong>
+														<small>{selectedCount}/{group.options.length} selected{group.visibleOptions.length < group.options.length ? ' · ' + group.visibleOptions.length + ' shown' : ''}</small>
+													</span>
+												</label>
+												<div class="company-access-options">
+													{#each group.visibleOptions as asset (asset.id)}
+														<label class="option-chip">
+															<input
+																type="checkbox"
+																checked={form.selectedAssetIds.includes(asset.id)}
+																on:change={() => toggleId('asset', asset.id)}
+															/>
+															<span>
+																<strong>{asset.label}</strong>
+																<small>
+																	ID {asset.id}{asset.sublabel ? ` • ${asset.sublabel}` : ''}
+																</small>
+															</span>
+														</label>
+													{/each}
+												</div>
+											</div>
 										{/each}
 									</div>
 									{#if filteredAssetOptions.length === 0}
@@ -3621,21 +3672,41 @@
 										/>
 										<span>{filteredVesselOptions.length} of {vesselOptions.length}</span>
 									</div>
-									<div class="option-list">
-										{#each filteredVesselOptions as vessel}
-											<label class="option-chip">
-												<input
-													type="checkbox"
-													checked={form.selectedVesselIds.includes(vessel.id)}
-													on:change={() => toggleId('vessel', vessel.id)}
-												/>
-												<span>
-													<strong>{vessel.label}</strong>
-													<small>
-														ID {vessel.id}{vessel.sublabel ? ` • ${vessel.sublabel}` : ''}
-													</small>
-												</span>
-											</label>
+									<div class="option-list company-access-list">
+										{#each vesselCompanyGroups as group (group.key)}
+											{@const selectedCount = group.options.filter((option) => form.selectedVesselIds.includes(option.id)).length}
+											<div class="company-access-group">
+												<label class="company-access-heading">
+													<input
+														type="checkbox"
+														aria-label={'Select all vessels in ' + group.companyName}
+														checked={selectedCount === group.options.length}
+														indeterminate={selectedCount > 0 && selectedCount < group.options.length}
+														on:change={(event) => toggleAccessCompany('vessel', group, event.currentTarget.checked)}
+													/>
+													<span>
+														<strong>{group.companyName}</strong>
+														<small>{selectedCount}/{group.options.length} selected{group.visibleOptions.length < group.options.length ? ' · ' + group.visibleOptions.length + ' shown' : ''}</small>
+													</span>
+												</label>
+												<div class="company-access-options">
+													{#each group.visibleOptions as vessel (vessel.id)}
+														<label class="option-chip">
+															<input
+																type="checkbox"
+																checked={form.selectedVesselIds.includes(vessel.id)}
+																on:change={() => toggleId('vessel', vessel.id)}
+															/>
+															<span>
+																<strong>{vessel.label}</strong>
+																<small>
+																	ID {vessel.id}{vessel.sublabel ? ` • ${vessel.sublabel}` : ''}
+																</small>
+															</span>
+														</label>
+													{/each}
+												</div>
+											</div>
 										{/each}
 									</div>
 									{#if filteredVesselOptions.length === 0}
@@ -7403,6 +7474,84 @@
 		max-height: 220px;
 		overflow: auto;
 		padding-right: 3px;
+	}
+
+	.company-access-list {
+		max-height: 380px;
+		gap: 12px;
+	}
+
+	.company-access-group {
+		min-width: 0;
+		border: 1px solid rgba(148, 163, 184, 0.3);
+		border-radius: 14px;
+		overflow: hidden;
+		background: var(--color-surface);
+	}
+
+	.company-access-heading {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 12px 14px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+		background: var(--color-accent-muted);
+		cursor: pointer;
+	}
+
+	.company-access-heading > span {
+		min-width: 0;
+		margin: 0;
+		text-transform: none;
+		overflow-wrap: anywhere;
+	}
+
+	.company-access-heading strong,
+	.company-access-heading small {
+		display: block;
+	}
+
+	.company-access-heading strong {
+		color: var(--text-primary);
+		font-size: 13px;
+	}
+
+	.company-access-heading small {
+		margin-top: 3px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 500;
+	}
+
+	.company-access-heading input:indeterminate {
+		border-color: #93c5fd;
+		background: #2563eb;
+	}
+
+	.company-access-heading input:indeterminate::after {
+		width: 8px;
+		height: 2px;
+		border: 0;
+		background: #fff;
+		opacity: 1;
+		transform: none;
+	}
+
+	.company-access-options {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+		gap: 8px;
+		padding: 12px;
+	}
+
+	.company-access-options .option-chip {
+		min-width: 0;
+		cursor: pointer;
+	}
+
+	.company-access-options .option-chip > span {
+		min-width: 0;
+		overflow-wrap: anywhere;
 	}
 
 	.option-chip {
