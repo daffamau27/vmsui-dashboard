@@ -6,6 +6,7 @@
 		alt = 'CCTV snapshot',
 		filePath = '',
 		loading = 'lazy',
+		loadImage = null,
 		frameKey = '',
 		renderTick = 0,
 		onLoading = null,
@@ -87,7 +88,8 @@
 		const sequence = ++loadSequence;
 		onLoading?.({ src: nextSrc, frameKey: nextFrameKey });
 
-		await preloadImage(nextSrc);
+		const ready = await (loadImage ? loadImage(nextSrc) : preloadImage(nextSrc));
+		if (ready === false) return;
 		if (sequence !== loadSequence) return;
 
 		if (displaySrc && displaySrc !== nextSrc) {
