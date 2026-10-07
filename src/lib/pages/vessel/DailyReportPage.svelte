@@ -1009,6 +1009,36 @@
 		return text;
 	}
 
+	function getHighRpmLowSpeedDuration(row) {
+		const duration = row?.duration_formatted ?? row?.durationFormatted ?? row?.duration;
+		if (typeof duration === 'string' && /\d/.test(duration)) return duration.trim();
+
+		let durationSeconds = null;
+		for (const [value, multiplier] of [
+			[row?.duration_seconds ?? row?.durationSeconds, 1],
+			[row?.duration_minutes ?? row?.durationMinutes, 60]
+		]) {
+			if (value === null || value === undefined || String(value).trim() === '') continue;
+			const number = Number(value);
+			if (Number.isFinite(number) && number >= 0) {
+				durationSeconds = number * multiplier;
+				break;
+			}
+		}
+
+		if (durationSeconds === null) {
+			const start = timeToSeconds(row?.start_time || row?.startTime);
+			const end = timeToSeconds(row?.end_time || row?.endTime);
+			if (start === null || end === null || start > 86400 || end > 86400) return '-';
+
+			// Time-only events can continue past midnight into the next day.
+			durationSeconds = end >= start ? end - start : 86400 - start + end;
+		}
+
+		const seconds = Math.floor(durationSeconds);
+		return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m ${seconds % 60}s`;
+	}
+
 	function normalizeHighRpmLowSpeed(data) {
 		const source = data?.high_rpm_low_speed || data?.highRpmLowSpeed || null;
 
@@ -1042,6 +1072,7 @@
 				engineName,
 				startTime: row?.start_time || row?.startTime || '-',
 				endTime: row?.end_time || row?.endTime || '-',
+				duration: getHighRpmLowSpeedDuration(row),
 				fuelUsedL: row?.fuel_used_l ?? row?.fuelUsedL ?? 0
 			});
 		});
@@ -4849,6 +4880,7 @@
 													<tr>
 														<th>Start Time</th>
 														<th>End Time</th>
+														<th>Duration</th>
 														<th>Fuel Used</th>
 													</tr>
 												</thead>
@@ -4858,6 +4890,7 @@
 														<tr>
 															<td>{formatTimeDot(row.startTime)}</td>
 															<td>{formatTimeDot(row.endTime)}</td>
+															<td>{row.duration}</td>
 															<td>{formatLiter(row.fuelUsedL)}</td>
 														</tr>
 													{/each}
