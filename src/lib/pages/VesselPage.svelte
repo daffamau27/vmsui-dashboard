@@ -185,8 +185,8 @@
 	let nextHireStatusLabel = $derived(nextHireStatus ? 'On Hire' : 'Off Hire');
 	let hireReasonOptions = $derived(
 		(hireStatusTarget ?? nextHireStatus)
-			? ['New Contract', 'Done of Breakdown']
-			: ['End of Contract', 'Breakdown']
+			? ['New Contract', 'After Docking', 'After Breakdown', 'As Replacement']
+			: ['End of Contract', 'Breakdown', 'Docking', 'Replaced']
 	);
 	let canManageHireStatus = $derived(hasPermission(['manage_hire_status']));
 	let hireStatusToggleTitle = $derived(

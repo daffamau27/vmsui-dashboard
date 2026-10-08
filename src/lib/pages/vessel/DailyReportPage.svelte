@@ -1009,9 +1009,18 @@
 		return text;
 	}
 
-	function getHighRpmLowSpeedDuration(row) {
+	function getHighRpmLowSpeedDurationSeconds(row) {
 		const duration = row?.duration_formatted ?? row?.durationFormatted ?? row?.duration;
-		if (typeof duration === 'string' && /\d/.test(duration)) return duration.trim();
+		if (typeof duration === 'string' && /\d/.test(duration)) {
+			const units = duration
+				.trim()
+				.match(/^(?:(\d+(?:\.\d+)?)h)?\s*(?:(\d+(?:\.\d+)?)m)?\s*(?:(\d+(?:\.\d+)?)s)?$/i);
+			if (units) {
+				return Number(units[1] || 0) * 3600 + Number(units[2] || 0) * 60 + Number(units[3] || 0);
+			}
+			const clock = duration.trim().match(/^(\d+):([0-5]\d):([0-5]\d)$/);
+			if (clock) return Number(clock[1]) * 3600 + Number(clock[2]) * 60 + Number(clock[3]);
+		}
 
 		let durationSeconds = null;
 		for (const [value, multiplier] of [
@@ -1029,11 +1038,19 @@
 		if (durationSeconds === null) {
 			const start = timeToSeconds(row?.start_time || row?.startTime);
 			const end = timeToSeconds(row?.end_time || row?.endTime);
-			if (start === null || end === null || start > 86400 || end > 86400) return '-';
+			if (start === null || end === null || start > 86400 || end > 86400) return null;
 
 			// Time-only events can continue past midnight into the next day.
 			durationSeconds = end >= start ? end - start : 86400 - start + end;
 		}
+
+		return durationSeconds;
+	}
+
+	function getHighRpmLowSpeedDuration(row, durationSeconds) {
+		const duration = row?.duration_formatted ?? row?.durationFormatted ?? row?.duration;
+		if (typeof duration === 'string' && /\d/.test(duration)) return duration.trim();
+		if (durationSeconds === null) return '-';
 
 		const seconds = Math.floor(durationSeconds);
 		return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m ${seconds % 60}s`;
@@ -1067,12 +1084,14 @@
 				groupMap.set(engineName, []);
 			}
 
+			const durationSeconds = getHighRpmLowSpeedDurationSeconds(row);
 			groupMap.get(engineName).push({
 				id: `${engineName}-${index}`,
 				engineName,
 				startTime: row?.start_time || row?.startTime || '-',
 				endTime: row?.end_time || row?.endTime || '-',
-				duration: getHighRpmLowSpeedDuration(row),
+				duration: getHighRpmLowSpeedDuration(row, durationSeconds),
+				durationShade: Math.min(Math.max(durationSeconds ?? 0, 0) / (30 * 60), 1) * 40,
 				fuelUsedL: row?.fuel_used_l ?? row?.fuelUsedL ?? 0
 			});
 		});
@@ -4860,6 +4879,9 @@
 
 					{#if highRpmLowSpeedGroups.length}
 						<div class="low-speed-content">
+							<p class="low-speed-duration-hint">
+								Row color intensifies with duration, reaching its maximum at 30 minutes.
+							</p>
 							<div class="low-speed-grid">
 								{#each highRpmLowSpeedGroups as group}
 									<article class="low-speed-card">
@@ -4887,7 +4909,10 @@
 
 												<tbody>
 													{#each group.rows as row}
-														<tr>
+														<tr
+															class="low-speed-duration-row"
+															style={`--duration-shade: ${row.durationShade}%;`}
+														>
 															<td>{formatTimeDot(row.startTime)}</td>
 															<td>{formatTimeDot(row.endTime)}</td>
 															<td>{row.duration}</td>
@@ -6730,6 +6755,23 @@
 
 	.low-speed-table tbody tr:hover td {
 		background: var(--color-elevated);
+	}
+
+	.low-speed-duration-hint {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+
+	/* Keep duration colors visible over the application's global table skin. */
+	.daily-page .low-speed-table tbody tr.low-speed-duration-row td,
+	.daily-page .low-speed-table tbody tr.low-speed-duration-row:hover td {
+		background: color-mix(
+			in srgb,
+			var(--color-danger, #ef4444) var(--duration-shade, 0%),
+			var(--color-surface)
+		) !important;
+		color: var(--text-primary) !important;
 	}
 
 	.low-speed-table td:first-child {
