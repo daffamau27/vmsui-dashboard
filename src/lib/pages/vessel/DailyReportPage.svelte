@@ -1270,6 +1270,13 @@
 		return String(status || '').toUpperCase() === 'ON';
 	}
 
+	function formatClutchStatus(status) {
+		const value = String(status || '-').trim().toUpperCase();
+		if (value === 'ON') return 'IN';
+		if (value === 'OFF') return 'OUT';
+		return value || '-';
+	}
+
 	function timeToSeconds(value) {
 		const text = String(value || '').trim();
 		const match = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
@@ -4354,7 +4361,7 @@
 														<span
 															class="compact-transition-label clutch-transition-label"
 															style={`left: ${label.leftPercent}%;`}
-															title={`${label.time} Â· ${label.status}`}
+															title={`${label.time} | ${formatClutchStatus(label.status)}`}
 														>
 															{label.time}
 														</span>
@@ -4368,10 +4375,10 @@
 															class:on-segment={isOnStatus(segment.status)}
 															class:off-segment={isOffStatus(segment.status)}
 															style={`width: ${segment.widthPercent}%;`}
-															title={`Clutch ${segment.status} | ${segment.start} - ${segment.end} | ${segment.duration}`}
+															title={`Clutch ${formatClutchStatus(segment.status)} | ${segment.start} - ${segment.end} | ${segment.duration}`}
 														>
 															{#if segment.widthPercent >= 12}
-																<span>{segment.status}</span>
+																<span>{formatClutchStatus(segment.status)}</span>
 															{/if}
 														</div>
 													{/each}
