@@ -1091,7 +1091,7 @@
 				startTime: row?.start_time || row?.startTime || '-',
 				endTime: row?.end_time || row?.endTime || '-',
 				duration: getHighRpmLowSpeedDuration(row, durationSeconds),
-				durationShade: Math.min(Math.max(durationSeconds ?? 0, 0) / (30 * 60), 1) * 40,
+				isLongDuration: durationSeconds !== null && durationSeconds > 30 * 60,
 				fuelUsedL: row?.fuel_used_l ?? row?.fuelUsedL ?? 0
 			});
 		});
@@ -4887,7 +4887,7 @@
 					{#if highRpmLowSpeedGroups.length}
 						<div class="low-speed-content">
 							<p class="low-speed-duration-hint">
-								Row color intensifies with duration, reaching its maximum at 30 minutes.
+								Red rows indicate durations longer than 30 minutes.
 							</p>
 							<div class="low-speed-grid">
 								{#each highRpmLowSpeedGroups as group}
@@ -4917,8 +4917,7 @@
 												<tbody>
 													{#each group.rows as row}
 														<tr
-															class="low-speed-duration-row"
-															style={`--duration-shade: ${row.durationShade}%;`}
+															class:low-speed-long-duration-row={row.isLongDuration}
 														>
 															<td>{formatTimeDot(row.startTime)}</td>
 															<td>{formatTimeDot(row.endTime)}</td>
@@ -6770,12 +6769,12 @@
 		font-size: 12px;
 	}
 
-	/* Keep duration colors visible over the application's global table skin. */
-	.daily-page .low-speed-table tbody tr.low-speed-duration-row td,
-	.daily-page .low-speed-table tbody tr.low-speed-duration-row:hover td {
+	/* Keep long-duration alerts visible over the application's global table skin. */
+	.daily-page .low-speed-table tbody tr.low-speed-long-duration-row td,
+	.daily-page .low-speed-table tbody tr.low-speed-long-duration-row:hover td {
 		background: color-mix(
 			in srgb,
-			var(--color-danger, #ef4444) var(--duration-shade, 0%),
+			var(--color-danger, #ef4444) 40%,
 			var(--color-surface)
 		) !important;
 		color: var(--text-primary) !important;
