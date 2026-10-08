@@ -1199,7 +1199,7 @@
 			<div class="topbar-table sd-card-card">
 				<div class="topbar-table-title">
 					<span class:available-dot={status.sdCardAvailable} class:unavailable-dot={!status.sdCardAvailable} class="sd-available-dot"></span>
-					SD Card
+					Storage
 				</div>
 				<div class="topbar-table-grid two-cols">
 					<span>Used</span>
