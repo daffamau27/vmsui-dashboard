@@ -110,6 +110,7 @@
 	let canViewDataLogDataDeviations = $derived(
 		hasPermission('view_data_log_data_deviations')
 	);
+	let canViewHighRpmLowSpeedTable = $derived(hasPermission('view_high_rpm_low_speed_table'));
 
 	let overrideDownloadingTemplate = $state(false);
 	let overrideImporting = $state(false);
@@ -807,7 +808,7 @@
 
 	let dataRows = $derived(loadedRows);
 	let rowHighlights = $derived(
-		canViewDataLogDataDeviations
+		canViewHighRpmLowSpeedTable
 			? getDataLogRowHighlights(
 					[...dataRows, ...getPayloadRows(rowHighlightContext?.payload)],
 					normalizedData?.timezone || (timezoneMode === 'manual' ? timezoneOffset : getAutoTimezoneLabel())
@@ -981,7 +982,7 @@
 			let nextHighlightContext = null;
 			let contextError = '';
 			const contextPage = Number(pagination.page) - 1;
-			if (canViewDataLogDataDeviations && contextPage >= 1) {
+			if (canViewHighRpmLowSpeedTable && contextPage >= 1) {
 				try {
 					const contextResult = contextPage === 1 && firstPageResult
 						? firstPageResult
@@ -1939,7 +1940,7 @@
 			</div>
 
 			{#if dataRows.length}
-				{#if canViewDataLogDataDeviations}
+				{#if canViewHighRpmLowSpeedTable}
 					<div class="row-highlight-legend" aria-label="High main engine RPM and low speed row indicators">
 						<span>RPM &gt; 1000 on any ME and speed &lt; 2 kn, continuously:</span>
 						<span class="warning"><i aria-hidden="true"></i> 5–10 min</span>
