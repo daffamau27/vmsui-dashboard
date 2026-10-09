@@ -12,6 +12,7 @@
 	import { downloadApiFile, apiRequest } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import { getDataLogRowHighlights, getDataLogTimestamp } from '$lib/utils/dataLogRowHighlights.js';
 
 	let loading = $state(false);
 	let loadingMore = $state(false);
@@ -19,6 +20,8 @@
 	let error = $state('');
 	let logData = $state(null);
 	let loadedRows = $state([]);
+	let rowHighlightContext = $state(null);
+	let rowHighlightContextError = $state('');
 	let dataLogPagination = $state(null);
 	let dataLogPage = $state(1);
 	let dataLogRequestId = 0;
@@ -239,6 +242,8 @@
 	function isDisplayColumn(key) {
 		const normalizedKey = normalizeColumnKey(key);
 
+		if (normalizedKey === 'rig' && !canViewDataLogAvailableColumns) return false;
+
 		return !hiddenDisplayColumns.has(normalizedKey) && canShowFuelColumn(normalizedKey);
 	}
 
@@ -417,28 +422,12 @@
 				: visibleColumns
 	);
 
-	function parseRowTimestamp(row) {
-		const value = row?.timestamp_utc || row?.timestamp || row?.ts || row?.time || row?.datetime;
-
-		if (!value) return 0;
-
-		// If this is a Unix timestamp
-		if (/^\d+$/.test(String(value))) {
-			return Number(value);
-		}
-
-		// Clean formats such as: 2026-05-24 00:00:00 (UTC+7)
-		const cleaned = String(value)
-			.replace(/\s*\(UTC[+-]?\d{1,2}(?::?\d{2})?\)\s*/i, '')
-			.replace(' ', 'T');
-
-		const time = new Date(cleaned).getTime();
-
-		return Number.isFinite(time) ? time : 0;
-	}
-
-	function sortRowsNewestFirst(rows = []) {
-		return [...rows].sort((a, b) => parseRowTimestamp(b) - parseRowTimestamp(a));
+	function sortRowsNewestFirst(rows = [], timezone = 'UTC+00:00') {
+		return [...rows].sort((a, b) => {
+			const aTime = getDataLogTimestamp(a, timezone);
+			const bTime = getDataLogTimestamp(b, timezone);
+			return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+		});
 	}
 
 	function normalizeDataLogPagination(rawPagination = {}, fallbackPage = 1, fallbackTotalRows = 0) {
@@ -539,6 +528,8 @@
 		}
 
 		hasLoadedDateRange = false;
+		rowHighlightContext = null;
+		rowHighlightContextError = '';
 		dataDeviation = null;
 		dataDeviationError = '';
 		dataDeviationLoading = false;
@@ -815,6 +806,14 @@
 	);
 
 	let dataRows = $derived(loadedRows);
+	let rowHighlights = $derived(
+		canViewDataLogDataDeviations
+			? getDataLogRowHighlights(
+					[...dataRows, ...getPayloadRows(rowHighlightContext?.payload)],
+					normalizedData?.timezone || (timezoneMode === 'manual' ? timezoneOffset : getAutoTimezoneLabel())
+				)
+			: new Map()
+	);
 
 	let hasNextDataLogPage = $derived(
 		Boolean(dataLogPagination?.hasPrevious) ||
@@ -886,12 +885,15 @@
 	}
 
 	async function fetchDataLogPage(page = 1) {
+		if (rowHighlightContext?.page === page) return rowHighlightContext.result;
 		return getDataLogData(getDataLogRequestParams(page));
 	}
 
 	async function loadDataLog({ page = null, append = false } = {}) {
 		if (!$selectedVesselId) {
 			error = 'No vessel has been selected from Fleet View.';
+			rowHighlightContext = null;
+			rowHighlightContextError = '';
 		logData = null;
 		loadedRows = [];
 		dataLogPagination = null;
@@ -913,6 +915,8 @@
 		} else {
 			loading = true;
 			loadedRows = [];
+			rowHighlightContext = null;
+			rowHighlightContextError = '';
 			logData = null;
 			dataLogPagination = null;
 			dataLogPage = 1;
@@ -933,6 +937,7 @@
 			let payload;
 			let rows;
 			let pagination;
+			let firstPageResult = null;
 
 			if (append) {
 				targetPage = Math.max(1, Number(page || dataLogPage - 1));
@@ -945,6 +950,7 @@
 			} else {
 				const firstResult = await fetchDataLogPage(1);
 				if (requestId !== dataLogRequestId) return;
+				firstPageResult = firstResult;
 
 				const firstPayload = firstResult?.data || firstResult || {};
 				const firstRows = getPayloadRows(firstPayload);
@@ -970,9 +976,35 @@
 				}
 			}
 
-			const nextRows = sortRowsNewestFirst(append ? [...loadedRows, ...rows] : rows);
+			// One older page supplies the preceding 10+ minutes without loading the whole range.
+			// Cache it for the next scroll, but do not include it in the displayed row count yet.
+			let nextHighlightContext = null;
+			let contextError = '';
+			const contextPage = Number(pagination.page) - 1;
+			if (canViewDataLogDataDeviations && contextPage >= 1) {
+				try {
+					const contextResult = contextPage === 1 && firstPageResult
+						? firstPageResult
+						: await fetchDataLogPage(contextPage);
+					nextHighlightContext = {
+						page: contextPage,
+						result: contextResult,
+						payload: contextResult?.data || contextResult || {}
+					};
+				} catch {
+					contextError = 'Earlier duration data could not be loaded. Load older rows to verify the first intervals.';
+				}
+			}
+			if (requestId !== dataLogRequestId) return;
+
+			const nextRows = sortRowsNewestFirst(
+				append ? [...loadedRows, ...rows] : rows,
+				payload?.timezone || (timezoneMode === 'manual' ? timezoneOffset : getAutoTimezoneLabel())
+			);
 			const stats = payload?.stats || {};
 
+			rowHighlightContext = nextHighlightContext;
+			rowHighlightContextError = contextError;
 			loadedRows = nextRows;
 			dataLogPagination = pagination;
 			dataLogPage = Number(pagination?.page || page);
@@ -1728,39 +1760,41 @@
 		</section>
 	{/if}
 
-	<section class="column-card">
-		<div class="column-header">
-			<div>
-				<span class="section-kicker">Columns</span>
-				<h2>Visible Data Columns</h2>
+	{#if canViewDataLogAvailableColumns}
+		<section class="column-card">
+			<div class="column-header">
+				<div>
+					<span class="section-kicker">Columns</span>
+					<h2>Visible Data Columns</h2>
+				</div>
+
+				<div class="column-actions">
+					{#if availableColumnsLoading}
+						<span class="column-loading">Loading columns...</span>
+					{/if}
+					<button type="button" onclick={selectAllColumns}>Select All</button>
+					<button type="button" onclick={clearColumns}>Basic</button>
+				</div>
 			</div>
 
-			<div class="column-actions">
-				{#if availableColumnsLoading}
-					<span class="column-loading">Loading columns...</span>
-				{/if}
-				<button type="button" onclick={selectAllColumns}>Select All</button>
-				<button type="button" onclick={clearColumns}>Basic</button>
+			{#if availableColumnsError}
+				<div class="column-warning">{availableColumnsError}</div>
+			{/if}
+
+			<div class="column-grid">
+				{#each visibleColumns as column (column)}
+					<label class="column-item" class:is-checked={selectedColumns.includes(column)}>
+						<input
+							type="checkbox"
+							checked={selectedColumns.includes(column)}
+							onchange={() => toggleColumn(column)}
+						/>
+						<span>{getColumnLabel(column, visibleColumns)}</span>
+					</label>
+				{/each}
 			</div>
-		</div>
-
-		{#if availableColumnsError}
-			<div class="column-warning">{availableColumnsError}</div>
-		{/if}
-
-		<div class="column-grid">
-			{#each visibleColumns as column (column)}
-				<label class="column-item" class:is-checked={selectedColumns.includes(column)}>
-					<input
-						type="checkbox"
-						checked={selectedColumns.includes(column)}
-						onchange={() => toggleColumn(column)}
-					/>
-					<span>{getColumnLabel(column, visibleColumns)}</span>
-				</label>
-			{/each}
-		</div>
-	</section>
+		</section>
+	{/if}
 
 	{#if error}
 		<div class="status-box error-box">{error}</div>
@@ -1905,6 +1939,17 @@
 			</div>
 
 			{#if dataRows.length}
+				{#if canViewDataLogDataDeviations}
+					<div class="row-highlight-legend" aria-label="High main engine RPM and low speed row indicators">
+						<span>RPM &gt; 1000 on any ME and speed &lt; 2 kn, continuously:</span>
+						<span class="warning"><i aria-hidden="true"></i> 5–10 min</span>
+						<span class="danger"><i aria-hidden="true"></i> &gt;10 min</span>
+						<span>The entire interval uses one color, including its first rows. AE is excluded.</span>
+					</div>
+					{#if rowHighlightContextError}
+						<p class="row-highlight-notice" role="status">{rowHighlightContextError}</p>
+					{/if}
+				{/if}
 				<div class="data-log-table-wrapper" onscroll={handleDataLogTableScroll}>
 					<table class="data-log-table">
 						<thead>
@@ -1919,7 +1964,14 @@
 
 						<tbody>
 							{#each dataRows as row}
-								<tr>
+								{@const highlight = rowHighlights.get(row)}
+								<tr
+									class:high-rpm-warning={highlight?.level === 'warning'}
+									class:high-rpm-danger={highlight?.level === 'danger'}
+									title={highlight
+										? `Continuous interval with ME RPM > 1000 and speed < 2 kn: ${formatDeviationDuration(highlight.durationMinutes)} | ${highlight.engines.join(', ')}`
+										: undefined}
+								>
 									{#each displaySelectedColumns as column (column)}
 										<td class:sticky-col={column === 'timestamp'}>
 											{formatCellValue(getRowColumnValue(row, column), column)}
@@ -3121,6 +3173,51 @@
 	.data-log-table tbody .sticky-col {
 		background: inherit;
 		box-shadow: 1px 0 0 #d7dee8;
+	}
+
+	.row-highlight-legend {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px 16px;
+		padding: 10px 14px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		border-bottom: 1px solid var(--color-border-subtle);
+	}
+
+	.row-highlight-legend span {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.row-highlight-legend i {
+		width: 10px;
+		height: 10px;
+		border-radius: 50%;
+		background: var(--color-warning, #f59e0b);
+	}
+
+	.row-highlight-legend .danger i {
+		background: var(--color-danger, #ef4444);
+	}
+
+	.row-highlight-notice {
+		margin: 0;
+		padding: 8px 14px;
+		font-size: 12px;
+		color: var(--text-secondary);
+	}
+
+	/* Override the global table skin, including hover, zebra rows and sticky timestamps. */
+	.data-log-page .data-log-table tbody tr.high-rpm-warning td {
+		background: color-mix(in srgb, var(--color-warning, #f59e0b) 28%, var(--color-surface)) !important;
+		color: var(--text-primary) !important;
+	}
+
+	.data-log-page .data-log-table tbody tr.high-rpm-danger td {
+		background: color-mix(in srgb, var(--color-danger, #ef4444) 40%, var(--color-surface)) !important;
+		color: var(--text-primary) !important;
 	}
 
 	.empty-box {
