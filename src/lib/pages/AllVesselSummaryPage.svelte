@@ -200,13 +200,27 @@
 
 		const sritiColumns = engines.map((engine) => ({
 			id: makeEngineColumnId('sriti', engine.key),
-			label: `SRITI ${engine.name}`,
+			label: `${engine.name} SRITI RH`,
 			type: 'additional',
 			group: 'Additional',
 			engineKey: engine.key
 		}));
 
-		return [...runtimeColumns, ...fuelEmsColumns, ...fuelEcuColumns, ...sritiColumns];
+		const sritiFuelColumns = engines.map((engine) => ({
+			id: makeEngineColumnId('sriti_fuel', engine.key),
+			label: `${engine.name} SRITI FC`,
+			type: 'additional',
+			group: 'Additional',
+			engineKey: engine.key
+		}));
+
+		return [
+			...runtimeColumns,
+			...fuelEmsColumns,
+			...fuelEcuColumns,
+			...sritiColumns,
+			...sritiFuelColumns
+		];
 	}
 
 	function getEngineByKey(row, engineKey) {
@@ -234,7 +248,7 @@
 				);
 			}
 
-			if (engineColumn.metric === 'sriti') {
+			if (engineColumn.metric === 'sriti' || engineColumn.metric === 'sriti_fuel') {
 				return canViewHighRpmLowSpeedTable;
 			}
 		}
@@ -531,6 +545,10 @@
 
 			if (engineColumn.metric === 'sriti') {
 				return engine.sriti_formatted || formatNumber(engine.sriti_duration || 0);
+			}
+
+			if (engineColumn.metric === 'sriti_fuel') {
+				return formatNumber(engine.sriti_fuel ?? engine.sritiFuel ?? 0);
 			}
 		}
 
