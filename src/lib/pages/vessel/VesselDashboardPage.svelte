@@ -298,20 +298,67 @@
     });
   }
 
+  function padCctvDatePart(value) {
+    return String(value).padStart(2, "0");
+  }
+
+  function formatCctvDateParts(year, month, day, hour, minute, second) {
+    const datePart = `${padCctvDatePart(day)}/${padCctvDatePart(month)}/${year}`;
+
+    if (hour === undefined || hour === null || hour === "") {
+      return datePart;
+    }
+
+    const timePart = `${padCctvDatePart(hour)}:${padCctvDatePart(minute)}:${padCctvDatePart(second ?? "00")}`;
+
+    return `${datePart} ${timePart}`;
+  }
+
+  function normalizeCctvUtcLabel(value) {
+    if (!value) return "";
+
+    const match = String(value).match(/UTC\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?/i);
+    if (!match) return "";
+
+    const [, sign, hours, minutes] = match;
+    const hourPart = String(Number(hours));
+    const minutePart = minutes ? `:${minutes}` : "";
+
+    return `UTC${sign}${hourPart}${minutePart}`;
+  }
+
   function formatCctvSnapshotTime(value) {
     if (!value) return "";
+
+    if (typeof value === "string") {
+      const text = value.trim();
+
+      // API sends "DD/MM/YYYY HH:MM:SS (UTC+X)". Parse it explicitly so the
+      // day/month are never swapped by the runtime's MM/DD/YYYY default.
+      const localMatch = text.match(
+        /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/
+      );
+
+      if (localMatch) {
+        const [, day, month, year, hour, minute, second] = localMatch;
+        const formatted = formatCctvDateParts(year, month, day, hour, minute, second);
+        const utcLabel = normalizeCctvUtcLabel(text);
+
+        return utcLabel ? `${formatted} (${utcLabel})` : formatted;
+      }
+    }
 
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return String(value);
 
-    return date.toLocaleString("id-ID", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit"
-    });
+    return formatCctvDateParts(
+      date.getFullYear(),
+      date.getMonth() + 1,
+      date.getDate(),
+      date.getHours(),
+      date.getMinutes(),
+      date.getSeconds()
+    );
   }
 
   function formatFileSize(value) {
