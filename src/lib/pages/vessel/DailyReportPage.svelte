@@ -1,4 +1,5 @@
 <script>
+	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { onMount } from 'svelte';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
@@ -3884,7 +3885,7 @@
 			<div class="filter-card">
 				<label>
 					<span>Date</span>
-					<input type="date" bind:value={reportDate} onchange={markDateFilterDirty} />
+					<input type="date" use:fourDigitDateYear bind:value={reportDate} onchange={markDateFilterDirty} />
 				</label>
 
 				<label>

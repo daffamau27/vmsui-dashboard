@@ -1,4 +1,5 @@
 <script>
+	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { onMount, tick } from 'svelte';
 	import { fade, fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
@@ -4654,7 +4655,7 @@
 								{#if reportingMode === 'periodical'}
 									<label>
 										<span>Start Date</span>
-										<input type="date" bind:value={autoReportForm.periodicalStartDate} />
+										<input type="date" use:fourDigitDateYear bind:value={autoReportForm.periodicalStartDate} />
 									</label>
 
 									<label>
@@ -4972,12 +4973,12 @@
 								<div class="form-grid manual-report-grid periodical-manual-grid">
 									<label>
 										<span>Start</span>
-										<input type="datetime-local" bind:value={manualPeriodicalStart} />
+										<input type="datetime-local" use:fourDigitDateYear bind:value={manualPeriodicalStart} />
 									</label>
 
 									<label>
 										<span>End</span>
-										<input type="datetime-local" bind:value={manualPeriodicalEnd} />
+										<input type="datetime-local" use:fourDigitDateYear bind:value={manualPeriodicalEnd} />
 									</label>
 
 									<label>
@@ -5019,7 +5020,7 @@
 								<div class="form-grid manual-report-grid">
 									<label>
 										<span>Report Date</span>
-										<input type="date" bind:value={manualReportDate} />
+										<input type="date" use:fourDigitDateYear bind:value={manualReportDate} />
 									</label>
 
 									<button
@@ -5643,12 +5644,12 @@
 
 						<label>
 							<span>Export Start Date</span>
-							<input type="date" bind:value={globalAuditFilters.startDate} />
+							<input type="date" use:fourDigitDateYear bind:value={globalAuditFilters.startDate} />
 						</label>
 
 						<label>
 							<span>Export End Date</span>
-							<input type="date" bind:value={globalAuditFilters.endDate} />
+							<input type="date" use:fourDigitDateYear bind:value={globalAuditFilters.endDate} />
 						</label>
 
 						<div class="global-audit-filter-actions">

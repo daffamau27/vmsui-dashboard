@@ -21,7 +21,11 @@
   let needleRotation = $derived(-90 + (percentage / 100) * 180);
 </script>
 
-<div class="rpm-card" class:disabled={value === null}>
+<div
+  class="rpm-card"
+  class:disabled={value === null}
+  class:engine-off={status === "offline" && value !== null}
+>
   <div class="rpm-header">
     <div class="rpm-title-wrap">
       <div class="rpm-title">{title}</div>
@@ -93,6 +97,11 @@
     background: var(--color-surface);
     border: 1px solid #d8d8d8;
     overflow: hidden;
+    transition: filter 180ms ease;
+  }
+
+  .rpm-card.engine-off {
+    filter: brightness(0.68) saturate(0.45);
   }
 
   .rpm-card.disabled {

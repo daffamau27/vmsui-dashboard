@@ -1,4 +1,5 @@
 <script>
+	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { onMount, tick } from 'svelte';
 	import { apiRequest } from '$lib/api/authApi.js';
 	import { browser } from '$app/environment';
@@ -3236,7 +3237,7 @@
 
 								<label class="assign-field">
 									<span>Start Date</span>
-									<input type="datetime-local" bind:value={assignForm.startDate} />
+									<input type="datetime-local" use:fourDigitDateYear bind:value={assignForm.startDate} />
 								</label>
 
 								<div class="assign-action">

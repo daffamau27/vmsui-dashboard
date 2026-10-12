@@ -1,4 +1,5 @@
 <script>
+	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { onMount } from 'svelte';
 	import { apiRequest } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
@@ -970,7 +971,7 @@
 							<label class="request-field">
 								<span>Start</span>
 								<input
-									type="datetime-local"
+									type="datetime-local" use:fourDigitDateYear
 									bind:value={defaultStartDate}
 									onchange={() => (activeDefaultPresetId = 'custom')}
 								/>
@@ -979,7 +980,7 @@
 							<label class="request-field">
 								<span>End</span>
 								<input
-									type="datetime-local"
+									type="datetime-local" use:fourDigitDateYear
 									bind:value={defaultEndDate}
 									onchange={() => (activeDefaultPresetId = 'custom')}
 								/>
@@ -1108,7 +1109,7 @@
 											<label class="request-field">
 												<span>Start</span>
 												<input
-													type="datetime-local"
+													type="datetime-local" use:fourDigitDateYear
 													value={getVesselRange(device.id).start}
 													onchange={(event) =>
 														setVesselRange(device.id, 'start', event.currentTarget.value)}
@@ -1118,7 +1119,7 @@
 											<label class="request-field">
 												<span>End</span>
 												<input
-													type="datetime-local"
+													type="datetime-local" use:fourDigitDateYear
 													value={getVesselRange(device.id).end}
 													onchange={(event) =>
 														setVesselRange(device.id, 'end', event.currentTarget.value)}

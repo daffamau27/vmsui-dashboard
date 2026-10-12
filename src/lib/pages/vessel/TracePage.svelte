@@ -1,4 +1,5 @@
 <script>
+	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { flushSync, onDestroy, untrack } from 'svelte';
 	import VesselMap from '$lib/VesselMap.svelte';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
@@ -176,16 +177,19 @@
 		hasLoadedDateRange = false;
 	}
 
+	function isValidTraceDateTime(value) {
+		if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value) || value.startsWith('0000-')) {
+			return false;
+		}
+		// Validate the calendar fields independently of the browser's timezone.
+		const date = new Date(`${value}:00.000Z`);
+		return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 16) === value;
+	}
+
 	function toApiDateTime(value) {
-		if (!value) return '';
+		if (!isValidTraceDateTime(value)) return '';
 
-		const date = new Date(value);
-
-		if (Number.isNaN(date.getTime())) return value;
-
-		return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
-			date.getDate()
-		)} ${pad(date.getHours())}:${pad(date.getMinutes())}:00`;
+		return `${value.replace('T', ' ')}:00`;
 	}
 
 	function toSnapshotApiDateTime(value) {
@@ -698,6 +702,7 @@
 	}
 
 	function getRangeTimestampMs(value) {
+		if (!isValidTraceDateTime(value)) return NaN;
 		return parseTraceDateTimeMs(value, timezoneMode === 'manual' ? timezoneOffset : autoTimezoneLabel);
 	}
 
@@ -1882,7 +1887,9 @@
 		const endMs = getRangeTimestampMs(endDateTime);
 
 		if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
-			error = 'End time must be later than start time.';
+			error = !Number.isFinite(startMs) || !Number.isFinite(endMs)
+				? 'Please enter valid Start and End dates with a 4-digit year.'
+				: 'End time must be later than start time.';
 			traceData = null;
 			hasLoadedDateRange = false;
 			activePlaybackTimestampMs = NaN;
@@ -2578,7 +2585,7 @@
 					<label>
 						<span>Start</span>
 						<input
-							type="datetime-local"
+							type="datetime-local" use:fourDigitDateYear
 							bind:value={startDateTime}
 							oninput={clearActiveTimePreset}
 						/>
@@ -2587,7 +2594,7 @@
 					<label>
 						<span>End</span>
 						<input
-							type="datetime-local"
+							type="datetime-local" use:fourDigitDateYear
 							bind:value={endDateTime}
 							oninput={clearActiveTimePreset}
 						/>
@@ -2622,7 +2629,7 @@
 					type="button"
 					class="primary-btn"
 					onclick={loadTrace}
-					disabled={loading || !startDateTime || !endDateTime}
+					disabled={loading || !isValidTraceDateTime(startDateTime) || !isValidTraceDateTime(endDateTime)}
 				>
 					{loading ? 'Loading...' : 'Load Trace'}
 				</button>

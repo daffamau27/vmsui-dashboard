@@ -1,4 +1,5 @@
 <script>
+	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { onMount } from 'svelte';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
 	import {
@@ -1536,7 +1537,7 @@
 		<label>
 			<span>Start</span>
 			<input
-				type="datetime-local"
+				type="datetime-local" use:fourDigitDateYear
 				bind:value={startDateTime}
 				oninput={clearActiveTimePreset}
 			/>
@@ -1544,7 +1545,7 @@
 
 		<label>
 			<span>End</span>
-			<input type="datetime-local" bind:value={endDateTime} oninput={clearActiveTimePreset} />
+			<input type="datetime-local" use:fourDigitDateYear bind:value={endDateTime} oninput={clearActiveTimePreset} />
 		</label>
 
 		<label>
