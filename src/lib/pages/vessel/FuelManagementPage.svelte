@@ -1,4 +1,5 @@
 <script>
+	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import { apiRequest } from '$lib/api/authApi.js';
@@ -1904,12 +1905,12 @@
 				<div class="history-filters">
 					<label>
 						<span>Start Date</span>
-						<input type="date" bind:value={historyStartDate} onchange={markDateFilterDirty} />
+						<input type="date" use:fourDigitDateYear bind:value={historyStartDate} onchange={markDateFilterDirty} />
 					</label>
 
 					<label>
 						<span>End Date</span>
-						<input type="date" bind:value={historyEndDate} onchange={markDateFilterDirty} />
+						<input type="date" use:fourDigitDateYear bind:value={historyEndDate} onchange={markDateFilterDirty} />
 					</label>
 
 					<label>
@@ -2126,7 +2127,7 @@
 									<h3>Save / Adjust ROB</h3>
 									<label>
 										<span>Datetime</span>
-										<input type="datetime-local" bind:value={robForm.datetime} />
+										<input type="datetime-local" use:fourDigitDateYear bind:value={robForm.datetime} />
 									</label>
 									<label>
 										<span>ROB (L)</span>
@@ -2159,7 +2160,7 @@
 									<h3>Bunkering Transaction</h3>
 									<label>
 										<span>Datetime</span>
-										<input type="datetime-local" bind:value={transactionForm.datetime} />
+										<input type="datetime-local" use:fourDigitDateYear bind:value={transactionForm.datetime} />
 									</label>
 									<div class="split-fields">
 										<label>
@@ -2219,7 +2220,7 @@
 										<div class="vdor-context-actions">
 											<label>
 												<span>VDOR date</span>
-												<input type="date" bind:value={vdorDate} onchange={handleVdorDateChange} />
+												<input type="date" use:fourDigitDateYear bind:value={vdorDate} onchange={handleVdorDateChange} />
 											</label>
 											<button
 												type="button"

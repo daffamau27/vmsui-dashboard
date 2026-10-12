@@ -1,4 +1,5 @@
 <script>
+	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { onMount } from 'svelte';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
 	import {
@@ -742,12 +743,12 @@
 			<div class="filter-card">
 		<label>
 			<span>Start</span>
-			<input type="datetime-local" bind:value={startDateTime} oninput={markDateFilterDirty} />
+			<input type="datetime-local" use:fourDigitDateYear bind:value={startDateTime} oninput={markDateFilterDirty} />
 		</label>
 
 		<label>
 			<span>End</span>
-			<input type="datetime-local" bind:value={endDateTime} oninput={markDateFilterDirty} />
+			<input type="datetime-local" use:fourDigitDateYear bind:value={endDateTime} oninput={markDateFilterDirty} />
 		</label>
 
 		<label>
@@ -1032,7 +1033,6 @@
 							<tr>
 								<th>Engine</th>
 								<th>Duration</th>
-								<th>Duration Minutes</th>
 								<th>Fuel Used</th>
 							</tr>
 						</thead>
@@ -1042,7 +1042,6 @@
 								<tr>
 									<td>{row.engine_name || row.engineName || '-'}</td>
 									<td>{row.duration_formatted || row.durationFormatted || formatRuntimeFromMinutes(row.duration_minutes ?? row.durationMinutes)}</td>
-									<td>{formatNumber(row.duration_minutes ?? row.durationMinutes, 0)}</td>
 									<td>{formatLiter(row.fuel_used_l ?? row.fuelUsedL ?? row.fuel)}</td>
 								</tr>
 							{/each}
@@ -1050,7 +1049,6 @@
 							<tr class="total-row">
 								<td>Grand Total</td>
 								<td>{highRpmLowSpeed?.grand_total_duration_formatted || highRpmLowSpeed?.grandTotalDurationFormatted || formatRuntimeFromMinutes(highRpmLowSpeed?.grand_total_duration_minutes ?? highRpmLowSpeed?.grandTotalDurationMinutes)}</td>
-								<td>{formatNumber(highRpmLowSpeed?.grand_total_duration_minutes ?? highRpmLowSpeed?.grandTotalDurationMinutes, 0)}</td>
 								<td>{formatLiter(highRpmLowSpeed?.grand_total_l ?? highRpmLowSpeed?.grandTotalL)}</td>
 							</tr>
 						</tbody>

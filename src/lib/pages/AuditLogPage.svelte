@@ -1,4 +1,5 @@
 <script>
+	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { onMount } from 'svelte';
 	import { apiRequest } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
@@ -455,12 +456,12 @@
             {/if}
 			<label>
 				<span>Start Date</span>
-				<input type="date" bind:value={exportStartDate} />
+				<input type="date" use:fourDigitDateYear bind:value={exportStartDate} />
 			</label>
 
 			<label>
 				<span>End Date</span>
-				<input type="date" bind:value={exportEndDate} />
+				<input type="date" use:fourDigitDateYear bind:value={exportEndDate} />
 			</label>
 
 			<label>

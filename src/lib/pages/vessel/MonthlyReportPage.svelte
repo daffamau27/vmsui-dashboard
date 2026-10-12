@@ -1,4 +1,5 @@
 <script>
+	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { onMount } from 'svelte';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
 	import {
@@ -1896,7 +1897,7 @@
 		<label>
 			<span>Month</span>
 			<input
-				type="month"
+				type="month" use:fourDigitDateYear
 				bind:value={reportMonth}
 				max={currentMonth()}
 				onchange={() => {

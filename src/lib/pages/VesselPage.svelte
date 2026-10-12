@@ -1,4 +1,5 @@
 <script>
+	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { activeVesselMenu, setActiveVesselMenu } from '$lib/stores/vesselNavigation.svelte.js';
 	import { apiRequest } from '$lib/api/authApi.js';
@@ -1498,7 +1499,7 @@
 
 				<label>
 					<span>Effective date & time <b>*</b></span>
-					<input type="datetime-local" bind:value={hireStatusForm.effectiveAt} required/>
+					<input type="datetime-local" use:fourDigitDateYear bind:value={hireStatusForm.effectiveAt} required/>
 					<small>Leave empty to apply immediately.</small>
 				</label>
 
