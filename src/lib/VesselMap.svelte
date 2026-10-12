@@ -132,6 +132,10 @@
       }
     }
 
+    // A trace timestamp may have telemetry without a usable GPS position.
+    // Do not move the vessel to 0,0 or reuse a different timestamp's position.
+    if (showTraceLine && tracePoints.length) return [NaN, NaN];
+
     return [toNumber(latitude, 0), toNumber(longitude, 0)];
   }
 
@@ -224,6 +228,7 @@ function drawColoredTraceSegments(
   for (let index = firstIndex; index <= lastIndex; index += 1) {
     const previous = points[index - 1];
     const current = points[index];
+    if (current.originalIndex !== previous.originalIndex + 1) continue;
     const segmentSpeed = current?.speed ?? previous?.speed ?? 0;
 
     L.polyline([previous.latLng, current.latLng], {
@@ -537,7 +542,11 @@ function updateMarker({ autoCenter = false } = {}) {
 
   const [lat, lng] = getPosition();
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    marker?.remove();
+    marker = null;
+    return;
+  }
 
   const icon = createVesselIcon();
 
@@ -669,11 +678,14 @@ async function loadMapAssetsAndZones() {
     if (!isMounted || !container) return;
 
     const [lat, lng] = getPosition();
+    const initialPosition = Number.isFinite(lat) && Number.isFinite(lng)
+      ? [lat, lng]
+      : getValidTraceLatLngs()[0] || [0, 0];
 
     map = L.map(container, {
       zoomControl: false,
       attributionControl: false
-    }).setView([lat, lng], zoom);
+    }).setView(initialPosition, zoom);
 
     addMapTileLayer(L, map);
     addLeafletZoomAndScale(L, map);

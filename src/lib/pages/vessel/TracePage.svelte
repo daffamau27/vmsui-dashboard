@@ -85,7 +85,7 @@
 	const CCTV_SNAPSHOT_PAGE_SIZE = TRACE_CCTV_PAGE_SIZE;
 	const TRACE_MS_PER_REAL_MS = 60;
 	const PLAYBACK_TICK_INTERVAL_MS = 100;
-	const PLAYBACK_SPEED_OPTIONS = [1, 2, 5, 10];
+	const PLAYBACK_SPEED_OPTIONS = [0.5, 1, 2, 5, 10];
 	const MAX_TRACE_POINT_JUMP_NM = 1000;
 	const MAX_TRACE_POINT_SPEED_KN = 80;
 	const MAX_TIMELINE_TRACE_MARKS = 24;
@@ -194,6 +194,7 @@
 	}
 
 	function toNumber(value, fallback = 0) {
+		if (value == null || (typeof value === 'string' && !value.trim())) return fallback;
 		const number = Number(value);
 		return Number.isFinite(number) ? number : fallback;
 	}
@@ -207,7 +208,7 @@
 			item.fuel_lh ??
 			item.fuelHour ??
 			item.fuel_hour;
-		const explicitHourly = Number(explicitHourlyValue);
+		const explicitHourly = toNumber(explicitHourlyValue, NaN);
 		if (Number.isFinite(explicitHourly)) return explicitHourly;
 
 		const perMinuteValue =
@@ -216,8 +217,8 @@
 			item.fuelRate ??
 			item.fuel_rate ??
 			item.f_rate;
-		const perMinute = Number(perMinuteValue);
-		return Number.isFinite(perMinute) ? perMinute * 60 : 0;
+		const perMinute = toNumber(perMinuteValue, NaN);
+		return Number.isFinite(perMinute) ? perMinute * 60 : NaN;
 	}
 
 	function formatNumber(value, digits = 1, fallback = '-') {
@@ -1304,16 +1305,16 @@
 	}
 
 	function normalizeRpm(value) {
-		if (!value) return {};
+		if (value == null) return {};
 
 		if (typeof value === 'object' && !Array.isArray(value)) {
 			return Object.fromEntries(
-				Object.entries(value).map(([engineName, rpmValue]) => [engineName, toNumber(rpmValue, 0)])
+				Object.entries(value).map(([engineName, rpmValue]) => [engineName, toNumber(rpmValue, NaN)])
 			);
 		}
 
 		return {
-			RPM: toNumber(value, 0)
+			RPM: toNumber(value, NaN)
 		};
 	}
 
@@ -1356,20 +1357,20 @@
 
 	function getMaxRpm(rpmObject = {}) {
 		const values = Object.values(rpmObject)
-			.map((value) => toNumber(value, 0))
+			.map((value) => toNumber(value, NaN))
 			.filter((value) => Number.isFinite(value));
 
-		if (!values.length) return 0;
+		if (!values.length) return NaN;
 
 		return Math.max(...values);
 	}
 
 	function getAvgRpm(rpmObject = {}) {
 		const values = Object.values(rpmObject)
-			.map((value) => toNumber(value, 0))
+			.map((value) => toNumber(value, NaN))
 			.filter((value) => Number.isFinite(value));
 
-		if (!values.length) return 0;
+		if (!values.length) return NaN;
 
 		return values.reduce((sum, value) => sum + value, 0) / values.length;
 	}
@@ -1398,8 +1399,14 @@
 		};
 	}
 
+	function isMissingTraceValue(value) {
+		return value == null ||
+			(typeof value === 'number' && !Number.isFinite(value)) ||
+			(typeof value === 'string' && /^(?:nan|-)?$/i.test(value.trim()));
+	}
+
 	function normalizeTraceWeather(value) {
-		if (!value) return '-';
+		if (isMissingTraceValue(value)) return '-';
 
 		if (typeof value === 'string') return value || '-';
 
@@ -1414,11 +1421,14 @@
 				'';
 			const windDirection = value.wind_dir_deg ?? value.windDirDeg ?? value.wind_direction_deg;
 			const windText =
-				Number.isFinite(Number(windDirection))
+				Number.isFinite(toNumber(windDirection, NaN))
 					? `${formatNumber(windDirection, 0, '0')}°`
 					: value.wind_dir ?? value.windDir ?? value.wind_direction ?? '';
 
-			return [condition, windText ? `Wind ${windText}` : ''].filter(Boolean).join(' • ') || '-';
+			return [
+				isMissingTraceValue(condition) ? '' : condition,
+				isMissingTraceValue(windText) ? '' : `Wind ${windText}`
+			].filter(Boolean).join(' • ') || '-';
 		}
 
 		return String(value);
@@ -1480,12 +1490,16 @@
 		);
 	}
 
-	function filterTracePointJumps(points = []) {
-		const filtered = [];
+	function sanitizeTracePositions(points = []) {
 		const dropped = [];
+		let previous = null;
 
-		points.forEach((point) => {
-			const previous = filtered[filtered.length - 1];
+		// Missing GPS and rejected jumps must not remove timestamps or telemetry.
+		// Only the map position is excluded, preserving playback through data gaps.
+		const sanitized = points.map((point) => {
+			if (!isValidTraceCoordinate(point.latitude, point.longitude)) {
+				return { ...point, latitude: NaN, longitude: NaN };
+			}
 
 			if (previous) {
 				const distanceNm = calculateDistanceNm(previous, point);
@@ -1510,14 +1524,12 @@
 						from: previous.timeFormatted || previous.timestamp,
 						to: point.timeFormatted || point.timestamp
 					});
-					return;
+					return { ...point, latitude: NaN, longitude: NaN };
 				}
 			}
 
-			filtered.push({
-				...point,
-				index: filtered.length
-			});
+			previous = point;
+			return point;
 		});
 
 		if (dropped.length) {
@@ -1529,7 +1541,7 @@
 			});
 		}
 
-		return filtered;
+		return sanitized;
 	}
 
 	function getTracePayload(data) {
@@ -1628,8 +1640,6 @@
 					NaN
 				);
 
-				if (!isValidTraceCoordinate(lat, lng)) return null;
-
 				const rpm = normalizeRpm(item.rpm ?? item.me_rpm ?? item.mePortRpm ?? item.me_port_rpm);
 				const timestampRaw = getTraceTimestampRaw(item);
 				const timestampDisplay = getTraceDisplayTime(item, timestampRaw);
@@ -1639,8 +1649,8 @@
 					rawIndex: index,
 					latitude: lat,
 					longitude: lng,
-					heading: toNumber(item.heading ?? item.course ?? item.bearing, 0),
-					speed: toNumber(item.speed ?? item.sog ?? item.speedOverGround, 0),
+					heading: toNumber(item.heading ?? item.course ?? item.bearing, NaN),
+					speed: toNumber(item.speed ?? item.sog ?? item.speedOverGround, NaN),
 					distance: toNumber(
 						item.distance ??
 							item.distance_nm ??
@@ -1649,7 +1659,7 @@
 							item.total_distance ??
 							item.distance_traveled ??
 							item.distanceTraveled,
-						0
+						NaN
 					),
 					rpm,
 					maxRpm: getMaxRpm(rpm),
@@ -1660,26 +1670,55 @@
 							item.fuelRate ??
 							item.fuel_rate ??
 							item.f_rate,
-						0
+						NaN
 					),
 					fuelPerHour: getTraceFuelPerHour(item),
 					weather: normalizeTraceWeather(item.weather ?? item.weatherForecast ?? item.condition),
 					ocean: normalizeOceanCurrent(item.ocean ?? item.oceanCurrent ?? item.current),
-					queue: toNumber(item.queue, 0),
-					sdCard: toNumber(item.sdCard ?? item.sd_card, 0),
-					online: item.online === undefined ? true : Boolean(item.online),
+					queue: toNumber(item.queue, NaN),
+					sdCard: toNumber(item.sdCard ?? item.sd_card, NaN),
+					online: isMissingTraceValue(item.online) ? null : Boolean(item.online),
 					timeFormatted: timestampDisplay,
 					timestampRaw,
 					timestamp: timestampDisplay
 				};
 			})
-			.filter(Boolean);
+			.filter(Boolean)
+			.sort((a, b) => {
+				const aTime = parseDateTimeMs(a.timestampRaw ?? a.timestamp);
+				const bTime = parseDateTimeMs(b.timestampRaw ?? b.timestamp);
+				return (Number.isFinite(aTime) ? aTime : Infinity) -
+					(Number.isFinite(bTime) ? bTime : Infinity);
+			});
 
-		const filteredPoints = filterTracePointJumps(points);
+		const resolvedPoints = carryForwardTraceValues(sanitizeTracePositions(points));
 
-		traceDebug('[TRACE_POINTS_PARSED]', filteredPoints.length, filteredPoints.slice(0, 3));
+		traceDebug('[TRACE_POINTS_PARSED]', resolvedPoints.length, resolvedPoints.slice(0, 3));
 
-		return filteredPoints;
+		return resolvedPoints;
+	}
+
+	function carryForwardTraceValues(points = []) {
+		let previous = null;
+		const retainPrevious = (value, previousValue) =>
+			isMissingTraceValue(value) && !isMissingTraceValue(previousValue) ? previousValue : value;
+
+		// Resolve in chronological order, not playback order, so reverse/seek give
+		// the same values. Never carry timestamps, RPM, or fuel-rate readings.
+		return points.map((point, index) => {
+			const current = { ...point, index, ocean: { ...point.ocean } };
+			for (const field of ['latitude', 'longitude', 'heading', 'speed', 'distance', 'weather', 'queue', 'sdCard', 'online']) {
+				current[field] = retainPrevious(point[field], previous?.[field]);
+			}
+			for (const field of ['speedKph', 'directionTo', 'directionDeg']) {
+				current.ocean[field] = retainPrevious(point.ocean?.[field], previous?.ocean?.[field]);
+			}
+			current.isPositionCarriedForward =
+				!isValidTraceCoordinate(point.latitude, point.longitude) &&
+				isValidTraceCoordinate(current.latitude, current.longitude);
+			previous = current;
+			return current;
+		});
 	}
 
 	let tracePoints = $derived(getTracePoints(traceData));
@@ -1718,10 +1757,9 @@
 				: Math.max(0, findClosestTraceIndexByTime(activeTimelineTimestampMs))
 	);
 	let activeTimelineLabel = $derived(
-		activeTimelineEvent?.label ||
+		(Number.isFinite(activeTimelineTimestampMs) ? formatDateTime(activeTimelineTimestampMs) : '') ||
+			activeTimelineEvent?.label ||
 			tracePoints[activeTraceIndex]?.timeFormatted ||
-			tracePoints[activeTraceIndex]?.timestamp ||
-			(Number.isFinite(activeTimelineTimestampMs) ? formatDateTime(activeTimelineTimestampMs) : '') ||
 			tracePoints[activeTraceIndex]?.timestamp ||
 			'-'
 	);
@@ -1798,11 +1836,11 @@
 		latitude: activePoint.latitude,
 		longitude: activePoint.longitude,
 		heading: activePoint.heading,
-		currentSpeed: `${formatNumber(activePoint.speed, 1, '0.0')} knot`,
+		currentSpeed: `${formatNumber(activePoint.speed, 1)} knot`,
 		distance: formatTraceDistance(activePoint.distance),
-		maxRpm: `${formatNumber(activePoint.maxRpm, 0, '0')} RPM`,
-		avgRpm: `${formatNumber(activePoint.avgRpm, 0, '0')} RPM`,
-		fuelPerHour: `${formatNumber(activePoint.fuelPerHour, 2, '0.00')} L/h`,
+		maxRpm: `${formatNumber(activePoint.maxRpm, 0)} RPM`,
+		avgRpm: `${formatNumber(activePoint.avgRpm, 0)} RPM`,
+		fuelPerHour: `${formatNumber(activePoint.fuelPerHour, 2)} L/h`,
 		weatherForecast: activePoint.weather || $selectedVesselInfo?.weather?.current?.condition || '-',
 		oceanCurrent: formatOceanCurrent(activePoint.ocean),
 		lastUpdate: activeTimelineLabel || activePoint.timestamp || '-',
@@ -2751,20 +2789,25 @@
 						<div class="card-title">Vessel Position</div>
 						<div class="card-subtitle">
 							{vesselInfo.lastUpdate}
+							{#if tracePoints.length && !isValidTraceCoordinate(vesselInfo.latitude, vesselInfo.longitude)}
+								<span> · GPS unavailable at this time</span>
+							{:else if activePoint.isPositionCarriedForward}
+								<span> · Using previous GPS position</span>
+							{/if}
 						</div>
 					</div>
 
 					<div class="coordinate-badge">
 						<CopyableCoordinate
-							value={formatNumber(vesselInfo.latitude, 6, '0.000000')}
-							display={formatNumber(vesselInfo.latitude, 6, '0.000000')}
+							value={formatNumber(vesselInfo.latitude, 6)}
+							display={formatNumber(vesselInfo.latitude, 6)}
 							label="latitude"
 							compact
 						/>
 						<span class="coordinate-separator">,</span>
 						<CopyableCoordinate
-							value={formatNumber(vesselInfo.longitude, 6, '0.000000')}
-							display={formatNumber(vesselInfo.longitude, 6, '0.000000')}
+							value={formatNumber(vesselInfo.longitude, 6)}
+							display={formatNumber(vesselInfo.longitude, 6)}
 							label="longitude"
 							compact
 						/>
@@ -3027,7 +3070,7 @@
 
 					<article class="info-card">
 						<span>Heading</span>
-						<strong>{formatNumber(vesselInfo.heading, 1, '0.0')}°</strong>
+						<strong>{formatNumber(vesselInfo.heading, 1)}°</strong>
 					</article>
 
 					<article class="info-card">
@@ -3062,7 +3105,7 @@
 							{#each activeRpmEntries as [engineName, rpmValue]}
 								<article class="rpm-card">
 									<span>{engineName}</span>
-									<strong>{formatNumber(rpmValue, 0, '0')} RPM</strong>
+									<strong>{formatNumber(rpmValue, 0)} RPM</strong>
 								</article>
 							{/each}
 						</div>
