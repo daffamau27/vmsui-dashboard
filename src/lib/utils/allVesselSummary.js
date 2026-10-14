@@ -16,6 +16,7 @@ const engineMetrics = [
 		label: 'RH',
 		type: 'runtime',
 		group: 'RH',
+		headerPath: ['RUNTIME'],
 		permission: 'view_engine_runtime_table'
 	},
 	{
@@ -24,6 +25,7 @@ const engineMetrics = [
 		label: 'SRITI RH',
 		type: 'additional',
 		group: 'SRITI RH',
+		headerPath: ['HIGH RPM LOW SPEED', 'DURATION (HH:MM)'],
 		permission: 'view_high_rpm_low_speed_table'
 	},
 	{
@@ -32,6 +34,7 @@ const engineMetrics = [
 		label: 'SRITI FC',
 		type: 'additional',
 		group: 'SRITI FC',
+		headerPath: ['HIGH RPM LOW SPEED', 'FUEL USED (L)'],
 		permission: 'view_high_rpm_low_speed_table'
 	}
 ];
@@ -47,6 +50,7 @@ const additionalColumns = [
 	{
 		id: 'avg_speed',
 		label: 'AVG SPEED',
+		headerPath: ['SPEED (KNOT)', 'AVG'],
 		type: 'additional',
 		path: ['speed', 'avg_running_speed'],
 		permissions: ['view_speed_stats_table']
@@ -54,6 +58,7 @@ const additionalColumns = [
 	{
 		id: 'max_speed',
 		label: 'MAX SPEED',
+		headerPath: ['SPEED (KNOT)', 'MAX'],
 		type: 'additional',
 		path: ['speed', 'top_speed'],
 		permissions: ['view_speed_stats_table']
@@ -95,6 +100,14 @@ function hasNonZeroField(value, path) {
 	return hasNonZeroValue(value);
 }
 
+function hasEngineValue(rows, path) {
+	return rows.some((row) =>
+		(Array.isArray(row?.engines) ? row.engines : []).some(
+			(engine) => engine?.key && hasNonZeroField(engine, path)
+		)
+	);
+}
+
 function readField(value, path) {
 	for (const key of path) value = value?.[key];
 	return value;
@@ -115,13 +128,7 @@ function getSritiFuelTotal(row) {
 }
 
 function getFuelSources(rows) {
-	const hasSource = (key) =>
-		rows.some(
-			(row) =>
-				(Array.isArray(row?.engines) ? row.engines : []).some((engine) =>
-					hasNonZeroField(engine, ['fuel', key])
-				) || ['me', 'ae', 'grand'].some((scope) => hasNonZeroField(row, ['totals', scope, key]))
-		);
+	const hasSource = (key) => hasEngineValue(rows, ['fuel', key]);
 	const internal = hasSource('ems_internal');
 	const external = hasSource('ems_external');
 	const splitEms = internal && external;
@@ -147,7 +154,9 @@ function getFuelSources(rows) {
 
 	// A single EMS column reads the active source directly, without adding values.
 	// VMS is the API alias for EMS internal; don't repeat it when internal is shown.
-	return [...emsSources, ...otherFuelSources.filter((source) => source.key !== 'vms' || !internal)];
+	return [...emsSources, ...otherFuelSources].filter(
+		(source) => hasSource(source.key) && (source.key !== 'vms' || !internal)
+	);
 }
 
 export function groupAllVesselSummaryColumns(columns) {
@@ -159,15 +168,72 @@ export function groupAllVesselSummaryColumns(columns) {
 	return Array.from(groups.values());
 }
 
+// Build both the headers and body order from the same tree. Hidden columns
+// cannot leave empty groups or stale spans in the three-level header.
+export function buildAllVesselSummaryTable(columns) {
+	const roots = [];
+	for (const column of columns) {
+		const path = column.headerPath || [column.label];
+		let siblings = roots;
+		for (let depth = 0; depth < path.length; depth += 1) {
+			const label = path[depth];
+			if (depth === path.length - 1) {
+				siblings.push({ id: column.id, label, column });
+			} else {
+				let group = siblings.find((node) => node.children && node.label === label);
+				if (!group) {
+					group = { id: JSON.stringify(path.slice(0, depth + 1)), label, children: [] };
+					siblings.push(group);
+				}
+				siblings = group.children;
+			}
+		}
+	}
+	const sectionOrder = [
+		'DATA RECEIVED',
+		'RUNTIME',
+		'FUEL CONSUMPTION (L)',
+		'SPEED (KNOT)',
+		'HIGH RPM LOW SPEED',
+		'DISTANCE',
+		'UTC'
+	];
+	const sourceOrder = ['EMS', 'EMS INTERNAL', 'EMS EXTERNAL', 'Engine Maker', 'ECU', 'FMS', 'VMS'];
+	const rank = (order, label) => (order.includes(label) ? order.indexOf(label) : order.length);
+	roots.sort((a, b) => rank(sectionOrder, a.label) - rank(sectionOrder, b.label));
+	const fuelGroup = roots.find((node) => node.label === 'FUEL CONSUMPTION (L)');
+	fuelGroup?.children.sort((a, b) => rank(sourceOrder, a.label) - rank(sourceOrder, b.label));
+
+	const headerRows = [[], [], []];
+	const orderedColumns = [];
+	const visit = (node, depth) => {
+		const cell = {
+			id: node.id,
+			label: node.label,
+			column: node.column,
+			colspan: 1,
+			rowspan: node.children ? 1 : headerRows.length - depth
+		};
+		headerRows[depth].push(cell);
+		if (node.children) {
+			cell.colspan = node.children.reduce((count, child) => count + visit(child, depth + 1), 0);
+		} else {
+			orderedColumns.push(node.column);
+		}
+		return cell.colspan;
+	};
+	roots.forEach((node) => visit(node, 0));
+	return { columns: orderedColumns, headerRows };
+}
+
 export function buildAllVesselSummaryColumns(rows = []) {
 	const engines = new Map();
 	for (const row of rows) {
 		for (const engine of Array.isArray(row?.engines) ? row.engines : []) {
 			if (!engine?.key) continue;
 			if (!engines.has(engine.key)) {
-				engines.set(engine.key, { key: engine.key, name: engine.name || engine.key, records: [] });
+				engines.set(engine.key, { key: engine.key, name: engine.name || engine.key });
 			}
-			engines.get(engine.key).records.push(engine);
 		}
 	}
 	const orderedEngines = Array.from(engines.values()).sort((left, right) =>
@@ -175,34 +241,38 @@ export function buildAllVesselSummaryColumns(rows = []) {
 	);
 	const fuelSources = getFuelSources(rows);
 
-	const engineColumns = engineMetrics.flatMap((metric) =>
-		orderedEngines
-			.filter((engine) => engine.records.some((record) => hasNonZeroField(record, [metric.field])))
-			.map((engine) => ({
+	// Visibility belongs to the metric/source, not to an individual engine.
+	// Once a group has data, include every engine, preserving zero/missing cells.
+	const engineColumns = engineMetrics
+		.filter((metric) => hasEngineValue(rows, [metric.field]))
+		.flatMap((metric) =>
+			orderedEngines.map((engine) => ({
 				id: `engine__${metric.key}__${engine.key}`,
 				label: `${engine.name} ${metric.label}`,
+				headerPath: [...metric.headerPath, engine.name],
 				type: metric.type,
 				group: metric.group,
 				engineKey: engine.key,
 				path: [metric.field],
 				permissions: [metric.permission]
 			}))
-	);
+		);
 
 	const fuelColumns = fuelSources.flatMap((source) =>
-		orderedEngines
-			.filter((engine) =>
-				engine.records.some((record) => hasNonZeroField(record, ['fuel', source.key]))
-			)
-			.map((engine) => ({
-				id: `engine__fuel_${source.key}__${engine.key}`,
-				label: `${engine.name} FC (${source.label})`,
-				type: 'fuel',
-				group: `FC ${source.label}`,
-				engineKey: engine.key,
-				path: ['fuel', source.key],
-				permissions: ['view_fuel_consumption_table', source.permission]
-			}))
+		orderedEngines.map((engine) => ({
+			id: `engine__fuel_${source.key}__${engine.key}`,
+			label: `${engine.name} FC (${source.label})`,
+			headerPath: [
+				'FUEL CONSUMPTION (L)',
+				source.key === 'engine_maker' ? 'Engine Maker' : source.label,
+				engine.name
+			],
+			type: 'fuel',
+			group: `FC ${source.label}`,
+			engineKey: engine.key,
+			path: ['fuel', source.key],
+			permissions: ['view_fuel_consumption_table', source.permission]
+		}))
 	);
 
 	const totalColumns = [
@@ -217,6 +287,11 @@ export function buildAllVesselSummaryColumns(rows = []) {
 			.map((source) => ({
 				id: `total_fuel__${scope.key}__${source.key}`,
 				label: `${scope.label} (${source.label})`,
+				headerPath: [
+					'FUEL CONSUMPTION (L)',
+					source.key === 'engine_maker' ? 'Engine Maker' : source.label,
+					scope.key === 'grand' ? 'TOTAL' : `${scope.key.toUpperCase()} TOTAL`
+				],
 				type: 'total',
 				group: scope.label,
 				path: ['totals', scope.key, source.key],
@@ -235,6 +310,7 @@ export function buildAllVesselSummaryColumns(rows = []) {
 					{
 						id: 'total_sriti_fuel',
 						label: 'SRITI TOTAL',
+						headerPath: ['HIGH RPM LOW SPEED', 'TOTAL FUEL'],
 						type: 'total',
 						group: 'SRITI TOTAL',
 						permissions: ['view_high_rpm_low_speed_table'],

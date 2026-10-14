@@ -8,6 +8,7 @@
 	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 	import {
 		buildAllVesselSummaryColumns,
+		buildAllVesselSummaryTable,
 		groupAllVesselSummaryColumns,
 		getAllVesselSummaryCellValue
 	} from '$lib/utils/allVesselSummary.js';
@@ -125,9 +126,12 @@
 
 	let permittedReportColumns = $derived(reportColumns.filter(canViewReportColumn));
 
-	let visibleDataColumns = $derived(
-		permittedReportColumns.filter((col) => visibleColumnIds.includes(col.id))
+	let tableLayout = $derived(
+		buildAllVesselSummaryTable(
+			permittedReportColumns.filter((col) => visibleColumnIds.includes(col.id))
+		)
 	);
+	let visibleDataColumns = $derived(tableLayout.columns);
 
 	let columnGroups = $derived(groupAllVesselSummaryColumns(permittedReportColumns));
 
@@ -971,37 +975,41 @@
 			<div class="table-wrapper">
 				<table>
 					<thead>
-						<tr>
-							<th>No</th>
-							<th>Vessel</th>
-							<th>Range</th>
-
-							{#each visibleDataColumns as col, index (col.id)}
-								<th
-									class:total-column={isTotalColumn(col)}
-									class:group-start={index === 0 || col.group !== visibleDataColumns[index - 1].group}
-									data-column-group={col.group}
-								>
-									{col.label}
-								</th>
-							{/each}
-						</tr>
+						{#each tableLayout.headerRows as cells, level (level)}
+							<tr style={`--header-level: ${level}`}>
+								{#if level === 0}
+									<th class="frozen-column number-column" rowspan="3" scope="col">No</th>
+									<th class="frozen-column vessel-column" rowspan="3" scope="col">Vessel</th>
+									<th class="frozen-column range-column" rowspan="3" scope="col">Range</th>
+								{/if}
+								{#each cells as cell (cell.id)}
+									<th
+										colspan={cell.colspan}
+										rowspan={cell.rowspan}
+										scope={cell.column ? 'col' : 'colgroup'}
+										title={cell.column?.label}
+										data-column-id={cell.column?.id}
+									>
+										{cell.label}
+									</th>
+								{/each}
+							</tr>
+						{/each}
 					</thead>
 
 					<tbody>
 						{#each vesselReportRows as row, index (row.id)}
 							<tr>
-								<td>{index + 1}</td>
-								<td>
+								<td class="frozen-column number-column">{index + 1}</td>
+								<td class="frozen-column vessel-column">
 									<div class="vessel-name-cell">
 										<strong>{row.vessel_name}</strong>
-										<span>{row.device_id}</span>
 									</div>
 								</td>
-								<td>{formatRangeLabel(row)}</td>
+								<td class="frozen-column range-column">{formatRangeLabel(row)}</td>
 
 								{#each visibleDataColumns as col (col.id)}
-									<td class:total-cell={isTotalColumn(col)}>
+									<td class:total-cell={isTotalColumn(col)} data-column-id={col.id}>
 										{getAllVesselSummaryCellValue(row, col)}
 									</td>
 								{/each}
@@ -1777,6 +1785,7 @@
 	}
 
 	.table-wrapper {
+		--header-row-height: 34px;
 		display: block;
 		width: 100%;
 		max-width: 100%;
@@ -1789,7 +1798,6 @@
 
 	.table-wrapper table {
 		width: max-content;
-		min-width: 1800px;
 		border-collapse: separate;
 		border-spacing: 0;
 		font-size: 12px;
@@ -1797,84 +1805,84 @@
 
 	.table-wrapper thead th {
 		position: sticky;
-		top: 0;
+		top: calc(var(--header-level) * var(--header-row-height));
 		z-index: 5;
+	}
+
+	.table-wrapper thead tr {
+		height: var(--header-row-height);
 	}
 
 	.table-wrapper th,
 	.table-wrapper td {
-		min-width: 120px;
+		box-sizing: border-box;
+		min-width: 80px;
+		border-right: 1px solid var(--color-border);
 	}
 
-	.table-wrapper th.group-start {
-		border-left: 2px solid var(--color-accent, #2563eb);
-	}
-
-	.table-wrapper th:nth-child(1),
-	.table-wrapper td:nth-child(1) {
+	.table-wrapper .frozen-column {
 		position: sticky;
+		z-index: 2;
+		background: var(--color-surface);
+	}
+
+	.table-wrapper .number-column {
 		left: 0;
-		z-index: 6;
 		min-width: 54px;
 		width: 54px;
-		background: var(--color-surface);
+		max-width: 54px;
 	}
 
-	.table-wrapper th:nth-child(2),
-	.table-wrapper td:nth-child(2) {
-		position: sticky;
+	.table-wrapper .vessel-column {
 		left: 54px;
-		z-index: 6;
-		min-width: 180px;
-		width: 180px;
-		background: var(--color-surface);
+		min-width: 220px;
+		width: 220px;
+		max-width: 220px;
 	}
 
-	.table-wrapper th:nth-child(3),
-	.table-wrapper td:nth-child(3) {
-		position: sticky;
-		left: 234px;
-		z-index: 6;
+	.table-wrapper td.vessel-column {
+		white-space: normal;
+		overflow-wrap: anywhere;
+		text-align: left;
+	}
+
+	.table-wrapper .range-column {
+		left: 274px;
 		min-width: 300px;
 		width: 300px;
-		background: var(--color-surface);
+		max-width: 300px;
+		box-shadow: 2px 0 0 var(--color-border);
 	}
 
-	.table-wrapper thead th:nth-child(1),
-	.table-wrapper thead th:nth-child(2),
-	.table-wrapper thead th:nth-child(3) {
+	.table-wrapper thead th.frozen-column {
 		z-index: 8;
-		background: rgba(255, 255, 255, 0.06);
-	}
-
-	.table-wrapper tbody td:nth-child(1),
-	.table-wrapper tbody td:nth-child(2),
-	.table-wrapper tbody td:nth-child(3) {
-		box-shadow: 2px 0 0 rgba(226, 232, 240, 0.9);
+		background: var(--color-elevated);
 	}
 
 	.table-wrapper th {
-		padding: 10px 12px;
-		background: rgba(255, 255, 255, 0.06);
-		border-bottom: 1px solid #d9e2ec;
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-weight: 900;
-		text-align: left;
-		text-transform: uppercase;
+		padding: 6px 10px;
+		background: var(--color-elevated);
+		border-bottom: 1px solid var(--color-border);
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 800;
+		line-height: 20px;
+		text-align: center;
+		vertical-align: middle;
 		white-space: nowrap;
 	}
 
 	.table-wrapper td {
 		padding: 10px 12px;
-		border-bottom: 1px solid #edf2f7;
+		border-bottom: 1px solid var(--color-border-subtle);
 		color: var(--text-primary);
 		font-weight: 800;
+		text-align: center;
 		white-space: nowrap;
 		background: var(--color-surface);
 	}
 
-	.total-cell {
+	.table-wrapper td.total-cell {
 		background: var(--color-elevated);
 		color: #0369a1;
 		font-weight: 900;
@@ -1900,6 +1908,30 @@
 		padding: 18px;
 		color: var(--text-secondary);
 		font-weight: 800;
+	}
+
+	@media (max-width: 900px) {
+		.table-wrapper .range-column {
+			position: static;
+		}
+
+		.table-wrapper thead th.range-column {
+			position: sticky;
+			left: auto;
+			z-index: 5;
+		}
+	}
+
+	@media (max-width: 640px) {
+		.table-wrapper .vessel-column {
+			position: static;
+		}
+
+		.table-wrapper thead th.vessel-column {
+			position: sticky;
+			left: auto;
+			z-index: 5;
+		}
 	}
 
 	@media (max-width: 1100px) {
