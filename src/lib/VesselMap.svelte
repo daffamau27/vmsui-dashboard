@@ -132,8 +132,6 @@
       }
     }
 
-    // A trace timestamp may have telemetry without a usable GPS position.
-    // Do not move the vessel to 0,0 or reuse a different timestamp's position.
     if (showTraceLine && tracePoints.length) return [NaN, NaN];
 
     return [toNumber(latitude, 0), toNumber(longitude, 0)];

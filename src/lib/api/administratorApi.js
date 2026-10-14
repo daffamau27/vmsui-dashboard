@@ -138,6 +138,23 @@ export async function updateVesselAdminApi(id, payload) {
   return unwrap(response);
 }
 
+export async function getVesselHireHistoryApi(id, { page = 1, pageSize = 20 } = {}) {
+  if (!id) {
+    throw new Error("Vessel ID tidak valid.");
+  }
+
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize)
+  });
+
+  const response = await apiRequest(`/vessels/${id}/hire-history?${params.toString()}`, {
+    method: "GET"
+  });
+
+  return unwrap(response);
+}
+
 export async function updateVesselHireStatusAdminApi(id, payload) {
   if (!id) {
     throw new Error("Vessel ID tidak valid.");

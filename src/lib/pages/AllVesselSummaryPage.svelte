@@ -6,6 +6,11 @@
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
 	import { sortByAlpha } from '$lib/utils/alphaSort.js';
+	import {
+		buildAllVesselSummaryColumns,
+		groupAllVesselSummaryColumns,
+		getAllVesselSummaryCellValue
+	} from '$lib/utils/allVesselSummary.js';
 
 	const TIME_RANGE_PRESETS = [
 		{ id: 'midnight', label: '00:00 - 06:00', startTime: '00:00', endTime: '06:00' },
@@ -72,49 +77,6 @@
 
 	let canAccessAllVesselSummary = $derived(hasPermission('access_all_vessel_summary'));
 
-	let canViewEngineRuntimeTable = $derived(hasPermission('view_engine_runtime_table'));
-
-	let canViewFuelConsumptionTable = $derived(hasPermission('view_fuel_consumption_table'));
-
-	let canViewSpeedStatsTable = $derived(hasPermission('view_speed_stats_table'));
-
-	let canViewTravelDistanceTable = $derived(hasPermission('view_travel_distance_table'));
-
-	let canViewHighRpmLowSpeedTable = $derived(hasPermission('view_high_rpm_low_speed_table'));
-
-	let canViewFuelEcu = $derived(hasPermission('view_fuel_ecu'));
-	let canViewFuelFms = $derived(hasPermission('view_fuel_fms'));
-	let canViewFuelEmsInternal = $derived(hasPermission('view_fuel_ems_internal'));
-	let canViewFuelEmsExternal = $derived(hasPermission('view_fuel_ems_external'));
-	let canViewFuelEngineMaker = $derived(hasPermission('view_fuel_engine_maker'));
-
-	let canViewAnyFuel = $derived(
-		canViewFuelConsumptionTable &&
-			(canViewFuelEcu ||
-				canViewFuelFms ||
-				canViewFuelEmsInternal ||
-				canViewFuelEmsExternal ||
-				canViewFuelEngineMaker)
-	);
-
-	const staticReportColumns = [
-		{ id: 'data_received', label: 'DATA RECEIVED', type: 'percent', group: 'Additional' },
-		{ id: 'total_fuel', label: 'TOTAL FUEL', type: 'total', group: 'Additional' },
-		{ id: 'avg_speed', label: 'AVG SPEED', type: 'additional', group: 'Additional' },
-		{ id: 'max_speed', label: 'MAX SPEED', type: 'additional', group: 'Additional' },
-		{ id: 'distance', label: 'DISTANCE', type: 'additional', group: 'Additional' },
-		{ id: 'utc', label: 'UTC', type: 'utc', group: 'Additional' }
-	];
-
-	const defaultColumnIds = [
-		'data_received',
-		'total_fuel',
-		'avg_speed',
-		'max_speed',
-		'distance',
-		'utc'
-	];
-
 	let vesselReportRows = $state([]);
 
 	let selectedDeviceIds = $state([]);
@@ -129,7 +91,7 @@
 
 	let activeDefaultPresetId = $state('custom');
 	let showColumnSelector = $state(false);
-	let visibleColumnIds = $state([...defaultColumnIds]);
+	let visibleColumnIds = $state([]);
 
 	let hasLoadedReport = $state(false);
 	let loading = $state(false);
@@ -137,141 +99,8 @@
 	let completed = $state(0);
 	let reportError = $state('');
 
-	function makeEngineColumnId(metric, engineKey) {
-		return `engine__${metric}__${engineKey}`;
-	}
-
-	function parseEngineColumnId(columnId) {
-		const parts = String(columnId || '').split('__');
-
-		if (parts.length !== 3 || parts[0] !== 'engine') {
-			return null;
-		}
-
-		return {
-			metric: parts[1],
-			engineKey: parts[2]
-		};
-	}
-
-	function buildDynamicEngineColumns(rows) {
-		const engineMap = new Map();
-
-		rows.forEach((row) => {
-			const engines = Array.isArray(row?.engines) ? row.engines : [];
-
-			engines.forEach((engine) => {
-				if (!engine?.key) return;
-
-				if (!engineMap.has(engine.key)) {
-					engineMap.set(engine.key, {
-						key: engine.key,
-						name: engine.name || engine.key
-					});
-				}
-			});
-		});
-
-		const engines = Array.from(engineMap.values());
-
-		const runtimeColumns = engines.map((engine) => ({
-			id: makeEngineColumnId('runtime', engine.key),
-			label: `${engine.name} RH`,
-			type: 'runtime',
-			group: 'Runtime / RH',
-			engineKey: engine.key
-		}));
-
-		const fuelEmsColumns = engines.map((engine) => ({
-			id: makeEngineColumnId('fuel_ems', engine.key),
-			label: `${engine.name} FC (EMS)`,
-			type: 'fuel',
-			group: 'Fuel / FC',
-			engineKey: engine.key
-		}));
-
-		const fuelEcuColumns = engines.map((engine) => ({
-			id: makeEngineColumnId('fuel_ecu', engine.key),
-			label: `${engine.name} FC (ECU)`,
-			type: 'fuel',
-			group: 'Fuel / FC',
-			engineKey: engine.key
-		}));
-
-		const sritiColumns = engines.map((engine) => ({
-			id: makeEngineColumnId('sriti', engine.key),
-			label: `${engine.name} SRITI RH`,
-			type: 'additional',
-			group: 'Additional',
-			engineKey: engine.key
-		}));
-
-		const sritiFuelColumns = engines.map((engine) => ({
-			id: makeEngineColumnId('sriti_fuel', engine.key),
-			label: `${engine.name} SRITI FC`,
-			type: 'additional',
-			group: 'Additional',
-			engineKey: engine.key
-		}));
-
-		return [
-			...runtimeColumns,
-			...fuelEmsColumns,
-			...fuelEcuColumns,
-			...sritiColumns,
-			...sritiFuelColumns
-		];
-	}
-
-	function getEngineByKey(row, engineKey) {
-		const engines = Array.isArray(row?.engines) ? row.engines : [];
-
-		return engines.find((engine) => String(engine?.key) === String(engineKey));
-	}
-
-	function canViewReportColumn(columnId) {
-		const engineColumn = parseEngineColumnId(columnId);
-
-		if (engineColumn) {
-			if (engineColumn.metric === 'runtime') {
-				return canViewEngineRuntimeTable;
-			}
-
-			if (engineColumn.metric === 'fuel_ems') {
-				return canViewFuelConsumptionTable && (canViewFuelEmsInternal || canViewFuelEmsExternal);
-			}
-
-			if (engineColumn.metric === 'fuel_ecu') {
-				return (
-					canViewFuelConsumptionTable &&
-					(canViewFuelEcu || canViewFuelFms || canViewFuelEngineMaker)
-				);
-			}
-
-			if (engineColumn.metric === 'sriti' || engineColumn.metric === 'sriti_fuel') {
-				return canViewHighRpmLowSpeedTable;
-			}
-		}
-
-		if (columnId === 'data_received') return canAccessAllVesselSummary;
-
-		if (columnId === 'total_fuel') {
-			return canViewAnyFuel;
-		}
-
-		if (['avg_speed', 'max_speed'].includes(columnId)) {
-			return canViewSpeedStatsTable;
-		}
-
-		if (columnId === 'distance') {
-			return canViewTravelDistanceTable;
-		}
-
-		if (columnId === 'utc') {
-			return true;
-		}
-
-		return true;
+	function canViewReportColumn(column) {
+		return column.permissions.every((permission) => hasPermission(permission));
 	}
 
 	let selectedDevicesCount = $derived(selectedDeviceIds.length);
@@ -280,7 +109,7 @@
 		devices.length > 0 && selectedDeviceIds.length === devices.length
 	);
 
-	let selectedColumnCount = $derived(visibleColumnIds.length);
+	let selectedColumnCount = $derived(visibleDataColumns.length);
 
 	let filteredDevices = $derived(
 		sortByAlpha(
@@ -292,23 +121,15 @@
 
 	let selectedDevices = $derived(devices.filter((device) => selectedDeviceIds.includes(device.id)));
 
-	let dynamicEngineColumns = $derived(buildDynamicEngineColumns(vesselReportRows));
+	let reportColumns = $derived(buildAllVesselSummaryColumns(vesselReportRows));
 
-	let reportColumns = $derived([...dynamicEngineColumns, ...staticReportColumns]);
-
-	let permittedReportColumns = $derived(reportColumns.filter((col) => canViewReportColumn(col.id)));
+	let permittedReportColumns = $derived(reportColumns.filter(canViewReportColumn));
 
 	let visibleDataColumns = $derived(
 		permittedReportColumns.filter((col) => visibleColumnIds.includes(col.id))
 	);
 
-	let runtimeColumns = $derived(
-		permittedReportColumns.filter((col) => col.group === 'Runtime / RH')
-	);
-
-	let fuelColumns = $derived(permittedReportColumns.filter((col) => col.group === 'Fuel / FC'));
-
-	let controlColumns = $derived(permittedReportColumns.filter((col) => col.group === 'Additional'));
+	let columnGroups = $derived(groupAllVesselSummaryColumns(permittedReportColumns));
 
 	let selectedRangeSummary = $derived(
 		`${defaultStartDate.replace('T', ' ')} → ${defaultEndDate.replace('T', ' ')}`
@@ -323,23 +144,6 @@
 	let progress = $derived(
 		selectedDevicesCount > 0 ? Math.min(100, (completed / selectedDevicesCount) * 100) : 0
 	);
-
-	let totalFuelSummary = $derived(
-		vesselReportRows.reduce(
-			(sum, row) => sum + numberValue(getCellValue(row, { id: 'total_fuel' })),
-			0
-		)
-	);
-
-	let avgSpeedSummary = $derived(() => {
-		const speeds = vesselReportRows
-			.map((row) => numberValue(getCellValue(row, { id: 'avg_speed' })))
-			.filter((value) => value > 0);
-
-		if (!speeds.length) return 0;
-
-		return speeds.reduce((sum, value) => sum + value, 0) / speeds.length;
-	});
 
 	function getTodayDateTime(time) {
 		const today = new Date();
@@ -356,22 +160,6 @@
 		const minute = String(now.getMinutes()).padStart(2, '0');
 
 		return `${hour}:${minute}`;
-	}
-
-	function numberValue(value) {
-		const numeric = Number(value);
-		return Number.isFinite(numeric) ? numeric : 0;
-	}
-
-	function formatNumber(value, digits = 2) {
-		const numeric = Number(value);
-
-		if (!Number.isFinite(numeric)) return '-';
-
-		return numeric.toLocaleString('en-US', {
-			minimumFractionDigits: 0,
-			maximumFractionDigits: digits
-		});
 	}
 
 	function formatDateTimeForApi(value) {
@@ -483,99 +271,6 @@
 		};
 	}
 
-	function getTotalFuel(row) {
-		const grand = row?.totals?.grand || {};
-		let total = 0;
-
-		if (canViewFuelEcu) {
-			total += numberValue(grand.ecu);
-		}
-
-		if (canViewFuelFms) {
-			total += numberValue(grand.fms);
-		}
-
-		if (canViewFuelEmsInternal) {
-			total += numberValue(grand.ems_internal);
-		}
-
-		if (canViewFuelEmsExternal) {
-			total += numberValue(grand.ems_external);
-		}
-
-		if (canViewFuelEngineMaker) {
-			total += numberValue(grand.engine_maker);
-		}
-
-		return total;
-	}
-
-	function getCellValue(row, col) {
-		const engineColumn = parseEngineColumnId(col.id);
-
-		if (engineColumn) {
-			const engine = getEngineByKey(row, engineColumn.engineKey);
-
-			if (!engine) return '-';
-
-			if (engineColumn.metric === 'runtime') {
-				return engine.runtime_formatted || '0h 0m';
-			}
-
-			if (engineColumn.metric === 'fuel_ems') {
-				const fuel = engine.fuel || {};
-
-				const value =
-					(canViewFuelEmsInternal ? numberValue(fuel.ems_internal) : 0) +
-					(canViewFuelEmsExternal ? numberValue(fuel.ems_external) : 0);
-
-				return formatNumber(value);
-			}
-
-			if (engineColumn.metric === 'fuel_ecu') {
-				const fuel = engine.fuel || {};
-
-				const value =
-					(canViewFuelEcu ? numberValue(fuel.ecu) : 0) +
-					(canViewFuelFms ? numberValue(fuel.fms) : 0) +
-					(canViewFuelEngineMaker ? numberValue(fuel.engine_maker) : 0);
-
-				return formatNumber(value);
-			}
-
-			if (engineColumn.metric === 'sriti') {
-				return engine.sriti_formatted || formatNumber(engine.sriti_duration || 0);
-			}
-
-			if (engineColumn.metric === 'sriti_fuel') {
-				return formatNumber(engine.sriti_fuel ?? engine.sritiFuel ?? 0);
-			}
-		}
-
-		switch (col.id) {
-			case 'data_received':
-				return `${formatNumber(row?.data_received?.percentage || 0, 1)}%`;
-
-			case 'total_fuel':
-				return formatNumber(getTotalFuel(row));
-
-			case 'avg_speed':
-				return formatNumber(row?.speed?.avg_running_speed || 0);
-
-			case 'max_speed':
-				return formatNumber(row?.speed?.top_speed || 0);
-
-			case 'distance':
-				return formatNumber(row?.distance || 0);
-
-			case 'utc':
-				return row?.range?.timezone || '-';
-
-			default:
-				return '-';
-		}
-	}
-
 	function isTotalColumn(col) {
 		return col.type === 'total' || col.id.includes('total');
 	}
@@ -633,9 +328,7 @@
 	}
 
 	function resetVisibleColumns() {
-		visibleColumnIds = defaultColumnIds.filter((id) =>
-			permittedReportColumns.some((col) => col.id === id)
-		);
+		visibleColumnIds = permittedReportColumns.filter((col) => col.defaultVisible).map((col) => col.id);
 	}
 
 	function setColumnVisibility(columnId, checked) {
@@ -804,11 +497,9 @@
 				id: String(row.vessel_id)
 			}));
 
-			const dynamicDefaultColumnIds = buildDynamicEngineColumns(vesselReportRows)
-				.filter((col) => ['runtime', 'fuel'].includes(col.type) || col.id.includes('sriti'))
+			visibleColumnIds = buildAllVesselSummaryColumns(vesselReportRows)
+				.filter(canViewReportColumn)
 				.map((col) => col.id);
-
-			visibleColumnIds = [...new Set([...dynamicDefaultColumnIds, ...defaultColumnIds])];
 			
 			hasLoadedReport = true;
 			loadingStatus = 'Completed';
@@ -894,15 +585,6 @@
 			<strong>{vesselReportRows.length}</strong>
 		</article>
 
-		<article class="summary-card">
-			<span>Total Fuel</span>
-			<strong>{formatNumber(totalFuelSummary)} L</strong>
-		</article>
-
-		<article class="summary-card">
-			<span>Avg Running Speed</span>
-			<strong>{formatNumber(avgSpeedSummary(), 2)} kt</strong>
-		</article>
 	</section>
 
 	<section class="layout-grid">
@@ -1228,50 +910,22 @@
 						</div>
 
 						<div class="column-groups">
-							<div class="column-group">
-								<h3>Runtime / RH <span>{getGroupVisibleCount(runtimeColumns)}</span></h3>
+							{#each columnGroups as group (group.label)}
+								<div class="column-group">
+									<h3>{group.label} <span>{getGroupVisibleCount(group.columns)}</span></h3>
 
-								{#each runtimeColumns as col}
-									<label class="check-row">
-										<input
-											type="checkbox"
-											checked={visibleColumnIds.includes(col.id)}
-											onchange={(event) => setColumnVisibility(col.id, event.currentTarget.checked)}
-										/>
-										<span>{col.label}</span>
-									</label>
-								{/each}
-							</div>
-
-							<div class="column-group">
-								<h3>Fuel / FC <span>{getGroupVisibleCount(fuelColumns)}</span></h3>
-
-								{#each fuelColumns as col}
-									<label class="check-row">
-										<input
-											type="checkbox"
-											checked={visibleColumnIds.includes(col.id)}
-											onchange={(event) => setColumnVisibility(col.id, event.currentTarget.checked)}
-										/>
-										<span>{col.label}</span>
-									</label>
-								{/each}
-							</div>
-
-							<div class="column-group">
-								<h3>Additional <span>{getGroupVisibleCount(controlColumns)}</span></h3>
-
-								{#each controlColumns as col}
-									<label class="check-row">
-										<input
-											type="checkbox"
-											checked={visibleColumnIds.includes(col.id)}
-											onchange={(event) => setColumnVisibility(col.id, event.currentTarget.checked)}
-										/>
-										<span>{col.label}</span>
-									</label>
-								{/each}
-							</div>
+									{#each group.columns as col (col.id)}
+										<label class="check-row">
+											<input
+												type="checkbox"
+												checked={visibleColumnIds.includes(col.id)}
+												onchange={(event) => setColumnVisibility(col.id, event.currentTarget.checked)}
+											/>
+											<span>{col.label}</span>
+										</label>
+									{/each}
+								</div>
+							{/each}
 						</div>
 					</div>
 				{/if}
@@ -1322,8 +976,12 @@
 							<th>Vessel</th>
 							<th>Range</th>
 
-							{#each visibleDataColumns as col}
-								<th class:total-column={isTotalColumn(col)}>
+							{#each visibleDataColumns as col, index (col.id)}
+								<th
+									class:total-column={isTotalColumn(col)}
+									class:group-start={index === 0 || col.group !== visibleDataColumns[index - 1].group}
+									data-column-group={col.group}
+								>
 									{col.label}
 								</th>
 							{/each}
@@ -1331,7 +989,7 @@
 					</thead>
 
 					<tbody>
-						{#each vesselReportRows as row, index}
+						{#each vesselReportRows as row, index (row.id)}
 							<tr>
 								<td>{index + 1}</td>
 								<td>
@@ -1342,9 +1000,9 @@
 								</td>
 								<td>{formatRangeLabel(row)}</td>
 
-								{#each visibleDataColumns as col}
+								{#each visibleDataColumns as col (col.id)}
 									<td class:total-cell={isTotalColumn(col)}>
-										{getCellValue(row, col)}
+										{getAllVesselSummaryCellValue(row, col)}
 									</td>
 								{/each}
 							</tr>
@@ -1460,7 +1118,7 @@
 
 	.summary-grid {
 		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
 		gap: 12px;
 	}
 
@@ -2051,7 +1709,7 @@
 
 	.column-groups {
 		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
 		gap: 12px;
 	}
 
@@ -2146,6 +1804,10 @@
 	.table-wrapper th,
 	.table-wrapper td {
 		min-width: 120px;
+	}
+
+	.table-wrapper th.group-start {
+		border-left: 2px solid var(--color-accent, #2563eb);
 	}
 
 	.table-wrapper th:nth-child(1),

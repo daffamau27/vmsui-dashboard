@@ -1,7 +1,10 @@
 <script>
 	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { onMount } from 'svelte';
+	import { fade } from 'svelte/transition';
+	import { cubicOut } from 'svelte/easing';
 	import { apiRequest } from '$lib/api/authApi.js';
+	import { slideScale } from '$lib/utils/modalTransition.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 
 	let { active = true, refreshToken = 0 } = $props();
@@ -582,12 +585,19 @@
 </section>
 
 {#if detailOpen}
-	<div class="detail-overlay" role="presentation" onclick={closeDetail}>
+	<div
+		class="detail-overlay"
+		role="presentation"
+		onclick={closeDetail}
+		transition:fade={{ duration: 220, easing: cubicOut }}
+	>
 		<section
 			class="detail-modal"
 			role="dialog"
 			aria-modal="true"
 			onclick={(event) => event.stopPropagation()}
+			in:slideScale={{ intro: true, distance: 480, start: 0.6, duration: 280 }}
+			out:slideScale={{ intro: false, distance: 480, start: 0.6, fadeAt: 0.3, duration: 280 }}
 		>
 			<div class="detail-header">
 				<div>

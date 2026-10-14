@@ -21,6 +21,8 @@
 		handleCoordinateCopyClick
 	} from '$lib/utils/coordinateClipboard.js';
 	import { sortByAlpha } from '$lib/utils/alphaSort.js';
+	import { slideScale, panelEnter } from '$lib/utils/modalTransition.js';
+	import { enableFleetPopupTransition } from '$lib/utils/leafletPopupTransition.js';
 
 	let { active = false } = $props();
 
@@ -35,6 +37,12 @@
 	let selectedVesselId = $state(null);
 	let selectedVesselDetail = $state(null);
 	let showDetailPanel = $state(false);
+	let detailEntryPoint = $state(null);
+	let detailSwitchFrom = $state(null);
+	// Counter yang HANYA naik saat panel ganti vessel (bukan buka/tutup). Dipakai
+	// sebagai {#key} agar remount hanya terjadi saat switch, sehingga intro saat
+	// buka pertama dan outro saat tutup (ke kanan) tetap dapat dimainkan.
+	let detailSwitchSeq = $state(0);
 	let detailCctvSnapshots = $state([]);
 	let detailCctvLoading = $state(false);
 	let detailCctvError = $state('');
@@ -716,7 +724,6 @@
 			return Number.isNaN(date.getTime()) ? null : date;
 		}
 
-		// Format contoh: "03/06/2026 16:34:00 (UTC+07:00)"
 		const match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
 
 		if (match) {
@@ -1503,32 +1510,147 @@
 		selectedVesselId = null;
 		selectedVesselDetail = null;
 		showDetailPanel = false;
+		detailSwitchFrom = null;
+		detailEntryPoint = null;
 
 		refreshMarkerSelection();
 	}
 
+	function getMarkerClientPoint(id) {
+		const marker = markers.get(String(id));
+
+		if (!map || !mapContainer || !marker?.getLatLng) return null;
+
+		try {
+			const point = map.latLngToContainerPoint(marker.getLatLng());
+			const rect = mapContainer.getBoundingClientRect();
+
+			return { x: rect.left + point.x, y: rect.top + point.y };
+		} catch {
+			return null;
+		}
+	}
+
+	function getVesselListIndex(id) {
+		return filteredVessels.findIndex((vessel) => String(vessel.id) === String(id));
+	}
+
+	function resolveDetailSwitchFrom(previousId, nextId) {
+		if (!previousId || String(previousId) === String(nextId)) return null;
+
+		const previousIndex = getVesselListIndex(previousId);
+		const nextIndex = getVesselListIndex(nextId);
+
+		if (previousIndex === -1 || nextIndex === -1) return null;
+
+		return nextIndex < previousIndex ? 'top' : 'bottom';
+	}
+
+	function detailIntro(node) {
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return { duration: 0 };
+
+		if (detailSwitchFrom) {
+			// Simpan arah di elemen ini agar outro-nya konsisten walau state global
+			// sudah dioverwrite oleh switch berikutnya.
+			const sign = detailSwitchFrom === 'top' ? -1 : 1;
+			node.dataset.detailSwitchSign = String(sign);
+
+			return slideScale(node, {
+				intro: true,
+				axis: 'y',
+				sign,
+				distance: 200,
+				start: 0.85,
+				duration: 220
+			});
+		}
+
+		if (node.dataset) {
+			delete node.dataset.detailSwitchSign;
+		}
+
+		// Buka pertama: masuk dari titik kapal (fallback ke kanan).
+		return panelEnter(node, { from: detailEntryPoint, start: 0.15, duration: 380 });
+	}
+
+	function detailOutro(node) {
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return { duration: 0 };
+
+		const switchSign = Number(node?.dataset?.detailSwitchSign);
+		const isSwitch = showDetailPanel && Number.isFinite(switchSign) && switchSign !== 0;
+
+		if (isSwitch) {
+			// Ganti vessel: panel lama keluar ke arah berlawanan dengan sisi masuk.
+			return slideScale(node, {
+				intro: false,
+				axis: 'y',
+				sign: -switchSign,
+				distance: 200,
+				start: 0.85,
+				fadeAt: 0.3,
+				duration: 220
+			});
+		}
+
+		// Tutup panel: geser melewati sisi kanan sambil memudar dan mengecil.
+		return slideScale(node, {
+			intro: false,
+			axis: 'x',
+			sign: 1,
+			distance: node.getBoundingClientRect().width + 32,
+			start: 0.55,
+			fadeAt: 1,
+			duration: 280
+		});
+	}
+
 	async function openVesselDetail(id) {
-		selectedVesselId = String(id);
+		const normalizedId = String(id);
+		const previousId = selectedVesselId;
+		const wasPanelOpen = showDetailPanel;
+
+		detailSwitchFrom = wasPanelOpen ? resolveDetailSwitchFrom(previousId, normalizedId) : null;
+
+		selectedVesselId = normalizedId;
 		selectedVesselDetail = null;
+		detailEntryPoint = getMarkerClientPoint(normalizedId);
+
+		if (wasPanelOpen) {
+			detailSwitchSeq += 1;
+		}
+
 		showDetailPanel = true;
 
 		refreshMarkerSelection();
 
-		await loadVesselDetail(id);
+		await loadVesselDetail(normalizedId);
 	}
 
 	async function openVesselDetailFromPopup(id, marker) {
 		const normalizedId = String(id);
+		const wasPanelOpen = showDetailPanel;
 
 		ignoreNextPopupCloseForVesselId = normalizedId;
 		openingDetailFromPopupForVesselId = normalizedId;
 
-		marker?.closePopup?.();
+		detailSwitchFrom = wasPanelOpen
+			? resolveDetailSwitchFrom(selectedVesselId, normalizedId)
+			: null;
 
+		// Set state panel lebih dulu agar popup ditutup tanpa animasi outro
+		// (lihat shouldSkipClosing pada enableFleetPopupTransition).
 		selectedVesselId = normalizedId;
 		selectedVesselDetail = null;
+		detailEntryPoint = getMarkerClientPoint(normalizedId);
+
+		if (wasPanelOpen) {
+			detailSwitchSeq += 1;
+		}
+
 		showDetailPanel = true;
 		isSidebarOpen = false;
+
+		marker?.closePopup?.();
 
 		refreshMarkerSelection();
 
@@ -1578,6 +1700,14 @@
 		const normalizedId = String(id);
 		const previousId = selectedVesselId ? String(selectedVesselId) : null;
 		const keepDetailPanelOpen = showDetailPanel;
+		const isVesselSwitch = keepDetailPanelOpen && previousId !== normalizedId;
+
+		// Hitung arah SEBELUM state apa pun berubah, selama urutan list masih stabil.
+		// Saat panel sudah terbuka dan user memilih vessel lain: animasi ganti
+		// mengikuti urutan list (dari atas / ke bawah).
+		detailSwitchFrom = isVesselSwitch
+			? resolveDetailSwitchFrom(previousId, normalizedId)
+			: null;
 
 		if (previousId && previousId !== normalizedId) {
 			const previousMarker = markers.get(previousId);
@@ -1591,6 +1721,13 @@
 		selectedVesselId = normalizedId;
 		selectedVesselDetail = null;
 		showDetailPanel = keepDetailPanelOpen;
+		detailEntryPoint = getMarkerClientPoint(normalizedId);
+
+		// Remount panel hanya saat benar-benar ganti vessel (key switch naik).
+		if (isVesselSwitch) {
+			detailSwitchSeq += 1;
+		}
+
 		if (!keepSidebarOpen) {
 			isSidebarOpen = false;
 		}
@@ -1635,6 +1772,7 @@
 
 		if (isDifferentVessel) {
 			showDetailPanel = false;
+			detailSwitchFrom = null;
 		}
 
 		refreshMarkerSelection();
@@ -2624,6 +2762,7 @@
 					selectedVesselId = null;
 					selectedVesselDetail = null;
 					showDetailPanel = false;
+					detailSwitchFrom = null;
 				}
 			}
 
@@ -2818,6 +2957,8 @@
 
 			L = await import('leaflet');
 			await import('leaflet/dist/leaflet.css');
+
+			enableFleetPopupTransition(L, { shouldSkipClosing: () => showDetailPanel });
 
 			if (!isFleetMounted || !isFleetPageActive || !container) return;
 
@@ -3307,7 +3448,14 @@
 				</button>
 
 				{#if showDetailPanel && selectedVessel}
-					<aside class="vessel-detail-panel" class:detail-offline={!selectedVessel.online}>
+					{#key detailSwitchSeq}
+					<!-- Global juga menjalankan transisi ketika blok if luar dibuka/ditutup. -->
+					<aside
+						class="vessel-detail-panel"
+						class:detail-offline={!selectedVessel.online}
+						in:detailIntro|global
+						out:detailOutro|global
+					>
 						<div class="detail-panel-header">
 							<div class="detail-title-wrap">
 								<span
@@ -3647,6 +3795,7 @@
 							</section>
 						</div>
 					</aside>
+					{/key}
 				{/if}
 
 				<div class:legend-collapsed={!isMapLegendOpen} class="map-legend" bind:this={mapLegendElement}>
@@ -6141,6 +6290,47 @@
 		box-shadow: 0 7px 16px rgba(15, 23, 42, 0.12);
 	}
 
+	/* Popup vessel & asset tumbuh/menyusut dari titik kapal (tip di bawah). */
+	:global(.fleet-leaflet-popup .leaflet-popup-content-wrapper),
+	:global(.asset-leaflet-popup .leaflet-popup-content-wrapper) {
+		transform-origin: 50% 100%;
+		animation: fleetPopupIn 280ms cubic-bezier(0.215, 0.61, 0.355, 1);
+	}
+
+	:global(.fleet-leaflet-popup.fleet-popup-closing .leaflet-popup-content-wrapper),
+	:global(.asset-leaflet-popup.fleet-popup-closing .leaflet-popup-content-wrapper) {
+		animation: fleetPopupOut 280ms cubic-bezier(0.215, 0.61, 0.355, 1) forwards;
+	}
+
+	@keyframes fleetPopupIn {
+		from {
+			opacity: 0;
+			transform: translateY(26px) scale(0.6);
+		}
+
+		to {
+			opacity: 1;
+			transform: translateY(0) scale(1);
+		}
+	}
+
+	@keyframes fleetPopupOut {
+		0% {
+			opacity: 1;
+			transform: translateY(0) scale(1);
+		}
+
+		70% {
+			opacity: 1;
+			transform: translateY(18px) scale(0.72);
+		}
+
+		100% {
+			opacity: 0;
+			transform: translateY(26px) scale(0.6);
+		}
+	}
+
 	:global(.fleet-leaflet-popup .leaflet-popup-close-button) {
 		top: 5px !important;
 		right: 5px !important;
@@ -6954,7 +7144,6 @@
 		background: var(--fleet-map-glass-bg);
 		box-shadow: var(--fleet-map-glass-shadow);
 		backdrop-filter: var(--fleet-map-glass-blur);
-		animation: detailPanelIn 220ms var(--ease-spring);
 	}
 
 	.vessel-detail-panel.detail-offline {
@@ -7623,17 +7812,6 @@
 		background: rgba(255, 255, 255, 0.02);
 		color: var(--text-secondary);
 		font-size: 9px;
-	}
-
-	@keyframes detailPanelIn {
-		from {
-			opacity: 0;
-			transform: translateX(14px) scale(0.985);
-		}
-		to {
-			opacity: 1;
-			transform: translateX(0) scale(1);
-		}
 	}
 
 	/* =========================

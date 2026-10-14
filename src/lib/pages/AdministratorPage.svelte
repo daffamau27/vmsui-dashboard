@@ -3048,8 +3048,6 @@
 			permissionAccess: buildAccessPayload('permission')
 		};
 
-		// The latest POST /users API endpoint does not accept assetAccess.
-		// Creation saves asset access with a follow-up PUT once the new user ID is available.
 		if (mode === 'edit') {
 			payload.assetAccess = buildAccessPayload('asset');
 		}
@@ -3095,7 +3093,6 @@
 					);
 				}
 
-				// Switch to edit before the second request so retries cannot create a duplicate user.
 				selectedUser = created;
 				mode = 'edit';
 				form = { ...submittedForm, password: '' };
@@ -3173,7 +3170,6 @@
 		const idsKey = type === 'asset' ? 'selectedAssetIds' : 'selectedVesselIds';
 		const textKey = type === 'asset' ? 'assetIdsText' : 'vesselIdsText';
 		const selected = new Set(form[idsKey]);
-		// Company selection includes all members, even when search hides some of them.
 		for (const option of group.options) {
 			if (checked) selected.add(option.id);
 			else selected.delete(option.id);
