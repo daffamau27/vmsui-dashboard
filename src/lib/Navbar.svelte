@@ -97,7 +97,6 @@
 			companyId: item?.companyId ?? null,
 			companyName: item?.companyName || '-',
 
-			// Endpoint /users/my-vessels does not include live status yet
 			online: item?.online ?? null,
 
 			raw: item

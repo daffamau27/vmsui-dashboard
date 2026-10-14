@@ -1,5 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
+	import { fade } from 'svelte/transition';
+	import { cubicOut } from 'svelte/easing';
 	import {
 		getCurrentUserApi,
 		getMyVesselsApi,
@@ -7,9 +9,11 @@
 		updateCurrentUserApi,
 		changePasswordApi
 	} from '$lib/api/authApi.js';
+	import { getVesselHireHistoryApi } from '$lib/api/administratorApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import AuditLogPage from '$lib/pages/AuditLogPage.svelte';
 	import { sortByAlpha } from '$lib/utils/alphaSort.js';
+	import { slideScale } from '$lib/utils/modalTransition.js';
 
 	let loading = true;
 	let savingProfile = false;
@@ -17,6 +21,21 @@
 
 	let errorMessage = '';
 	let successMessage = '';
+
+	let hireHistoryModalOpen = false;
+	let hireHistoryLoading = false;
+	let hireHistoryError = '';
+	let hireHistoryVessel = null;
+	let hireHistoryItems = [];
+	let hireHistoryPage = 1;
+	let hireHistoryPagination = {
+		page: 1,
+		pageSize: 20,
+		totalItems: 0,
+		totalPages: 1,
+		hasNextPage: false,
+		hasPrevPage: false
+	};
 
 	let currentUser = null;
 	let vessels = [];
@@ -161,6 +180,107 @@
 		}
 	}
 
+	function getVesselId(vessel) {
+		return vessel?.vesselId || vessel?.id || vessel?.vessel_id || vessel?.dbId || null;
+	}
+
+	function getVesselLabel(vessel) {
+		return vessel?.vesselName || vessel?.deviceName || vessel?.name || '-';
+	}
+
+	function closeHireHistory() {
+		if (hireHistoryLoading) return;
+
+		hireHistoryModalOpen = false;
+		hireHistoryVessel = null;
+		hireHistoryItems = [];
+		hireHistoryError = '';
+		hireHistoryPage = 1;
+	}
+
+	function handleHireHistoryBackdrop(event) {
+		if (event.target === event.currentTarget) {
+			closeHireHistory();
+		}
+	}
+
+	function handleHireHistoryKeydown(event) {
+		if (event.key === 'Escape') {
+			closeHireHistory();
+		}
+	}
+
+	async function loadHireHistoryPage(vesselId, page) {
+		hireHistoryLoading = true;
+		hireHistoryError = '';
+
+		try {
+			const payload = await getVesselHireHistoryApi(vesselId, { page, pageSize: 20 });
+
+			hireHistoryItems = Array.isArray(payload?.items) ? payload.items : [];
+			hireHistoryPage = payload?.pagination?.page ?? page;
+			hireHistoryPagination = {
+				page: payload?.pagination?.page ?? page,
+				pageSize: payload?.pagination?.pageSize ?? 20,
+				totalItems: payload?.pagination?.totalItems ?? hireHistoryItems.length,
+				totalPages: payload?.pagination?.totalPages ?? 1,
+				hasNextPage: Boolean(payload?.pagination?.hasNextPage),
+				hasPrevPage: Boolean(payload?.pagination?.hasPrevPage)
+			};
+		} catch (error) {
+			hireHistoryItems = [];
+			hireHistoryError = error.message || 'Failed to load vessel hire history.';
+			hireHistoryPagination = {
+				page,
+				pageSize: 20,
+				totalItems: 0,
+				totalPages: 1,
+				hasNextPage: false,
+				hasPrevPage: false
+			};
+		} finally {
+			hireHistoryLoading = false;
+		}
+	}
+
+	function openHireHistory(vessel) {
+		const vesselId = getVesselId(vessel);
+
+		if (!vesselId) {
+			errorMessage = 'Unable to open hire history: vessel ID is missing.';
+			return;
+		}
+
+		hireHistoryVessel = vessel;
+		hireHistoryItems = [];
+		hireHistoryError = '';
+		hireHistoryPage = 1;
+		hireHistoryPagination = {
+			page: 1,
+			pageSize: 20,
+			totalItems: 0,
+			totalPages: 1,
+			hasNextPage: false,
+			hasPrevPage: false
+		};
+		hireHistoryModalOpen = true;
+
+		loadHireHistoryPage(vesselId, 1);
+	}
+
+	function goToHireHistoryPage(page) {
+		const vesselId = getVesselId(hireHistoryVessel);
+
+		if (!vesselId || hireHistoryLoading) return;
+
+		const targetPage = Number(page);
+
+		if (!Number.isFinite(targetPage) || targetPage < 1) return;
+		if (targetPage > (hireHistoryPagination.totalPages || 1)) return;
+
+		loadHireHistoryPage(vesselId, targetPage);
+	}
+
 	function getInitials(name = '') {
 		const parts = name.trim().split(' ').filter(Boolean);
 
@@ -196,6 +316,8 @@
 
 	onMount(loadProfilePage);
 </script>
+
+<svelte:window on:keydown={handleHireHistoryKeydown} />
 
 <svelte:head>
 	<title>Profile</title>
@@ -415,6 +537,13 @@
 									<div>
 										<strong>{vessel.vesselName || vessel.deviceName || '-'}</strong>
 									</div>
+									<button
+										type="button"
+										class="hire-history-button"
+										on:click={() => openHireHistory(vessel)}
+									>
+										Hire History
+									</button>
 								</div>
 							{/each}
 						</div>
@@ -456,6 +585,120 @@
 		</section>
 	{/if}
 </section>
+
+{#if hireHistoryModalOpen}
+	<div
+		class="hire-history-backdrop"
+		role="presentation"
+		on:click={handleHireHistoryBackdrop}
+		transition:fade={{ duration: 220, easing: cubicOut }}
+	>
+		<section
+			class="hire-history-modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="hire-history-title"
+			in:slideScale={{ intro: true, distance: 480, start: 0.6, duration: 280 }}
+			out:slideScale={{ intro: false, distance: 480, start: 0.6, fadeAt: 0.3, duration: 280 }}
+		>
+			<header class="hire-history-header">
+				<div>
+					<span class="page-kicker">Hire History</span>
+					<h2 id="hire-history-title">{getVesselLabel(hireHistoryVessel)}</h2>
+					<p>{hireHistoryPagination.totalItems} record(s) found</p>
+				</div>
+				<button
+					type="button"
+					class="hire-history-close"
+					on:click={closeHireHistory}
+					disabled={hireHistoryLoading}
+					aria-label="Close hire history">×</button
+				>
+			</header>
+
+			<div class="hire-history-body">
+				{#if hireHistoryLoading}
+					<div class="hire-history-state">Loading hire history...</div>
+				{:else if hireHistoryError}
+					<div class="hire-history-state danger" role="alert">{hireHistoryError}</div>
+				{:else if hireHistoryItems.length}
+					<ul class="hire-history-list">
+						{#each hireHistoryItems as item, index}
+							<li class="hire-history-item">
+								<div class="hire-history-item-head">
+									<strong>Record #{index + 1}</strong>
+									<span class="hire-history-duration">
+										{item?.duration?.formatted || '-'}
+										{#if item?.duration?.ongoing}
+											<em>Ongoing</em>
+										{/if}
+									</span>
+								</div>
+
+								<div class="hire-history-timeline">
+									<div class="hire-history-event on">
+										<span class="event-label">On Hire</span>
+										<strong>{item?.on_hire?.formatted || '-'}</strong>
+										<small>
+											By {item?.on_hire?.by || '-'}
+											{#if item?.on_hire?.reason} • {item.on_hire.reason}{/if}
+										</small>
+										{#if item?.on_hire?.note}
+											<p>{item.on_hire.note}</p>
+										{/if}
+									</div>
+
+									<div class="hire-history-event off">
+										<span class="event-label">Off Hire</span>
+										{#if item?.off_hire}
+											<strong>{item?.off_hire?.formatted || '-'}</strong>
+											<small>
+												By {item?.off_hire?.by || '-'}
+												{#if item?.off_hire?.reason} • {item.off_hire.reason}{/if}
+											</small>
+											{#if item?.off_hire?.note}
+												<p>{item.off_hire.note}</p>
+											{/if}
+										{:else}
+											<strong>-</strong>
+											<small>Still on hire</small>
+										{/if}
+									</div>
+								</div>
+							</li>
+						{/each}
+					</ul>
+				{:else}
+					<div class="hire-history-state">No hire history available for this vessel.</div>
+				{/if}
+			</div>
+
+			<footer class="hire-history-pagination">
+				<button
+					type="button"
+					class="secondary-button"
+					on:click={() => goToHireHistoryPage(hireHistoryPage - 1)}
+					disabled={!hireHistoryPagination.hasPrevPage || hireHistoryLoading}
+				>
+					Previous
+				</button>
+
+				<span>
+					Page {hireHistoryPagination.page || 1} of {hireHistoryPagination.totalPages || 1}
+				</span>
+
+				<button
+					type="button"
+					class="secondary-button"
+					on:click={() => goToHireHistoryPage(hireHistoryPage + 1)}
+					disabled={!hireHistoryPagination.hasNextPage || hireHistoryLoading}
+				>
+					Next
+				</button>
+			</footer>
+		</section>
+	</div>
+{/if}
 
 <style>
 	.profile-page {
@@ -822,7 +1065,7 @@
 
 	.access-row {
 		display: grid;
-		grid-template-columns: 42px minmax(0, 1fr);
+		grid-template-columns: 42px minmax(0, 1fr) auto;
 		gap: 12px;
 		align-items: center;
 		padding: 12px;
@@ -830,6 +1073,24 @@
 		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+	}
+
+	.hire-history-button {
+		flex-shrink: 0;
+		height: 30px;
+		padding: 0 12px;
+		border: 1px solid #bfdbfe;
+		border-radius: 999px;
+		background: var(--color-accent-muted);
+		color: #1d4ed8;
+		font-size: 11px;
+		font-weight: 900;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
+	.hire-history-button:hover:not(:disabled) {
+		background: #dbeafe;
 	}
 
 	.access-row:hover {
@@ -889,6 +1150,280 @@
 		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 800;
+	}
+
+	.hire-history-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 30000;
+		display: grid;
+		place-items: center;
+		padding: 20px;
+		background: rgba(2, 6, 23, 0.72);
+		backdrop-filter: blur(8px);
+	}
+
+	.hire-history-modal {
+		width: min(620px, 100%);
+		max-height: calc(100dvh - 40px);
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		border: 1px solid #d9e2ec;
+		border-radius: 16px;
+		background: var(--color-surface);
+		box-shadow: 0 26px 80px rgba(0, 0, 0, 0.35);
+	}
+
+	.hire-history-header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 16px;
+		padding: 16px 18px;
+		border-bottom: 1px solid #e5edf5;
+	}
+
+	.hire-history-header h2 {
+		margin: 6px 0 0;
+		color: var(--text-primary);
+		font-size: 18px;
+		font-weight: 900;
+		overflow-wrap: anywhere;
+	}
+
+	.hire-history-header p {
+		margin: 5px 0 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.hire-history-close {
+		display: grid;
+		place-items: center;
+		width: 32px;
+		height: 32px;
+		padding: 0;
+		border: 1px solid #e2e8f0;
+		border-radius: 9px;
+		background: rgba(15, 23, 42, 0.05);
+		color: #334155;
+		font-size: 20px;
+		font-weight: 900;
+		line-height: 1;
+		cursor: pointer;
+	}
+
+	.hire-history-close:hover:not(:disabled) {
+		background: rgba(15, 23, 42, 0.12);
+	}
+
+	.hire-history-body {
+		overflow-y: auto;
+		padding: 14px;
+		background: var(--color-elevated);
+	}
+
+	.hire-history-state {
+		padding: 22px 14px;
+		text-align: center;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 800;
+		background: var(--color-surface);
+		border: 1px dashed #cbd5e1;
+		border-radius: 12px;
+	}
+
+	.hire-history-state.danger {
+		color: #9f1239;
+		border-color: #fecaca;
+		background: rgba(255, 241, 242, 0.96);
+	}
+
+	.hire-history-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 12px;
+	}
+
+	.hire-history-item {
+		padding: 14px;
+		border-radius: 12px;
+		background: var(--color-surface);
+		border: 1px solid #d9e2ec;
+		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+	}
+
+	.hire-history-item-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		margin-bottom: 12px;
+		padding-bottom: 10px;
+		border-bottom: 1px dashed #e2e8f0;
+	}
+
+	.hire-history-item-head strong {
+		color: var(--text-primary);
+		font-size: 13px;
+		font-weight: 900;
+	}
+
+	.hire-history-duration {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 4px 10px;
+		border-radius: 999px;
+		background: var(--color-accent-muted);
+		border: 1px solid #bfdbfe;
+		color: #1d4ed8;
+		font-size: 11px;
+		font-weight: 900;
+	}
+
+	.hire-history-duration em {
+		font-style: normal;
+		padding: 2px 7px;
+		border-radius: 999px;
+		background: var(--color-success-muted);
+		border: 1px solid #bbf7d0;
+		color: #047857;
+		font-size: 10px;
+		font-weight: 900;
+	}
+
+	.hire-history-timeline {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 10px;
+	}
+
+	.hire-history-event {
+		padding: 10px 12px;
+		border-radius: 10px;
+		border: 1px solid #e2e8f0;
+		background: var(--color-elevated);
+	}
+
+	.hire-history-event.on {
+		border-color: #bbf7d0;
+		background: var(--color-success-muted);
+	}
+
+	.hire-history-event.off {
+		border-color: #fecaca;
+		background: rgba(255, 241, 242, 0.7);
+	}
+
+	.hire-history-event.on .event-label {
+		background: rgba(6, 95, 70, 0.35);
+		color: #a7f3d0;
+	}
+
+	.hire-history-event.on strong {
+		color: #a7f3d0;
+	}
+
+	.hire-history-event.on small {
+		color: #6ee7b7;
+	}
+
+	.hire-history-event.off .event-label {
+		background: rgba(153, 27, 27, 0.14);
+		color: #7f1d1d;
+	}
+
+	.hire-history-event.off strong {
+		color: #7f1d1d;
+	}
+
+	.hire-history-event.off small {
+		color: #991b1b;
+	}
+
+	.hire-history-event .event-label {
+		display: inline-flex;
+		padding: 2px 8px;
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.08);
+		color: #991b1b;
+		font-size: 9px;
+		font-weight: 900;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+	}
+
+	.hire-history-event strong {
+		display: block;
+		margin-top: 8px;
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 900;
+		overflow-wrap: anywhere;
+	}
+
+	.hire-history-event small {
+		display: block;
+		margin-top: 4px;
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 700;
+		overflow-wrap: anywhere;
+	}
+
+	.hire-history-event p {
+		margin: 8px 0 0;
+		padding: 7px 9px;
+		border-radius: 8px;
+		background: rgba(15, 23, 42, 0.05);
+		color: #991b1b;
+		font-size: 11px;
+		font-weight: 700;
+		line-height: 1.4;
+		overflow-wrap: anywhere;
+	}
+
+	.hire-history-pagination {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 12px 18px;
+		border-top: 1px solid #e5edf5;
+		background: var(--color-surface);
+	}
+
+	.hire-history-pagination span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 800;
+	}
+
+	.secondary-button {
+		height: 32px;
+		padding: 0 14px;
+		border: 1px solid #cbd5e1;
+		border-radius: 8px;
+		background: var(--color-surface);
+		color: var(--text-primary);
+		font-size: 11px;
+		font-weight: 900;
+		cursor: pointer;
+	}
+
+	.secondary-button:hover:not(:disabled) {
+		background: #e2e8f0;
+	}
+
+	.secondary-button:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
 	.profile-toast-layer {
@@ -1106,6 +1641,14 @@
 
 		.primary-button {
 			width: 100%;
+		}
+
+		.hire-history-timeline {
+			grid-template-columns: 1fr;
+		}
+
+		.hire-history-pagination {
+			flex-wrap: wrap;
 		}
 	}
 </style>

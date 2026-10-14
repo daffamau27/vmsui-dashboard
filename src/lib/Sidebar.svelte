@@ -204,7 +204,7 @@
 			try {
 				localStorage.setItem('currentUser', JSON.stringify(user));
 			} catch {
-				// Cache is optional; sidebar access should still work without storage.
+				// 
 			}
 
 			console.log('[SIDEBAR][CURRENT_USER_PERMISSION]', {

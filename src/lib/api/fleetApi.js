@@ -13,7 +13,6 @@ function normalizeEngine(item) {
     engineKeyThingsboard: item?.engineKeyThingsboard || "",
     engineName: item?.engineName || "-",
 
-    // Alias agar mudah dipakai di halaman report
     key: item?.engineKeyThingsboard || "",
     name: item?.engineName || "-"
   };
@@ -124,7 +123,6 @@ function normalizeLiveVessel(item) {
 
     voyageProgress: item?.voyageProgress || null,
 
-    // Ini engine live RPM dari ThingsBoard
     liveEngines: Array.isArray(item?.engines) ? item.engines : [],
 
     weather: item?.weather || null,
