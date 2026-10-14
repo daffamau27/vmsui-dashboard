@@ -168,6 +168,21 @@ export function groupAllVesselSummaryColumns(columns) {
 	return Array.from(groups.values());
 }
 
+function getFuelColumnOrder(column) {
+	if (column.path[0] === 'totals') {
+		return { ae: 1, me: 3, grand: 5 }[column.path[1]] ?? 5;
+	}
+	// Prefer the engine key, with its display name as a fallback for custom keys.
+	for (const value of [column.engineKey, column.headerPath.at(-1)]) {
+		const name = String(value || '')
+			.toLowerCase()
+			.replace(/[^a-z0-9]/g, '');
+		if (name.startsWith('ae') || name.startsWith('aux')) return 0;
+		if (name.startsWith('me') || name.startsWith('main')) return 2;
+	}
+	return 4;
+}
+
 // Build both the headers and body order from the same tree. Hidden columns
 // cannot leave empty groups or stale spans in the three-level header.
 export function buildAllVesselSummaryTable(columns) {
@@ -203,6 +218,14 @@ export function buildAllVesselSummaryTable(columns) {
 	roots.sort((a, b) => rank(sectionOrder, a.label) - rank(sectionOrder, b.label));
 	const fuelGroup = roots.find((node) => node.label === 'FUEL CONSUMPTION (L)');
 	fuelGroup?.children.sort((a, b) => rank(sourceOrder, a.label) - rank(sourceOrder, b.label));
+	for (const source of fuelGroup?.children || []) {
+		// Keep each subtotal beside its engines, and the overall total last.
+		source.children.sort(
+			(a, b) =>
+				getFuelColumnOrder(a.column) - getFuelColumnOrder(b.column) ||
+				compareAlphaValue(a.column.engineKey, b.column.engineKey)
+		);
+	}
 
 	const headerRows = [[], [], []];
 	const orderedColumns = [];
