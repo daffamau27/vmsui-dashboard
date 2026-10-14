@@ -1692,14 +1692,14 @@
 		return Number.isFinite(number) ? number : null;
 	}
 
-	function toNullablePositiveNumber(value) {
+	function toNullableNonNegativeNumber(value) {
 		if (value === undefined || value === null || value === '' || value === '-') return null;
 
 		const number = Number(value);
 
 		if (!Number.isFinite(number)) return null;
 
-		return number > 0 ? number : null;
+		return number >= 0 ? number : null;
 	}
 
 	function getChartFuelValue(row, sourceKey) {
@@ -1731,80 +1731,83 @@
 
 		if (!rpmVsFuelChart || typeof rpmVsFuelChart !== 'object') return [];
 
-		return Object.entries(rpmVsFuelChart)
-			.map(([engineKey, chartRows]) => {
-				if (!Array.isArray(chartRows) || !chartRows.length) return null;
+		const engineCharts = Object.entries(rpmVsFuelChart).filter(
+			([engineKey, chartRows]) =>
+				Array.isArray(chartRows) &&
+				chartRows.length &&
+				isConfiguredEngine(normalizeEngineText(engineKey))
+		);
+		// Decide fuel-series visibility across all configured engines, using raw
+		// points so downsampling cannot hide a source's only non-zero measurement.
+		const activeFuelSources = new Set(
+			['ems_internal', 'ems_external', 'fms', 'ecu', 'engine_maker'].filter((sourceKey) =>
+				engineCharts.some(([, chartRows]) =>
+					chartRows.some((row) => toNullableNonNegativeNumber(getChartFuelValue(row, sourceKey)) > 0)
+				)
+			)
+		);
 
+		return engineCharts
+			.map(([engineKey, chartRows]) => {
 				const engineName = normalizeEngineText(engineKey);
 
-				if (!isConfiguredEngine(engineName)) return null;
-
 				const validRows = downsampleChartRows(chartRows).filter((row) => {
-					const rpm = Number(row?.rpm);
-					const speed = Number(row?.speed);
-					const fuelInternal = Number(getChartFuelValue(row, 'ems_internal'));
-					const fuelExternal = Number(getChartFuelValue(row, 'ems_external'));
-					const fuelFms = Number(getChartFuelValue(row, 'fms'));
-					const fuelEcu = Number(getChartFuelValue(row, 'ecu'));
-					const fuelEngineMaker = Number(getChartFuelValue(row, 'engine_maker'));
-
-					return (
-						Number.isFinite(rpm) ||
-						Number.isFinite(speed) ||
-						Number.isFinite(fuelInternal) ||
-						Number.isFinite(fuelExternal) ||
-						Number.isFinite(fuelFms) ||
-						Number.isFinite(fuelEcu) ||
-						Number.isFinite(fuelEngineMaker)
-					);
+					return [
+						row?.rpm,
+						row?.speed,
+						getChartFuelValue(row, 'ems_internal'),
+						getChartFuelValue(row, 'ems_external'),
+						getChartFuelValue(row, 'fms'),
+						getChartFuelValue(row, 'ecu'),
+						getChartFuelValue(row, 'engine_maker')
+					].some((value) => toNullableChartNumber(value) !== null);
 				});
 
 				if (!validRows.length) return null;
 
 				const labels = validRows.map((row) => row?.time || '-');
 
-				const rpmData = validRows.map((row) => {
-					const rpm = Number(row?.rpm);
-					return Number.isFinite(rpm) ? rpm : null;
-				});
+				const rpmData = validRows.map((row) => toNullableChartNumber(row?.rpm));
 
 				const speedData = validRows.map((row) => toNullableChartNumber(row?.speed));
 
 				const internalFuelData = validRows.map((row) =>
-					toNullablePositiveNumber(getChartFuelValue(row, 'ems_internal'))
+					toNullableNonNegativeNumber(getChartFuelValue(row, 'ems_internal'))
 				);
 
 				const externalFuelData = validRows.map((row) =>
-					toNullablePositiveNumber(getChartFuelValue(row, 'ems_external'))
+					toNullableNonNegativeNumber(getChartFuelValue(row, 'ems_external'))
 				);
 
 				const fmsFuelData = validRows.map((row) =>
-					toNullablePositiveNumber(getChartFuelValue(row, 'fms'))
+					toNullableNonNegativeNumber(getChartFuelValue(row, 'fms'))
 				);
 
 				const ecuFuelData = validRows.map((row) =>
-					toNullablePositiveNumber(getChartFuelValue(row, 'ecu'))
+					toNullableNonNegativeNumber(getChartFuelValue(row, 'ecu'))
 				);
 
 				const engineMakerFuelData = validRows.map((row) =>
-					toNullablePositiveNumber(getChartFuelValue(row, 'engine_maker'))
+					toNullableNonNegativeNumber(getChartFuelValue(row, 'engine_maker'))
 				);
 
-				const hasInternal = hasPositiveChartData(internalFuelData);
-				const hasExternal = hasPositiveChartData(externalFuelData);
-				const hasFms = hasPositiveChartData(fmsFuelData);
-				const hasEcu = hasPositiveChartData(ecuFuelData);
-				const hasEngineMaker = hasPositiveChartData(engineMakerFuelData);
-				const hasSpeed = hasPositiveChartData(speedData);
+				const hasInternal = hasFiniteChartData(internalFuelData);
+				const hasExternal = hasFiniteChartData(externalFuelData);
+				const hasFms = hasFiniteChartData(fmsFuelData);
+				const hasEcu = hasFiniteChartData(ecuFuelData);
+				const hasEngineMaker = hasFiniteChartData(engineMakerFuelData);
+				const hasSpeed = hasFiniteChartData(speedData);
 				const hasRpm = hasFiniteChartData(rpmData);
 				const hasVisibleFuel =
-					(hasInternal && canShowFuelEmsInternal) ||
-					(hasExternal && canShowFuelEmsExternal) ||
-					(hasFms && canShowFuelFms) ||
-					(hasEcu && canShowFuelEcu) ||
-					(hasEngineMaker && canShowFuelEngineMaker);
+					(hasInternal && canViewFuelEmsInternal) ||
+					(hasExternal && canViewFuelEmsExternal) ||
+					(hasFms && canViewFuelFms) ||
+					(hasEcu && canViewFuelEcu) ||
+					(hasEngineMaker && canViewFuelEngineMaker);
 
-				if (!hasVisibleFuel) return null;
+				// Zero is a real measurement, not an empty chart. RPM/speed can
+				// also be shown when no permitted fuel series is available.
+				if (!hasRpm && !hasSpeed && !hasVisibleFuel) return null;
 
 				return {
 					engineKey,
@@ -1819,11 +1822,11 @@
 					engineMakerFuelData,
 					hasRpm,
 					hasSpeed,
-					hasInternal,
-					hasExternal,
-					hasFms,
-					hasEcu,
-					hasEngineMaker
+					hasInternal: hasInternal && activeFuelSources.has('ems_internal'),
+					hasExternal: hasExternal && activeFuelSources.has('ems_external'),
+					hasFms: hasFms && activeFuelSources.has('fms'),
+					hasEcu: hasEcu && activeFuelSources.has('ecu'),
+					hasEngineMaker: hasEngineMaker && activeFuelSources.has('engine_maker')
 				};
 			})
 			.filter(Boolean);
@@ -1928,9 +1931,9 @@
 				});
 			}
 
-			if (chartGroup.hasEcu && canShowFuelEcu) {
+			if (chartGroup.hasEcu && canViewFuelEcu) {
 				datasets.push({
-					label: `${getDailyFuelSourceLabel('ecu')} L/min`,
+					label: `${getDailyFuelSourceLabel('ecu', chartGroup)} L/min`,
 					data: chartGroup.ecuFuelData,
 					yAxisID: 'fuel',
 					borderColor: '#f97316',
@@ -1942,9 +1945,9 @@
 				});
 			}
 
-			if (chartGroup.hasFms && canShowFuelFms) {
+			if (chartGroup.hasFms && canViewFuelFms) {
 				datasets.push({
-					label: `${getDailyFuelSourceLabel('fms')} L/min`,
+					label: `${getDailyFuelSourceLabel('fms', chartGroup)} L/min`,
 					data: chartGroup.fmsFuelData,
 					yAxisID: 'fuel',
 					borderColor: '#a855f7',
@@ -1956,9 +1959,9 @@
 				});
 			}
 
-			if (chartGroup.hasInternal && canShowFuelEmsInternal) {
+			if (chartGroup.hasInternal && canViewFuelEmsInternal) {
 				datasets.push({
-					label: `${getDailyFuelSourceLabel('ems_internal')} L/min`,
+					label: `${getDailyFuelSourceLabel('ems_internal', chartGroup)} L/min`,
 					data: chartGroup.internalFuelData,
 					yAxisID: 'fuel',
 					borderColor: '#38bdf8',
@@ -1970,9 +1973,9 @@
 				});
 			}
 
-			if (chartGroup.hasExternal && canShowFuelEmsExternal) {
+			if (chartGroup.hasExternal && canViewFuelEmsExternal) {
 				datasets.push({
-					label: `${getDailyFuelSourceLabel('ems_external')} L/min`,
+					label: `${getDailyFuelSourceLabel('ems_external', chartGroup)} L/min`,
 					data: chartGroup.externalFuelData,
 					yAxisID: 'fuel',
 					borderColor: '#f59e0b',
@@ -1984,9 +1987,9 @@
 				});
 			}
 
-			if (chartGroup.hasEngineMaker && canShowFuelEngineMaker) {
+			if (chartGroup.hasEngineMaker && canViewFuelEngineMaker) {
 				datasets.push({
-					label: `${getDailyFuelSourceLabel('engine_maker')} L/min`,
+					label: `${getDailyFuelSourceLabel('engine_maker', chartGroup)} L/min`,
 					data: chartGroup.engineMakerFuelData,
 					yAxisID: 'fuel',
 					borderColor: '#ec4899',
@@ -3683,9 +3686,13 @@
 		return visibleDailyFuelSources.some((source) => source.key === sourceKey);
 	}
 
-	function getDailyFuelSourceLabel(sourceKey) {
-		const hasInternal = canShowFuelEmsInternal;
-		const hasExternal = canShowFuelEmsExternal;
+	function getDailyFuelSourceLabel(sourceKey, chartGroup = null) {
+		const hasInternal = chartGroup
+			? chartGroup.hasInternal && canViewFuelEmsInternal
+			: canShowFuelEmsInternal;
+		const hasExternal = chartGroup
+			? chartGroup.hasExternal && canViewFuelEmsExternal
+			: canShowFuelEmsExternal;
 
 		if (sourceKey === 'ems_internal') {
 			return hasInternal && hasExternal ? 'VMS' : 'EMS';
@@ -4731,24 +4738,24 @@
 												<span>Speed</span>
 											{/if}
 
-											{#if group.hasEcu && canShowFuelEcu}
-												<span>{getDailyFuelSourceLabel('ecu')}</span>
+											{#if group.hasEcu && canViewFuelEcu}
+												<span>{getDailyFuelSourceLabel('ecu', group)}</span>
 											{/if}
 
-											{#if group.hasFms && canShowFuelFms}
-												<span>{getDailyFuelSourceLabel('fms')}</span>
+											{#if group.hasFms && canViewFuelFms}
+												<span>{getDailyFuelSourceLabel('fms', group)}</span>
 											{/if}
 
-											{#if group.hasInternal && canShowFuelEmsInternal}
-												<span>{getDailyFuelSourceLabel('ems_internal')}</span>
+											{#if group.hasInternal && canViewFuelEmsInternal}
+												<span>{getDailyFuelSourceLabel('ems_internal', group)}</span>
 											{/if}
 
-											{#if group.hasExternal && canShowFuelEmsExternal}
-												<span>{getDailyFuelSourceLabel('ems_external')}</span>
+											{#if group.hasExternal && canViewFuelEmsExternal}
+												<span>{getDailyFuelSourceLabel('ems_external', group)}</span>
 											{/if}
 
-											{#if group.hasEngineMaker && canShowFuelEngineMaker}
-												<span>{getDailyFuelSourceLabel('engine_maker')}</span>
+											{#if group.hasEngineMaker && canViewFuelEngineMaker}
+												<span>{getDailyFuelSourceLabel('engine_maker', group)}</span>
 											{/if}
 										</div>
 									</div>
