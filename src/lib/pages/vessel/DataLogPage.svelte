@@ -779,10 +779,12 @@
 		selectedColumns = [...visibleColumns];
 	}
 
-	function clearColumns() {
-		selectedColumns = ['timestamp', 'course', 'latitude', 'longitude', 'speed', 'rig'].filter(
-			(key) => visibleColumns.includes(key)
-		);
+	function selectBasicColumns() {
+		const basicColumns = new Set(['timestamp', 'course', 'latitude', 'longitude', 'speed', 'rig']);
+		selectedColumns = visibleColumns.filter((column) => {
+			const key = normalizeColumnKey(column);
+			return basicColumns.has(key) || key.endsWith('_rpm') || key.endsWith('_run');
+		});
 	}
 
 	let vesselName = $derived(
@@ -1775,7 +1777,7 @@
 						<span class="column-loading">Loading columns...</span>
 					{/if}
 					<button type="button" onclick={selectAllColumns}>Select All</button>
-					<button type="button" onclick={clearColumns}>Basic</button>
+					<button type="button" onclick={selectBasicColumns}>Basic</button>
 				</div>
 			</div>
 
