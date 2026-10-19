@@ -4707,7 +4707,7 @@
 		grid-area: detail;
 		display: grid;
 		grid-template-rows: auto auto auto minmax(0, 1fr);
-		min-height: 100%;
+		min-height: 0;
 	}
 
 	.assign-panel {
@@ -5162,7 +5162,8 @@
 
 	.detail-panel .route-table-wrap {
 		min-height: 0;
-		max-height: none;
+		max-height: min(420px, 60vh);
+		overscroll-behavior-y: contain;
 	}
 
 	.detail-panel .route-table-wrap table {
@@ -7226,6 +7227,14 @@
 	.move-point-btn.cancel:hover:not(:disabled) {
 		background: var(--color-danger-muted);
 		color: #7f1d1d;
+	}
+
+	@media (min-width: 1181px) {
+		.voyage-grid.has-assign-panel .route-table-wrap {
+			/* Let the list and assignment panels set the grid height, not the route rows. */
+			contain: size;
+			max-height: 100%;
+		}
 	}
 
 	@media (max-width: 1180px) {
