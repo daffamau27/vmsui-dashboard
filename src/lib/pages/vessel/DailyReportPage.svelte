@@ -5944,7 +5944,9 @@
 
 	.event-table-wrapper {
 		width: 100%;
-		overflow-x: auto;
+		max-height: 360px;
+		overflow: auto;
+		overscroll-behavior-y: contain;
 	}
 
 	.event-table {
@@ -5954,6 +5956,9 @@
 	}
 
 	.event-table th {
+		position: sticky;
+		top: 0;
+		z-index: 1;
 		background: var(--color-elevated);
 		color: var(--text-secondary);
 		font-size: 10.5px;
