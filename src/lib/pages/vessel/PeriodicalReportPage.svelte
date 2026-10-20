@@ -11,6 +11,12 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
+	import {
+		buildPeriodicalEngineFuelSummary,
+		buildPeriodicalRpmMatrices,
+		getPeriodicalRpmRuntimeHours,
+		getPeriodicalRpmRuntimePercent
+	} from '$lib/utils/periodicalReport.js';
 
 	let loading = $state(false);
 	let exporting = $state(false);
@@ -208,6 +214,23 @@
 		return table?.label || '-';
 	}
 
+	function formatRpmMatrixCell(row, metric, engineRows) {
+		if (!row) return '-';
+		if (metric.key === 'runtime') {
+			const hours = getPeriodicalRpmRuntimeHours(row);
+			return hours === null ? '-' : formatRuntimeValue(hours);
+		}
+		if (metric.key === 'runtime_percent') {
+			const percent = getPeriodicalRpmRuntimePercent(row, engineRows);
+			return percent === null ? '-' : `${formatNumber(percent, 1)}%`;
+		}
+		const value = metric.key === 'lh'
+			? row.lh_ems ?? row.lhEms ?? row.lh_maker ?? row.lhMaker ?? row.lh
+			: getRpmFuelValue(row, metric.sourceKey);
+		if ((typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '' || !Number.isFinite(Number(value))) return '-';
+		return metric.key === 'lh' ? formatNumber(value, 2) : formatLiter(value);
+	}
+
 	function formatRuntimeFromMinutes(minutes) {
 		const totalMinutes = Number(minutes);
 
@@ -361,11 +384,9 @@
 		return toFuelNumber(found?.fuel_l ?? found?.fuelL ?? found?.fuel);
 	}
 
-	function getEngineTotalFuel(engineName) {
-		return visibleFuelSources.reduce((sum, source) => {
-			return sum + getFuelForEngine(source, engineName);
-		}, 0);
-	}
+	let engineFuelSummary = $derived(
+		buildPeriodicalEngineFuelSummary(engineRuntimeRows, visibleFuelSources)
+	);
 
 	let totalRuntimeHours = $derived(
 		engineRuntimeRows.reduce((sum, row) => {
@@ -375,18 +396,16 @@
 
 	let totalRuntimeMinutes = $derived(totalRuntimeHours * 60);
 
-	let totalEngineFuel = $derived(
-		visibleFuelSources.reduce((sum, source) => {
-			return sum + toFuelNumber(source.total);
-		}, 0)
-	);
-
 	let totalRobBunkerFuel = $derived(
 		toFuelNumber(robBunker?.total_fod_l ?? robBunker?.totalFodL) +
 			toFuelNumber(robBunker?.bunker_l ?? robBunker?.bunkerL)
 	);
 
-	let totalFuel = $derived(totalEngineFuel + totalRobBunkerFuel);
+	let totalFuel = $derived(
+		engineFuelSummary.some((engine) => engine.fuel !== null)
+			? engineFuelSummary.reduce((sum, engine) => sum + (engine.fuel ?? 0), 0)
+			: null
+	);
 
 	let hasRobBunkerData = $derived(
 		toFuelNumber(robBunker?.fod_port_l ?? robBunker?.fodPortL) > 0 ||
@@ -480,13 +499,24 @@
 
 	let rpmRangeTables = $derived(getRpmRangePayload());
 
-	let rpmRangeRows = $derived(rpmRangeTables.flatMap((table) => table.details));
-
 	let selectedRpmRangeTable = $derived(
 		rpmRangeTables.find((table) => table.key === selectedRpmRuntimeFuelTableKey) ||
 			rpmRangeTables[0] ||
 			null
 	);
+	let selectedRpmMatrices = $derived(
+		buildPeriodicalRpmMatrices(selectedRpmRangeTable?.details || [])
+	);
+	let rpmMatrixMetrics = $derived([
+		{ key: 'runtime', label: 'Runtime' },
+		{ key: 'runtime_percent', label: 'Runtime %' },
+		{ key: 'lh', label: 'L/H' },
+		...(selectedRpmRangeTable?.sourceKeys || []).map((sourceKey) => ({
+			key: `fuel_${sourceKey}`,
+			sourceKey,
+			label: selectedRpmRangeTable.sourceKeys.length === 1 ? 'Fuel (L)' : `${getRpmSourceLabel(sourceKey)} Fuel (L)`
+		}))
+	]);
 
 	$effect(() => {
 		const keys = rpmRangeTables.map((table) => table.key);
@@ -815,10 +845,13 @@
 		</section>
 
 	<section class="summary-grid">
-		<article class="summary-card">
-			<span>Total Engine Fuel</span>
-			<strong>{formatLiter(totalEngineFuel)}</strong>
-		</article>
+		{#each engineFuelSummary as engine (engine.key)}
+			<article class="summary-card engine-fuel-card">
+				<span>{engine.engineName} Fuel</span>
+				<strong>{engine.fuel === null ? '-' : formatLiter(engine.fuel)}</strong>
+				<small>{engine.sourceLabel || 'Fuel data unavailable'}</small>
+			</article>
+		{/each}
 
 		<article class="summary-card">
 			<span>Bunker Fuel</span>
@@ -827,7 +860,8 @@
 
 		<article class="summary-card">
 			<span>Total Fuel</span>
-			<strong>{formatLiter(totalFuel)}</strong>
+			<strong>{totalFuel === null ? '-' : formatLiter(totalFuel)}</strong>
+			<small>Engine fuel only</small>
 		</article>
 
 		{#if Number.isFinite(totalDistanceNm)}
@@ -951,75 +985,159 @@
 
 		{#if selectedRpmRangeTable}
 			<div class="periodical-rpm-table-list">
-				<article class="periodical-rpm-card">
+				{#each selectedRpmMatrices as matrix (matrix.key)}
+					<article class="periodical-rpm-card">
 						<div class="periodical-rpm-card-header">
 							<div>
-								<span>Source</span>
-								<strong>{getRpmTableLabel(selectedRpmRangeTable)}</strong>
+								<span>{getRpmTableLabel(selectedRpmRangeTable)}</span>
+								<strong>{matrix.label}</strong>
 							</div>
-							<small>{selectedRpmRangeTable.details.length} rows</small>
+							<small>{matrix.engines.length} engines</small>
 						</div>
 
-						<div class="table-wrapper">
-							<table>
+						<!-- svelte-ignore a11y_no_noninteractive_tabindex (The scrollable table region needs keyboard access.) -->
+						<div class="table-wrapper periodical-rpm-matrix-wrap" role="region" aria-label={`${matrix.label} RPM range comparison`} tabindex="0">
+							<table class="periodical-rpm-matrix">
 								<thead>
 									<tr>
-										<th>Engine</th>
-										<th>RPM Range</th>
-										<th>Runtime</th>
-										{#if selectedRpmRangeTable.showLh}
-											<th>L/h</th>
-										{/if}
-										{#each selectedRpmRangeTable.sourceKeys as sourceKey}
-											<th>{getRpmSourceLabel(sourceKey)} Fuel</th>
+										<th rowspan="2" scope="col" class="rpm-range-column">RPM Range</th>
+										{#each rpmMatrixMetrics as metric (metric.key)}
+											<th colspan={matrix.engines.length} scope="colgroup" class="rpm-metric-start">{metric.label}</th>
+										{/each}
+									</tr>
+									<tr>
+										{#each rpmMatrixMetrics as metric (metric.key)}
+											{#each matrix.engines as engine, engineIndex (engine.key)}
+												<th scope="col" title={engine.engineName} class:rpm-metric-start={engineIndex === 0}>{engine.label}</th>
+											{/each}
 										{/each}
 									</tr>
 								</thead>
 
 								<tbody>
-									{#each selectedRpmRangeTable.details as row}
-										<tr class:total-row={row.is_total_row || row.isTotalRow}>
-											<td>{row.engine_name || row.engineName || '-'}</td>
-											<td>{formatRpmRangeLabel(row.rpm_range || row.rpmRange || row.range)}</td>
-											<td>{formatRuntimeValue(row.runtime_hours ?? row.runtimeHours)}</td>
-											{#if selectedRpmRangeTable.showLh}
-												<td>{formatNumber(row.lh_ems ?? row.lhEms ?? row.lh_maker ?? row.lhMaker ?? row.lh, 2)}</td>
-											{/if}
-											{#each selectedRpmRangeTable.sourceKeys as sourceKey}
-												<td>{formatLiter(getRpmFuelValue(row, sourceKey))}</td>
+									{#each matrix.rows as row (row.key)}
+										<tr class:total-row={row.isTotal}>
+											<th scope="row" class="rpm-range-column">{row.isTotal ? 'Total' : formatRpmRangeLabel(row.label)}</th>
+											{#each rpmMatrixMetrics as metric (metric.key)}
+												{#each matrix.engines as engine, engineIndex (engine.key)}
+													<td class:rpm-metric-start={engineIndex === 0}>{formatRpmMatrixCell(row.cells[engineIndex], metric, engine.rows)}</td>
+												{/each}
 											{/each}
+										</tr>
+									{:else}
+										<tr>
+											<td colspan={1 + rpmMatrixMetrics.length * matrix.engines.length}>All RPM ranges have zero runtime.</td>
 										</tr>
 									{/each}
-
-									{#if selectedRpmRangeTable.grandTotal && Object.keys(selectedRpmRangeTable.grandTotal).length}
-										<tr class="total-row">
-											<td>Grand Total</td>
-											<td>—</td>
-											<td>{formatRuntimeValue(selectedRpmRangeTable.grandTotal.runtime_hours ?? selectedRpmRangeTable.grandTotal.runtimeHours)}</td>
-											{#if selectedRpmRangeTable.showLh}
-												<td>{formatNumber(selectedRpmRangeTable.grandTotal.lh_ems ?? selectedRpmRangeTable.grandTotal.lhEms ?? selectedRpmRangeTable.grandTotal.lh, 2)}</td>
-											{/if}
-											{#each selectedRpmRangeTable.sourceKeys as sourceKey}
-												<td>{formatLiter(getRpmFuelValue(selectedRpmRangeTable.grandTotal, sourceKey))}</td>
-											{/each}
-										</tr>
-									{/if}
 								</tbody>
 							</table>
 						</div>
 					</article>
+				{/each}
 			</div>
+			{#if selectedRpmRangeTable.grandTotal && Object.keys(selectedRpmRangeTable.grandTotal).length}
+				<div class="table-wrapper periodical-rpm-grand-total">
+					<table>
+						<thead>
+							<tr>
+								<th>Summary</th>
+								<th>Runtime</th>
+								{#if selectedRpmRangeTable.showLh}
+									<th>L/h</th>
+								{/if}
+								{#each selectedRpmRangeTable.sourceKeys as sourceKey}
+									<th>{getRpmSourceLabel(sourceKey)} Fuel</th>
+								{/each}
+							</tr>
+						</thead>
+						<tbody>
+							<tr class="total-row">
+								<td>Grand Total</td>
+								<td>{formatRuntimeValue(selectedRpmRangeTable.grandTotal.runtime_hours ?? selectedRpmRangeTable.grandTotal.runtimeHours)}</td>
+								{#if selectedRpmRangeTable.showLh}
+									<td>{formatNumber(selectedRpmRangeTable.grandTotal.lh_ems ?? selectedRpmRangeTable.grandTotal.lhEms ?? selectedRpmRangeTable.grandTotal.lh_maker ?? selectedRpmRangeTable.grandTotal.lhMaker ?? selectedRpmRangeTable.grandTotal.lh, 2)}</td>
+								{/if}
+								{#each selectedRpmRangeTable.sourceKeys as sourceKey}
+									<td>{formatLiter(getRpmFuelValue(selectedRpmRangeTable.grandTotal, sourceKey))}</td>
+								{/each}
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			{/if}
 		{:else}
 			<div class="empty-box">RPM range data is not available yet.</div>
 		{/if}
 	</section>
 	{/if}
 
+	<section class="table-section fuel-section">
+		<div class="section-header">
+			<div>
+				<span class="section-kicker">Fuel</span>
+				<h2>Fuel Consumption</h2>
+			</div>
+
+			<strong>{visibleFuelSources.length} sources</strong>
+		</div>
+
+		{#if hasRobBunkerData}
+			<div class="fod-usage-summary">
+				{#each robBunkerCards as card}
+					<article class:fod-total-card={card.total}>
+						<span>{card.label}</span>
+						<strong>{formatLiter(card.value)}</strong>
+					</article>
+				{/each}
+			</div>
+		{/if}
+
+		{#if visibleFuelSources.length}
+			<div class="table-wrapper">
+				<table>
+					<thead>
+						<tr>
+							<th>Engine</th>
+
+							{#each visibleFuelSources as source}
+								<th>{source.label}</th>
+							{/each}
+						</tr>
+					</thead>
+
+					<tbody>
+						{#each engineRuntimeRows as engine}
+							{@const engineName = engine.engine_name || engine.engineName}
+
+							<tr>
+								<td>{engineName || '-'}</td>
+
+								{#each visibleFuelSources as source}
+									<td>{formatLiter(getFuelForEngine(source, engineName))}</td>
+								{/each}
+							</tr>
+						{/each}
+
+						<tr class="total-row">
+							<td>Grand Total</td>
+
+							{#each visibleFuelSources as source}
+								<td>{formatLiter(source.total)}</td>
+							{/each}
+						</tr>
+					</tbody>
+				</table>
+			</div>
+		{:else}
+			<div class="empty-box">Fuel consumption data is not available yet.</div>
+		{/if}
+	</section>
+	
 	{#if canViewHighRpmLowSpeedTable}
 		<section class="table-section">
 			<div class="section-header">
 				<div>
-					<span class="section-kicker">RPM</span>
+					<span class="section-kicker">SRITI</span>
 					<h2>High RPM Low Speed</h2>
 				</div>
 
@@ -1059,74 +1177,6 @@
 			{/if}
 		</section>
 	{/if}
-
-	<section class="table-section fuel-section">
-		<div class="section-header">
-			<div>
-				<span class="section-kicker">Fuel</span>
-				<h2>Fuel Consumption</h2>
-			</div>
-
-			<strong>{visibleFuelSources.length} sources</strong>
-		</div>
-
-		{#if hasRobBunkerData}
-			<div class="fod-usage-summary">
-				{#each robBunkerCards as card}
-					<article class:fod-total-card={card.total}>
-						<span>{card.label}</span>
-						<strong>{formatLiter(card.value)}</strong>
-					</article>
-				{/each}
-			</div>
-		{/if}
-
-		{#if visibleFuelSources.length}
-			<div class="table-wrapper">
-				<table>
-					<thead>
-						<tr>
-							<th>Engine</th>
-
-							{#each visibleFuelSources as source}
-								<th>{source.label}</th>
-							{/each}
-
-							<th>Total Used</th>
-						</tr>
-					</thead>
-
-					<tbody>
-						{#each engineRuntimeRows as engine}
-							{@const engineName = engine.engine_name || engine.engineName}
-
-							<tr>
-								<td>{engineName || '-'}</td>
-
-								{#each visibleFuelSources as source}
-									<td>{formatLiter(getFuelForEngine(source, engineName))}</td>
-								{/each}
-
-								<td>{formatLiter(getEngineTotalFuel(engineName))}</td>
-							</tr>
-						{/each}
-
-						<tr class="total-row">
-							<td>Grand Total</td>
-
-							{#each visibleFuelSources as source}
-								<td>{formatLiter(source.total)}</td>
-							{/each}
-
-							<td>{formatLiter(totalEngineFuel)}</td>
-						</tr>
-					</tbody>
-				</table>
-			</div>
-		{:else}
-			<div class="empty-box">Fuel consumption data is not available yet.</div>
-		{/if}
-	</section>
 
 	{#if hasAverageSpeed || hasMaxSpeed}
 		<section class="table-section">
@@ -1456,6 +1506,13 @@
 		font-weight: 900;
 	}
 
+	.summary-card small {
+		margin-top: 8px;
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 700;
+	}
+
 	.table-section {
 		margin-top: 14px;
 		overflow: hidden;
@@ -1576,16 +1633,83 @@
 	.periodical-rpm-table-list {
 		padding: 14px;
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 14px;
+		align-items: start;
 		background: var(--color-elevated);
 	}
 
 	.periodical-rpm-card {
+		min-width: 0;
 		overflow: hidden;
 		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		border-radius: 12px;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+	}
+
+	.periodical-rpm-grand-total {
+		border-top: 1px solid #e5edf5;
+	}
+
+	.periodical-rpm-matrix-wrap {
+		max-height: 520px;
+		overscroll-behavior: contain;
+	}
+
+	.periodical-rpm-matrix-wrap:focus-visible {
+		outline: 2px solid var(--color-accent, #2563eb);
+		outline-offset: -2px;
+	}
+
+	.periodical-rpm-matrix {
+		--rpm-header-height: 38px;
+		border-collapse: separate;
+		border-spacing: 0;
+	}
+
+	.periodical-rpm-matrix th,
+	.periodical-rpm-matrix td {
+		min-width: 96px;
+		text-align: center;
+		border-right: 1px solid var(--color-border-subtle, #d9e2ec);
+	}
+
+	.periodical-rpm-matrix thead th {
+		position: sticky;
+		top: 0;
+		z-index: 2;
+		height: var(--rpm-header-height);
+		padding: 8px 12px;
+		line-height: 1.2;
+		background: var(--color-elevated);
+	}
+
+	.periodical-rpm-matrix thead tr:nth-child(2) th {
+		top: var(--rpm-header-height);
+	}
+
+	.periodical-rpm-matrix .rpm-range-column {
+		position: sticky;
+		left: 0;
+		z-index: 1;
+		width: 130px;
+		min-width: 130px;
+		background: var(--color-surface);
+		text-align: left;
+	}
+
+	.periodical-rpm-matrix thead .rpm-range-column {
+		z-index: 3;
+		background: var(--color-elevated);
+	}
+
+	.periodical-rpm-matrix .rpm-metric-start {
+		border-left: 1px solid var(--color-border-subtle, #d9e2ec);
+	}
+
+	.periodical-rpm-matrix .total-row .rpm-range-column {
+		background: var(--color-accent-muted);
 	}
 
 	.periodical-rpm-card-header {
