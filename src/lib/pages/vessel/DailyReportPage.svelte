@@ -30,6 +30,11 @@
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
 	import { sortByAlpha } from '$lib/utils/alphaSort.js';
+	import {
+		buildPeriodicalRpmMatrices,
+		getPeriodicalRpmRuntimeHours,
+		getPeriodicalRpmRuntimePercent
+	} from '$lib/utils/periodicalReport.js';
 
 	let loading = $state(false);
 	let exporting = $state(false);
@@ -2810,7 +2815,7 @@
 	}
 
 	function getRpmLhValue(row) {
-		return row?.lh_ems ?? row?.lhEms ?? row?.lh_maker ?? row?.lhMaker ?? row?.lh ?? 0;
+		return row?.lh_ems ?? row?.lhEms ?? row?.lh_maker ?? row?.lhMaker ?? row?.lh;
 	}
 
 	function getConsumptionPerRangeRows(data) {
@@ -2919,6 +2924,23 @@
 		});
 	}
 
+	function formatRpmMatrixCell(row, metric, engineRows = []) {
+		if (!row) return '-';
+		if (metric.key === 'runtime') return formatHour(getPeriodicalRpmRuntimeHours(row));
+		if (metric.key === 'runtime_percent') {
+			const percent = getPeriodicalRpmRuntimePercent(row, engineRows);
+			return percent === null ? '-' : `${formatNumber(percent, 1)}%`;
+		}
+		const value =
+			metric.key === 'lh' ? getRpmLhValue(row) : getRpmFuelValue(row, metric.sourceKey);
+		if (
+			(typeof value !== 'number' && typeof value !== 'string') ||
+			String(value).trim() === '' ||
+			!Number.isFinite(Number(value))
+		) return '-';
+		return metric.key === 'lh' ? formatNumber(value, 2) : formatLiter(value);
+	}
+
 	function buildRpmCurveTables(data) {
 		const consumptionRows = addRpmCurveSource(getConsumptionPerRangeRows(data), 'fms_ecu');
 		const hasFmsRows = consumptionRows.some((row) => hasPresentRpmFuelValue(row, 'fms'));
@@ -2930,6 +2952,9 @@
 				key: 'ems_internal',
 				curveType: 'ems_internal',
 				title: 'VMS',
+				grandTotal:
+					(data?.rpm_ranges_ems_internal || data?.rpmRangesEmsInternal)?.grand_total ??
+					(data?.rpm_ranges_ems_internal || data?.rpmRangesEmsInternal)?.grandTotal,
 				sourceKeys: ['ems_internal'],
 				showLh: true,
 				rows: addRpmCurveSource(
@@ -2941,6 +2966,9 @@
 				key: 'ems_external',
 				curveType: 'ems_external',
 				title: 'EMS',
+				grandTotal:
+					(data?.rpm_ranges_ems_external || data?.rpmRangesEmsExternal)?.grand_total ??
+					(data?.rpm_ranges_ems_external || data?.rpmRangesEmsExternal)?.grandTotal,
 				sourceKeys: ['ems_external'],
 				showLh: true,
 				rows: addRpmCurveSource(
@@ -2952,6 +2980,9 @@
 				key: 'engine_maker',
 				curveType: 'engine_maker',
 				title: 'Engine Maker',
+				grandTotal:
+					(data?.rpm_ranges_maker || data?.rpmRangesMaker)?.grand_total ??
+					(data?.rpm_ranges_maker || data?.rpmRangesMaker)?.grandTotal,
 				sourceKeys: ['engine_maker'],
 				showLh: true,
 				rows: addRpmCurveSource(
@@ -2965,6 +2996,9 @@
 			tables.push({
 				key: 'fms_ecu',
 				curveType: 'fms_ecu',
+				grandTotal:
+					(data?.consumption_per_range || data?.consumptionPerRange)?.grand_total ??
+					(data?.consumption_per_range || data?.consumptionPerRange)?.grandTotal,
 				title: consumptionSourceKeys.map(getRpmSourceLabel).join(' / '),
 				sourceKeys: consumptionSourceKeys,
 				showLh: false,
@@ -2975,7 +3009,7 @@
 		return tables
 			.map((table) => ({
 				...table,
-				rows: table.rows.filter(isConfiguredRpmRow).filter(hasRuntimeValue)
+				rows: table.rows.filter(isConfiguredRpmRow)
 			}))
 			.filter((table) => table.rows.length);
 	}
@@ -3022,70 +3056,6 @@
 		if (Number.isFinite(runtimeMinutes)) return runtimeMinutes / 60;
 
 		return 0;
-	}
-
-	function isRpmTotalRow(row) {
-		const rangeText = String(row?.rpm_range ?? row?.rpmRange ?? row?.range ?? '')
-			.trim()
-			.toUpperCase();
-		const engineText = String(getRowEngineName(row)).trim().toUpperCase();
-
-		return Boolean(
-			row?.is_total_row ||
-				row?.isTotalRow ||
-				rangeText === 'TOTAL' ||
-				rangeText === 'GRAND TOTAL' ||
-				/\bTOTAL$/.test(engineText)
-		);
-	}
-
-	function getRpmEngineTotalRuntimeHours(row, rows = []) {
-		const explicitTotal = parseRuntimeHours(
-			row?.total_runtime_hours ??
-				row?.totalRuntimeHours ??
-				row?.engine_runtime_hours ??
-				row?.engineRuntimeHours ??
-				row?.total_rh ??
-				row?.totalRh
-		);
-
-		if (Number.isFinite(explicitTotal) && explicitTotal > 0) return explicitTotal;
-
-		const targetEngine = normalizeEngineText(getRpmRowEngineName(row));
-		const engineRows = rows.filter((item) => {
-			return normalizeEngineText(getRpmRowEngineName(item)) === targetEngine;
-		});
-		const totalRow = engineRows.find((item) => isRpmTotalRow(item));
-		const totalRowRuntime = totalRow ? getRpmRuntimeHours(totalRow) : 0;
-
-		if (totalRowRuntime > 0) return totalRowRuntime;
-
-		return engineRows.reduce((sum, item) => {
-			if (isRpmTotalRow(item)) return sum;
-			return sum + getRpmRuntimeHours(item);
-		}, 0);
-	}
-
-	function getRpmRuntimePercent(row, rows = []) {
-		const runtimeHours = getRpmRuntimeHours(row);
-		const totalRuntimeHours = getRpmEngineTotalRuntimeHours(row, rows);
-
-		if (totalRuntimeHours > 0) {
-			if (isRpmTotalRow(row)) return 100;
-			return (runtimeHours / totalRuntimeHours) * 100;
-		}
-
-		const explicitPercent =
-			row?.runtime_percent ??
-			row?.runtimePercent ??
-			row?.runtime_percentage ??
-			row?.runtimePercentage ??
-			row?.rh_percent ??
-			row?.rhPercent ??
-			row?.percentage_rh ??
-			row?.percentageRh;
-
-		return explicitPercent ?? null;
 	}
 
 	function hasRuntimeValue(row) {
@@ -3483,6 +3453,28 @@
 			visibleRpmCurveTables[0] ||
 			null
 	);
+
+	let selectedRpmMatrices = $derived(
+		buildPeriodicalRpmMatrices(
+			(selectedRpmCurveTable?.rows || []).map((row) => ({
+				...row,
+				engine_name: getRowEngineName(row)
+			}))
+		)
+	);
+	let rpmMatrixMetrics = $derived([
+		{ key: 'runtime', label: 'Runtime' },
+		{ key: 'runtime_percent', label: 'Runtime %' },
+		{ key: 'lh', label: 'L/H' },
+		...(selectedRpmCurveTable?.sourceKeys || []).map((sourceKey) => ({
+			key: `fuel_${sourceKey}`,
+			sourceKey,
+			label:
+				selectedRpmCurveTable.sourceKeys.length === 1
+					? 'Fuel (L)'
+					: `${getRpmSourceLabel(sourceKey)} Fuel (L)`
+		}))
+	]);
 
 	$effect(() => {
 		const keys = visibleRpmCurveTables.map((table) => table.key);
@@ -4646,66 +4638,90 @@
 
 					{#if selectedRpmCurveTable}
 						<div class="rpm-curve-table-list">
+							{#each selectedRpmMatrices as matrix (matrix.key)}
 							<article class="rpm-curve-table-card">
 								<div class="rpm-curve-table-header">
 									<div>
-										<span>Curve Source</span>
-										<strong>{getRpmCurveTableLabel(selectedRpmCurveTable)}</strong>
+										<span>{getRpmCurveTableLabel(selectedRpmCurveTable)}</span>
+										<strong>{matrix.label}</strong>
 									</div>
 
 									<div class="rpm-curve-table-count">
-										{selectedRpmCurveTable.rows.length} rows
+										{matrix.engines.length} engines
 									</div>
 								</div>
 
-								<div class="table-wrapper">
-									<table>
+								<!-- Scrollable comparison is keyboard accessible. -->
+								<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+								<div class="table-wrapper rpm-matrix-wrap" role="region" aria-label={`${matrix.label} RPM range comparison`} tabindex="0">
+									<table class="rpm-matrix">
 										<thead>
 											<tr>
-												<th>Engine</th>
-												<th>RPM Range</th>
-												<th>Runtime</th>
-												<th>Runtime %</th>
-												{#if selectedRpmCurveTable.showLh}
-													<th>L/h</th>
-												{/if}
-												{#each selectedRpmCurveTable.sourceKeys as sourceKey}
-													<th>{getRpmSourceLabel(sourceKey)} Fuel</th>
+												<th rowspan="2" scope="col" class="rpm-range-column">RPM Range</th>
+												{#each rpmMatrixMetrics as metric (metric.key)}
+													<th colspan={matrix.engines.length} scope="colgroup" class="rpm-metric-start">{metric.label}</th>
+												{/each}
+											</tr>
+											<tr>
+												{#each rpmMatrixMetrics as metric (metric.key)}
+													{#each matrix.engines as engine, engineIndex (engine.key)}
+														<th scope="col" title={engine.engineName} class:rpm-metric-start={engineIndex === 0}>{engine.label}</th>
+													{/each}
 												{/each}
 											</tr>
 										</thead>
 
 										<tbody>
-											{#each selectedRpmCurveTable.rows as row}
-												<tr class:total-row={row.is_total_row || row.isTotalRow}>
-													<td
-														>{row.engine_name ||
-															row.engineName ||
-															row.engine ||
-															row.name ||
-															'-'}</td
-													>
-
-													<td>{formatRpmRangeLabel(row.rpm_range || row.rpmRange || row.range)}</td>
-
-													<td>{formatHour(getRpmRuntimeHours(row))}</td>
-
-													<td>{formatPercent(getRpmRuntimePercent(row, selectedRpmCurveTable.rows))}</td>
-
-													{#if selectedRpmCurveTable.showLh}
-														<td>{formatNumber(getRpmLhValue(row), 2)}</td>
-													{/if}
-
-													{#each selectedRpmCurveTable.sourceKeys as sourceKey}
-														<td>{formatLiter(getRpmFuelValue(row, sourceKey))}</td>
+											{#each matrix.rows as row (row.key)}
+												<tr class:total-row={row.isTotal}>
+													<th scope="row" class="rpm-range-column">{row.isTotal ? 'Total' : formatRpmRangeLabel(row.label)}</th>
+													{#each rpmMatrixMetrics as metric (metric.key)}
+														{#each matrix.engines as engine, engineIndex (engine.key)}
+															<td class:rpm-metric-start={engineIndex === 0}>{formatRpmMatrixCell(row.cells[engineIndex], metric, engine.rows)}</td>
+														{/each}
 													{/each}
+												</tr>
+											{:else}
+												<tr>
+													<td colspan={1 + rpmMatrixMetrics.length * matrix.engines.length}>All RPM ranges have zero runtime.</td>
 												</tr>
 											{/each}
 										</tbody>
 									</table>
 								</div>
 							</article>
+							{/each}
 						</div>
+						{#if selectedRpmCurveTable.grandTotal && Object.keys(selectedRpmCurveTable.grandTotal).length}
+							<div class="table-wrapper rpm-grand-total">
+								<table>
+									<thead>
+										<tr>
+											<th scope="col">Summary</th>
+											<th scope="col">Runtime</th>
+											{#if selectedRpmCurveTable.showLh}
+												<th scope="col">L/H</th>
+											{/if}
+											{#each selectedRpmCurveTable.sourceKeys as sourceKey}
+												<th scope="col">{getRpmSourceLabel(sourceKey)} Fuel</th>
+											{/each}
+										</tr>
+									</thead>
+									<tbody>
+										<tr class="total-row">
+											<td>Grand Total</td>
+											<td>{formatRpmMatrixCell(selectedRpmCurveTable.grandTotal, { key: 'runtime' })}</td>
+											{#if selectedRpmCurveTable.showLh}
+												<td>{formatRpmMatrixCell(selectedRpmCurveTable.grandTotal, { key: 'lh' })}</td>
+											{/if}
+											{#each selectedRpmCurveTable.sourceKeys as sourceKey}
+												<td>{formatRpmMatrixCell(selectedRpmCurveTable.grandTotal, { key: `fuel_${sourceKey}`, sourceKey })}</td>
+											{/each}
+										</tr>
+									</tbody>
+								</table>
+							</div>
+						{/if}
 					{:else}
 						<div class="empty-box">RPM range data is not available yet.</div>
 					{/if}
@@ -6375,16 +6391,83 @@
 	.rpm-curve-table-list {
 		padding: 14px;
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 14px;
+		align-items: start;
 		background: var(--color-elevated);
 	}
 
 	.rpm-curve-table-card {
+		min-width: 0;
 		background: var(--color-surface);
 		border: 1px solid #d9e2ec;
 		border-radius: 12px;
 		overflow: hidden;
 		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+	}
+
+	.rpm-grand-total {
+		border-top: 1px solid #e5edf5;
+	}
+
+	.rpm-matrix-wrap {
+		max-height: 520px;
+		overscroll-behavior: contain;
+	}
+
+	.rpm-matrix-wrap:focus-visible {
+		outline: 2px solid var(--color-accent, #2563eb);
+		outline-offset: -2px;
+	}
+
+	.rpm-matrix {
+		--rpm-header-height: 38px;
+		border-collapse: separate;
+		border-spacing: 0;
+	}
+
+	.rpm-matrix th,
+	.rpm-matrix td {
+		min-width: 96px;
+		text-align: center;
+		border-right: 1px solid var(--color-border-subtle, #d9e2ec);
+	}
+
+	.rpm-matrix thead th {
+		position: sticky;
+		top: 0;
+		z-index: 2;
+		height: var(--rpm-header-height);
+		padding: 8px 12px;
+		line-height: 1.2;
+		background: var(--color-elevated);
+	}
+
+	.rpm-matrix thead tr:nth-child(2) th {
+		top: var(--rpm-header-height);
+	}
+
+	.rpm-matrix .rpm-range-column {
+		position: sticky;
+		left: 0;
+		z-index: 1;
+		width: 130px;
+		min-width: 130px;
+		background: var(--color-surface);
+		text-align: left;
+	}
+
+	.rpm-matrix thead .rpm-range-column {
+		z-index: 3;
+		background: var(--color-elevated);
+	}
+
+	.rpm-matrix .rpm-metric-start {
+		border-left: 1px solid var(--color-border-subtle, #d9e2ec);
+	}
+
+	.rpm-matrix .total-row .rpm-range-column {
+		background: var(--color-accent-muted);
 	}
 
 	.rpm-curve-table-header {
