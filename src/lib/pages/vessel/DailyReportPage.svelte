@@ -4676,9 +4676,13 @@
 												<tr class:total-row={row.isTotal}>
 													<th scope="row" class="rpm-range-column">{row.isTotal ? 'Total' : formatRpmRangeLabel(row.label)}</th>
 													{#each rpmMatrixMetrics as metric (metric.key)}
-														{#each matrix.engines as engine, engineIndex (engine.key)}
-															<td class:rpm-metric-start={engineIndex === 0}>{formatRpmMatrixCell(row.cells[engineIndex], metric, engine.rows)}</td>
-														{/each}
+														{#if row.isTotal && metric.key === 'lh'}
+															<td colspan={matrix.engines.length} class="rpm-total-spacer rpm-metric-start" aria-label="Not applicable"></td>
+														{:else}
+															{#each matrix.engines as engine, engineIndex (engine.key)}
+																<td class:rpm-metric-start={engineIndex === 0}>{formatRpmMatrixCell(row.cells[engineIndex], metric, engine.rows)}</td>
+															{/each}
+														{/if}
 													{/each}
 												</tr>
 											{:else}
@@ -4699,9 +4703,6 @@
 										<tr>
 											<th scope="col">Summary</th>
 											<th scope="col">Runtime</th>
-											{#if selectedRpmCurveTable.showLh}
-												<th scope="col">L/H</th>
-											{/if}
 											{#each selectedRpmCurveTable.sourceKeys as sourceKey}
 												<th scope="col">{getRpmSourceLabel(sourceKey)} Fuel</th>
 											{/each}
@@ -4711,9 +4712,6 @@
 										<tr class="total-row">
 											<td>Grand Total</td>
 											<td>{formatRpmMatrixCell(selectedRpmCurveTable.grandTotal, { key: 'runtime' })}</td>
-											{#if selectedRpmCurveTable.showLh}
-												<td>{formatRpmMatrixCell(selectedRpmCurveTable.grandTotal, { key: 'lh' })}</td>
-											{/if}
 											{#each selectedRpmCurveTable.sourceKeys as sourceKey}
 												<td>{formatRpmMatrixCell(selectedRpmCurveTable.grandTotal, { key: `fuel_${sourceKey}`, sourceKey })}</td>
 											{/each}
@@ -6468,6 +6466,10 @@
 
 	.rpm-matrix .total-row .rpm-range-column {
 		background: var(--color-accent-muted);
+	}
+
+	.rpm-matrix .total-row .rpm-total-spacer {
+		background: var(--color-surface);
 	}
 
 	.rpm-curve-table-header {

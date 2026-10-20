@@ -1019,9 +1019,13 @@
 										<tr class:total-row={row.isTotal}>
 											<th scope="row" class="rpm-range-column">{row.isTotal ? 'Total' : formatRpmRangeLabel(row.label)}</th>
 											{#each rpmMatrixMetrics as metric (metric.key)}
-												{#each matrix.engines as engine, engineIndex (engine.key)}
-													<td class:rpm-metric-start={engineIndex === 0}>{formatRpmMatrixCell(row.cells[engineIndex], metric, engine.rows)}</td>
-												{/each}
+												{#if row.isTotal && metric.key === 'lh'}
+													<td colspan={matrix.engines.length} class="rpm-total-spacer rpm-metric-start" aria-label="Not applicable"></td>
+												{:else}
+													{#each matrix.engines as engine, engineIndex (engine.key)}
+														<td class:rpm-metric-start={engineIndex === 0}>{formatRpmMatrixCell(row.cells[engineIndex], metric, engine.rows)}</td>
+													{/each}
+												{/if}
 											{/each}
 										</tr>
 									{:else}
@@ -1042,9 +1046,6 @@
 							<tr>
 								<th>Summary</th>
 								<th>Runtime</th>
-								{#if selectedRpmRangeTable.showLh}
-									<th>L/h</th>
-								{/if}
 								{#each selectedRpmRangeTable.sourceKeys as sourceKey}
 									<th>{getRpmSourceLabel(sourceKey)} Fuel</th>
 								{/each}
@@ -1054,9 +1055,6 @@
 							<tr class="total-row">
 								<td>Grand Total</td>
 								<td>{formatRuntimeValue(selectedRpmRangeTable.grandTotal.runtime_hours ?? selectedRpmRangeTable.grandTotal.runtimeHours)}</td>
-								{#if selectedRpmRangeTable.showLh}
-									<td>{formatNumber(selectedRpmRangeTable.grandTotal.lh_ems ?? selectedRpmRangeTable.grandTotal.lhEms ?? selectedRpmRangeTable.grandTotal.lh_maker ?? selectedRpmRangeTable.grandTotal.lhMaker ?? selectedRpmRangeTable.grandTotal.lh, 2)}</td>
-								{/if}
 								{#each selectedRpmRangeTable.sourceKeys as sourceKey}
 									<td>{formatLiter(getRpmFuelValue(selectedRpmRangeTable.grandTotal, sourceKey))}</td>
 								{/each}
@@ -1710,6 +1708,10 @@
 
 	.periodical-rpm-matrix .total-row .rpm-range-column {
 		background: var(--color-accent-muted);
+	}
+
+	.periodical-rpm-matrix .total-row .rpm-total-spacer {
+		background: var(--color-surface);
 	}
 
 	.periodical-rpm-card-header {
