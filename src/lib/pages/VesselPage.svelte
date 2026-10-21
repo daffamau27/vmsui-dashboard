@@ -5,6 +5,7 @@
 	import { apiRequest } from '$lib/api/authApi.js';
 	import { updateVesselHireStatusAdminApi as updateVesselHireStatusApi } from '$lib/api/administratorApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import HireHistoryModal from '$lib/components/HireHistoryModal.svelte';
 	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 
 	import VesselDashboardPage from '$lib/pages/vessel/VesselDashboardPage.svelte';
@@ -43,6 +44,7 @@
 	let hireStatusError = $state('');
 	let hireStatusModalOpen = $state(false);
 	let hireStatusTarget = $state(null);
+	let hireHistoryModalOpen = $state(false);
 	let hireStatusForm = $state({
 		effectiveAt: '',
 		reason: '',
@@ -851,6 +853,7 @@
 	}
 
 	function resetVesselScopedUiState() {
+		hireHistoryModalOpen = false;
 		pageStatusMap = {};
 		todayDataReceived = '-';
 		todayDataReceivedStats = { received: '-', total: 1440 };
@@ -1062,6 +1065,21 @@
 		hireStatusError = '';
 		hireStatusModalOpen = true;
 	}
+
+	function openSelectedVesselHireHistory() {
+		if (
+			permissionLoading ||
+			!canManageHireStatus ||
+			!($selectedVesselId || getVesselId(selectedVesselRecord))
+		) return;
+		menuOpen = false;
+		vesselDropdownOpen = false;
+		hireHistoryModalOpen = true;
+	}
+
+	$effect(() => {
+		if (!active || permissionLoading || !canManageHireStatus) hireHistoryModalOpen = false;
+	});
 
 	function closeHireStatusModal() {
 		if (hireStatusLoading) return;
@@ -1291,6 +1309,22 @@
 					</span>
 				</div>
 			{/if}
+			{#if canManageHireStatus}
+				<button
+					type="button"
+					class="hire-history-topbar-button"
+					onclick={openSelectedVesselHireHistory}
+					disabled={permissionLoading || !($selectedVesselId || getVesselId(selectedVesselRecord))}
+					title={`View hire history for ${selectedVessel}`}
+					aria-label="Hire History"
+					aria-haspopup="dialog"
+				>
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+						<path d="M3 11a9 9 0 1 1 2.6 7M3 4v7h7M12 7v5l3 2" stroke-linecap="round" stroke-linejoin="round" />
+					</svg>
+					<span>Hire History</span>
+				</button>
+			{/if}
 		</div>
 
 		<div class="vessel-dropdown">
@@ -1450,6 +1484,16 @@
 	</main>
 </section>
 
+{#if active && !permissionLoading && canManageHireStatus && hireHistoryModalOpen && ($selectedVesselId || getVesselId(selectedVesselRecord))}
+	{#key $selectedVesselId || getVesselId(selectedVesselRecord)}
+		<HireHistoryModal
+			vesselId={$selectedVesselId || getVesselId(selectedVesselRecord)}
+			vesselName={selectedVessel}
+			onclose={() => (hireHistoryModalOpen = false)}
+		/>
+	{/key}
+{/if}
+
 {#if hireStatusModalOpen}
 	<div
 		class="hire-modal-backdrop"
@@ -1560,6 +1604,7 @@
 
 	.vessel-shell {
 		--vessel-topbar-height: 62px;
+		container: vessel-workspace / inline-size;
 		width: 100%;
 		height: 100%;
 		min-width: 0;
@@ -2601,6 +2646,68 @@
 		line-height: 1.15;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.hire-history-topbar-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex: 0 0 auto;
+		gap: 6px;
+		height: var(--vessel-topbar-item-height);
+		padding: 0 10px;
+		border: 1px solid rgba(96, 165, 250, 0.3);
+		border-radius: 13px;
+		background: rgba(30, 58, 95, 0.4);
+		color: var(--text-primary);
+		font: inherit;
+		font-size: 12px;
+		font-weight: 700;
+		white-space: nowrap;
+		cursor: pointer;
+	}
+
+	.hire-history-topbar-button svg {
+		color: #93c5fd;
+		flex-shrink: 0;
+	}
+	.hire-history-topbar-button:hover:not(:disabled) {
+		background: rgba(37, 99, 235, 0.24);
+		border-color: #60a5fa;
+	}
+	.hire-history-topbar-button:focus-visible {
+		outline: 2px solid #60a5fa;
+		outline-offset: 2px;
+	}
+	.hire-history-topbar-button:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+
+	/* Only the vessel selector stays pinned; hire history scrolls with the status cards. */
+	@container vessel-workspace (max-width: 1500px) {
+		.vessel-dropdown {
+			position: sticky;
+			right: 0;
+			z-index: 21;
+			padding-left: 8px;
+			background: rgba(10, 14, 26, 0.98);
+		}
+		.hire-history-topbar-button {
+			width: var(--vessel-topbar-item-height);
+			padding: 0;
+		}
+		.hire-history-topbar-button span {
+			display: none;
+		}
+		.topbar-left {
+			min-width: max-content;
+		}
+		.vessel-topbar:not(.dropdown-open) {
+			overflow-x: auto;
+			overflow-y: hidden;
+			scrollbar-width: thin;
+		}
 	}
 
 	.hire-modal-backdrop {

@@ -48,6 +48,8 @@
   let { active = false } = $props();
   let lastDashboardLoadKey = $state("");
   let dashboardRequestId = 0;
+  let dashboardRequestInFlight = false;
+  const DASHBOARD_POLL_INTERVAL_MS = 60_000;
 
   let dashboardMapContainer;
   let dashboardMap = null;
@@ -1893,44 +1895,56 @@
     );
   }
 
-  async function loadDashboard(vesselId = $selectedVesselId) {
+  async function loadDashboard(vesselId = $selectedVesselId, { background = false } = {}) {
     const targetVesselId = vesselId || $selectedVesselId;
+    if (background && dashboardRequestInFlight) return;
+
     const requestId = ++dashboardRequestId;
 
     if (!targetVesselId) {
+      dashboardRequestInFlight = false;
+      loading = false;
+      cctvSnapshotsLoading = false;
       dashboardData = null;
       cctvSnapshots = [];
       error = "No vessel has been selected from Fleet View.";
       return;
     }
 
-    loading = true;
+    const keepCurrentData = background && dashboardData !== null;
+    dashboardRequestInFlight = true;
+    if (!keepCurrentData) loading = true;
     error = "";
 
     try {
-      const [dashboardResult] = await Promise.all([
+      // Wait for the entire refresh, including CCTV, before allowing the next poll.
+      const [dashboardResult] = await Promise.allSettled([
         getVesselDashboard(targetVesselId),
-        loadDashboardAssets(),
-        loadLatestCctvSnapshots(targetVesselId, requestId),
+        background ? Promise.resolve() : loadDashboardAssets(),
+        loadLatestCctvSnapshots(targetVesselId, requestId, { background }),
         loadCurrentUser()
       ]);
 
       if (!isDashboardRequestCurrent(targetVesselId, requestId)) return;
+      if (dashboardResult.status === "rejected") throw dashboardResult.reason;
 
-      dashboardData = dashboardResult?.data || dashboardResult || null;
+      dashboardData = dashboardResult.value?.data || dashboardResult.value || null;
 
       console.log("[VESSEL_DASHBOARD_DATA]", { vesselId: targetVesselId, data: dashboardData });
 
-      scheduleDashboardMapRefresh({ center: true });
+      scheduleDashboardMapRefresh({ center: !background });
     } catch (err) {
       if (!isDashboardRequestCurrent(targetVesselId, requestId)) return;
 
       console.error("[VESSEL_DASHBOARD_ERROR]", err);
-      error = err?.message || "Failed to load vessel dashboard.";
-      dashboardData = null;
-      cctvSnapshots = [];
+      if (!keepCurrentData || err?.status === 401 || err?.status === 403) {
+        error = err?.message || "Failed to load vessel dashboard.";
+        dashboardData = null;
+        cctvSnapshots = [];
+      }
     } finally {
       if (isDashboardRequestCurrent(targetVesselId, requestId)) {
+        dashboardRequestInFlight = false;
         loading = false;
       }
     }
@@ -1964,13 +1978,17 @@
     }
   }
 
-  async function loadLatestCctvSnapshots(vesselId = $selectedVesselId, requestId = dashboardRequestId) {
+  async function loadLatestCctvSnapshots(
+    vesselId = $selectedVesselId,
+    requestId = dashboardRequestId,
+    { background = false } = {}
+  ) {
     if (!vesselId) {
       cctvSnapshots = [];
       return [];
     }
 
-    cctvSnapshotsLoading = true;
+    if (!background) cctvSnapshotsLoading = true;
     cctvSnapshotsError = "";
 
     try {
@@ -1993,7 +2011,7 @@
       if (!isDashboardRequestCurrent(vesselId, requestId)) return [];
 
       console.error("[VESSEL_CCTV_SNAPSHOTS_ERROR]", err);
-      cctvSnapshots = [];
+      if (!background || err?.status === 401 || err?.status === 403) cctvSnapshots = [];
       cctvSnapshotsError = err?.message || "Failed to load latest CCTV snapshots.";
       return [];
     } finally {
@@ -2047,6 +2065,19 @@
     if (!active && dashboardMap) {
       destroyDashboardMap();
     }
+  });
+
+  $effect(() => {
+    const vesselId = $selectedVesselId;
+    if (!browser || !active || !vesselId) return;
+
+    const interval = setInterval(() => {
+      if (!active || String(vesselId) !== String($selectedVesselId)) return;
+      if (currentUser && !canAccessDashboard) return;
+      void loadDashboard(vesselId, { background: true });
+    }, DASHBOARD_POLL_INTERVAL_MS);
+
+    return () => clearInterval(interval);
   });
 
   $effect(() => {
@@ -2108,6 +2139,7 @@
   });
 
   onDestroy(() => {
+    dashboardRequestId += 1;
     destroyDashboardMap();
   });
 </script>
