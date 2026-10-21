@@ -147,6 +147,8 @@
 	let searchEngineCurveImportVessel = '';
 	let engineCurveImportVesselDropdownOpen = false;
 	let engineCurveFileInput;
+	let engineCurveValidFromInput;
+	let engineCurveActivationDate = getTodayDate();
 
 	let reportingVessels = [];
 	let reportingVesselsLoading = false;
@@ -1548,6 +1550,11 @@
 		}
 	}
 
+	function getTodayDate() {
+		const now = new Date();
+		return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+	}
+
 	function createEmptyEngineCurveForm() {
 		return {
 			vesselId: '',
@@ -1555,7 +1562,8 @@
 			curveName: '',
 			file: null,
 			fileName: '',
-			activateAfterImport: false
+			activateAfterImport: false,
+			validFrom: getTodayDate()
 		};
 	}
 
@@ -1672,6 +1680,16 @@
 
 	function getCurveId(curve) {
 		return curve?.curve_id || curve?.curveId || curve?.id || '';
+	}
+
+	function getCurveDate(value) {
+		// Validity is a calendar date: do not shift it to the browser's timezone.
+		const dateOnly = String(value ?? '').trim().match(/^\d{4}-\d{2}-\d{2}(?=$|T)/)?.[0];
+		if (!dateOnly || dateOnly < '0001-01-01') return '';
+		const date = new Date(`${dateOnly}T00:00:00Z`);
+		return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === dateOnly
+			? dateOnly
+			: '';
 	}
 
 	async function loadEngineCurves() {
@@ -2654,6 +2672,8 @@
 	function resetEngineCurveForm() {
 		selectedEngineCurve = null;
 		selectedEngineCurveDetail = null;
+		selectedEngineCurveLoading = false;
+		engineCurveActivationDate = getTodayDate();
 		engineCurveForm = createEmptyEngineCurveForm();
 		searchEngineCurveImportVessel = '';
 		engineCurveImportVesselDropdownOpen = false;
@@ -2682,6 +2702,13 @@
 			return 'Excel file is required.';
 		}
 
+		if (
+			engineCurveValidFromInput?.validity.valid === false ||
+			(engineCurveForm.validFrom && getCurveDate(engineCurveForm.validFrom) !== engineCurveForm.validFrom)
+		) {
+			return 'Valid From must be a valid date (YYYY-MM-DD).';
+		}
+
 		return null;
 	}
 
@@ -2704,6 +2731,7 @@
 	}
 
 	async function importEngineCurve() {
+		if (engineCurveSaving) return;
 		clearAlert();
 
 		const errorMessage = validateEngineCurveForm();
@@ -2714,6 +2742,7 @@
 		}
 
 		engineCurveSaving = true;
+		const validFrom = engineCurveForm.validFrom;
 
 		try {
 			const fileBase64 = await fileToBase64(engineCurveForm.file);
@@ -2724,7 +2753,8 @@
 				curveName: engineCurveForm.curveName.trim(),
 				fileBase64,
 				fileName: engineCurveForm.fileName || engineCurveForm.file.name,
-				activateAfterImport: Boolean(engineCurveForm.activateAfterImport)
+				activateAfterImport: Boolean(engineCurveForm.activateAfterImport),
+				...(validFrom ? { validFrom } : {})
 			};
 
 			await importEngineCurveAdminApi(payload);
@@ -2746,28 +2776,40 @@
 		if (!curveId) return;
 
 		selectedEngineCurveLoading = true;
+		selectedEngineCurveDetail = null;
+		engineCurveActivationDate = getTodayDate();
 		clearAlert();
 
 		try {
 			selectedEngineCurve = curve;
-			selectedEngineCurveDetail = await getEngineCurveDetailAdminApi(curveId);
+			const detail = await getEngineCurveDetailAdminApi(curveId);
+			if (getCurveId(selectedEngineCurve) !== curveId) return;
+			// Preserve validity fields from GET /engine-curves if detail omits them.
+			selectedEngineCurveDetail = { ...curve, ...detail };
 		} catch (error) {
-			showAlert('error', error.message || 'Failed to load engine curve details.');
+			if (getCurveId(selectedEngineCurve) === curveId) {
+				showAlert('error', error.message || 'Failed to load engine curve details.');
+			}
 		} finally {
-			selectedEngineCurveLoading = false;
+			if (getCurveId(selectedEngineCurve) === curveId) selectedEngineCurveLoading = false;
 		}
 	}
 
 	async function toggleEngineCurve(curve) {
 		const curveId = getCurveId(curve);
 
-		if (!curveId) return;
+		if (!curveId || engineCurveActionLoadingId) return;
 
 		const nextStatus = !Boolean(curve?.is_active);
+		const validFrom = nextStatus ? engineCurveActivationDate : '';
+		if (validFrom && getCurveDate(validFrom) !== validFrom) {
+			showAlert('error', 'Valid From must be a valid date (YYYY-MM-DD).');
+			return;
+		}
 
 		const confirmed = window.confirm(
 			nextStatus
-				? `Activate curve "${curve.curve_name}"? Other curves with the same type on this vessel will be deactivated.`
+				? `Activate curve "${curve.curve_name}"${validFrom ? ` from ${validFrom}` : ''}? Other curves with the same type on this vessel will be deactivated.`
 				: `Deactivate curve "${curve.curve_name}"?`
 		);
 
@@ -2777,7 +2819,7 @@
 		clearAlert();
 
 		try {
-			await toggleEngineCurveActiveAdminApi(curveId, nextStatus);
+			await toggleEngineCurveActiveAdminApi(curveId, nextStatus, validFrom);
 
 			showAlert(
 				'success',
@@ -2787,7 +2829,8 @@
 			await loadEngineCurves();
 
 			if (selectedEngineCurve && getCurveId(selectedEngineCurve) === curveId) {
-				await openEngineCurveDetail({
+				const updatedCurve = engineCurves.find((item) => getCurveId(item) === curveId);
+				await openEngineCurveDetail(updatedCurve || {
 					...curve,
 					is_active: nextStatus
 				});
@@ -4272,6 +4315,8 @@
 										<strong>{curve.curve_name || '-'}</strong>
 										<span>{curve.vessel_name || `Vessel ${curve.vessel_id}`}</span>
 										<small>{curve.curve_type || '-'}</small>
+										<small>Valid From: {getCurveDate(curve.valid_from) || '-'}</small>
+										<small>Valid To: {getCurveDate(curve.valid_to) || '-'}</small>
 									</div>
 
 									<em class:active-curve={curve.is_active}>
@@ -4386,6 +4431,17 @@
 							</label>
 
 							<label>
+								<span>Valid From (optional)</span>
+								<input
+									type="date"
+									use:fourDigitDateYear
+									bind:this={engineCurveValidFromInput}
+									bind:value={engineCurveForm.validFrom}
+									disabled={engineCurveSaving}
+								/>
+							</label>
+
+							<label class="engine-curve-file-field">
 								<span>Excel File</span>
 								<input
 									bind:this={engineCurveFileInput}
@@ -4442,14 +4498,16 @@
 								</div>
 
 								<div class="detail-actions">
-									<button
-										type="button"
-										class="ghost-button small"
-										on:click={() => toggleEngineCurve(selectedEngineCurve)}
-										disabled={engineCurveActionLoadingId === getCurveId(selectedEngineCurve)}
-									>
-										{selectedEngineCurve?.is_active ? 'Deactivate' : 'Activate'}
-									</button>
+									{#if selectedEngineCurve?.is_active}
+										<button
+											type="button"
+											class="ghost-button small"
+											on:click={() => toggleEngineCurve(selectedEngineCurve)}
+											disabled={engineCurveActionLoadingId === getCurveId(selectedEngineCurve)}
+										>
+											Deactivate
+										</button>
+									{/if}
 
 									<button
 										type="button"
@@ -4469,6 +4527,16 @@
 								</article>
 
 								<article>
+									<span>Valid From</span>
+									<strong>{getCurveDate(selectedEngineCurveDetail.valid_from) || '-'}</strong>
+								</article>
+
+								<article>
+									<span>Valid To</span>
+									<strong>{getCurveDate(selectedEngineCurveDetail.valid_to) || '-'}</strong>
+								</article>
+
+								<article>
 									<span>Source File</span>
 									<strong>{selectedEngineCurveDetail.meta?.source_file_path || '-'}</strong>
 								</article>
@@ -4478,6 +4546,19 @@
 									<strong>{formatDate(selectedEngineCurveDetail.meta?.uploaded_at)}</strong>
 								</article>
 							</div>
+
+							{#if !selectedEngineCurve?.is_active}
+								<form class="curve-activation-form" on:submit|preventDefault={() => toggleEngineCurve(selectedEngineCurve)}>
+									<label>
+										<span>Valid From (optional)</span>
+										<input type="date" use:fourDigitDateYear bind:value={engineCurveActivationDate} disabled={Boolean(engineCurveActionLoadingId)} />
+									</label>
+									<p>Choose the effective date before activating this curve. Leave blank to omit the date.</p>
+									<button type="submit" class="primary-button" disabled={Boolean(engineCurveActionLoadingId)}>
+										{engineCurveActionLoadingId === getCurveId(selectedEngineCurve) ? 'Activating...' : 'Activate'}
+									</button>
+								</form>
+							{/if}
 
 							<div class="engine-curve-engine-list">
 								{#each selectedEngineCurveDetail.engines || [] as engine}
@@ -6283,6 +6364,10 @@
 		align-items: start;
 	}
 
+	.engine-curve-file-field {
+		grid-column: 1 / -1;
+	}
+
 	.engine-curve-vessel-picker {
 		display: grid;
 		gap: 8px;
@@ -6619,6 +6704,32 @@
 		display: grid;
 		gap: 12px;
 		margin-top: 12px;
+	}
+
+	.curve-activation-form {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: end;
+		gap: 12px;
+		margin-top: 14px;
+		padding: 14px;
+		border: 1px solid var(--color-border);
+		border-radius: 12px;
+		background: var(--color-surface);
+	}
+	.curve-activation-form label {
+		flex: 1 1 180px;
+		min-width: 0;
+	}
+	.curve-activation-form input {
+		width: 100%;
+	}
+	.curve-activation-form p {
+		flex: 2 1 220px;
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 1.5;
 	}
 
 	.engine-curve-engine-card {

@@ -352,14 +352,17 @@ export async function deleteEngineCurveAdminApi(curveId) {
   return unwrap(response);
 }
 
-export async function toggleEngineCurveActiveAdminApi(curveId, isActive) {
+export async function toggleEngineCurveActiveAdminApi(curveId, isActive, validFrom = "") {
   if (!curveId) {
     throw new Error("Curve ID tidak valid.");
   }
 
   const response = await apiRequest(`/engine-curves/curves/${curveId}/toggle-active`, {
     method: "PUT",
-    body: JSON.stringify({ isActive: Boolean(isActive) })
+    body: JSON.stringify({
+      isActive: Boolean(isActive),
+      ...(isActive && validFrom ? { validFrom } : {})
+    })
   });
 
   return unwrap(response);
