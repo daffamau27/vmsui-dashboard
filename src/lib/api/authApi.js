@@ -1,5 +1,6 @@
 import { sortByAlpha } from "$lib/utils/alphaSort.js";
 import { getApiBaseUrl } from "$lib/runtimeConfig.js";
+import { getPostLoginPath } from "$lib/utils/appRoutes.js";
 
 export const AUTH_SESSION_EXPIRES_AT_KEY = "authSessionExpiresAt";
 
@@ -82,7 +83,8 @@ export function redirectToLogin() {
   const currentPath = window.location.pathname;
 
   if (currentPath !== "/") {
-    window.location.href = "/";
+    const destination = getPostLoginPath(currentPath + window.location.search + window.location.hash);
+    window.location.href = `/?redirect=${encodeURIComponent(destination)}`;
   }
 }
 

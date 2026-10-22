@@ -116,6 +116,16 @@ export function getPeriodicalRpmRuntimeHours(row) {
 	return minutes === null ? null : minutes / 60;
 }
 
+export function formatRpmRuntime(row) {
+	const runtimeHours = getPeriodicalRpmRuntimeHours(row);
+	if (runtimeHours === null || runtimeHours < 0) return '-';
+	const totalMinutes = Math.round(runtimeHours * 60);
+	if (!Number.isFinite(totalMinutes)) return '-';
+	const hours = String(Math.floor(totalMinutes / 60)).padStart(2, '0');
+	const minutes = String(totalMinutes % 60).padStart(2, '0');
+	return `${hours}h ${minutes}m`;
+}
+
 /** Prefer API percentages; otherwise use this engine's runtime, excluding its subtotal rows. */
 export function getPeriodicalRpmRuntimePercent(row, engineRows = []) {
 	if (!row) return null;

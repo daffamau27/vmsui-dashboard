@@ -4,9 +4,10 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import Sidebar from '$lib/Sidebar.svelte';
-	import { initAuth, isLoggedIn, authReady } from '$lib/stores/authStore.js';
+	import { initAuth, isLoggedIn, authReady, authLoading } from '$lib/stores/authStore.js';
 	import { activeMenu } from '$lib/stores/appNavigation.svelte.js';
 	import { activeVesselMenu } from '$lib/stores/vesselNavigation.svelte.js';
+	import { getPostLoginPath, parseAppPath } from '$lib/utils/appRoutes.js';
 
 	let { children } = $props();
 
@@ -36,6 +37,7 @@
 	let isLoginPage = $derived(page.url.pathname === '/');
 	let isAccountLinkPage = $derived(page.url.pathname === '/link');
 	let isPublicPage = $derived(isLoginPage || isAccountLinkPage);
+	let isWorkspacePage = $derived(Boolean(parseAppPath(page.url.pathname)));
 	let currentPageTitle = $derived(
 		isLoginPage
 			? 'Login'
@@ -52,15 +54,16 @@
 	});
 
 	$effect(() => {
-		if (!$authReady) return;
+		if (!$authReady || $authLoading) return;
 
 		if (!isPublicPage && !$isLoggedIn) {
-			goto('/');
+			const destination = page.url.pathname + page.url.search + page.url.hash;
+			goto(`/?redirect=${encodeURIComponent(getPostLoginPath(destination))}`, { replaceState: true });
 			return;
 		}
 
 		if (isLoginPage && $isLoggedIn) {
-			goto('/app');
+			goto(getPostLoginPath(page.url.searchParams.get('redirect')), { replaceState: true });
 		}
 	});
 </script>
@@ -80,7 +83,7 @@
 	</div>
 {:else if isPublicPage}
 	{@render children()}
-{:else}
+{:else if $isLoggedIn && isWorkspacePage}
 	<div class:fleet-floating-shell={$activeMenu === 'fleet-view'} class="app-shell">
 		<Sidebar />
 
@@ -88,6 +91,8 @@
 			{@render children()}
 		</main>
 	</div>
+{:else if $isLoggedIn}
+	{@render children()}
 {/if}
 
 <style>

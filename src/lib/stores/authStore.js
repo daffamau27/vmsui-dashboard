@@ -1,5 +1,6 @@
 import { writable, get } from "svelte/store";
 import { goto } from "$app/navigation";
+import { getPostLoginPath } from "$lib/utils/appRoutes.js";
 import {
   loginApi,
   logoutApi,
@@ -182,8 +183,7 @@ export async function login(username, password) {
     isLoggedIn.set(true);
     authReady.set(true);
 
-    await goto("/app");
-
+    // The root layout resumes the requested URL after authentication.
     loadCurrentUserInBackground();
   } catch (error) {
     console.error("[LOGIN_ERROR]", error);
@@ -203,6 +203,9 @@ export async function login(username, password) {
 }
 
 export async function logout({ preserveAuthError = false } = {}) {
+  const returnPath = preserveAuthError && typeof window !== 'undefined'
+    ? getPostLoginPath(window.location.pathname + window.location.search + window.location.hash)
+    : null;
   clearSessionTimeout();
   stopActivityTracking();
   authLoading.set(true);
@@ -220,9 +223,11 @@ export async function logout({ preserveAuthError = false } = {}) {
     currentUser.set(null);
     isLoggedIn.set(false);
     authReady.set(true);
-    authLoading.set(false);
-
-    await goto("/");
+    try {
+      await goto(returnPath ? `/?redirect=${encodeURIComponent(returnPath)}` : '/', { replaceState: true });
+    } finally {
+      authLoading.set(false);
+    }
   }
 }
 

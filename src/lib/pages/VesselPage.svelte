@@ -7,6 +7,7 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import HireHistoryModal from '$lib/components/HireHistoryModal.svelte';
 	import { sortByAlpha } from '$lib/utils/alphaSort.js';
+	import { getVesselPath } from '$lib/utils/appRoutes.js';
 
 	import VesselDashboardPage from '$lib/pages/vessel/VesselDashboardPage.svelte';
 	import DailyReportPage from '$lib/pages/vessel/DailyReportPage.svelte';
@@ -57,9 +58,7 @@
 
 	let pageStatusMap = $state({});	
 
-	let mountedPages = $state({
-		dashboard: true
-	});
+	let mountedPages = $state({});
 
 	const vesselMenus = [
 		{
@@ -878,8 +877,7 @@
 
 		const activeKey = $activeVesselMenu;
 		mountedPages = {
-			dashboard: true,
-			...(activeKey && activeKey !== 'dashboard' ? { [activeKey]: true } : {})
+			...(activeKey ? { [activeKey]: true } : {})
 		};
 	}
 
@@ -918,12 +916,9 @@
 	});
 
 	$effect(() => {
-		if (permissionLoading) return;
+		if (!active || permissionLoading) return;
 
 		if (!visibleVesselMenus.length) {
-			if ($activeVesselMenu) {
-				setActiveVesselMenu('');
-			}
 			return;
 		}
 
@@ -932,7 +927,7 @@
 		);
 
 		if (!activeMenuStillAllowed) {
-			setActiveVesselMenu(visibleVesselMenus[0].key);
+			setActiveVesselMenu(visibleVesselMenus[0].key, { replaceState: true });
 		}
 	});
 
@@ -1136,10 +1131,12 @@
 		}
 	}
 
-	function selectVesselMenu(key) {
-		if (!isPageAllowed(key)) return;
-
-		setActiveVesselMenu(key);
+	function selectVesselMenu(event, key) {
+		if (!isPageAllowed(key)) {
+			event.preventDefault();
+			return;
+		}
+		if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
 		menuOpen = false;
 	}
 
@@ -1186,17 +1183,19 @@
 							<div class="dropdown-empty"><LoadingSkeleton label="Loading menu" variant="list" rows={3} compact /></div>
 						{:else if visibleVesselMenus.length}
 							{#each visibleVesselMenus as menu}
-								<button
-									type="button"
+								<a
+									href={getVesselPath(menu.key)}
+									aria-current={$activeVesselMenu === menu.key ? 'page' : undefined}
+									data-sveltekit-noscroll
 									class="dropdown-item"
 									class:active-item={$activeVesselMenu === menu.key}
-									onclick={() => selectVesselMenu(menu.key)}
+									onclick={(event) => selectVesselMenu(event, menu.key)}
 								>
 									<span>{menu.label}</span>
 									{#if $activeVesselMenu === menu.key}
 										<span class="active-check">✓</span>
 									{/if}
-								</button>
+								</a>
 							{/each}
 						{:else}
 							<div class="dropdown-empty">No menu access.</div>
@@ -1718,6 +1717,8 @@
 	}
 
 	.dropdown-item {
+		text-decoration: none;
+		font-family: inherit;
 		width: 100%;
 		padding: 10px 14px;
 		border: none;
