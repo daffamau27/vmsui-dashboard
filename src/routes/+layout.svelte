@@ -1,9 +1,9 @@
 <script>
-	import './layout.css';
+	import '$lib/styles/layout.css';
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import Sidebar from '$lib/Sidebar.svelte';
+	import Sidebar from '$lib/components/shell/Sidebar.svelte';
 	import { initAuth, isLoggedIn, authReady, authLoading } from '$lib/stores/authStore.js';
 	import { activeMenu } from '$lib/stores/appNavigation.svelte.js';
 	import { activeVesselMenu } from '$lib/stores/vesselNavigation.svelte.js';
@@ -44,8 +44,8 @@
 			: isAccountLinkPage
 				? 'Link Telegram Account'
 				: $activeMenu === 'vessel'
-				? vesselPageTitles[$activeVesselMenu] || pageTitles.vessel
-				: pageTitles[$activeMenu] || 'Dashboard'
+					? vesselPageTitles[$activeVesselMenu] || pageTitles.vessel
+					: pageTitles[$activeMenu] || 'Dashboard'
 	);
 	let documentTitle = $derived(`VMS - ${currentPageTitle}`);
 
@@ -58,7 +58,9 @@
 
 		if (!isPublicPage && !$isLoggedIn) {
 			const destination = page.url.pathname + page.url.search + page.url.hash;
-			goto(`/?redirect=${encodeURIComponent(getPostLoginPath(destination))}`, { replaceState: true });
+			goto(`/?redirect=${encodeURIComponent(getPostLoginPath(destination))}`, {
+				replaceState: true
+			});
 			return;
 		}
 
@@ -192,11 +194,20 @@
 	}
 
 	@keyframes spinner {
-		to { transform: rotate(360deg); }
+		to {
+			transform: rotate(360deg);
+		}
 	}
 
 	@keyframes loadingBrand {
-		0%, 100% { transform: translateY(0); opacity: 1; }
-		50% { transform: translateY(-3px); opacity: 0.85; }
+		0%,
+		100% {
+			transform: translateY(0);
+			opacity: 1;
+		}
+		50% {
+			transform: translateY(-3px);
+			opacity: 0.85;
+		}
 	}
 </style>

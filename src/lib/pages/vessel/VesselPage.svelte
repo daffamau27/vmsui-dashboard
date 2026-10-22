@@ -1,0 +1,3385 @@
+<script>
+	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
+	import { onMount, onDestroy, tick } from 'svelte';
+	import { activeVesselMenu, setActiveVesselMenu } from '$lib/stores/vesselNavigation.svelte.js';
+	import { apiRequest } from '$lib/api/authApi.js';
+	import { updateVesselHireStatusAdminApi as updateVesselHireStatusApi } from '$lib/api/administratorApi.js';
+	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import HireHistoryModal from '$lib/components/HireHistoryModal.svelte';
+	import { sortByAlpha } from '$lib/utils/alphaSort.js';
+	import { getVesselPath } from '$lib/utils/appRoutes.js';
+
+	import VesselDashboardPage from '$lib/pages/vessel/vessel-dashboard/VesselDashboardPage.svelte';
+	import DailyReportPage from '$lib/pages/vessel/daily-report/DailyReportPage.svelte';
+	import MonthlyReportPage from '$lib/pages/vessel/monthly-report/MonthlyReportPage.svelte';
+	import PeriodicalReportPage from '$lib/pages/vessel/periodical-report/PeriodicalReportPage.svelte';
+	import VoyagePlanPage from '$lib/pages/vessel/voyage-plan/VoyagePlanPage.svelte';
+	import TracePage from '$lib/pages/vessel/trace/TracePage.svelte';
+	import DataLogPage from '$lib/pages/vessel/data-log/DataLogPage.svelte';
+	import FuelManagementPage from '$lib/pages/vessel/fuel-management/FuelManagementPage.svelte';
+	import SingleLineDiagramPage from '$lib/pages/vessel/single-line-diagram/SingleLineDiagramPage.svelte';
+
+	import { getMyVesselsApi } from '$lib/api/authApi.js';
+	import {
+		selectedVesselId,
+		selectedVesselInfo,
+		setSelectedVessel,
+		restoreSelectedVessel
+	} from '$lib/stores/selectedVessel.svelte.js';
+	import { pageStatus } from '$lib/stores/pageStatusStore.svelte.js';
+	import { getDailyReportData } from '$lib/api/dailyReportApi.js';
+
+	let { active = true } = $props();
+
+	let menuOpen = $state(false);
+	let vesselDropdownOpen = $state(false);
+	let vesselSearch = $state('');
+	let focusedVesselIndex = $state(-1);
+	let vesselMenuElement = $state(null);
+	let vesselSearchInputElement = $state(null);
+
+	let vessels = $state([]);
+	let vesselLoading = $state(false);
+	let vesselError = $state('');
+	let hireStatusLoading = $state(false);
+	let hireStatusError = $state('');
+	let hireStatusModalOpen = $state(false);
+	let hireStatusTarget = $state(null);
+	let hireHistoryModalOpen = $state(false);
+	let hireStatusForm = $state({
+		effectiveAt: '',
+		reason: '',
+		note: ''
+	});
+
+	let permissionLoading = $state(true);
+	let permissionMode = $state('selected');
+	let permissions = $state([]);
+
+	let pageStatusMap = $state({});
+
+	let mountedPages = $state({});
+
+	const vesselMenus = [
+		{
+			label: 'Dashboard',
+			key: 'dashboard',
+			permissions: ['access_dashboard']
+		},
+		{
+			label: 'Daily Report',
+			key: 'daily-report',
+			permissions: ['access_daily_report']
+		},
+		{
+			label: 'Monthly Report',
+			key: 'monthly-report',
+			permissions: ['access_monthly_report']
+		},
+		{
+			label: 'Periodical Report',
+			key: 'periodical-report',
+			permissions: ['access_periodical_report']
+		},
+		{
+			label: 'Voyage Plan',
+			key: 'voyage-plan',
+			permissions: ['view_voyage_plan_vessel']
+		},
+		{
+			label: 'Trace',
+			key: 'trace',
+			permissions: ['access_trace']
+		},
+		{
+			label: 'Data Log',
+			key: 'data-log',
+			permissions: ['access_data_log']
+		},
+		{
+			label: 'Fuel Management',
+			key: 'fuel-management',
+			permissions: ['access_fuel_management']
+		},
+		{
+			label: 'Single Line Diagram',
+			key: 'single-line-diagram',
+			permissions: ['access_single_line']
+		}
+	];
+
+	function normalizePermissions(permissionAccess = {}) {
+		const rawPermissions = Array.isArray(permissionAccess?.permissions)
+			? permissionAccess.permissions
+			: Array.isArray(permissionAccess?.details)
+				? permissionAccess.details
+				: [];
+
+		return rawPermissions
+			.map((item) => {
+				if (typeof item === 'string') return item;
+
+				return (
+					item?.key || item?.permissionKey || item?.name || item?.code || item?.permission || ''
+				);
+			})
+			.filter(Boolean);
+	}
+
+	function hasPermission(permissionKeys = []) {
+		if (permissionMode === 'all') return true;
+
+		if (!Array.isArray(permissionKeys)) return false;
+		if (!permissionKeys.length) return false;
+
+		return permissionKeys.some((permissionKey) => permissions.includes(permissionKey));
+	}
+
+	function isPageAllowed(key) {
+		const menu = vesselMenus.find((item) => item.key === key);
+		if (!menu) return false;
+
+		return hasPermission(menu.permissions);
+	}
+
+	let visibleVesselMenus = $derived(vesselMenus.filter((menu) => hasPermission(menu.permissions)));
+
+	let activeLabel = $derived(
+		permissionLoading
+			? 'Loading...'
+			: visibleVesselMenus.find((menu) => menu.key === $activeVesselMenu)?.label ||
+					visibleVesselMenus[0]?.label ||
+					'No Access'
+	);
+
+	let selectedVessel = $derived(
+		$selectedVesselInfo?.vesselName || $selectedVesselInfo?.name || 'Select Vessel'
+	);
+
+	let selectedVesselRecord = $derived(
+		vessels.find(
+			(vessel) =>
+				Number(getVesselId(vessel)) ===
+				Number($selectedVesselId || getVesselId($selectedVesselInfo))
+		) ||
+			$selectedVesselInfo ||
+			null
+	);
+
+	let latestVesselStatus = $state({
+		queue: '-',
+		sdcard: '-',
+		sdCardAvailable: false,
+		sdCardUsed: '-',
+		sdCardCapacity: '-',
+		online: false,
+		hireStatus: null,
+		hireUpcoming: null,
+		hireUpcomingLabel: 'Upcoming',
+		hireChangedBy: '-'
+	});
+
+	let selectedHireStatusKnown = $derived(typeof latestVesselStatus.hireStatus === 'boolean');
+	let selectedHireIsOn = $derived(latestVesselStatus.hireStatus === true);
+	let selectedHireLabel = $derived(
+		selectedHireStatusKnown ? (selectedHireIsOn ? 'On Hire' : 'Off Hire') : '-'
+	);
+	let nextHireStatus = $derived(!selectedHireIsOn);
+	let nextHireStatusLabel = $derived(nextHireStatus ? 'On Hire' : 'Off Hire');
+	let hireReasonOptions = $derived(
+		(hireStatusTarget ?? nextHireStatus)
+			? ['New Contract', 'After Docking', 'After Breakdown', 'As Replacement']
+			: ['End of Contract', 'Breakdown', 'Docking', 'Replaced']
+	);
+	let canManageHireStatus = $derived(hasPermission(['manage_hire_status']));
+	let hireStatusToggleTitle = $derived(
+		permissionLoading
+			? 'Loading hire status permission...'
+			: !canManageHireStatus
+				? 'Requires manage_hire_status permission'
+				: hireStatusError ||
+					(selectedHireStatusKnown ? `Change to ${nextHireStatusLabel}` : 'Hire status unavailable')
+	);
+
+	let vesselPageKey = $derived(
+		String($selectedVesselId || getVesselId($selectedVesselInfo) || 'no-vessel')
+	);
+
+	let latestStatusInterval = null;
+	let latestStatusRequestId = 0;
+	let todayDataReceivedRequestId = 0;
+	let lastLatestStatusVesselId = $state(null);
+	let todayDataReceived = $state('-');
+	let todayDataReceivedStats = $state({
+		received: '-',
+		total: 1440
+	});
+
+	function normalizeStatusPageKey(rawStatus = {}) {
+		const pageKey = rawStatus?.pageKey || rawStatus?.key;
+
+		if (pageKey) return pageKey;
+
+		const sourcePage = String(rawStatus?.sourcePage || '').toLowerCase();
+
+		if (sourcePage.includes('daily')) return 'daily-report';
+		if (sourcePage.includes('monthly')) return 'monthly-report';
+		if (sourcePage.includes('periodical')) return 'periodical-report';
+		if (sourcePage.includes('data log')) return 'data-log';
+		if (sourcePage.includes('fuel')) return 'fuel-management';
+		if (sourcePage.includes('dashboard')) return 'dashboard';
+		if (sourcePage.includes('trace')) return 'trace';
+		if (sourcePage.includes('voyage')) return 'voyage-plan';
+
+		return $activeVesselMenu || 'dashboard';
+	}
+
+	let activePageStatus = $derived(pageStatusMap[$activeVesselMenu] || {});
+
+	let status = $derived({
+		dataReceived: todayDataReceived || activePageStatus?.dataReceived || '-',
+		dataReceivedReceived: todayDataReceivedStats.received ?? '-',
+		dataReceivedTotal: todayDataReceivedStats.total ?? 1440,
+		queue: latestVesselStatus.queue ?? '-',
+		sdcard: latestVesselStatus.sdcard ?? '-',
+		sdCardAvailable: latestVesselStatus.sdCardAvailable ?? false,
+		sdCardUsed: latestVesselStatus.sdCardUsed ?? '-',
+		sdCardCapacity: latestVesselStatus.sdCardCapacity ?? '-',
+		online: latestVesselStatus.online ?? false
+	});
+
+	function getVesselId(vessel) {
+		return vessel?.vesselId || vessel?.id || vessel?.vessel_id || vessel?.dbId || null;
+	}
+
+	function getVesselHireRawValue(vessel = {}) {
+		const source = vessel?.vessel || vessel?.raw?.vessel || vessel;
+
+		return (
+			source?.hireStatus ??
+			source?.hire_status ??
+			source?.onHire ??
+			source?.on_hire ??
+			source?.isOnHire ??
+			source?.is_on_hire ??
+			vessel?.hireStatus ??
+			vessel?.hire_status ??
+			vessel?.onHire ??
+			vessel?.on_hire ??
+			vessel?.isOnHire ??
+			vessel?.is_on_hire ??
+			vessel?.raw?.hireStatus ??
+			vessel?.raw?.hire_status ??
+			vessel?.raw?.onHire ??
+			vessel?.raw?.on_hire ??
+			false
+		);
+	}
+
+	function isOnHireStatus(value) {
+		if (typeof value === 'boolean') return value;
+		if (typeof value === 'number') return value === 1;
+
+		const normalized = String(value ?? '')
+			.trim()
+			.toLowerCase()
+			.replace(/[_-]+/g, ' ');
+
+		return ['true', '1', 'on', 'on hire', 'onhire', 'active'].includes(normalized);
+	}
+
+	function formatHireStatusValue(value) {
+		return isOnHireStatus(value) ? 'On Hire' : 'Off Hire';
+	}
+
+	function normalizeVesselForSelector(item = {}) {
+		const source = item?.vessel || item?.raw?.vessel || item;
+		const vesselId =
+			source?.id ??
+			source?.vesselId ??
+			source?.vessel_id ??
+			item?.id ??
+			item?.vesselId ??
+			item?.vessel_id ??
+			item?.dbId ??
+			null;
+
+		const vesselName =
+			source?.vesselName ||
+			source?.vessel_name ||
+			source?.name ||
+			source?.deviceName ||
+			item?.vesselName ||
+			item?.vessel_name ||
+			item?.name ||
+			item?.deviceName ||
+			(vesselId ? `Vessel ${vesselId}` : 'Vessel');
+
+		const companyName =
+			source?.companyName ||
+			source?.company_name ||
+			source?.company?.name ||
+			source?.company?.companyName ||
+			item?.companyName ||
+			item?.company_name ||
+			item?.company?.name ||
+			item?.company?.companyName ||
+			'-';
+		const hireStatus = formatHireStatusValue(getVesselHireRawValue({ ...item, ...source }));
+
+		return {
+			...item,
+			...source,
+			id: vesselId,
+			vesselId,
+			dbId: vesselId,
+			name: vesselName,
+			vesselName,
+			deviceName: source?.deviceName || item?.deviceName || vesselName,
+			deviceId: source?.deviceId || source?.device_id || item?.deviceId || item?.device_id || '',
+			companyName,
+			hireStatus,
+			hire_status: hireStatus,
+			timezone:
+				source?.timezone || item?.timezone || item?.timezoneOffset || item?.timezone_offset || '',
+			engines: Array.isArray(source?.engines)
+				? source.engines
+				: Array.isArray(item?.engines)
+					? item.engines
+					: [],
+			raw: item
+		};
+	}
+
+	function extractVesselsFromResponse(response) {
+		const data = response?.data ?? response;
+		const candidates = [
+			data,
+			data?.items,
+			data?.vessels,
+			data?.data,
+			data?.data?.items,
+			data?.data?.vessels
+		];
+
+		const rows = candidates.find((candidate) => Array.isArray(candidate)) || [];
+
+		return sortByAlpha(
+			rows.map(normalizeVesselForSelector).filter((vessel) => getVesselId(vessel)),
+			getVesselDisplayName,
+			getVesselCompanyName
+		);
+	}
+
+	function getVesselDisplayName(vessel) {
+		return (
+			vessel?.vesselName ||
+			vessel?.vessel_name ||
+			vessel?.name ||
+			vessel?.deviceName ||
+			vessel?.raw?.vesselName ||
+			vessel?.raw?.vessel_name ||
+			vessel?.raw?.vessel?.vesselName ||
+			vessel?.raw?.vessel?.vessel_name ||
+			''
+		);
+	}
+
+	function getVesselCompanyName(vessel) {
+		return (
+			vessel?.companyName ||
+			vessel?.company_name ||
+			vessel?.company?.name ||
+			vessel?.company?.companyName ||
+			vessel?.raw?.companyName ||
+			vessel?.raw?.company_name ||
+			vessel?.raw?.company?.name ||
+			vessel?.raw?.company?.companyName ||
+			vessel?.raw?.vessel?.companyName ||
+			vessel?.raw?.vessel?.company_name ||
+			vessel?.raw?.vessel?.company?.name ||
+			vessel?.raw?.vessel?.company?.companyName ||
+			vessel?.raw?.detail?.companyName ||
+			vessel?.raw?.detail?.company_name ||
+			vessel?.raw?.detail?.company?.name ||
+			vessel?.raw?.detail?.company?.companyName ||
+			''
+		);
+	}
+
+	let filteredVessels = $derived(
+		vessels.filter((vessel) => {
+			const keyword = vesselSearch.trim().toLowerCase();
+			if (!keyword) return true;
+
+			return [getVesselDisplayName(vessel), getVesselCompanyName(vessel)]
+				.filter(Boolean)
+				.some((value) => String(value).toLowerCase().includes(keyword));
+		})
+	);
+
+	function getActiveVesselIndex(list = filteredVessels) {
+		if (!Array.isArray(list) || list.length === 0) return -1;
+
+		const selectedId = $selectedVesselId || getVesselId($selectedVesselInfo);
+		if (!selectedId) return 0;
+
+		const selectedIndex = list.findIndex(
+			(vessel) => Number(getVesselId(vessel)) === Number(selectedId)
+		);
+
+		return selectedIndex >= 0 ? selectedIndex : 0;
+	}
+
+	async function scrollVesselOptionIntoView(
+		index = focusedVesselIndex,
+		block = 'nearest',
+		behavior = 'smooth'
+	) {
+		if (!vesselDropdownOpen || index < 0) return;
+
+		await tick();
+
+		const option = vesselMenuElement?.querySelector?.(`[data-vessel-option-index="${index}"]`);
+
+		option?.scrollIntoView?.({
+			block,
+			inline: 'nearest',
+			behavior
+		});
+	}
+
+	async function prepareVesselDropdown({ focusSearch = false, scrollBlock = 'center' } = {}) {
+		await tick();
+
+		focusedVesselIndex = getActiveVesselIndex();
+
+		if (focusSearch) {
+			vesselSearchInputElement?.focus?.({ preventScroll: true });
+		}
+
+		await scrollVesselOptionIntoView(focusedVesselIndex, scrollBlock, 'auto');
+	}
+
+	function openVesselDropdown({ focusSearch = true } = {}) {
+		vesselDropdownOpen = true;
+		void prepareVesselDropdown({ focusSearch });
+	}
+
+	function toggleVesselDropdown() {
+		if (vesselDropdownOpen) {
+			vesselDropdownOpen = false;
+			return;
+		}
+
+		openVesselDropdown();
+	}
+
+	function moveFocusedVessel(nextIndex) {
+		if (!filteredVessels.length) {
+			focusedVesselIndex = -1;
+			return;
+		}
+
+		const maxIndex = filteredVessels.length - 1;
+		focusedVesselIndex = Math.max(0, Math.min(maxIndex, nextIndex));
+		void scrollVesselOptionIntoView(focusedVesselIndex);
+	}
+
+	function handleVesselSelectorKeydown(event) {
+		if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+			event.preventDefault();
+			openVesselDropdown();
+		}
+	}
+
+	function handleVesselDropdownKeydown(event) {
+		if (!vesselDropdownOpen) return;
+
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			vesselDropdownOpen = false;
+			return;
+		}
+
+		if (!filteredVessels.length) return;
+
+		const currentIndex =
+			focusedVesselIndex >= 0 ? focusedVesselIndex : getActiveVesselIndex(filteredVessels);
+
+		if (event.key === 'ArrowDown') {
+			event.preventDefault();
+			moveFocusedVessel(currentIndex + 1);
+			return;
+		}
+
+		if (event.key === 'ArrowUp') {
+			event.preventDefault();
+			moveFocusedVessel(currentIndex - 1);
+			return;
+		}
+
+		if (event.key === 'Home') {
+			event.preventDefault();
+			moveFocusedVessel(0);
+			return;
+		}
+
+		if (event.key === 'End') {
+			event.preventDefault();
+			moveFocusedVessel(filteredVessels.length - 1);
+			return;
+		}
+
+		if (event.key === 'PageDown') {
+			event.preventDefault();
+			moveFocusedVessel(currentIndex + 6);
+			return;
+		}
+
+		if (event.key === 'PageUp') {
+			event.preventDefault();
+			moveFocusedVessel(currentIndex - 6);
+			return;
+		}
+
+		if (event.key === 'Enter') {
+			event.preventDefault();
+			const vessel = filteredVessels[currentIndex];
+			if (vessel) selectVessel(vessel);
+		}
+	}
+
+	function handleVesselSearchKeydown(event) {
+		handleVesselDropdownKeydown(event);
+
+		if (
+			['ArrowDown', 'ArrowUp', 'Home', 'End', 'PageDown', 'PageUp', 'Enter', 'Escape'].includes(
+				event.key
+			)
+		) {
+			event.stopPropagation();
+		}
+	}
+
+	function formatNumber(value) {
+		const number = Number(value);
+
+		if (!Number.isFinite(number)) return '-';
+
+		return number.toLocaleString('en-US');
+	}
+
+	function padDatePart(value) {
+		return String(value).padStart(2, '0');
+	}
+
+	function todayDate() {
+		const date = new Date();
+		return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
+	}
+
+	function formatDataReceivedStats(stats = {}) {
+		todayDataReceivedStats = {
+			received:
+				stats?.received_minutes ??
+				stats?.receivedMinutes ??
+				stats?.received_slots ??
+				stats?.receivedSlots ??
+				'-',
+			total:
+				stats?.total_minutes ??
+				stats?.totalMinutes ??
+				stats?.total_slots ??
+				stats?.totalSlots ??
+				1440
+		};
+
+		if (stats?.received_minutes !== undefined && stats?.total_minutes !== undefined) {
+			return `${stats.received_minutes} of ${stats.total_minutes} (${stats.percentage ?? '-'}%)`;
+		}
+
+		if (stats?.receivedMinutes !== undefined && stats?.totalMinutes !== undefined) {
+			return `${stats.receivedMinutes} of ${stats.totalMinutes} (${stats.percentage ?? '-'}%)`;
+		}
+
+		if (stats?.received_slots !== undefined && stats?.total_slots !== undefined) {
+			return `${stats.received_slots} of ${stats.total_slots} (${stats.percentage ?? '-'}%)`;
+		}
+
+		if (stats?.receivedSlots !== undefined && stats?.totalSlots !== undefined) {
+			return `${stats.receivedSlots} of ${stats.totalSlots} (${stats.percentage ?? '-'}%)`;
+		}
+
+		return '-';
+	}
+
+	function formatSdCardStatus(sdCardStats) {
+		if (!sdCardStats || sdCardStats.available === false) {
+			return 'Not Available';
+		}
+
+		const freePercentage = Number(sdCardStats.sd_card_free_percentage);
+		const free = Number(sdCardStats.sd_card_free);
+		const total = Number(sdCardStats.sd_card_total);
+		const used = Number(sdCardStats.sd_card_used);
+
+		if (Number.isFinite(free) && Number.isFinite(total) && total > 0) {
+			const percentageText = Number.isFinite(freePercentage)
+				? ` (${freePercentage.toFixed(1)}%)`
+				: '';
+
+			return `${formatNumber(free)} of ${formatNumber(total)} MB Free${percentageText}`;
+		}
+
+		if (Number.isFinite(used) && Number.isFinite(total) && total > 0) {
+			return `${formatNumber(used)} of ${formatNumber(total)} MB Used`;
+		}
+
+		if (Number.isFinite(freePercentage)) {
+			return `${freePercentage.toFixed(1)}% Free`;
+		}
+
+		return 'Available';
+	}
+
+	function formatStorageFromMb(value) {
+		const number = Number(value);
+		if (!Number.isFinite(number)) return '-';
+
+		if (number >= 1000) {
+			const gb = number / 1000;
+			return `${Number.isInteger(gb) ? gb.toFixed(0) : gb.toFixed(1)} GB`;
+		}
+
+		return `${formatNumber(number)} MB`;
+	}
+
+	function normalizeSdCardDetails(sdCardStats = {}) {
+		const total = Number(sdCardStats?.sd_card_total);
+		const free = Number(sdCardStats?.sd_card_free);
+		const used = Number(
+			sdCardStats?.sd_card_used ??
+				(Number.isFinite(total) && Number.isFinite(free) ? total - free : NaN)
+		);
+
+		return {
+			available: Boolean(sdCardStats?.available),
+			used: formatStorageFromMb(used),
+			capacity: formatStorageFromMb(total)
+		};
+	}
+
+	function normalizeLatestStatus(response) {
+		const data = response?.data || response || {};
+		const sdCardDetails = normalizeSdCardDetails(data.sd_card_stats);
+		const hireStatus = data?.hire_status || {};
+		const rawHireStatus = hireStatus?.status;
+		const hasKnownHireStatus = typeof rawHireStatus === 'boolean';
+		const hireUpcoming = hasKnownHireStatus
+			? rawHireStatus
+				? hireStatus?.off_hire_upcoming
+				: hireStatus?.on_hire_upcoming
+			: null;
+
+		return {
+			queue: data.queue ?? '-',
+			sdcard: formatSdCardStatus(data.sd_card_stats),
+			sdCardAvailable: sdCardDetails.available,
+			sdCardUsed: sdCardDetails.used,
+			sdCardCapacity: sdCardDetails.capacity,
+			online: Boolean(data.online),
+			hireStatus: hasKnownHireStatus ? rawHireStatus : null,
+			hireUpcoming: hireUpcoming || null,
+			hireUpcomingLabel: hasKnownHireStatus
+				? rawHireStatus
+					? 'Off Hire Upcoming'
+					: 'On Hire Upcoming'
+				: 'Upcoming',
+			hireChangedBy: hireStatus?.change_by || '-'
+		};
+	}
+
+	async function loadLatestVesselStatus(vesselId) {
+		const effectiveVesselId = vesselId || $selectedVesselId || getVesselId($selectedVesselInfo);
+
+		console.log('[VESSEL_PAGE][LATEST_STATUS][CALL]', {
+			vesselId,
+			effectiveVesselId,
+			selectedVesselId: $selectedVesselId,
+			selectedVesselInfo: $selectedVesselInfo
+		});
+
+		if (!effectiveVesselId) {
+			console.warn('[VESSEL_PAGE][LATEST_STATUS][SKIP] vesselId is empty');
+
+			latestVesselStatus = {
+				queue: '-',
+				sdcard: '-',
+				sdCardAvailable: false,
+				sdCardUsed: '-',
+				sdCardCapacity: '-',
+				online: false,
+				hireStatus: null,
+				hireUpcoming: null,
+				hireUpcomingLabel: 'Upcoming',
+				hireChangedBy: '-'
+			};
+
+			return;
+		}
+
+		const requestId = ++latestStatusRequestId;
+
+		try {
+			const response = await apiRequest(`/vessels/${effectiveVesselId}/latest-status`, {
+				method: 'GET'
+			});
+
+			console.log('[VESSEL_PAGE][LATEST_STATUS][RESPONSE]', response);
+
+			if (requestId !== latestStatusRequestId) return;
+
+			latestVesselStatus = normalizeLatestStatus(response);
+
+			console.log('[VESSEL_PAGE][LATEST_STATUS][NORMALIZED]', latestVesselStatus);
+		} catch (err) {
+			console.error('[VESSEL_PAGE][LATEST_STATUS][ERROR]', err);
+
+			if (requestId !== latestStatusRequestId) return;
+
+			latestVesselStatus = {
+				queue: '-',
+				sdcard: '-',
+				sdCardAvailable: false,
+				sdCardUsed: '-',
+				sdCardCapacity: '-',
+				online: false,
+				hireStatus: null,
+				hireUpcoming: null,
+				hireUpcomingLabel: 'Upcoming',
+				hireChangedBy: '-'
+			};
+		}
+	}
+
+	async function loadTodayDataReceivedStatus(vesselId) {
+		const effectiveVesselId = vesselId || $selectedVesselId || getVesselId($selectedVesselInfo);
+
+		if (!effectiveVesselId) {
+			todayDataReceived = '-';
+			todayDataReceivedStats = { received: '-', total: 1440 };
+			return;
+		}
+
+		const requestId = ++todayDataReceivedRequestId;
+		const date = todayDate();
+
+		try {
+			const response = await getDailyReportData({
+				vesselId: effectiveVesselId,
+				date,
+				timezoneMode: 'auto'
+			});
+
+			if (requestId !== todayDataReceivedRequestId) return;
+
+			const payload = response?.data || response || {};
+			const stats =
+				payload?.data_received_stats || payload?.dataReceivedStats || payload?.stats || {};
+			todayDataReceived = formatDataReceivedStats(stats);
+
+			console.log('[VESSEL_PAGE][TODAY_DATA_RECEIVED]', {
+				vesselId: effectiveVesselId,
+				date,
+				dataReceived: todayDataReceived,
+				stats
+			});
+		} catch (err) {
+			console.error('[VESSEL_PAGE][TODAY_DATA_RECEIVED_ERROR]', err);
+
+			if (requestId !== todayDataReceivedRequestId) return;
+
+			todayDataReceived = '-';
+			todayDataReceivedStats = { received: '-', total: 1440 };
+		}
+	}
+
+	function stopLatestStatusPolling() {
+		if (latestStatusInterval) {
+			clearInterval(latestStatusInterval);
+			latestStatusInterval = null;
+		}
+	}
+
+	function startLatestStatusPolling(vesselId) {
+		const effectiveVesselId = vesselId || $selectedVesselId || getVesselId($selectedVesselInfo);
+
+		console.log('[VESSEL_PAGE][LATEST_STATUS][START_POLLING]', effectiveVesselId);
+
+		stopLatestStatusPolling();
+
+		if (!effectiveVesselId) {
+			console.warn('[VESSEL_PAGE][LATEST_STATUS][POLLING_SKIP] vesselId is empty');
+			return;
+		}
+
+		loadLatestVesselStatus(effectiveVesselId);
+		loadTodayDataReceivedStatus(effectiveVesselId);
+
+		latestStatusInterval = setInterval(() => {
+			loadLatestVesselStatus(effectiveVesselId);
+			loadTodayDataReceivedStatus(effectiveVesselId);
+		}, 30000);
+	}
+
+	function resetVesselScopedUiState() {
+		hireHistoryModalOpen = false;
+		pageStatusMap = {};
+		todayDataReceived = '-';
+		todayDataReceivedStats = { received: '-', total: 1440 };
+		latestVesselStatus = {
+			queue: '-',
+			sdcard: '-',
+			sdCardAvailable: false,
+			sdCardUsed: '-',
+			sdCardCapacity: '-',
+			online: false,
+			hireStatus: null,
+			hireUpcoming: null,
+			hireUpcomingLabel: 'Upcoming',
+			hireChangedBy: '-'
+		};
+		hireStatusModalOpen = false;
+		hireStatusTarget = null;
+		hireStatusError = '';
+
+		latestStatusRequestId += 1;
+		todayDataReceivedRequestId += 1;
+
+		const activeKey = $activeVesselMenu;
+		mountedPages = {
+			...(activeKey ? { [activeKey]: true } : {})
+		};
+	}
+
+	function isPageActive(key) {
+		return active && $activeVesselMenu === key;
+	}
+
+	function shouldMountPage(key) {
+		return Boolean(mountedPages[key]);
+	}
+
+	$effect(() => {
+		const rawStatus = $pageStatus;
+
+		if (!rawStatus) return;
+
+		const pageKey = normalizeStatusPageKey(rawStatus);
+
+		if (!pageKey) return;
+
+		const nextStatus = {
+			dataReceived: rawStatus?.dataReceived ?? '-',
+			sourcePage: rawStatus?.sourcePage ?? ''
+		};
+
+		const currentStatus = pageStatusMap[pageKey];
+
+		if (
+			currentStatus?.dataReceived === nextStatus.dataReceived &&
+			currentStatus?.sourcePage === nextStatus.sourcePage
+		) {
+			return;
+		}
+
+		pageStatusMap[pageKey] = nextStatus;
+	});
+
+	$effect(() => {
+		if (!active || permissionLoading) return;
+
+		if (!visibleVesselMenus.length) {
+			return;
+		}
+
+		const activeMenuStillAllowed = visibleVesselMenus.some(
+			(menu) => menu.key === $activeVesselMenu
+		);
+
+		if (!activeMenuStillAllowed) {
+			setActiveVesselMenu(visibleVesselMenus[0].key, { replaceState: true });
+		}
+	});
+
+	$effect(() => {
+		const key = $activeVesselMenu;
+
+		if (permissionLoading) return;
+		if (!key) return;
+		if (!isPageAllowed(key)) return;
+
+		if (!mountedPages[key]) {
+			mountedPages = {
+				...mountedPages,
+				[key]: true
+			};
+		}
+	});
+
+	$effect(() => {
+		const vesselId = $selectedVesselId || getVesselId($selectedVesselInfo);
+
+		if (!vesselId) return;
+		if (String(vesselId) === String(lastLatestStatusVesselId)) return;
+
+		lastLatestStatusVesselId = vesselId;
+		resetVesselScopedUiState();
+		startLatestStatusPolling(vesselId);
+	});
+
+	$effect(() => {
+		if (!vesselDropdownOpen) {
+			focusedVesselIndex = -1;
+			return;
+		}
+
+		const searchKey = vesselSearch;
+		const vesselCount = filteredVessels.length;
+		const selectedId = $selectedVesselId || getVesselId($selectedVesselInfo);
+
+		searchKey;
+		vesselCount;
+		selectedId;
+
+		const nextFocusedIndex = getActiveVesselIndex(filteredVessels);
+		focusedVesselIndex = nextFocusedIndex;
+		void scrollVesselOptionIntoView(nextFocusedIndex, 'nearest');
+	});
+
+	async function loadCurrentUserPermissions() {
+		permissionLoading = true;
+
+		try {
+			const response = await apiRequest('/users/current-user', {
+				method: 'GET'
+			});
+
+			const permissionAccess = response?.data?.permissionAccess || {};
+
+			permissionMode = permissionAccess?.mode || 'selected';
+			permissions = normalizePermissions(permissionAccess);
+
+			console.log('[VESSEL_PAGE][CURRENT_USER_PERMISSION]', {
+				mode: permissionMode,
+				permissions
+			});
+		} catch (err) {
+			console.error('[VESSEL_PAGE][CURRENT_USER_PERMISSION][ERROR]', err);
+
+			permissionMode = 'selected';
+			permissions = [];
+		} finally {
+			permissionLoading = false;
+		}
+	}
+
+	async function loadVesselsFromApi() {
+		vesselLoading = true;
+		vesselError = '';
+
+		try {
+			console.log('[VESSEL_PAGE][LOAD_VESSELS][START]');
+
+			const response = await getMyVesselsApi();
+			const rows = extractVesselsFromResponse(response);
+
+			console.log('[VESSEL_PAGE][LOAD_VESSELS][RESULT]', rows);
+
+			vessels = sortByAlpha(
+				Array.isArray(rows) ? rows : [],
+				getVesselDisplayName,
+				getVesselCompanyName
+			);
+
+			const currentId = $selectedVesselId;
+
+			if (currentId && vessels.length) {
+				const found = vessels.find((item) => Number(getVesselId(item)) === Number(currentId));
+				const selected = found || vessels[0];
+
+				setSelectedVessel(selected);
+			} else if (vessels.length) {
+				const selected = vessels[0];
+
+				setSelectedVessel(selected);
+			}
+		} catch (err) {
+			console.error('[VESSEL_PAGE][LOAD_VESSELS][ERROR]', err);
+			vesselError = err?.message || 'Failed to load vessels from the API.';
+			vessels = [];
+		} finally {
+			vesselLoading = false;
+		}
+	}
+
+	function openHireStatusModal() {
+		const vesselId = getVesselId(selectedVesselRecord) || $selectedVesselId;
+
+		if (!vesselId || hireStatusLoading) return;
+		if (!canManageHireStatus) {
+			hireStatusError = 'This account does not have the manage_hire_status permission.';
+			return;
+		}
+		if (!selectedHireStatusKnown) {
+			hireStatusError = 'Latest hire status is not available yet.';
+			return;
+		}
+
+		hireStatusTarget = !selectedHireIsOn;
+		hireStatusForm = {
+			effectiveAt: '',
+			reason: '',
+			note: ''
+		};
+		hireStatusError = '';
+		hireStatusModalOpen = true;
+	}
+
+	function openSelectedVesselHireHistory() {
+		if (
+			permissionLoading ||
+			!canManageHireStatus ||
+			!($selectedVesselId || getVesselId(selectedVesselRecord))
+		)
+			return;
+		menuOpen = false;
+		vesselDropdownOpen = false;
+		hireHistoryModalOpen = true;
+	}
+
+	$effect(() => {
+		if (!active || permissionLoading || !canManageHireStatus) hireHistoryModalOpen = false;
+	});
+
+	function closeHireStatusModal() {
+		if (hireStatusLoading) return;
+
+		hireStatusModalOpen = false;
+		hireStatusTarget = null;
+		hireStatusError = '';
+	}
+
+	function handleHireStatusBackdropClick(event) {
+		if (event.target === event.currentTarget) closeHireStatusModal();
+	}
+
+	function handleWindowKeydown(event) {
+		if (event.key === 'Escape' && hireStatusModalOpen) {
+			closeHireStatusModal();
+		}
+	}
+
+	async function submitSelectedVesselHireStatus(event) {
+		event.preventDefault();
+
+		const vesselId = getVesselId(selectedVesselRecord) || $selectedVesselId;
+		if (!vesselId || hireStatusLoading || typeof hireStatusTarget !== 'boolean') return;
+
+		const reason = hireStatusForm.reason.trim();
+		if (!reason) {
+			hireStatusError = 'Reason is required.';
+			return;
+		}
+
+		const effectiveAt = hireStatusForm.effectiveAt.trim().replace('T', ' ');
+		const note = hireStatusForm.note.trim();
+		const payload = {
+			hireStatus: hireStatusTarget,
+			reason,
+			...(effectiveAt ? { effectiveAt } : {}),
+			...(note ? { note } : {})
+		};
+
+		hireStatusLoading = true;
+		hireStatusError = '';
+
+		try {
+			await updateVesselHireStatusApi(vesselId, payload);
+			await loadLatestVesselStatus(vesselId);
+			hireStatusModalOpen = false;
+			hireStatusTarget = null;
+		} catch (error) {
+			console.error('[VESSEL_PAGE][HIRE_STATUS_UPDATE][ERROR]', error);
+			hireStatusError = error?.message || 'Failed to update hire status.';
+		} finally {
+			hireStatusLoading = false;
+		}
+	}
+
+	function selectVesselMenu(event, key) {
+		if (!isPageAllowed(key)) {
+			event.preventDefault();
+			return;
+		}
+		if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+		menuOpen = false;
+	}
+
+	function selectVessel(vessel) {
+		setSelectedVessel(vessel);
+		vesselDropdownOpen = false;
+		vesselSearch = '';
+
+		console.log('[VESSEL_PAGE][VESSEL_SELECTED]', vessel);
+	}
+
+	onMount(() => {
+		restoreSelectedVessel();
+
+		setTimeout(() => {
+			loadCurrentUserPermissions();
+			loadVesselsFromApi();
+		}, 150);
+	});
+
+	onDestroy(() => {
+		stopLatestStatusPolling();
+	});
+</script>
+
+<svelte:window onkeydown={handleWindowKeydown} />
+
+<section class="vessel-shell">
+	<header class="vessel-topbar" class:dropdown-open={menuOpen || vesselDropdownOpen}>
+		<div class="topbar-left">
+			<div class="dropdown">
+				<button type="button" class="dropdown-button" onclick={() => (menuOpen = !menuOpen)}>
+					<span class="menu-icon" aria-hidden="true">▦</span>
+					<span class="selector-copy">
+						<small>Workspace</small>
+						<strong>{activeLabel}</strong>
+					</span>
+					<span>▾</span>
+				</button>
+
+				{#if menuOpen}
+					<div class="dropdown-menu">
+						{#if permissionLoading}
+							<div class="dropdown-empty">
+								<LoadingSkeleton label="Loading menu" variant="list" rows={3} compact />
+							</div>
+						{:else if visibleVesselMenus.length}
+							{#each visibleVesselMenus as menu}
+								<a
+									href={getVesselPath(menu.key)}
+									aria-current={$activeVesselMenu === menu.key ? 'page' : undefined}
+									data-sveltekit-noscroll
+									class="dropdown-item"
+									class:active-item={$activeVesselMenu === menu.key}
+									onclick={(event) => selectVesselMenu(event, menu.key)}
+								>
+									<span>{menu.label}</span>
+									{#if $activeVesselMenu === menu.key}
+										<span class="active-check">✓</span>
+									{/if}
+								</a>
+							{/each}
+						{:else}
+							<div class="dropdown-empty">No menu access.</div>
+						{/if}
+					</div>
+				{/if}
+			</div>
+
+			<div class="topbar-table telemetry-count-card">
+				<div class="topbar-table-title">Telemetry Data Count ({status.dataReceivedTotal})</div>
+				<div class="topbar-table-grid two-cols">
+					<span>Received</span>
+					<span>Queue</span>
+					<strong>{status.dataReceivedReceived}</strong>
+					<strong>{status.queue}</strong>
+				</div>
+			</div>
+
+			<div class="topbar-table sd-card-card">
+				<div class="topbar-table-title">
+					<span
+						class:available-dot={status.sdCardAvailable}
+						class:unavailable-dot={!status.sdCardAvailable}
+						class="sd-available-dot"
+					></span>
+					Storage
+				</div>
+				<div class="topbar-table-grid two-cols">
+					<span>Used</span>
+					<span>Capacity</span>
+					<strong>{status.sdCardUsed}</strong>
+					<strong>{status.sdCardCapacity}</strong>
+				</div>
+			</div>
+
+			{#if false}
+				<div class="topbar-item data-status">
+					<span class="status-icon" aria-hidden="true">↙</span>
+					<span class="status-copy">
+						<small>Data received</small>
+						<strong>{status.dataReceived}</strong>
+					</span>
+				</div>
+
+				<div class="topbar-item">
+					<span class="status-icon" aria-hidden="true">≡</span>
+					<span class="status-copy">
+						<small>Queue</small>
+						<strong>{status.queue}</strong>
+					</span>
+				</div>
+
+				<div class="topbar-item storage-status">
+					<span class="status-icon" aria-hidden="true">▣</span>
+					<span class="status-copy">
+						<small>SD card</small>
+						<strong>{status.sdcard}</strong>
+					</span>
+				</div>
+			{/if}
+
+			<div class="topbar-item online-box" class:offline-box={!status.online}>
+				<span class="dot"></span>
+				<span class="status-copy">
+					<small>Connection</small>
+					<strong>{status.online ? 'Online' : 'Offline'}</strong>
+				</span>
+			</div>
+
+			{#if canManageHireStatus}
+				<button
+					type="button"
+					class="hire-status-toggle manager-detail"
+					class:on-hire={selectedHireIsOn}
+					class:off-hire={!selectedHireIsOn}
+					onclick={openHireStatusModal}
+					disabled={!selectedVesselRecord ||
+						!selectedHireStatusKnown ||
+						hireStatusLoading ||
+						permissionLoading}
+					aria-pressed={selectedHireIsOn}
+					title={hireStatusToggleTitle}
+				>
+					<span class="hire-toggle-track" aria-hidden="true">
+						<span></span>
+					</span>
+					<span class="hire-manager-grid">
+						<span class="hire-detail-item status-detail">
+							<small>Hire Status</small>
+							<strong>{hireStatusLoading ? 'Updating...' : selectedHireLabel}</strong>
+						</span>
+						<span class="hire-detail-item upcoming-detail">
+							<small>{latestVesselStatus.hireUpcomingLabel}</small>
+							<strong title={latestVesselStatus.hireUpcoming || '-'}>
+								{latestVesselStatus.hireUpcoming || '-'}
+							</strong>
+						</span>
+						<span class="hire-detail-item changed-by-detail">
+							<small>Changed By</small>
+							<strong title={latestVesselStatus.hireChangedBy}
+								>{latestVesselStatus.hireChangedBy}</strong
+							>
+						</span>
+					</span>
+				</button>
+			{:else}
+				<div
+					class="hire-status-display"
+					class:on-hire={selectedHireIsOn}
+					class:off-hire={!selectedHireIsOn}
+					role="status"
+					title="Hire status"
+				>
+					<span class="hire-status-dot" aria-hidden="true"></span>
+					<span class="hire-toggle-copy">
+						<small>Hire Status</small>
+						<strong>{selectedHireLabel}</strong>
+					</span>
+				</div>
+			{/if}
+			{#if canManageHireStatus}
+				<button
+					type="button"
+					class="hire-history-topbar-button"
+					onclick={openSelectedVesselHireHistory}
+					disabled={permissionLoading || !($selectedVesselId || getVesselId(selectedVesselRecord))}
+					title={`View hire history for ${selectedVessel}`}
+					aria-label="Hire History"
+					aria-haspopup="dialog"
+				>
+					<svg
+						width="18"
+						height="18"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.8"
+						aria-hidden="true"
+					>
+						<path
+							d="M3 11a9 9 0 1 1 2.6 7M3 4v7h7M12 7v5l3 2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						/>
+					</svg>
+					<span>Hire History</span>
+				</button>
+			{/if}
+		</div>
+
+		<div class="vessel-dropdown">
+			<button
+				type="button"
+				class="vessel-selector"
+				onclick={toggleVesselDropdown}
+				onkeydown={handleVesselSelectorKeydown}
+			>
+				<span class="vessel-selector-icon" aria-hidden="true">🚢</span>
+				<span class="selector-copy">
+					<strong>{selectedVessel}</strong>
+				</span>
+				<span>▾</span>
+			</button>
+
+			{#if vesselDropdownOpen}
+				<div
+					class="vessel-menu"
+					bind:this={vesselMenuElement}
+					onkeydown={handleVesselDropdownKeydown}
+					role="listbox"
+					aria-label="Vessel list"
+					tabindex="-1"
+				>
+					{#if vesselLoading}
+						<div class="vessel-state">
+							<LoadingSkeleton label="Loading vessels" variant="list" rows={4} compact />
+						</div>
+					{:else if vesselError}
+						<div class="vessel-state error">{vesselError}</div>
+					{:else if vessels.length === 0}
+						<div class="vessel-state">No vessels available</div>
+					{:else}
+						<div class="vessel-search-box">
+							<input
+								type="search"
+								placeholder="Search vessel..."
+								aria-label="Search vessel"
+								bind:value={vesselSearch}
+								bind:this={vesselSearchInputElement}
+								onkeydown={handleVesselSearchKeydown}
+							/>
+							{#if vesselSearch}
+								<button
+									type="button"
+									class="vessel-search-clear"
+									aria-label="Clear vessel search"
+									onclick={() => (vesselSearch = '')}
+								>
+								</button>
+							{/if}
+						</div>
+
+						{#if filteredVessels.length === 0}
+							<div class="vessel-state">No vessel found.</div>
+						{:else}
+							{#each filteredVessels as vessel, index}
+								<button
+									type="button"
+									class="vessel-item"
+									class:active-vessel={Number($selectedVesselId) === Number(getVesselId(vessel))}
+									class:keyboard-active={focusedVesselIndex === index &&
+										Number($selectedVesselId) !== Number(getVesselId(vessel))}
+									data-vessel-option-index={index}
+									role="option"
+									aria-selected={focusedVesselIndex === index}
+									onmouseenter={() => (focusedVesselIndex = index)}
+									onclick={() => selectVessel(vessel)}
+								>
+									<span class="vessel-item-icon" aria-hidden="true">🚢</span>
+									<span class="vessel-item-copy">
+										<strong>{vessel.vesselName || vessel.name}</strong>
+										<small>{vessel.companyName || vessel.deviceName || 'Vessel monitoring'}</small>
+									</span>
+									{#if Number($selectedVesselId) === Number(getVesselId(vessel))}
+										<span class="active-check">✓</span>
+									{/if}
+								</button>
+							{/each}
+						{/if}
+					{/if}
+				</div>
+			{/if}
+		</div>
+	</header>
+
+	<main class="vessel-content">
+		{#if permissionLoading}
+			<div class="loading-screen">
+				<div class="loading-brand">⚓</div>
+				<div class="loading-spinner" aria-hidden="true"></div>
+				<span>Initializing...</span>
+			</div>
+		{:else if !visibleVesselMenus.length}
+			<section class="vessel-page active-vessel-page">
+				<div class="no-access-card">
+					<h2>No Menu Access</h2>
+					<p>This user does not have permission to open the vessel page.</p>
+				</div>
+			</section>
+		{:else}
+			{#key vesselPageKey}
+				{#if shouldMountPage('dashboard') && isPageAllowed('dashboard')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('dashboard')}>
+						<VesselDashboardPage active={isPageActive('dashboard')} />
+					</section>
+				{/if}
+
+				{#if shouldMountPage('daily-report') && isPageAllowed('daily-report')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('daily-report')}>
+						<DailyReportPage active={isPageActive('daily-report')} />
+					</section>
+				{/if}
+
+				{#if shouldMountPage('monthly-report') && isPageAllowed('monthly-report')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('monthly-report')}>
+						<MonthlyReportPage active={isPageActive('monthly-report')} />
+					</section>
+				{/if}
+
+				{#if shouldMountPage('periodical-report') && isPageAllowed('periodical-report')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('periodical-report')}>
+						<PeriodicalReportPage active={isPageActive('periodical-report')} />
+					</section>
+				{/if}
+
+				{#if shouldMountPage('voyage-plan') && isPageAllowed('voyage-plan')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('voyage-plan')}>
+						<VoyagePlanPage active={isPageActive('voyage-plan')} />
+					</section>
+				{/if}
+
+				{#if shouldMountPage('trace') && isPageAllowed('trace')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('trace')}>
+						<TracePage active={isPageActive('trace')} />
+					</section>
+				{/if}
+
+				{#if shouldMountPage('data-log') && isPageAllowed('data-log')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('data-log')}>
+						<DataLogPage active={isPageActive('data-log')} />
+					</section>
+				{/if}
+
+				{#if shouldMountPage('fuel-management') && isPageAllowed('fuel-management')}
+					<section class="vessel-page" class:active-vessel-page={isPageActive('fuel-management')}>
+						<FuelManagementPage active={isPageActive('fuel-management')} />
+					</section>
+				{/if}
+
+				{#if shouldMountPage('single-line-diagram') && isPageAllowed('single-line-diagram')}
+					<section
+						class="vessel-page"
+						class:active-vessel-page={isPageActive('single-line-diagram')}
+					>
+						<SingleLineDiagramPage active={isPageActive('single-line-diagram')} />
+					</section>
+				{/if}
+			{/key}
+		{/if}
+	</main>
+</section>
+
+{#if active && !permissionLoading && canManageHireStatus && hireHistoryModalOpen && ($selectedVesselId || getVesselId(selectedVesselRecord))}
+	{#key $selectedVesselId || getVesselId(selectedVesselRecord)}
+		<HireHistoryModal
+			vesselId={$selectedVesselId || getVesselId(selectedVesselRecord)}
+			vesselName={selectedVessel}
+			onclose={() => (hireHistoryModalOpen = false)}
+		/>
+	{/key}
+{/if}
+
+{#if hireStatusModalOpen}
+	<div class="hire-modal-backdrop" role="presentation" onclick={handleHireStatusBackdropClick}>
+		<div class="hire-modal" role="dialog" aria-modal="true" aria-labelledby="hire-modal-title">
+			<header class="hire-modal-header">
+				<div>
+					<small>Hire Status</small>
+					<h2 id="hire-modal-title">Change to {hireStatusTarget ? 'On Hire' : 'Off Hire'}</h2>
+					<p>{selectedVessel}</p>
+				</div>
+				<button
+					type="button"
+					class="hire-modal-close"
+					onclick={closeHireStatusModal}
+					disabled={hireStatusLoading}
+					aria-label="Close hire status form">×</button
+				>
+			</header>
+
+			<form class="hire-status-form" onsubmit={submitSelectedVesselHireStatus}>
+				<label>
+					<span>Status</span>
+					<input
+						class:on-hire={hireStatusTarget === true}
+						value={hireStatusTarget ? 'On Hire' : 'Off Hire'}
+						readonly
+					/>
+				</label>
+
+				<label>
+					<span>Reason <b>*</b></span>
+					<select bind:value={hireStatusForm.reason} required>
+						<option value="" disabled>Select reason</option>
+						{#each hireReasonOptions as reason}
+							<option value={reason}>{reason}</option>
+						{/each}
+					</select>
+				</label>
+
+				<label>
+					<span>Effective date & time <b>*</b></span>
+					<input
+						type="datetime-local"
+						use:fourDigitDateYear
+						bind:value={hireStatusForm.effectiveAt}
+						required
+					/>
+					<small>Leave empty to apply immediately.</small>
+				</label>
+
+				<label>
+					<span>Note <em>Optional</em></span>
+					<textarea rows="4" bind:value={hireStatusForm.note} placeholder="Add a note..."
+					></textarea>
+				</label>
+
+				{#if hireStatusError}
+					<p class="hire-form-error" role="alert">{hireStatusError}</p>
+				{/if}
+
+				<footer class="hire-modal-actions">
+					<button
+						type="button"
+						class="secondary"
+						onclick={closeHireStatusModal}
+						disabled={hireStatusLoading}
+					>
+						Cancel
+					</button>
+					<button type="submit" class="primary" disabled={hireStatusLoading}>
+						{hireStatusLoading ? 'Saving...' : `Save ${hireStatusTarget ? 'On Hire' : 'Off Hire'}`}
+					</button>
+				</footer>
+			</form>
+		</div>
+	</div>
+{/if}
+
+<style>
+	.loading-screen {
+		width: 100vw;
+		height: 100vh;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		place-content: center;
+		justify-items: center;
+		gap: 14px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		font-family:
+			'Plus Jakarta Sans',
+			ui-sans-serif,
+			system-ui,
+			-apple-system,
+			BlinkMacSystemFont,
+			'Segoe UI',
+			sans-serif;
+		background:
+			radial-gradient(circle at 35% 25%, rgba(59, 130, 246, 0.16), transparent 28%),
+			var(--color-base);
+		font-weight: var(--font-weight-body);
+	}
+
+	.vessel-shell {
+		--vessel-topbar-height: 62px;
+		container: vessel-workspace / inline-size;
+		width: 100%;
+		height: 100%;
+		min-width: 0;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		background: var(--color-base);
+	}
+
+	.vessel-content {
+		position: relative;
+		flex: 1 1 auto;
+		min-height: 0;
+		min-width: 0;
+		overflow: hidden;
+		background: var(--color-base);
+	}
+
+	.vessel-page {
+		position: absolute;
+		inset: 0;
+		z-index: 0;
+		opacity: 0;
+		visibility: hidden;
+		pointer-events: none;
+		width: 100%;
+		height: 100%;
+		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
+	}
+
+	.vessel-page.active-vessel-page {
+		z-index: 10;
+		opacity: 1;
+		visibility: visible;
+		pointer-events: auto;
+	}
+
+	.vessel-page :global(.dashboard-content),
+	.vessel-page :global(.daily-report-page),
+	.vessel-page :global(.monthly-report-page),
+	.vessel-page :global(.periodical-page),
+	.vessel-page :global(.page-content) {
+		height: 100%;
+		min-height: 0;
+		overflow: auto;
+		box-sizing: border-box;
+	}
+
+	.vessel-topbar {
+		height: 58px;
+		min-height: 58px;
+		background: rgba(255, 255, 255, 0.06);
+		border-bottom: 1px solid #bdbdbd;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		font-size: 13px;
+		flex-shrink: 0;
+		position: relative;
+		z-index: 900;
+	}
+
+	.topbar-left {
+		display: flex;
+		align-items: center;
+		height: 100%;
+		min-width: 0;
+	}
+
+	.dropdown {
+		position: relative;
+		height: 100%;
+	}
+
+	.dropdown-button {
+		height: 100%;
+		min-width: 145px;
+		padding: 0 12px;
+		border: none;
+		border-right: 1px solid #c4c4c4;
+		background: rgba(255, 255, 255, 0.06);
+		font-weight: 700;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		font-size: 13px;
+	}
+
+	.dropdown-button:hover {
+		background: var(--color-elevated);
+	}
+
+	.arrow {
+		font-size: 11px;
+	}
+
+	.dropdown-menu {
+		position: absolute;
+		top: 58px;
+		left: 0;
+		min-width: 210px;
+		background: var(--color-surface);
+		border: 1px solid #bdbdbd;
+		box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+		z-index: 999;
+	}
+
+	.dropdown-item {
+		text-decoration: none;
+		font-family: inherit;
+		width: 100%;
+		padding: 10px 14px;
+		border: none;
+		background: var(--color-surface);
+		text-align: left;
+		cursor: pointer;
+		font-size: 13px;
+	}
+
+	.dropdown-item:hover {
+		background: var(--color-elevated);
+	}
+
+	.active-item {
+		background: var(--color-accent-muted);
+		font-weight: 700;
+	}
+
+	.topbar-item {
+		height: 100%;
+		padding: 0 12px;
+		display: flex;
+		align-items: center;
+		border-right: 1px solid #c4c4c4;
+		white-space: nowrap;
+		font-weight: 600;
+	}
+
+	.topbar-table {
+		height: 52px;
+		min-width: 210px;
+		display: grid;
+		grid-template-rows: 20px 1fr;
+		margin-left: 8px;
+		border: 1px solid rgba(96, 165, 250, 0.22);
+		border-radius: 14px;
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.2), rgba(15, 23, 42, 0.08)),
+			rgba(15, 23, 42, 0.42);
+		color: var(--text-primary);
+		overflow: hidden;
+		box-shadow:
+			0 10px 26px rgba(2, 6, 23, 0.16),
+			inset 0 1px 0 rgba(255, 255, 255, 0.08);
+		backdrop-filter: blur(12px);
+	}
+
+	.telemetry-count-card {
+		min-width: 265px;
+		border-color: rgba(96, 165, 250, 0.32);
+	}
+
+	.sd-card-card {
+		min-width: 210px;
+		border-color: rgba(20, 184, 166, 0.26);
+		background:
+			linear-gradient(135deg, rgba(20, 184, 166, 0.14), rgba(15, 23, 42, 0.08)),
+			rgba(15, 23, 42, 0.42);
+	}
+
+	.topbar-table-title {
+		display: flex;
+		align-items: center;
+		justify-content: flex-start;
+		gap: 7px;
+		padding: 0 10px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+		color: #bfdbfe;
+		font-size: 10px;
+		line-height: 1;
+		font-weight: 800;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+
+	.topbar-table-grid {
+		display: grid;
+		min-height: 0;
+		gap: 0;
+	}
+
+	.topbar-table-grid.two-cols {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.topbar-table-grid span,
+	.topbar-table-grid strong {
+		min-width: 0;
+		display: flex;
+		align-items: center;
+		padding: 0 10px;
+		border-right: 1px solid rgba(148, 163, 184, 0.14);
+		border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+		font-size: 10px;
+		line-height: 1;
+		white-space: nowrap;
+	}
+
+	.topbar-table-grid span {
+		color: #94a3b8;
+		font-weight: 800;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		background: rgba(15, 23, 42, 0.24);
+	}
+
+	.topbar-table-grid span:nth-child(2n),
+	.topbar-table-grid strong:nth-child(2n) {
+		border-right: none;
+	}
+
+	.topbar-table-grid strong {
+		justify-content: flex-end;
+		color: #f8fafc;
+		font-size: 14px;
+		font-weight: 800;
+		letter-spacing: -0.02em;
+		background: rgba(15, 23, 42, 0.1);
+	}
+
+	.sd-available-dot {
+		width: 9px;
+		height: 9px;
+		border-radius: 999px;
+		display: inline-block;
+		flex: 0 0 auto;
+		background: #94a3b8;
+		box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.12);
+	}
+
+	.sd-available-dot.available-dot {
+		background: #12b886;
+		box-shadow:
+			0 0 0 3px rgba(18, 184, 134, 0.14),
+			0 0 12px rgba(18, 184, 134, 0.46);
+	}
+
+	.sd-available-dot.unavailable-dot {
+		background: #94a3b8;
+	}
+
+	.online-box {
+		gap: 6px;
+	}
+
+	.dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: #12b886;
+		display: inline-block;
+	}
+
+	.offline-box .dot {
+		background: #ef4444;
+	}
+
+	.vessel-dropdown {
+		position: relative;
+		height: 100%;
+		flex-shrink: 0;
+	}
+
+	.vessel-selector {
+		height: 100%;
+		min-width: 120px;
+		padding: 0 12px;
+		border: none;
+		border-left: 1px solid #bdbdbd;
+		font-weight: 700;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		font-size: 13px;
+	}
+
+	.vessel-selector:hover {
+		background: #d0d0d0;
+	}
+
+	.vessel-menu {
+		position: absolute;
+		top: 58px;
+		right: 0;
+		min-width: 150px;
+		background: var(--color-surface);
+		border: 1px solid #bdbdbd;
+		box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+		z-index: 999;
+	}
+
+	.vessel-item {
+		width: 100%;
+		padding: 10px 14px;
+		border: none;
+		background: var(--color-surface);
+		text-align: left;
+		cursor: pointer;
+		font-size: 13px;
+		font-weight: 600;
+	}
+
+	.vessel-item:hover {
+		background: var(--color-elevated);
+	}
+
+	.active-vessel {
+		background: var(--color-accent-muted);
+		font-weight: 800;
+	}
+
+	.vessel-content {
+		position: relative;
+		flex: 1;
+		min-height: 0;
+		min-width: 0;
+		overflow: hidden;
+		background: var(--color-base);
+	}
+
+	.vessel-page {
+		position: absolute;
+		inset: 0;
+		z-index: 0;
+		opacity: 0;
+		visibility: hidden;
+		pointer-events: none;
+		overflow: hidden;
+		min-width: 0;
+		min-height: 0;
+	}
+
+	.vessel-page.active-vessel-page {
+		z-index: 10;
+		opacity: 1;
+		visibility: visible;
+		pointer-events: auto;
+	}
+
+	.dropdown-empty {
+		padding: 10px 14px;
+		font-size: 13px;
+		font-weight: 600;
+		color: #6b7280;
+		background: var(--color-surface);
+		white-space: nowrap;
+	}
+
+	.no-access-card {
+		width: min(520px, calc(100% - 32px));
+		margin: 48px auto;
+		padding: 22px 24px;
+		border: 1px solid #d1d5db;
+		border-radius: 14px;
+		background: var(--color-surface);
+		box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+		color: var(--text-primary);
+	}
+
+	.no-access-card h2 {
+		margin: 0 0 8px;
+		font-size: 18px;
+		font-weight: 800;
+	}
+
+	.no-access-card p {
+		margin: 0;
+		font-size: 13px;
+		color: #6b7280;
+		line-height: 1.5;
+	}
+
+	@media (max-width: 900px) {
+		.vessel-shell {
+			--vessel-topbar-height: 56px;
+		}
+
+		.vessel-topbar {
+			overflow: visible;
+		}
+
+		.vessel-dropdown {
+			position: relative;
+			right: auto;
+		}
+	}
+
+	@media (max-width: 760px) {
+		.vessel-topbar,
+		.topbar {
+			height: 32px;
+			min-height: 32px;
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			background: rgba(255, 255, 255, 0.06);
+			border-bottom: 1px solid #bdbdbd;
+			overflow-x: auto;
+			overflow-y: visible;
+			scrollbar-width: thin;
+		}
+
+		.vessel-topbar::-webkit-scrollbar,
+		.topbar::-webkit-scrollbar {
+			height: 4px;
+		}
+
+		.vessel-topbar::-webkit-scrollbar-track,
+		.topbar::-webkit-scrollbar-track {
+			background: var(--color-elevated);
+		}
+
+		.vessel-topbar::-webkit-scrollbar-thumb,
+		.topbar::-webkit-scrollbar-thumb {
+			background: #9ca3af;
+			border-radius: 999px;
+		}
+
+		.topbar-left {
+			display: flex;
+			align-items: center;
+			height: 100%;
+			min-width: max-content;
+			flex: 0 0 auto;
+		}
+
+		.dropdown {
+			height: 100%;
+			position: relative;
+			flex: 0 0 auto;
+		}
+
+		.dropdown-button {
+			height: 100%;
+			min-width: 116px;
+			max-width: 132px;
+			padding: 0 9px;
+			border: none;
+			border-right: 1px solid #c4c4c4;
+			background: rgba(255, 255, 255, 0.06);
+			color: var(--text-primary);
+			font-size: 11px;
+			font-weight: 800;
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 7px;
+			cursor: pointer;
+		}
+
+		.dropdown-button span:first-child {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.dropdown-button:hover {
+			background: var(--color-elevated);
+		}
+
+		.arrow {
+			font-size: 9px;
+			flex-shrink: 0;
+		}
+
+		.topbar-item {
+			height: 100%;
+			padding: 0 10px;
+			border-right: 1px solid #c4c4c4;
+			display: flex;
+			align-items: center;
+			background: rgba(255, 255, 255, 0.06);
+			color: var(--text-primary);
+			font-size: 11px;
+			font-weight: 700;
+			white-space: nowrap;
+			flex: 0 0 auto;
+		}
+
+		.online-box {
+			gap: 6px;
+		}
+
+		.dot {
+			width: 7px;
+			height: 7px;
+			border-radius: 50%;
+			background: #12b886;
+			display: inline-block;
+			flex-shrink: 0;
+		}
+
+		.offline-box .dot {
+			background: #ef4444;
+		}
+
+		.vessel-dropdown {
+			height: 100%;
+			position: sticky;
+			right: 0;
+			flex: 0 0 auto;
+			z-index: 950;
+		}
+
+		.vessel-selector {
+			height: 100%;
+			min-width: 104px;
+			padding: 0 10px;
+			border: none;
+			border-left: 1px solid #bdbdbd;
+			background: #d9d9d9;
+			color: var(--text-primary);
+			font-size: 11px;
+			font-weight: 800;
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 8px;
+			cursor: pointer;
+		}
+
+		.vessel-selector span:first-child {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.vessel-selector:hover {
+			background: #cfcfcf;
+		}
+
+		.dropdown-menu {
+			position: fixed;
+			top: 32px;
+			left: 52px;
+			min-width: 170px;
+			max-width: calc(100vw - 16px);
+			background: var(--color-surface);
+			border: 1px solid #bdbdbd;
+			border-radius: 0 0 8px 8px;
+			box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+			overflow: hidden;
+			z-index: 3000;
+		}
+
+		.dropdown-item {
+			width: 100%;
+			padding: 9px 12px;
+			border: none;
+			background: var(--color-surface);
+			text-align: left;
+			cursor: pointer;
+			font-size: 11px;
+			font-weight: 700;
+		}
+
+		.dropdown-item:hover {
+			background: var(--color-elevated);
+		}
+
+		.active-item {
+			background: var(--color-accent-muted);
+			font-weight: 800;
+		}
+
+		.vessel-menu {
+			position: fixed;
+			top: 32px;
+			right: 4px;
+			min-width: 132px;
+			max-width: calc(100vw - 16px);
+			background: var(--color-surface);
+			border: 1px solid #bdbdbd;
+			border-radius: 0 0 8px 8px;
+			box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+			overflow: hidden;
+			z-index: 3000;
+		}
+
+		.vessel-item {
+			width: 100%;
+			padding: 9px 12px;
+			border: none;
+			background: var(--color-surface);
+			text-align: left;
+			cursor: pointer;
+			font-size: 11px;
+			font-weight: 700;
+		}
+
+		.vessel-item:hover {
+			background: var(--color-elevated);
+		}
+
+		.active-vessel {
+			background: var(--color-accent-muted);
+			font-weight: 800;
+		}
+	}
+
+	/* Vessel workspace navigation */
+	.vessel-topbar {
+		--vessel-topbar-item-height: 52px;
+		height: 62px;
+		min-height: 62px;
+		padding: 0 12px;
+		gap: 8px;
+		background: rgba(10, 14, 26, 0.96);
+		border-bottom: 1px solid var(--color-border);
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+		backdrop-filter: blur(18px) saturate(1.25);
+	}
+
+	.topbar-left {
+		flex: 1 1 auto;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		overflow: visible;
+		min-width: 0;
+	}
+
+	.dropdown {
+		z-index: 20;
+	}
+
+	.dropdown,
+	.vessel-dropdown {
+		height: var(--vessel-topbar-item-height);
+		flex: 0 0 auto;
+		display: flex;
+		align-items: center;
+	}
+
+	.dropdown-button,
+	.vessel-selector,
+	.topbar-item,
+	.topbar-table,
+	.hire-status-display,
+	.hire-status-toggle {
+		height: var(--vessel-topbar-item-height);
+		min-height: var(--vessel-topbar-item-height);
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 13px;
+		background:
+			linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+		color: var(--text-primary);
+		box-shadow:
+			inset 0 1px 0 rgba(255, 255, 255, 0.045),
+			0 10px 24px rgba(2, 6, 23, 0.16);
+		backdrop-filter: blur(14px) saturate(1.2);
+		transition:
+			border-color 120ms ease,
+			background 120ms ease,
+			transform 120ms ease;
+	}
+
+	.dropdown-button {
+		min-width: 180px;
+		padding: 0 11px;
+		border-color: rgba(59, 130, 246, 0.24);
+		background:
+			linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+	}
+
+	.topbar-table {
+		margin-left: 0;
+		overflow: hidden;
+	}
+
+	.telemetry-count-card {
+		border-color: rgba(96, 165, 250, 0.3);
+		background:
+			linear-gradient(135deg, rgba(37, 99, 235, 0.16), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+	}
+
+	.sd-card-card {
+		border-color: rgba(20, 184, 166, 0.28);
+		background:
+			linear-gradient(135deg, rgba(20, 184, 166, 0.12), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+	}
+
+	.dropdown-button:hover,
+	.vessel-selector:hover,
+	.hire-status-toggle:hover:not(:disabled),
+	.topbar-item:hover,
+	.topbar-table:hover {
+		border-color: rgba(59, 130, 246, 0.4);
+		background:
+			linear-gradient(135deg, rgba(59, 130, 246, 0.14), rgba(15, 23, 42, 0.2)),
+			rgba(15, 23, 42, 0.68);
+		transform: translateY(-1px);
+	}
+
+	.menu-icon,
+	.vessel-selector-icon,
+	.status-icon {
+		display: grid;
+		place-items: center;
+		flex: 0 0 auto;
+		color: #60a5fa;
+	}
+
+	.menu-icon,
+	.vessel-selector-icon {
+		width: 26px;
+		height: 26px;
+		border-radius: 8px;
+		background: rgba(59, 130, 246, 0.13);
+		font-size: 13px;
+	}
+
+	.menu-icon {
+		background: rgba(59, 130, 246, 0.13) url('/assets/workspace.png') center / 17px 17px no-repeat;
+		color: transparent;
+		font-size: 0;
+	}
+
+	.selector-copy,
+	.status-copy,
+	.vessel-item-copy {
+		min-width: 0;
+		display: grid;
+		text-align: left;
+	}
+
+	.selector-copy {
+		flex: 1 1 auto;
+		gap: 1px;
+	}
+
+	.selector-copy small,
+	.status-copy small {
+		color: var(--text-muted);
+		font-size: 8px;
+		font-weight: 900;
+		letter-spacing: 0.08em;
+		line-height: 1.1;
+		text-transform: uppercase;
+	}
+
+	.selector-copy strong {
+		overflow: hidden;
+		color: var(--text-primary);
+		font-size: 15px;
+		font-weight: 900;
+		line-height: 1.25;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.arrow {
+		flex: 0 0 auto;
+		color: var(--text-secondary);
+		font-size: 0;
+	}
+
+	.arrow::before {
+		content: '⌄';
+		font-size: 12px;
+	}
+
+	.topbar-item {
+		min-width: 78px;
+		padding: 0 10px;
+		gap: 7px;
+		color: var(--text-secondary);
+	}
+
+	.topbar-item.data-status {
+		min-width: 145px;
+	}
+
+	.topbar-item.storage-status {
+		min-width: 190px;
+	}
+
+	.status-icon {
+		width: 21px;
+		height: 21px;
+		border-radius: 7px;
+		background: rgba(255, 255, 255, 0.045);
+		font-size: 11px;
+	}
+
+	.status-copy {
+		gap: 2px;
+	}
+
+	.status-copy strong {
+		overflow: hidden;
+		color: var(--text-primary);
+		font-size: 10px;
+		font-weight: 800;
+		line-height: 1.15;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.online-box {
+		min-width: 96px;
+		border-color: rgba(16, 185, 129, 0.18);
+		background:
+			linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+		color: #34d399;
+	}
+
+	.online-box .status-copy strong {
+		color: #34d399;
+	}
+
+	.offline-box {
+		border-color: rgba(239, 68, 68, 0.18);
+		background:
+			linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+	}
+
+	.offline-box .status-copy strong {
+		color: #f87171;
+	}
+
+	.hire-status-toggle {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: flex-start;
+		gap: 9px;
+		margin-left: auto;
+		min-width: 140px;
+		padding: 0 12px;
+		border: 1px solid rgba(245, 158, 11, 0.28);
+		background:
+			linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+		color: #fbbf24;
+		cursor: pointer;
+	}
+
+	.hire-status-toggle.manager-detail {
+		flex: 0 0 370px;
+		min-width: 370px;
+		padding-inline: 10px;
+	}
+
+	.hire-manager-grid {
+		min-width: 0;
+		flex: 1 1 auto;
+		display: grid;
+		grid-template-columns: minmax(64px, 0.8fr) minmax(130px, 1.6fr) minmax(74px, 1fr);
+		align-items: stretch;
+	}
+
+	.hire-detail-item {
+		min-width: 0;
+		display: grid;
+		align-content: center;
+		gap: 3px;
+		padding: 0 8px;
+		border-left: 1px solid rgba(148, 163, 184, 0.16);
+		text-align: left;
+	}
+
+	.hire-detail-item small {
+		overflow: hidden;
+		color: var(--text-muted);
+		font-size: 7px;
+		font-weight: 850;
+		letter-spacing: 0.05em;
+		line-height: 1.1;
+		text-overflow: ellipsis;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+
+	.hire-detail-item strong {
+		overflow: hidden;
+		color: var(--text-primary);
+		font-size: 10px;
+		font-weight: 800;
+		line-height: 1.15;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.hire-detail-item.status-detail strong {
+		color: currentColor;
+	}
+
+	.hire-status-display {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: flex-start;
+		gap: 9px;
+		margin-left: auto;
+		min-width: 126px;
+		padding: 0 12px;
+		border-color: rgba(245, 158, 11, 0.22);
+		background:
+			linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+		color: #fbbf24;
+		cursor: default;
+		user-select: none;
+	}
+
+	.hire-status-display.on-hire {
+		border-color: rgba(16, 185, 129, 0.24);
+		background:
+			linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+		color: #34d399;
+	}
+
+	.hire-status-dot {
+		width: 9px;
+		height: 9px;
+		border-radius: 999px;
+		background: #f59e0b;
+		box-shadow: 0 0 12px rgba(245, 158, 11, 0.42);
+		flex: 0 0 auto;
+	}
+
+	.hire-status-display.on-hire .hire-status-dot {
+		background: #22c55e;
+		box-shadow: 0 0 12px rgba(34, 197, 94, 0.46);
+	}
+
+	.hire-status-toggle:hover:not(:disabled) {
+		border-color: rgba(245, 158, 11, 0.42);
+		background:
+			linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(15, 23, 42, 0.2)),
+			rgba(15, 23, 42, 0.68);
+	}
+
+	.hire-status-toggle.on-hire {
+		border-color: rgba(16, 185, 129, 0.3);
+		background:
+			linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(15, 23, 42, 0.18)),
+			rgba(15, 23, 42, 0.62);
+		color: #34d399;
+	}
+
+	.hire-status-toggle.on-hire:hover:not(:disabled) {
+		border-color: rgba(16, 185, 129, 0.42);
+		background:
+			linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(15, 23, 42, 0.2)),
+			rgba(15, 23, 42, 0.68);
+	}
+
+	.hire-status-toggle:disabled {
+		cursor: progress;
+		opacity: 0.64;
+	}
+
+	.hire-toggle-track {
+		display: flex;
+		align-items: center;
+		width: 38px;
+		height: 20px;
+		padding: 2px;
+		border: 1px solid rgba(245, 158, 11, 0.32);
+		border-radius: 999px;
+		background: rgba(245, 158, 11, 0.18);
+		flex: 0 0 auto;
+	}
+
+	.hire-toggle-track span {
+		width: 14px;
+		height: 14px;
+		border-radius: 999px;
+		background: #f59e0b;
+		box-shadow: 0 0 12px rgba(245, 158, 11, 0.45);
+		transform: translateX(0);
+		transition:
+			transform 180ms ease,
+			background 180ms ease,
+			box-shadow 180ms ease;
+	}
+
+	.hire-status-toggle.on-hire .hire-toggle-track {
+		border-color: rgba(16, 185, 129, 0.36);
+		background: rgba(16, 185, 129, 0.18);
+	}
+
+	.hire-status-toggle.on-hire .hire-toggle-track span {
+		background: #22c55e;
+		box-shadow: 0 0 12px rgba(34, 197, 94, 0.48);
+		transform: translateX(18px);
+	}
+
+	.hire-toggle-copy {
+		min-width: 0;
+		display: grid;
+		gap: 3px;
+		text-align: left;
+	}
+
+	.hire-toggle-copy small {
+		color: var(--text-muted);
+		font-size: 8px;
+		font-weight: 800;
+		letter-spacing: 0.08em;
+		line-height: 1.1;
+		text-transform: uppercase;
+	}
+
+	.hire-toggle-copy strong {
+		overflow: hidden;
+		color: currentColor;
+		font-size: 12px;
+		font-weight: 800;
+		line-height: 1.15;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.hire-history-topbar-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex: 0 0 auto;
+		gap: 6px;
+		height: var(--vessel-topbar-item-height);
+		padding: 0 10px;
+		border: 1px solid rgba(96, 165, 250, 0.3);
+		border-radius: 13px;
+		background: rgba(30, 58, 95, 0.4);
+		color: var(--text-primary);
+		font: inherit;
+		font-size: 12px;
+		font-weight: 700;
+		white-space: nowrap;
+		cursor: pointer;
+	}
+
+	.hire-history-topbar-button svg {
+		color: #93c5fd;
+		flex-shrink: 0;
+	}
+	.hire-history-topbar-button:hover:not(:disabled) {
+		background: rgba(37, 99, 235, 0.24);
+		border-color: #60a5fa;
+	}
+	.hire-history-topbar-button:focus-visible {
+		outline: 2px solid #60a5fa;
+		outline-offset: 2px;
+	}
+	.hire-history-topbar-button:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+
+	/* Only the vessel selector stays pinned; hire history scrolls with the status cards. */
+	@container vessel-workspace (max-width: 1500px) {
+		.vessel-dropdown {
+			position: sticky;
+			right: 0;
+			z-index: 21;
+			padding-left: 8px;
+			background: rgba(10, 14, 26, 0.98);
+		}
+		.hire-history-topbar-button {
+			width: var(--vessel-topbar-item-height);
+			padding: 0;
+		}
+		.hire-history-topbar-button span {
+			display: none;
+		}
+		.topbar-left {
+			min-width: max-content;
+		}
+		.vessel-topbar:not(.dropdown-open) {
+			overflow-x: auto;
+			overflow-y: hidden;
+			scrollbar-width: thin;
+		}
+	}
+
+	.hire-modal-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 30000;
+		display: grid;
+		place-items: center;
+		padding: 20px;
+		background: rgba(2, 6, 23, 0.72);
+		backdrop-filter: blur(8px);
+	}
+
+	.hire-modal {
+		width: min(520px, 100%);
+		max-height: calc(100dvh - 40px);
+		overflow-y: auto;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		border-radius: 16px;
+		background: #111827;
+		box-shadow: 0 26px 80px rgba(0, 0, 0, 0.55);
+		color: var(--text-primary);
+		animation: hireModalIn 160ms ease-out;
+	}
+
+	.hire-modal-header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 16px;
+		padding: 20px 22px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+	}
+
+	.hire-modal-header small {
+		color: #60a5fa;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+	}
+
+	.hire-modal-header h2 {
+		margin: 5px 0 3px;
+		font-size: 19px;
+		line-height: 1.25;
+	}
+
+	.hire-modal-header p {
+		margin: 0;
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+
+	.hire-modal-close {
+		display: grid;
+		place-items: center;
+		width: 34px;
+		height: 34px;
+		padding: 0;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		border-radius: 9px;
+		background: rgba(30, 41, 59, 0.72);
+		color: var(--text-secondary);
+		font-size: 22px;
+		line-height: 1;
+		cursor: pointer;
+	}
+
+	.hire-status-form {
+		display: grid;
+		gap: 16px;
+		padding: 22px;
+	}
+
+	.hire-status-form label {
+		display: grid;
+		gap: 7px;
+	}
+
+	.hire-status-form label > span {
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 800;
+		text-transform: uppercase;
+	}
+
+	.hire-status-form label > span b {
+		color: #f87171;
+	}
+
+	.hire-status-form label > span em {
+		margin-left: 5px;
+		color: var(--text-muted);
+		font-size: 9px;
+		font-style: normal;
+		font-weight: 700;
+	}
+
+	.hire-status-form input,
+	.hire-status-form select,
+	.hire-status-form textarea {
+		width: 100%;
+		min-width: 0;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		border-radius: 9px;
+		background: rgba(15, 23, 42, 0.88);
+		color: var(--text-primary);
+		font: inherit;
+		font-size: 12px;
+		outline: none;
+	}
+
+	.hire-status-form input,
+	.hire-status-form select {
+		height: 42px;
+		padding: 0 12px;
+	}
+
+	.hire-status-form textarea {
+		min-height: 94px;
+		padding: 11px 12px;
+		resize: vertical;
+	}
+
+	.hire-status-form input:focus,
+	.hire-status-form select:focus,
+	.hire-status-form textarea:focus {
+		border-color: rgba(59, 130, 246, 0.68);
+		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+	}
+
+	.hire-status-form input[readonly] {
+		color: #fbbf24;
+		font-weight: 800;
+		cursor: default;
+	}
+
+	.hire-status-form input[readonly].on-hire {
+		color: #34d399;
+	}
+
+	.hire-status-form label > small {
+		color: var(--text-muted);
+		font-size: 10px;
+	}
+
+	.hire-form-error {
+		margin: 0;
+		padding: 10px 12px;
+		border: 1px solid rgba(239, 68, 68, 0.25);
+		border-radius: 9px;
+		background: rgba(239, 68, 68, 0.1);
+		color: #fca5a5;
+		font-size: 11px;
+		font-weight: 700;
+	}
+
+	.hire-modal-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 10px;
+		padding-top: 4px;
+	}
+
+	.hire-modal-actions button {
+		min-width: 105px;
+		height: 40px;
+		padding: 0 15px;
+		border-radius: 9px;
+		font-size: 11px;
+		font-weight: 800;
+		cursor: pointer;
+	}
+
+	.hire-modal-actions .secondary {
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		background: rgba(30, 41, 59, 0.72);
+		color: var(--text-secondary);
+	}
+
+	.hire-modal-actions .primary {
+		border: 1px solid rgba(59, 130, 246, 0.55);
+		background: #2563eb;
+		color: #fff;
+	}
+
+	.hire-modal-actions button:disabled,
+	.hire-modal-close:disabled {
+		cursor: not-allowed;
+		opacity: 0.6;
+	}
+
+	@keyframes hireModalIn {
+		from {
+			opacity: 0;
+			transform: translateY(8px) scale(0.985);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0) scale(1);
+		}
+	}
+
+	.dot {
+		width: 8px;
+		height: 8px;
+		box-shadow: 0 0 10px rgba(16, 185, 129, 0.65);
+		animation: vesselStatusPulse 1.8s ease-in-out infinite;
+	}
+
+	.offline-box .dot {
+		box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+	}
+
+	.vessel-selector {
+		width: 210px;
+		min-width: 210px;
+		padding: 0 10px;
+		border-left: 1px solid rgba(255, 255, 255, 0.08);
+	}
+
+	.dropdown-menu,
+	.vessel-menu {
+		top: calc(100% + 8px);
+		padding: 6px;
+		border: 1px solid rgba(255, 255, 255, 0.09);
+		border-radius: 13px;
+		background: rgba(17, 24, 39, 0.98);
+		box-shadow: 0 18px 48px rgba(0, 0, 0, 0.48);
+		backdrop-filter: blur(18px);
+		animation: vesselMenuIn 150ms ease;
+		z-index: 10000;
+		pointer-events: auto;
+	}
+
+	.dropdown-menu {
+		min-width: 220px;
+	}
+
+	.vessel-menu {
+		width: 280px;
+		max-height: min(420px, calc(100vh - 90px));
+		overflow-y: auto;
+	}
+
+	.vessel-search-box {
+		position: sticky;
+		top: 0;
+		z-index: 2;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 7px;
+		margin-bottom: 6px;
+		padding: 6px;
+		border-radius: 10px;
+		background: rgba(10, 15, 28, 0.96);
+		border: 1px solid rgba(148, 163, 184, 0.14);
+		box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+	}
+
+	.vessel-search-box input {
+		width: 100%;
+		min-width: 0;
+		height: 34px;
+		padding: 0 10px;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 8px;
+		background: rgba(15, 23, 42, 0.96);
+		color: var(--text-primary);
+		font-size: 11px;
+		font-weight: 600;
+		outline: none;
+	}
+
+	.vessel-search-box input::placeholder {
+		color: rgba(148, 163, 184, 0.78);
+	}
+
+	.vessel-search-box input:focus {
+		border-color: rgba(59, 130, 246, 0.58);
+		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+	}
+
+	.vessel-search-clear {
+		width: 34px;
+		height: 34px;
+		display: grid;
+		place-items: center;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 8px;
+		background: rgba(30, 41, 59, 0.9);
+		color: var(--text-secondary);
+		font-size: 0;
+		font-weight: 800;
+		line-height: 1;
+		transition:
+			background 120ms ease,
+			color 120ms ease,
+			border-color 120ms ease;
+	}
+
+	.vessel-search-clear::before {
+		content: 'X';
+		font-size: 11px;
+	}
+
+	.vessel-search-clear:hover {
+		border-color: rgba(96, 165, 250, 0.36);
+		background: rgba(37, 99, 235, 0.18);
+		color: #dbeafe;
+	}
+
+	.dropdown-item,
+	.vessel-item {
+		min-height: 40px;
+		padding: 8px 10px;
+		border: 1px solid transparent;
+		border-radius: 9px;
+		background: transparent;
+		color: var(--text-secondary);
+		transition:
+			background 120ms ease,
+			color 120ms ease,
+			border-color 120ms ease;
+	}
+
+	.dropdown-item {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		font-size: 11px;
+		font-weight: 800;
+	}
+
+	.vessel-item {
+		display: grid;
+		grid-template-columns: 30px minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 9px;
+	}
+
+	.dropdown-item:hover,
+	.vessel-item:hover {
+		border-color: rgba(255, 255, 255, 0.06);
+		background: rgba(255, 255, 255, 0.05);
+		color: var(--text-primary);
+	}
+
+	.dropdown-item.active-item,
+	.vessel-item.active-vessel {
+		border-color: rgba(59, 130, 246, 0.18);
+		background: var(--color-accent-muted);
+		color: var(--text-accent);
+	}
+
+	.vessel-item.keyboard-active {
+		border-color: rgba(96, 165, 250, 0.38);
+		background:
+			linear-gradient(90deg, rgba(59, 130, 246, 0.18), rgba(59, 130, 246, 0.08)),
+			rgba(255, 255, 255, 0.045);
+		color: var(--text-primary);
+		box-shadow:
+			inset 3px 0 0 rgba(96, 165, 250, 0.9),
+			0 8px 18px rgba(15, 23, 42, 0.18);
+	}
+
+	.vessel-item.keyboard-active .vessel-item-icon {
+		background: rgba(59, 130, 246, 0.18);
+		color: #93c5fd;
+	}
+
+	.vessel-item-icon {
+		width: 30px;
+		height: 30px;
+		display: grid;
+		place-items: center;
+		border-radius: 9px;
+		background: rgba(59, 130, 246, 0.1);
+		color: #60a5fa;
+		font-size: 13px;
+	}
+
+	.vessel-item-copy {
+		gap: 2px;
+	}
+
+	.vessel-item-copy strong {
+		overflow: hidden;
+		color: var(--text-primary);
+		font-size: 11px;
+		font-weight: 900;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.vessel-item-copy small {
+		overflow: hidden;
+		color: var(--text-secondary);
+		font-size: 8px;
+		font-weight: 700;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.active-check {
+		color: #60a5fa;
+		font-size: 11px;
+		font-weight: 900;
+	}
+
+	.vessel-state,
+	.dropdown-empty {
+		padding: 12px;
+		border-radius: 9px;
+		background: rgba(255, 255, 255, 0.025);
+		color: var(--text-secondary);
+		font-size: 10px;
+		font-weight: 700;
+	}
+
+	.vessel-state.error {
+		background: var(--color-danger-muted);
+		color: #fca5a5;
+	}
+
+	@keyframes vesselMenuIn {
+		from {
+			opacity: 0;
+			transform: translateY(-5px) scale(0.985);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0) scale(1);
+		}
+	}
+
+	@keyframes vesselStatusPulse {
+		0%,
+		100% {
+			opacity: 1;
+			transform: scale(1);
+		}
+		50% {
+			opacity: 0.62;
+			transform: scale(0.86);
+		}
+	}
+
+	@media (max-width: 1180px) {
+		.topbar-item.storage-status {
+			max-width: 160px;
+			min-width: 150px;
+		}
+
+		.vessel-selector {
+			width: 185px;
+			min-width: 185px;
+		}
+	}
+
+	@media (max-width: 900px) {
+		.vessel-topbar {
+			--vessel-topbar-item-height: 48px;
+			height: 56px;
+			min-height: 56px;
+			overflow-x: auto;
+			overflow-y: hidden;
+			scrollbar-width: none;
+		}
+
+		.vessel-topbar.dropdown-open {
+			overflow: visible;
+			z-index: 10000;
+		}
+
+		.vessel-topbar::-webkit-scrollbar {
+			display: none;
+		}
+
+		.topbar-left {
+			min-width: max-content;
+			overflow: visible;
+		}
+
+		.dropdown-button,
+		.vessel-selector,
+		.topbar-item,
+		.topbar-table,
+		.hire-status-display,
+		.hire-status-toggle {
+			height: var(--vessel-topbar-item-height);
+			min-height: var(--vessel-topbar-item-height);
+		}
+
+		.hire-status-display,
+		.hire-status-toggle {
+			margin-left: 0;
+			min-width: 128px;
+		}
+
+		.dropdown-button {
+			min-width: 150px;
+		}
+
+		.topbar-item.data-status {
+			min-width: 126px;
+		}
+
+		.topbar-item.storage-status {
+			min-width: 145px;
+		}
+
+		.vessel-dropdown {
+			position: sticky;
+			right: 0;
+			padding-left: 5px;
+			background: linear-gradient(90deg, transparent, rgba(10, 14, 26, 0.98) 16%);
+		}
+
+		.vessel-selector {
+			width: 165px;
+			min-width: 165px;
+		}
+
+		.dropdown-menu,
+		.vessel-menu {
+			position: fixed;
+			top: 58px;
+			z-index: 10001;
+			max-height: calc(100dvh - 70px);
+			overflow-y: auto;
+		}
+
+		.dropdown-menu {
+			left: max(8px, env(safe-area-inset-left));
+			width: min(280px, calc(100vw - 16px));
+			min-width: 0;
+		}
+
+		.vessel-menu {
+			right: max(8px, env(safe-area-inset-right));
+			width: min(280px, calc(100vw - 16px));
+		}
+	}
+
+	@media (max-width: 560px) {
+		.vessel-shell {
+			--vessel-topbar-height: 52px;
+		}
+
+		.hire-modal-backdrop {
+			align-items: end;
+			padding: 10px;
+		}
+
+		.hire-modal {
+			max-height: calc(100dvh - 20px);
+			border-radius: 14px;
+		}
+
+		.hire-modal-header,
+		.hire-status-form {
+			padding: 16px;
+		}
+
+		.hire-modal-actions {
+			display: grid;
+			grid-template-columns: 1fr 1fr;
+		}
+
+		.hire-modal-actions button {
+			width: 100%;
+			min-width: 0;
+		}
+
+		.vessel-topbar {
+			--vessel-topbar-item-height: 44px;
+			height: 52px;
+			min-height: 52px;
+			padding-inline: 6px;
+		}
+
+		.dropdown-button,
+		.vessel-selector,
+		.topbar-item,
+		.topbar-table,
+		.hire-status-display,
+		.hire-status-toggle {
+			height: var(--vessel-topbar-item-height);
+			min-height: var(--vessel-topbar-item-height);
+		}
+
+		.hire-status-display,
+		.hire-status-toggle {
+			margin-left: 0;
+			min-width: 108px;
+			padding-inline: 8px;
+		}
+
+		.hire-status-toggle.manager-detail {
+			flex-basis: 350px;
+			min-width: 350px;
+		}
+
+		.hire-detail-item {
+			padding-inline: 6px;
+		}
+
+		.dropdown-button {
+			min-width: 132px;
+			max-width: 132px;
+		}
+
+		.menu-icon,
+		.vessel-selector-icon,
+		.status-icon {
+			display: none;
+		}
+
+		.selector-copy small,
+		.status-copy small {
+			display: none;
+		}
+
+		.hire-toggle-copy small {
+			display: none;
+		}
+
+		.hire-toggle-track {
+			width: 34px;
+		}
+
+		.hire-status-toggle.on-hire .hire-toggle-track span {
+			transform: translateX(14px);
+		}
+
+		.topbar-item {
+			min-width: auto;
+			padding-inline: 9px;
+		}
+
+		.topbar-item.data-status,
+		.topbar-item.storage-status {
+			min-width: auto;
+			max-width: 145px;
+		}
+
+		.online-box {
+			min-width: auto;
+		}
+
+		.vessel-selector {
+			width: 128px;
+			min-width: 128px;
+		}
+
+		.dropdown-menu,
+		.vessel-menu {
+			top: 54px;
+		}
+	}
+</style>
