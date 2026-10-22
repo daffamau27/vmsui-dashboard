@@ -1,11 +1,10 @@
 <script>
-	import { goto } from '$app/navigation';
-	import { page } from '$app/state';
-	import { activeMenu, setActiveMenu } from '$lib/stores/appNavigation.svelte.js';
+	import { activeMenu, setActiveMenu, getMenuHref } from '$lib/stores/appNavigation.svelte.js';
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { browser } from '$app/environment';
 	import { logout, currentUser } from '$lib/stores/authStore.js';
 	import { apiRequest } from '$lib/api/authApi.js';
+	import { canAccessAppMenu } from '$lib/utils/appRoutes.js';
 
 	const menus = [
 		{
@@ -66,61 +65,9 @@
 	let activeAlarmCount = $state(0);
 
 	let permissionLoading = $state(true);
-	let assetAccessMode = $state('selected');
-	let vesselAccessMode = $state('selected');
-	let permissionMode = $state('selected');
-	let permissions = $state([]);
-
-	function normalizeAccessMode(mode) {
-		return String(mode || 'selected').toLowerCase();
-	}
-
-	function extractPermissionKey(item) {
-		if (typeof item === 'string') return item;
-
-		return item?.key || item?.permissionKey || item?.name || item?.code || item?.permission || '';
-	}
-
-	function applyPermissionAccess(permissionAccess = {}) {
-		permissionMode = normalizeAccessMode(permissionAccess?.mode);
-
-		const rawPermissions = Array.isArray(permissionAccess?.permissions)
-			? permissionAccess.permissions
-			: Array.isArray(permissionAccess?.details)
-				? permissionAccess.details
-				: [];
-
-		permissions = rawPermissions.map(extractPermissionKey).filter(Boolean);
-	}
-
-	function applyCurrentUserAccess(user = {}) {
-		assetAccessMode = normalizeAccessMode(user?.assetAccess?.mode);
-		vesselAccessMode = normalizeAccessMode(user?.vesselAccess?.mode);
-		applyPermissionAccess(user?.permissionAccess || {});
-	}
-
-	function hasFullAdministratorAccess() {
-		return (
-			assetAccessMode === 'all' &&
-			vesselAccessMode === 'all' &&
-			permissionMode === 'all'
-		);
-	}
 
 	function hasPermission(menu) {
-		if (menu?.alwaysShow) return true;
-
-		if (menu?.superAdminOnly) {
-			return hasFullAdministratorAccess();
-		}
-
-		if (permissionMode === 'all') return true;
-
-		const permissionKeys = Array.isArray(menu?.permissions) ? menu.permissions : [];
-
-		if (!permissionKeys.length) return false;
-
-		return permissionKeys.some((permissionKey) => permissions.includes(permissionKey));
+		return canAccessAppMenu(menu?.key, $currentUser);
 	}
 
 	function canAccessAlarmMenu() {
@@ -198,8 +145,6 @@
 			});
 
 			const user = response?.data || response || {};
-			applyCurrentUserAccess(user);
-
 			currentUser.set(user);
 			try {
 				localStorage.setItem('currentUser', JSON.stringify(user));
@@ -207,29 +152,23 @@
 				// 
 			}
 
-			console.log('[SIDEBAR][CURRENT_USER_PERMISSION]', {
-				assetAccessMode,
-				vesselAccessMode,
-				permissionMode,
-				permissions
-			});
 		} catch (err) {
 			console.error('[SIDEBAR][CURRENT_USER_PERMISSION][ERROR]', err);
-			assetAccessMode = 'selected';
-			vesselAccessMode = 'selected';
-			permissionMode = 'selected';
-			permissions = [];
+			currentUser.set(null);
 		} finally {
 			permissionLoading = false;
-
-			if (canAccessAlarmMenu()) {
-				startAlarmBadgeRefresh();
-			} else {
-				stopAlarmBadgeRefresh();
-				activeAlarmCount = 0;
-			}
 		}
 	}
+
+	$effect(() => {
+		if (permissionLoading) return;
+		if (canAccessAlarmMenu()) startAlarmBadgeRefresh();
+		else {
+			stopAlarmBadgeRefresh();
+			activeAlarmCount = 0;
+		}
+		return stopAlarmBadgeRefresh;
+	});
 
 	$effect(() => {
 		if (permissionLoading) return;
@@ -238,7 +177,7 @@
 		const activeMenuStillAllowed = visibleMenus.some((menu) => menu.key === $activeMenu);
 
 		if (!activeMenuStillAllowed) {
-			setActiveMenu(visibleMenus[0].key);
+			setActiveMenu(visibleMenus[0].key, { replaceState: true });
 		}
 	});
 
@@ -306,16 +245,14 @@
 		}
 	}
 
-	async function openMenu(menu) {
-		if (!hasPermission(menu)) return;
-
-		setActiveMenu(menu.key);
+	function openMenu(event, menu) {
+		if (!hasPermission(menu)) {
+			event.preventDefault();
+			return;
+		}
+		if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
 		if (browser && window.innerWidth <= 760) {
 			isSidebarOpen = false;
-		}
-
-		if (page.url.pathname !== '/app') {
-			await goto('/app');
 		}
 	}
 
@@ -323,11 +260,6 @@
 		if (!browser) return;
 
 		isSidebarOpen = window.innerWidth > 760;
-
-		const currentPermissionAccess = $currentUser?.permissionAccess;
-		if (currentPermissionAccess || $currentUser?.assetAccess || $currentUser?.vesselAccess) {
-			applyCurrentUserAccess($currentUser || {});
-		}
 
 		window.addEventListener('mobile-panel-open', handleMobilePanelOpen);
 
@@ -394,11 +326,14 @@
 		{/if}
 
 		{#each visibleMenus as menu}
-			<button
+			<a
 				class="side-item"
+				href={getMenuHref(menu.key)}
+				aria-current={isActive(menu.key) ? 'page' : undefined}
+				data-sveltekit-noscroll
 				class:active={isActive(menu.key)}
 				title={menu.key === 'alarm' && activeAlarmCount > 0 ? `${menu.title} (${activeAlarmCount} active)` : menu.title}
-				onclick={() => openMenu(menu)}
+				onclick={(event) => openMenu(event, menu)}
 			>
 			<span class="side-icon">
 				{#if menu.type === 'image'}
@@ -415,7 +350,7 @@
 			</span>
 
 				<span class="side-label">{menu.title}</span>
-			</button>
+			</a>
 		{/each}
 	</div>
 
@@ -703,6 +638,8 @@
 	}
 
 	.side-item {
+		text-decoration: none;
+		font-family: inherit;
 		position: relative;
 		z-index: 3;
 		width: 48px;

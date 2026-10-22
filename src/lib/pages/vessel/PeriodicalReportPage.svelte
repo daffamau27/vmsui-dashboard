@@ -14,7 +14,7 @@
 	import {
 		buildPeriodicalEngineFuelSummary,
 		buildPeriodicalRpmMatrices,
-		getPeriodicalRpmRuntimeHours,
+		formatRpmRuntime,
 		getPeriodicalRpmRuntimePercent
 	} from '$lib/utils/periodicalReport.js';
 
@@ -121,30 +121,6 @@
 		return `${formatNumber(toFuelNumber(value), 1)} L`;
 	}
 
-	function formatRuntimeHours(hours) {
-		const runtimeHours = Number(hours);
-
-		if (!Number.isFinite(runtimeHours) || runtimeHours <= 0) {
-			return '0h 0m';
-		}
-
-		const totalMinutes = runtimeHours * 60;
-		const h = Math.floor(totalMinutes / 60);
-		const m = Math.round(totalMinutes % 60);
-
-		return `${h}h ${m}m`;
-	}
-
-	function formatRuntimeValue(value) {
-		if (value === undefined || value === null || value === '') return '-';
-
-		const text = String(value).trim();
-
-		if (text && /[hms]/i.test(text)) return text;
-
-		return formatRuntimeHours(value);
-	}
-
 	function formatRpmRangeLabel(value) {
 		if (value === undefined || value === null || value === '') return '-';
 
@@ -216,10 +192,7 @@
 
 	function formatRpmMatrixCell(row, metric, engineRows) {
 		if (!row) return '-';
-		if (metric.key === 'runtime') {
-			const hours = getPeriodicalRpmRuntimeHours(row);
-			return hours === null ? '-' : formatRuntimeValue(hours);
-		}
+		if (metric.key === 'runtime') return formatRpmRuntime(row);
 		if (metric.key === 'runtime_percent') {
 			const percent = getPeriodicalRpmRuntimePercent(row, engineRows);
 			return percent === null ? '-' : `${formatNumber(percent, 1)}%`;
@@ -1054,7 +1027,7 @@
 						<tbody>
 							<tr class="total-row">
 								<td>Grand Total</td>
-								<td>{formatRuntimeValue(selectedRpmRangeTable.grandTotal.runtime_hours ?? selectedRpmRangeTable.grandTotal.runtimeHours)}</td>
+								<td>{formatRpmRuntime(selectedRpmRangeTable.grandTotal)}</td>
 								{#each selectedRpmRangeTable.sourceKeys as sourceKey}
 									<td>{formatLiter(getRpmFuelValue(selectedRpmRangeTable.grandTotal, sourceKey))}</td>
 								{/each}

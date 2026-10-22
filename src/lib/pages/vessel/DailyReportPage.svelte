@@ -32,7 +32,7 @@
 	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 	import {
 		buildPeriodicalRpmMatrices,
-		getPeriodicalRpmRuntimeHours,
+		formatRpmRuntime,
 		getPeriodicalRpmRuntimePercent
 	} from '$lib/utils/periodicalReport.js';
 
@@ -2926,7 +2926,7 @@
 
 	function formatRpmMatrixCell(row, metric, engineRows = []) {
 		if (!row) return '-';
-		if (metric.key === 'runtime') return formatHour(getPeriodicalRpmRuntimeHours(row));
+		if (metric.key === 'runtime') return formatRpmRuntime(row);
 		if (metric.key === 'runtime_percent') {
 			const percent = getPeriodicalRpmRuntimePercent(row, engineRows);
 			return percent === null ? '-' : `${formatNumber(percent, 1)}%`;
