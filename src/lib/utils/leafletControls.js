@@ -3,7 +3,7 @@ import {
 	getMapSourceId,
 	setStoredMapSourceId,
 	switchMapTileLayer
-} from '$lib/mapStyle.js';
+} from '$lib/utils/mapStyle.js';
 
 export function addLeafletZoomAndScale(leaflet, map, options = {}) {
 	if (!leaflet || !map) return null;
@@ -47,17 +47,17 @@ function createMapSourceControl(leaflet, options = {}) {
 		},
 
 		onAdd() {
-			const container = leaflet.DomUtil.create(
-				'div',
-				'leaflet-control vms-map-source-control'
-			);
+			const container = leaflet.DomUtil.create('div', 'leaflet-control vms-map-source-control');
 			const label = leaflet.DomUtil.create('span', 'vms-map-source-control__label', container);
 			label.textContent = 'Map';
 
 			const group = leaflet.DomUtil.create('div', 'vms-map-source-control__options', container);
 			const sources = Object.values(MAP_SOURCES);
 			const currentSourceId = getMapSourceId();
-			const currentSourceIndex = Math.max(0, sources.findIndex((source) => source.id === currentSourceId));
+			const currentSourceIndex = Math.max(
+				0,
+				sources.findIndex((source) => source.id === currentSourceId)
+			);
 			group.style.setProperty('--map-source-count', String(sources.length));
 			group.style.setProperty('--map-source-gap-count', String(Math.max(0, sources.length - 1)));
 			group.style.setProperty('--map-source-index', String(currentSourceIndex));

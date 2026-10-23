@@ -1,6 +1,6 @@
 <script>
 	import { afterNavigate } from '$app/navigation';
-	import AppWorkspace from '$lib/components/AppWorkspace.svelte';
+	import AppWorkspace from '$lib/components/shell/AppWorkspace.svelte';
 	import { rememberVesselRoute } from '$lib/stores/routeNavigation.svelte.js';
 
 	let { children } = $props();
