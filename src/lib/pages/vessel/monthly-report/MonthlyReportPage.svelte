@@ -1,5 +1,4 @@
 <script>
-	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { onMount } from 'svelte';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
 	import {
@@ -10,8 +9,18 @@
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import { downloadApiFile, apiRequest } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
+	import {
+		currentMonth,
+		getMonthlyRangeLimitText,
+		validateMonthlyRange
+	} from '$lib/utils/monthlyReportCalendar.js';
+	import MonthlyReportHeader from './MonthlyReportHeader.svelte';
+	import MonthlyReportColumnOptions from './MonthlyReportColumnOptions.svelte';
+	import MonthlyReportSummary from './MonthlyReportSummary.svelte';
+	import MonthlyReportTable from './MonthlyReportTable.svelte';
+	import MonthlyReportLoadOverlay from './MonthlyReportLoadOverlay.svelte';
+	import './monthly-report-page.css';
 
 	let loading = $state(false);
 	let exporting = $state(false);
@@ -21,10 +30,6 @@
 	let reportMonth = $state('');
 	let startDate = $state('');
 	let endDate = $state('');
-	let dateRangeDropdownOpen = $state(false);
-	let hoveredCalendarDay = $state('');
-	let hoveredCalendarKind = $state('');
-	let monthlyDayClickCount = $state(0);
 	let timezoneMode = $state('auto');
 	let timezoneOffset = $state('+07:00');
 	let hasLoadedDateRange = $state(false);
@@ -265,7 +270,9 @@
 		const normalizedKey = normalizeMonthlyColumnKey(key);
 
 		if (isMonthlyColumnSelected(normalizedKey)) {
-			selectedMonthlyColumnKeys = selectedMonthlyColumnKeys.filter((item) => item !== normalizedKey);
+			selectedMonthlyColumnKeys = selectedMonthlyColumnKeys.filter(
+				(item) => item !== normalizedKey
+			);
 			return;
 		}
 
@@ -297,270 +304,6 @@
 	let shouldShowDateRangeOverlay = $derived(
 		!hasLoadedDateRange || !reportMonth || !startDate || !endDate
 	);
-
-	function pad(value) {
-		return String(value).padStart(2, '0');
-	}
-
-	function currentMonth() {
-		const date = new Date();
-		return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
-	}
-
-	function getLastDayOfMonth(monthValue) {
-		if (!monthValue) return '31';
-
-		const [year, month] = monthValue.split('-').map(Number);
-		if (!year || !month) return '31';
-
-		return String(new Date(year, month, 0).getDate()).padStart(2, '0');
-	}
-
-	function getMonthParts(monthValue) {
-		const [year, month] = String(monthValue || '')
-			.split('-')
-			.map(Number);
-
-		if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
-			return null;
-		}
-
-		return { year, month };
-	}
-
-	function getMaxSelectableDay(monthValue) {
-		const parts = getMonthParts(monthValue);
-		if (!parts) return 31;
-
-		const today = new Date();
-		const selectedMonthIndex = parts.month - 1;
-		const selectedMonthDate = new Date(parts.year, selectedMonthIndex, 1);
-		const currentMonthDate = new Date(today.getFullYear(), today.getMonth(), 1);
-		const lastDay = Number(getLastDayOfMonth(monthValue));
-
-		if (selectedMonthDate > currentMonthDate) return 0;
-
-		if (
-			parts.year === today.getFullYear() &&
-			selectedMonthIndex === today.getMonth()
-		) {
-			return Math.min(lastDay, today.getDate());
-		}
-
-		return lastDay;
-	}
-
-	const MONTHLY_WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
-
-	/**
-	 * @param {string} monthValue
-	 * @param {string | number} [minDay]
-	 */
-	function getMonthlyCalendarDays(monthValue, minDay = '1') {
-		const parts = getMonthParts(monthValue);
-		if (!parts) return [];
-
-		const maxSelectableDay = getMaxSelectableDay(monthValue);
-		if (maxSelectableDay <= 0) return [];
-
-		const lastDay = Number(getLastDayOfMonth(monthValue));
-		const minSelectableDay = Math.max(1, normalizeMonthlyDay(minDay, 1));
-		const firstDate = new Date(parts.year, parts.month - 1, 1);
-		const firstWeekday = firstDate.getDay();
-		const totalCells = Math.ceil((firstWeekday + lastDay) / 7) * 7;
-
-		return Array.from({ length: totalCells }, (_, index) => {
-			const dayNumber = index - firstWeekday + 1;
-			const inMonth = dayNumber >= 1 && dayNumber <= lastDay;
-			const selectable = inMonth && dayNumber >= minSelectableDay && dayNumber <= maxSelectableDay;
-
-			return {
-				key: `${monthValue}-${index}`,
-				label: inMonth ? String(dayNumber) : '',
-				value: inMonth ? pad(dayNumber) : '',
-				inMonth,
-				selectable
-			};
-		});
-	}
-
-	let monthlyStartCalendarDays = $derived(getMonthlyCalendarDays(reportMonth));
-	let monthlyEndCalendarDays = $derived(getMonthlyCalendarDays(reportMonth));
-	let nextMonthlyDaySelection = $derived(monthlyDayClickCount % 2 === 0 ? 'start' : 'end');
-	let activeMonthlyCalendarDays = $derived(
-		nextMonthlyDaySelection === 'start' ? monthlyStartCalendarDays : monthlyEndCalendarDays
-	);
-
-	function getMonthlyRangeLimitText() {
-		if (!reportMonth) return 'Select a month first.';
-
-		const maxDay = getMaxSelectableDay(reportMonth);
-		if (maxDay <= 0) return 'Future month cannot be loaded.';
-
-		const lastDay = Number(getLastDayOfMonth(reportMonth));
-		const isLimitedByToday = maxDay < lastDay;
-
-		return isLimitedByToday
-			? `Available until day ${pad(maxDay)} because the selected month is current month.`
-			: `Available day 01 - ${pad(maxDay)}.`;
-	}
-
-	function normalizeMonthlyDay(value, fallback = 1) {
-		const day = Number(value);
-		return Number.isInteger(day) ? day : fallback;
-	}
-
-	function validateMonthlyRange() {
-		if (!reportMonth) {
-			return { valid: false, message: 'Month is required.' };
-		}
-
-		const maxDay = getMaxSelectableDay(reportMonth);
-		const monthLastDay = Number(getLastDayOfMonth(reportMonth));
-
-		if (maxDay <= 0) {
-			return {
-				valid: false,
-				message: 'Selected month is in the future. Please choose current month or a previous month.'
-			};
-		}
-
-		const start = normalizeMonthlyDay(startDate, 1);
-		const end = normalizeMonthlyDay(endDate, maxDay);
-
-		if (!String(startDate || '').trim() || !String(endDate || '').trim()) {
-			return { valid: false, message: 'Date range is required.' };
-		}
-
-		if (start < 1 || end < 1) {
-			return { valid: false, message: 'Start day and end day must be at least 1.' };
-		}
-
-		if (start > monthLastDay || end > monthLastDay) {
-			return {
-				valid: false,
-				message: `Selected day exceeds the selected month. ${reportMonth} only has ${monthLastDay} days.`
-			};
-		}
-
-		if (start > maxDay || end > maxDay) {
-			return {
-				valid: false,
-				message: `Selected day exceeds available data date. Maximum day for this month is ${pad(maxDay)}.`
-			};
-		}
-
-		if (start > end) {
-			return { valid: false, message: 'Start day cannot be greater than end day.' };
-		}
-
-		return {
-			valid: true,
-			startDate: pad(start),
-			endDate: pad(end)
-		};
-	}
-
-	function resetMonthlyDateRange() {
-		hasLoadedDateRange = false;
-		startDate = '';
-		endDate = '';
-		monthlyDayClickCount = 0;
-		dateRangeDropdownOpen = false;
-		hoveredCalendarDay = '';
-		hoveredCalendarKind = '';
-	}
-
-	/**
-	 * @param {string} day
-	 */
-	function selectMonthlyDay(day) {
-		const selectionKind = nextMonthlyDaySelection;
-		const maxDay = getMaxSelectableDay(reportMonth);
-		if (maxDay <= 0) return;
-
-		const selectedDay = pad(Math.min(Math.max(normalizeMonthlyDay(day, 1), 1), maxDay));
-
-		if (selectionKind === 'start') {
-			startDate = selectedDay;
-			endDate = '';
-		} else {
-			const start = normalizeMonthlyDay(startDate, 1);
-			const end = normalizeMonthlyDay(selectedDay, start);
-			startDate = pad(Math.min(start, end));
-			endDate = pad(Math.min(Math.max(start, end), maxDay));
-			dateRangeDropdownOpen = false;
-		}
-
-		hasLoadedDateRange = false;
-		monthlyDayClickCount += 1;
-		hoveredCalendarDay = '';
-		hoveredCalendarKind = '';
-	}
-
-	/**
-	 * @param {string} kind
-	 * @param {{ selectable?: boolean, value?: string }} day
-	 */
-	function setMonthlyDayHover(kind, day) {
-		if (!day?.selectable || !day?.value) return;
-
-		hoveredCalendarKind = kind;
-		hoveredCalendarDay = day.value;
-	}
-
-	/**
-	 * @param {string} kind
-	 */
-	function clearMonthlyDayHover(kind) {
-		if (hoveredCalendarKind !== kind) return;
-
-		hoveredCalendarDay = '';
-		hoveredCalendarKind = '';
-	}
-
-	/**
-	 * @param {{ inMonth?: boolean, value?: string }} day
-	 * @param {string} [kind]
-	 */
-	function getMonthlyDayRangeState(day, kind = '') {
-		if (!day?.inMonth || !day?.value) {
-			return {
-				isStart: false,
-				isEnd: false,
-				isRangeStart: false,
-				isRangeEnd: false,
-				isInRange: false,
-				isPreview: false
-			};
-		}
-
-		const dayNumber = Number(day.value);
-		const hoverNumber = normalizeMonthlyDay(hoveredCalendarDay, 0);
-		const isHoveringThisCalendar = hoveredCalendarKind === kind && hoverNumber > 0;
-		const hasStartDate = Boolean(String(startDate || '').trim());
-		const hasEndDate = Boolean(String(endDate || '').trim());
-		const shouldPreviewEndRange = isHoveringThisCalendar && kind === 'end' && hasStartDate;
-		const startNumber = hasStartDate ? normalizeMonthlyDay(startDate, 1) : 0;
-		const endNumber =
-			shouldPreviewEndRange
-				? hoverNumber
-				: hasEndDate
-					? normalizeMonthlyDay(endDate, startNumber || 1)
-					: startNumber;
-		const rangeStart = Math.min(startNumber, endNumber);
-		const rangeEnd = Math.max(startNumber, endNumber);
-
-		return {
-			isStart: hasStartDate && dayNumber === startNumber,
-			isEnd: hasEndDate && dayNumber === endNumber,
-			// Round the chronological boundaries, including when End is hovered before Start.
-			isRangeStart: hasStartDate && dayNumber === rangeStart,
-			isRangeEnd: hasStartDate && dayNumber === rangeEnd,
-			isInRange: hasStartDate && hasEndDate && dayNumber > rangeStart && dayNumber < rangeEnd,
-			isPreview: shouldPreviewEndRange && dayNumber >= rangeStart && dayNumber <= rangeEnd
-		};
-	}
 
 	function normalizeDay(value) {
 		if (value === undefined || value === null || value === '') return '-';
@@ -1333,16 +1076,18 @@
 	];
 
 	let availableMonthlyGlobalFuelSourceOptions = $derived(
-		monthlyGlobalFuelSources.filter(
-			(source) =>
-				canViewMonthlyFuelSource(source.key) &&
-				isAvailableMonthlyColumnKey(getMonthlyFuelSourceColumnKey(source.key))
-		).map((source) => ({
-			...source,
-			label:
-				getAvailableMonthlyColumn(getMonthlyFuelSourceColumnKey(source.key))?.label ||
-				source.label
-		}))
+		monthlyGlobalFuelSources
+			.filter(
+				(source) =>
+					canViewMonthlyFuelSource(source.key) &&
+					isAvailableMonthlyColumnKey(getMonthlyFuelSourceColumnKey(source.key))
+			)
+			.map((source) => ({
+				...source,
+				label:
+					getAvailableMonthlyColumn(getMonthlyFuelSourceColumnKey(source.key))?.label ||
+					source.label
+			}))
 	);
 
 	let availableMonthlyGlobalFuelGroups = $derived([
@@ -1384,8 +1129,12 @@
 	function shouldCollapseGlobalFuelGroupHeader(group) {
 		if (!group || group.columns?.length !== 1) return false;
 
-		const groupLabel = String(group.label || '').trim().toLowerCase();
-		const columnLabel = String(group.columns[0]?.label || '').trim().toLowerCase();
+		const groupLabel = String(group.label || '')
+			.trim()
+			.toLowerCase();
+		const columnLabel = String(group.columns[0]?.label || '')
+			.trim()
+			.toLowerCase();
 
 		return Boolean(groupLabel && groupLabel === columnLabel);
 	}
@@ -1434,8 +1183,7 @@
 			{
 				key: 'high_rpm_low_speed',
 				label: getAvailableMonthlyColumnLabel('high_rpm_low_speed', 'High RPM Low Speed'),
-				available:
-					canViewHighRpmLowSpeedTable && isAvailableMonthlyColumnKey('high_rpm_low_speed')
+				available: canViewHighRpmLowSpeedTable && isAvailableMonthlyColumnKey('high_rpm_low_speed')
 			}
 		].filter((option) => option.available)
 	);
@@ -1694,19 +1442,19 @@
 
 		return sortMonthlyEngines(
 			Object.entries(runningHours)
-			.map(([key, value]) => ({
-				key: normalizeEngineKey(key),
-				name: normalizeEngineText(key),
-				label: normalizeEngineText(key),
-				value
-			}))
-			.filter(
-				(entry) =>
-					isEngineKey(entry.key) &&
-					entry.value !== undefined &&
-					entry.value !== null &&
-					entry.value !== ''
-			)
+				.map(([key, value]) => ({
+					key: normalizeEngineKey(key),
+					name: normalizeEngineText(key),
+					label: normalizeEngineText(key),
+					value
+				}))
+				.filter(
+					(entry) =>
+						isEngineKey(entry.key) &&
+						entry.value !== undefined &&
+						entry.value !== null &&
+						entry.value !== ''
+				)
 		);
 	}
 
@@ -1719,6 +1467,55 @@
 	}
 
 	let summaryEngineRuntimeEntries = $derived(getSummaryEngineRuntimeEntries());
+	let monthlyRangeLimitText = $derived(getMonthlyRangeLimitText(reportMonth));
+	let monthlyColumnOptions = $derived(
+		monthlyColumnFilterOptions.map((option) => ({
+			...option,
+			selected: isMonthlyColumnSelected(option.key)
+		}))
+	);
+	let monthlyFuelSourceOptions = $derived(
+		monthlyFuelSourceFilterOptions.map((source) => ({
+			...source,
+			selected: isMonthlyFuelSourceSelected(source.key)
+		}))
+	);
+	let monthlyTableGlobalFuelGroups = $derived(
+		visibleMonthlyGlobalFuelGroups.map((group) => ({
+			...group,
+			collapsed: shouldCollapseGlobalFuelGroupHeader(group)
+		}))
+	);
+	let monthlyTableRows = $derived(
+		monthlyRows.map((row, index) => {
+			const isFuture = isFutureMonthlyRow(row);
+
+			return {
+				key: `${getDateCell(row)}-${index}`,
+				dateLabel: getDateCell(row),
+				isFuture,
+				dataReceived: getDataReceived(row),
+				runtimes: monthlyEngines.map((engine) => getRuntime(row, engine.key)),
+				fuelSourceCells: visibleMonthlyEngineFuelSources.map((source) => ({
+					key: source.key,
+					engineValues: monthlyEngines.map((engine) =>
+						getFuelBySource(row, source.key, engine.key)
+					),
+					total: getFuelSourceTotal(row, source.key)
+				})),
+				globalFuelValues: visibleMonthlyGlobalFuelGroups.flatMap((group) =>
+					group.columns.map((column) => getGlobalFuelValue(row, group.key, column.key))
+				),
+				speedAvg: getSpeed(row, 'avg'),
+				speedMax: getSpeed(row, 'max'),
+				highRpmDurations: monthlyHighRpmEngines.map((engine) =>
+					getHighRpmDuration(row, engine.key)
+				),
+				highRpmFuelUsed: monthlyHighRpmEngines.map((engine) => getHighRpmFuelUsed(row, engine.key)),
+				highRpmTotalFuel: getHighRpmFuel(row)
+			};
+		})
+	);
 
 	async function loadMonthlyReport() {
 		if (!$selectedVesselId) {
@@ -1728,7 +1525,7 @@
 			return;
 		}
 
-		const rangeValidation = validateMonthlyRange();
+		const rangeValidation = validateMonthlyRange(reportMonth, startDate, endDate);
 		if (!rangeValidation.valid) {
 			error = rangeValidation.message;
 			reportData = null;
@@ -1772,7 +1569,6 @@
 				dataReceived: dataReceivedSummary,
 				sourcePage: 'Monthly Report'
 			});
-
 		} catch (err) {
 			console.error('[MONTHLY_REPORT_ERROR]', err);
 			error = err?.message || 'Failed to load monthly report.';
@@ -1789,7 +1585,7 @@
 			return;
 		}
 
-		const rangeValidation = validateMonthlyRange();
+		const rangeValidation = validateMonthlyRange(reportMonth, startDate, endDate);
 		if (!rangeValidation.valid) {
 			error = rangeValidation.message;
 			return;
@@ -1869,1425 +1665,106 @@
 		if (
 			String(availableMonthlyColumnsVesselId) === String(vesselId) &&
 			String(availableMonthlyColumnsMonth) === monthKey
-		) return;
+		)
+			return;
 		if (
 			String(availableMonthlyColumnsRequestedVesselId) === String(vesselId) &&
 			String(availableMonthlyColumnsRequestedMonth) === monthKey
-		) return;
+		)
+			return;
 		if (availableMonthlyColumnsLoading) return;
 
 		loadAvailableMonthlyColumns(vesselId, reportMonth);
 	});
-
 </script>
 
 <section class="monthly-page">
-	<section class="monthly-header-card">
-		<div class="monthly-header-copy">
-			<div class="page-kicker">Monthly Report</div>
-			<h1>{vesselName}</h1>
-			<p>
-				Monthly operation report by date with runtime, fuel consumption, speed, and high RPM low
-				speed summary.
-			</p>
-		</div>
+	<MonthlyReportHeader
+		{vesselName}
+		bind:reportMonth
+		bind:startDate
+		bind:endDate
+		bind:timezoneMode
+		bind:timezoneOffset
+		{autoTimezoneLabel}
+		{loading}
+		{exporting}
+		loadDisabled={loading ||
+			availableMonthlyColumnsLoading ||
+			!reportMonth ||
+			!startDate ||
+			!endDate}
+		exportDisabled={availableMonthlyColumnsLoading || shouldShowDateRangeOverlay}
+		rangeLimitText={monthlyRangeLimitText}
+		onLoad={loadMonthlyReport}
+		onExport={handleExportExcel}
+		onRangeChange={() => (hasLoadedDateRange = false)}
+	/>
 
-		<div class="monthly-header-filters">
-			<div class="filter-card">
-		<label>
-			<span>Month</span>
-			<input
-				type="month" use:fourDigitDateYear
-				bind:value={reportMonth}
-				max={currentMonth()}
-				onchange={() => {
-					resetMonthlyDateRange();
-				}}
-			/>
-		</label>
-
-		<label>
-			<span>Date Range</span>
-			<div class="date-range-combo">
-				<button
-					type="button"
-					class="date-range-trigger"
-					class:is-open={dateRangeDropdownOpen}
-					aria-label="Open date range calendar"
-					aria-expanded={dateRangeDropdownOpen}
-					onclick={() => (dateRangeDropdownOpen = !dateRangeDropdownOpen)}
-				>
-					<span class="date-range-value" class:is-placeholder={!startDate && !endDate}>
-						{#if startDate && endDate}
-							{startDate} - {endDate}
-						{:else if startDate}
-							{startDate} -
-						{:else}
-							Select date range
-						{/if}
-					</span>
-					<span class="date-range-caret">v</span>
-				</button>
-
-				{#if dateRangeDropdownOpen}
-					<div class="day-dropdown-menu">
-						{#each MONTHLY_WEEKDAY_LABELS as label}
-							<span class="day-calendar-weekday">{label}</span>
-						{/each}
-						{#each activeMonthlyCalendarDays as day}
-							{@const rangeState = getMonthlyDayRangeState(day, nextMonthlyDaySelection)}
-							<button
-								type="button"
-								disabled={!day.selectable}
-								class:is-muted={!day.inMonth || !day.selectable}
-								class:is-in-range={rangeState.isInRange}
-								class:is-preview-range={rangeState.isPreview}
-								class:is-range-start={rangeState.isRangeStart}
-								class:is-range-end={rangeState.isRangeEnd}
-								class:is-selected={rangeState.isStart || rangeState.isEnd}
-								onmousedown={(event) => event.preventDefault()}
-								onmouseenter={() => setMonthlyDayHover(nextMonthlyDaySelection, day)}
-								onmouseleave={() => clearMonthlyDayHover(nextMonthlyDaySelection)}
-								onclick={() => day.selectable && selectMonthlyDay(day.value)}
-							>
-								{day.label}
-							</button>
-						{/each}
-					</div>
-				{/if}
-			</div>
-		</label>
-
-		<label>
-			<span class="field-label-row">
-				Timezone Mode
-				{#if timezoneMode === 'auto'}
-					<small class="timezone-auto-pill">Auto • {autoTimezoneLabel}</small>
-				{/if}
-			</span>
-			<select bind:value={timezoneMode} onchange={() => (hasLoadedDateRange = false)}>
-				{#each TIMEZONE_MODE_OPTIONS as option}
-					<option value={option.value}>{option.label}</option>
-				{/each}
-			</select>
-		</label>
-
-		{#if timezoneMode === 'manual'}
-			<label>
-				<span>Timezone Offset</span>
-				<select bind:value={timezoneOffset} onchange={() => (hasLoadedDateRange = false)}>
-					{#each TIMEZONE_OFFSET_OPTIONS as option}
-						<option value={option.value}>{option.label}</option>
-					{/each}
-				</select>
-			</label>
-		{/if}
-
-		<div class="filter-actions">
-			<button type="button" class="primary-btn" onclick={loadMonthlyReport} disabled={loading || availableMonthlyColumnsLoading || !reportMonth || !startDate || !endDate}>
-				{loading ? 'Loading...' : 'Load Data'}
-			</button>
-
-			<button type="button" class="export-btn" onclick={handleExportExcel} disabled={exporting || availableMonthlyColumnsLoading || shouldShowDateRangeOverlay}>
-				{exporting ? 'Exporting...' : 'Export Excel'}
-			</button>
-		</div>
-
-		<p class="filter-hint">{getMonthlyRangeLimitText()}</p>
-			</div>
-		</div>
-	</section>
-
-	<section class="table-section monthly-column-options-section">
-		<div class="section-header">
-			<div>
-				<span class="section-kicker">Columns</span>
-				<h2>Visible Columns</h2>
-			</div>
-
-			<div class="section-header-actions">
-				<strong>{getSelectedMonthlyApiColumnKeys().length} selected</strong>
-			</div>
-		</div>
-
-		<div class="monthly-column-options-body">
-			<div class="column-filter-panel">
-				<div class="column-filter-title">
-					<span>Visible Columns</span>
-					<button type="button" onclick={resetMonthlyColumns}>Reset</button>
-				</div>
-
-				{#if availableMonthlyColumnsLoading}
-					<p class="column-filter-status">Loading available columns...</p>
-				{:else if availableMonthlyColumnsError}
-					<p class="column-filter-status is-error">{availableMonthlyColumnsError}</p>
-				{/if}
-
-				<div class="column-filter-options">
-					{#each monthlyColumnFilterOptions as option}
-						<label
-							class="column-filter-option"
-							class:is-selected={isMonthlyColumnSelected(option.key)}
-						>
-							<input
-								type="checkbox"
-								checked={isMonthlyColumnSelected(option.key)}
-								onchange={() => toggleMonthlyColumn(option.key)}
-							/>
-							<span>{option.label}</span>
-						</label>
-					{/each}
-				</div>
-
-				{#if isMonthlyColumnSelected('fuel') && monthlyFuelSourceFilterOptions.length}
-					<div class="fuel-source-filter">
-						<div class="fuel-source-filter-title">
-							<span>Fuel Sources</span>
-							<button type="button" onclick={resetMonthlyFuelSources}>Reset sources</button>
-						</div>
-
-						<div class="column-filter-options">
-							{#each monthlyFuelSourceFilterOptions as source}
-								<label
-									class="column-filter-option fuel-source-option"
-									class:is-selected={isMonthlyFuelSourceSelected(source.key)}
-								>
-									<input
-										type="checkbox"
-										checked={isMonthlyFuelSourceSelected(source.key)}
-										onchange={() => toggleMonthlyFuelSource(source.key)}
-									/>
-									<span>{source.label}</span>
-								</label>
-							{/each}
-						</div>
-					</div>
-				{/if}
-			</div>
-		</div>
-	</section>
+	<MonthlyReportColumnOptions
+		columns={monthlyColumnOptions}
+		fuelSources={monthlyFuelSourceOptions}
+		selectedCount={getSelectedMonthlyApiColumnKeys().length}
+		columnsLoading={availableMonthlyColumnsLoading}
+		columnsError={availableMonthlyColumnsError}
+		showFuelSources={isMonthlyColumnSelected('fuel')}
+		onToggleColumn={toggleMonthlyColumn}
+		onResetColumns={resetMonthlyColumns}
+		onToggleFuelSource={toggleMonthlyFuelSource}
+		onResetFuelSources={resetMonthlyFuelSources}
+	/>
 
 	<div class="load-required-area" class:is-locked={shouldShowDateRangeOverlay}>
-	{#if error}
-		<div class="status-box error-box">{error}</div>
-	{/if}
-
-	{#if currentUserLoading}
-		<LoadingSkeleton label="Loading user permissions" variant="card" rows={2} compact />
-	{/if}
-
-	{#if currentUserError}
-		<div class="status-box error-box">{currentUserError}</div>
-	{/if}
-
-	{#if loading}
-		<LoadingSkeleton
-			label="Loading monthly report data"
-			variant="monthly-report"
-			rows={10}
-			columns={monthlyTableSkeletonColumns}
-		/>
-	{:else}
-		<section class="summary-grid">
-		{#if isAvailableMonthlyColumnKey('data_received')}
-			<article class="summary-card">
-				<span>Data Received</span>
-				<strong>{getSummaryDataReceived()}</strong>
-			</article>
+		{#if error}
+			<div class="status-box error-box">{error}</div>
 		{/if}
 
-		{#if canViewFuelConsumptionTable}
-			<article class="summary-card">
-				<span>Total Fuel</span>
-				<strong>{getSummaryFuel()} L</strong>
-			</article>
+		{#if currentUserLoading}
+			<LoadingSkeleton label="Loading user permissions" variant="card" rows={2} compact />
 		{/if}
 
-		{#if canViewTravelDistanceTable}
-			<article class="summary-card">
-				<span>Total Distance</span>
-				<strong>{getSummaryDistance()}</strong>
-			</article>
+		{#if currentUserError}
+			<div class="status-box error-box">{currentUserError}</div>
 		{/if}
 
-		{#if canViewSpeedStatsTable}
-			<article class="summary-card">
-				<span>Average Speed</span>
-				<strong>{getSummaryAvgSpeed()}</strong>
-			</article>
-		{/if}
-
-		{#if canViewEngineRuntimeTable}
-			<article class="summary-card">
-				<span>Total Operation Hours</span>
-				<strong>{getSummaryTotalOperationHours()}</strong>
-			</article>
-		{/if}
-
-		{#if canViewEngineRuntimeTable && summaryEngineRuntimeEntries.length}
-			<article class="summary-card engine-runtime-summary-card">
-				<span>Engine Running Hours</span>
-				<div class="engine-runtime-summary-list">
-					{#each summaryEngineRuntimeEntries as runtime}
-						<div class="engine-runtime-summary-item">
-							<small>{runtime.label}</small>
-							<strong>{runtime.value}</strong>
-						</div>
-					{/each}
-				</div>
-			</article>
-		{/if}
-	</section>
-
-	<section class="table-section monthly-main-table">
-		<div class="section-header">
-			<div>
-				<span class="section-kicker">Daily Aggregation</span>
-				<h2>Monthly Report by Date</h2>
-			</div>
-
-			<div class="section-header-actions">
-				<strong>{monthlyRows.length} rows</strong>
-			</div>
-		</div>
-
-		{#if monthlyRows.length}
-			<div class="monthly-table-wrapper">
-				<table class="monthly-report-table">
-					<thead>
-						<tr>
-							<th rowspan={monthlyHeaderRowspan} class="sticky-col">DATE</th>
-							{#if showMonthlyDataReceivedColumn}
-								<th rowspan={monthlyHeaderRowspan}>DATA RECEIVED</th>
-							{/if}
-
-							{#if showMonthlyRuntimeColumns}
-								<th colspan={monthlyEngines.length || 1}>RUNTIME</th>
-							{/if}
-
-							{#if showMonthlyFuelColumns}
-								<th colspan={monthlyFuelColspan}> FUEL CONSUMPTION (L) </th>
-							{/if}
-
-							{#if showMonthlySpeedColumns}
-								<th colspan="2">SPEED (KNOT)</th>
-							{/if}
-
-							{#if showMonthlyHighRpmLowSpeedColumns}
-								<th colspan={monthlyHighRpmLowSpeedColspan}>HIGH RPM LOW SPEED</th>
-							{/if}
-						</tr>
-
-						{#if hasMonthlyGroupedHeaderRows}
-							<tr>
-								{#if showMonthlyRuntimeColumns}
-									{#if monthlyEngines.length}
-										{#each monthlyEngines as engine}
-											<th rowspan="2">{engine.name}</th>
-										{/each}
-									{:else}
-										<th rowspan="2">-</th>
-									{/if}
-								{/if}
-
-								{#if showMonthlyFuelColumns}
-									{#if hasMonthlyFuelColumns}
-										{#each visibleMonthlyEngineFuelSources as source}
-											<th colspan={monthlyEngines.length + 1}>
-												{getMonthlyFuelSourceLabel(source.key)}
-											</th>
-										{/each}
-
-										{#each visibleMonthlyGlobalFuelGroups as group}
-											{#if shouldCollapseGlobalFuelGroupHeader(group)}
-												<th rowspan="2">{group.label}</th>
-											{:else}
-												<th colspan={group.columns.length}>{group.label}</th>
-											{/if}
-										{/each}
-									{:else}
-										<th rowspan="2">-</th>
-									{/if}
-								{/if}
-
-								{#if showMonthlySpeedColumns}
-									<th rowspan="2">AVG</th>
-									<th rowspan="2">MAX</th>
-								{/if}
-
-								{#if showMonthlyHighRpmLowSpeedColumns}
-									<th colspan={monthlyHighRpmEngineColspan}>DURATION (HH:MM)</th>
-									<th colspan={monthlyHighRpmEngineColspan}>FUEL USED (L)</th>
-									<th rowspan="2">TOTAL FUEL (L)</th>
-								{/if}
-							</tr>
-
-							<tr>
-								{#if showMonthlyFuelColumns && hasMonthlyFuelColumns}
-									{#each visibleMonthlyEngineFuelSources as source}
-										{#each monthlyEngines as engine}
-											<th>{engine.name}</th>
-										{/each}
-										<th>TOTAL</th>
-									{/each}
-
-									{#each visibleMonthlyGlobalFuelGroups as group}
-										{#if !shouldCollapseGlobalFuelGroupHeader(group)}
-											{#each group.columns as column}
-												<th>{column.label}</th>
-											{/each}
-										{/if}
-									{/each}
-								{/if}
-
-								{#if showMonthlyHighRpmLowSpeedColumns}
-									{#if monthlyHighRpmEngines.length}
-										{#each monthlyHighRpmEngines as engine}
-											<th>{engine.name}</th>
-										{/each}
-										{#each monthlyHighRpmEngines as engine}
-											<th>{engine.name}</th>
-										{/each}
-									{:else}
-										<th>-</th>
-										<th>-</th>
-									{/if}
-								{/if}
-							</tr>
-						{/if}
-					</thead>
-
-					<tbody>
-						{#each monthlyRows as row}
-							{@const isFutureRow = isFutureMonthlyRow(row)}
-
-							<tr class:future-row={isFutureRow}>
-								<td class="sticky-col date-cell">{getDateCell(row)}</td>
-								{#if showMonthlyDataReceivedColumn}
-									<td>{isFutureRow ? '-' : getDataReceived(row)}</td>
-								{/if}
-
-								{#if showMonthlyRuntimeColumns}
-									{#if monthlyEngines.length}
-										{#each monthlyEngines as engine}
-											<td>{isFutureRow ? '-' : getRuntime(row, engine.key)}</td>
-										{/each}
-									{:else}
-										<td>-</td>
-									{/if}
-								{/if}
-
-								{#if showMonthlyFuelColumns}
-									{#if hasMonthlyFuelColumns}
-										{#each visibleMonthlyEngineFuelSources as source}
-											{#each monthlyEngines as engine}
-												<td>{isFutureRow ? '-' : getFuelBySource(row, source.key, engine.key)}</td>
-											{/each}
-
-											<td class="total-col">
-												{isFutureRow ? '-' : getFuelSourceTotal(row, source.key)}
-											</td>
-										{/each}
-
-										{#each visibleMonthlyGlobalFuelGroups as group}
-											{#each group.columns as column}
-												<td>{isFutureRow ? '-' : getGlobalFuelValue(row, group.key, column.key)}</td
-												>
-											{/each}
-										{/each}
-									{:else}
-										<td>-</td>
-									{/if}
-								{/if}
-
-								{#if showMonthlySpeedColumns}
-									<td>{isFutureRow ? '-' : getSpeed(row, 'avg')}</td>
-									<td>{isFutureRow ? '-' : getSpeed(row, 'max')}</td>
-								{/if}
-
-								{#if showMonthlyHighRpmLowSpeedColumns}
-									{#if monthlyHighRpmEngines.length}
-										{#each monthlyHighRpmEngines as engine}
-											<td>{isFutureRow ? '-' : getHighRpmDuration(row, engine.key)}</td>
-										{/each}
-										{#each monthlyHighRpmEngines as engine}
-											<td>{isFutureRow ? '-' : getHighRpmFuelUsed(row, engine.key)}</td>
-										{/each}
-									{:else}
-										<td>-</td>
-										<td>-</td>
-									{/if}
-									<td class="total-col">{isFutureRow ? '-' : getHighRpmFuel(row)}</td>
-								{/if}
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
+		{#if loading}
+			<LoadingSkeleton
+				label="Loading monthly report data"
+				variant="monthly-report"
+				rows={10}
+				columns={monthlyTableSkeletonColumns}
+			/>
 		{:else}
-			<div class="empty-box">Monthly report by date is not available yet.</div>
-		{/if}
-		</section>
-	{/if}
+			<MonthlyReportSummary
+				dataReceivedLabel={isAvailableMonthlyColumnKey('data_received')
+					? getSummaryDataReceived()
+					: ''}
+				totalFuelLabel={canViewFuelConsumptionTable ? getSummaryFuel() : ''}
+				totalDistanceLabel={canViewTravelDistanceTable ? getSummaryDistance() : ''}
+				averageSpeedLabel={canViewSpeedStatsTable ? getSummaryAvgSpeed() : ''}
+				totalOperationHoursLabel={canViewEngineRuntimeTable ? getSummaryTotalOperationHours() : ''}
+				engineRuntimeEntries={canViewEngineRuntimeTable ? summaryEngineRuntimeEntries : []}
+			/>
 
-		{#if shouldShowDateRangeOverlay}
-			<div class="load-required-overlay">
-				<div class="load-required-card">
-					<div class="load-required-icon">!</div>
-					<span class="section-kicker">Waiting for date range</span>
-					<h2>Choose a monthly range first</h2>
-					<p>
-						Select month, date range, and timezone above, then click
-						<strong>Load Data</strong> to display the monthly report.
-					</p>
-				</div>
-			</div>
+			<MonthlyReportTable
+				rows={monthlyTableRows}
+				engines={monthlyEngines}
+				fuelSources={visibleMonthlyEngineFuelSources}
+				globalFuelGroups={monthlyTableGlobalFuelGroups}
+				highRpmEngines={monthlyHighRpmEngines}
+				showDataReceived={showMonthlyDataReceivedColumn}
+				showRuntime={showMonthlyRuntimeColumns}
+				showFuel={showMonthlyFuelColumns}
+				showSpeed={showMonthlySpeedColumns}
+				showHighRpm={showMonthlyHighRpmLowSpeedColumns}
+				fuelColspan={monthlyFuelColspan}
+				highRpmColspan={monthlyHighRpmLowSpeedColspan}
+				highRpmEngineColspan={monthlyHighRpmEngineColspan}
+				headerRowspan={monthlyHeaderRowspan}
+				hasGroupedHeaderRows={hasMonthlyGroupedHeaderRows}
+			/>
 		{/if}
+
+		<MonthlyReportLoadOverlay visible={shouldShowDateRangeOverlay} />
 	</div>
 </section>
-
-<style>
-	.monthly-page {
-		width: 100%;
-		height: 100%;
-		max-height: 100%;
-		min-height: 0;
-		padding: 14px;
-		background: var(--color-base);
-		color: var(--text-primary);
-		overflow-y: auto;
-		overflow-x: hidden;
-		box-sizing: border-box;
-	}
-
-	.monthly-header-card,
-	.summary-card,
-	.table-section,
-	.raw-box {
-		background: var(--color-surface);
-		border: 1px solid #d9e2ec;
-		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
-	}
-
-	.monthly-header-card {
-		padding: 14px 16px;
-		display: grid;
-		grid-template-columns: minmax(240px, 0.65fr) minmax(650px, 1.35fr);
-		align-items: center;
-		gap: 18px;
-	}
-
-	.monthly-header-copy {
-		min-width: 0;
-		max-width: 560px;
-	}
-
-	.monthly-header-filters {
-		min-width: 0;
-		display: grid;
-		justify-items: end;
-	}
-
-	.page-kicker,
-	.section-kicker {
-		display: inline-flex;
-		width: fit-content;
-		padding: 4px 9px;
-		border-radius: 999px;
-		background: var(--color-accent-muted);
-		color: #1d4ed8;
-		font-size: 10px;
-		font-weight: 900;
-		letter-spacing: 0.07em;
-		text-transform: uppercase;
-	}
-
-	.monthly-header-card h1 {
-		margin: 8px 0 0;
-		font-size: 21px;
-		line-height: 1.2;
-		font-weight: 900;
-		color: var(--text-primary);
-	}
-
-	.monthly-header-card p {
-		margin: 7px 0 0;
-		color: var(--text-secondary);
-		font-size: 12px;
-		font-weight: 700;
-	}
-
-	.header-meta {
-		min-width: 120px;
-		padding: 10px 12px;
-		border-radius: 12px;
-		background: var(--color-elevated);
-		border: 1px solid #e2e8f0;
-		text-align: right;
-	}
-
-	.header-meta span {
-		display: block;
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 900;
-		text-transform: uppercase;
-	}
-
-	.header-meta strong {
-		display: block;
-		margin-top: 5px;
-		color: var(--text-primary);
-		font-size: 14px;
-		font-weight: 900;
-	}
-
-	.filter-card {
-		width: 100%;
-		display: grid;
-		grid-template-columns:
-			minmax(140px, 0.9fr)
-			minmax(180px, 1fr)
-			minmax(175px, 1fr)
-			auto;
-		align-items: end;
-		gap: 10px;
-	}
-
-	.filter-card:has(label:nth-of-type(4)) {
-		grid-template-columns:
-			minmax(130px, 0.8fr)
-			minmax(180px, 0.95fr)
-			minmax(150px, 0.85fr)
-			minmax(130px, 0.7fr)
-			auto;
-	}
-
-	.filter-card label {
-		display: grid;
-		gap: 5px;
-	}
-
-	.filter-card label span {
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 900;
-		text-transform: uppercase;
-	}
-
-	.field-label-row {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 8px;
-	}
-
-	.timezone-auto-pill {
-		display: inline-flex;
-		align-items: center;
-		min-height: 18px;
-		padding: 2px 7px;
-		border: 1px solid rgba(96, 165, 250, 0.28);
-		border-radius: 999px;
-		background: rgba(37, 99, 235, 0.1);
-		color: #bfdbfe;
-		font-size: 10px;
-		font-weight: 800;
-		letter-spacing: 0;
-		text-transform: none;
-		white-space: nowrap;
-	}
-
-	.filter-card input,
-	.filter-card select {
-		height: 32px;
-		width: 100%;
-		min-width: 0;
-		border: 1px solid #cbd5e1;
-		background: var(--color-surface);
-		padding: 0 9px;
-		color: var(--text-primary);
-		font-size: 12px;
-		font-weight: 700;
-		outline: none;
-	}
-
-	.date-range-combo {
-		position: relative;
-	}
-
-	.date-range-trigger {
-		height: 32px;
-		width: 100%;
-		min-width: 0;
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto auto;
-		align-items: center;
-		gap: 8px;
-		border: 1px solid #cbd5e1;
-		background: var(--color-surface);
-		padding: 0 8px 0 9px;
-		color: var(--text-primary);
-		font-size: 12px;
-		font-weight: 800;
-		text-align: left;
-		cursor: pointer;
-		outline: none;
-		transition:
-			border-color 0.18s ease,
-			box-shadow 0.18s ease,
-			background 0.18s ease;
-	}
-
-	.date-range-trigger:hover,
-	.date-range-trigger.is-open {
-		border-color: #60a5fa;
-		box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.14);
-	}
-
-	.date-range-trigger .date-range-value {
-		overflow: hidden;
-		color: var(--text-primary);
-		font-size: 14px;
-		font-weight: 900;
-		line-height: 1;
-		text-transform: none;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.date-range-trigger .date-range-value.is-placeholder {
-		color: var(--text-secondary);
-		font-weight: 800;
-	}
-
-	.date-range-step {
-		display: inline-flex;
-		align-items: center;
-		min-height: 18px;
-		padding: 0 7px;
-		border: 1px solid rgba(96, 165, 250, 0.32);
-		border-radius: 999px;
-		background: rgba(37, 99, 235, 0.14);
-		color: #bfdbfe;
-		font-size: 10px;
-		font-weight: 900;
-		text-transform: uppercase;
-	}
-
-	.date-range-caret {
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 900;
-	}
-
-	.day-dropdown-menu {
-		position: absolute;
-		z-index: 30;
-		top: calc(100% + 6px);
-		left: 0;
-		width: 282px;
-		border: 1px solid #cbd5e1;
-		background: #111827;
-		box-shadow: 0 16px 34px rgba(15, 23, 42, 0.22);
-		display: grid;
-		grid-template-columns: repeat(7, 1fr);
-		column-gap: 0;
-		row-gap: 6px;
-		padding: 12px;
-	}
-
-	.day-calendar-weekday {
-		height: 24px;
-		display: grid;
-		place-items: center;
-		color: #e5e7eb;
-		font-size: 11px;
-		font-weight: 900;
-	}
-
-	.day-dropdown-menu button {
-		position: relative;
-		isolation: isolate;
-		aspect-ratio: 1;
-		display: grid;
-		place-items: center;
-		border: 1px solid transparent;
-		border-radius: 999px;
-		background: transparent;
-		color: #f8fafc;
-		font-size: 12px;
-		font-weight: 800;
-		cursor: pointer;
-		transition:
-			background 0.18s ease,
-			border-color 0.18s ease,
-			color 0.18s ease,
-			box-shadow 0.18s ease,
-			transform 0.18s ease;
-	}
-
-	.day-dropdown-menu button::after {
-		content: '';
-		position: absolute;
-		z-index: -1;
-		top: 50%;
-		left: 50%;
-		width: 30px;
-		height: 30px;
-		border: 1px solid transparent;
-		border-radius: 999px;
-		background: transparent;
-		opacity: 0;
-		transform: translate(-50%, -50%) scale(0.86);
-		transition:
-			background 0.18s ease,
-			opacity 0.18s ease,
-			transform 0.18s ease;
-	}
-
-	.day-dropdown-menu button::before {
-		content: '';
-		position: absolute;
-		z-index: -1;
-		top: 2px;
-		bottom: 2px;
-		left: -1px;
-		right: -1px;
-		background: transparent;
-		/* transform: scaleX(0.72); */
-		opacity: 0;
-		transition:
-			background 0.18s ease,
-			border-radius 0.18s ease,
-			opacity 0.18s ease,
-			transform 0.18s ease;
-	}
-
-	.day-dropdown-menu button.is-muted {
-		color: rgba(148, 163, 184, 0.7);
-		cursor: default;
-	}
-
-	.day-dropdown-menu button:disabled {
-		cursor: default;
-	}
-
-	.day-dropdown-menu button.is-in-range {
-		color: #dbeafe;
-		animation: dayRangeFade 0.22s ease both;
-	}
-
-	.day-dropdown-menu button.is-in-range::before,
-	.day-dropdown-menu button.is-preview-range::before,
-	.day-dropdown-menu button.is-range-start::before,
-	.day-dropdown-menu button.is-range-end::before {
-		background: rgba(96, 165, 250, 0.2);
-		opacity: 1;
-		transform: scaleX(1);
-	}
-
-	.day-dropdown-menu button.is-preview-range::before {
-		background: rgba(96, 165, 250, 0.28);
-	}
-
-	.day-dropdown-menu button.is-range-start,
-	.day-dropdown-menu button.is-range-end {
-		box-shadow: none;
-		transform: scale(1.04);
-	}
-
-	.day-dropdown-menu button.is-range-start::before {
-		border-radius: 999px 0 0 999px;
-	}
-
-	.day-dropdown-menu button.is-range-end::before {
-		border-radius: 0 999px 999px 0;
-	}
-
-	.day-dropdown-menu button.is-range-start.is-range-end::before {
-		border-radius: 999px;
-	}
-
-	.day-dropdown-menu button:hover,
-	.day-dropdown-menu button.is-selected {
-		border-color: transparent;
-		background: transparent;
-		color: #111827;
-	}
-
-	.day-dropdown-menu button:hover::after,
-	.day-dropdown-menu button.is-selected::after {
-		border-color: #e5e7eb;
-		background: #e5e7eb;
-		box-shadow: 0 0 0 4px rgba(229, 231, 235, 0.12);
-		opacity: 1;
-		transform: translate(-50%, -50%) scale(1);
-	}
-
-	.day-dropdown-menu button:disabled:hover {
-		border-color: transparent;
-		background: transparent;
-		color: rgba(148, 163, 184, 0.7);
-	}
-
-	.day-dropdown-menu button:disabled:hover::after {
-		opacity: 0;
-	}
-
-	@keyframes dayRangeFade {
-		from {
-			opacity: 0.4;
-			transform: scale(0.96);
-		}
-		to {
-			opacity: 1;
-			transform: scale(1);
-		}
-	}
-
-	.filter-actions {
-		display: flex;
-		gap: 8px;
-		flex-wrap: nowrap;
-		justify-content: flex-end;
-	}
-
-	.filter-hint {
-		grid-column: 1 / -1;
-		margin: -2px 0 0;
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-weight: 600;
-	}
-
-	.primary-btn,
-	.export-btn {
-		height: 32px;
-		padding: 0 12px;
-		border: none;
-		font-size: 11px;
-		font-weight: 900;
-		cursor: pointer;
-	}
-
-	.primary-btn {
-		background: #2563eb;
-		color: #ffffff;
-	}
-
-	.export-btn {
-		background: #16a34a;
-		color: #ffffff;
-	}
-
-	.primary-btn:disabled,
-	.export-btn:disabled {
-		opacity: 0.55;
-		cursor: not-allowed;
-	}
-
-	.status-box {
-		margin-top: 12px;
-		padding: 10px 12px;
-		border-radius: 10px;
-		font-size: 12px;
-		font-weight: 900;
-	}
-
-	.error-box {
-		background: var(--color-danger-muted);
-		color: #b91c1c;
-		border: 1px solid #fecaca;
-	}
-
-	.summary-grid {
-		margin-top: 12px;
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
-		gap: 12px;
-	}
-
-	.summary-card {
-		min-height: 84px;
-		padding: 13px 14px;
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
-	}
-
-	.summary-card span {
-		color: var(--text-secondary);
-		font-size: 10.5px;
-		font-weight: 900;
-		text-transform: uppercase;
-	}
-
-	.summary-card strong {
-		margin-top: 9px;
-		color: var(--text-primary);
-		font-size: 19px;
-		line-height: 1.1;
-		font-weight: 900;
-	}
-
-	.engine-runtime-summary-card {
-		grid-column: 1 / -1;
-		align-items: stretch;
-		width: 100%;
-	}
-
-	.engine-runtime-summary-list {
-		margin-top: 12px;
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
-		gap: 10px;
-	}
-
-	.engine-runtime-summary-item {
-		min-height: 58px;
-		padding: 10px 12px;
-		display: grid;
-		align-content: center;
-		border: 1px solid rgba(191, 219, 254, 0.9);
-		border-radius: 10px;
-		background: rgba(37, 99, 235, 0.08);
-	}
-
-	.engine-runtime-summary-item small {
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 900;
-		letter-spacing: 0.06em;
-		text-transform: uppercase;
-	}
-
-	.engine-runtime-summary-item strong {
-		margin-top: 6px;
-		color: #1d4ed8;
-		font-size: 17px;
-		line-height: 1.15;
-	}
-
-	.table-section {
-		margin-top: 12px;
-		overflow: hidden;
-	}
-
-	.section-header {
-		min-height: 54px;
-		padding: 11px 13px;
-		border-bottom: 1px solid #e5edf5;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-		background: var(--color-surface);
-	}
-
-	.section-header h2 {
-		margin: 6px 0 0;
-		color: var(--text-primary);
-		font-size: 16px;
-		font-weight: 900;
-	}
-
-	.section-header > strong,
-	.section-header-actions > strong {
-		padding: 5px 10px;
-		border-radius: 999px;
-		background: var(--color-accent-muted);
-		border: 1px solid #bfdbfe;
-		color: #1d4ed8;
-		font-size: 11px;
-		font-weight: 900;
-	}
-
-	.section-header-actions {
-		display: flex;
-		align-items: center;
-		justify-content: flex-end;
-		gap: 10px;
-		min-width: 0;
-	}
-
-	.column-filter-panel {
-		min-width: min(560px, 58vw);
-		padding: 8px 10px;
-		border: 1px solid #dbe6f3;
-		background: var(--color-elevated);
-	}
-
-	.monthly-column-options-section {
-		overflow: visible;
-	}
-
-	.monthly-column-options-body {
-		padding: 12px 13px;
-		background: var(--color-surface);
-	}
-
-	.monthly-column-options-body .column-filter-panel {
-		width: 100%;
-		min-width: 0;
-	}
-
-	.column-filter-title {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 10px;
-		margin-bottom: 7px;
-	}
-
-	.column-filter-title span,
-	.fuel-source-filter-title span {
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 900;
-		letter-spacing: 0.06em;
-		text-transform: uppercase;
-	}
-
-	.column-filter-title button,
-	.fuel-source-filter-title button {
-		border: none;
-		background: transparent;
-		color: #2563eb;
-		font-size: 10px;
-		font-weight: 900;
-		cursor: pointer;
-	}
-
-	.column-filter-status {
-		margin: -2px 0 8px;
-		color: var(--text-secondary);
-		font-size: 10.5px;
-		font-weight: 800;
-	}
-
-	.column-filter-status.is-error {
-		color: #fca5a5;
-	}
-
-	.fuel-source-filter {
-		margin-top: 8px;
-		padding-top: 8px;
-		border-top: 1px solid #dbe6f3;
-	}
-
-	.fuel-source-filter-title {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 10px;
-		margin-bottom: 7px;
-	}
-
-	.column-filter-options {
-		display: flex;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 6px;
-	}
-
-	.column-filter-option {
-		position: relative;
-		display: inline-flex;
-		align-items: center;
-		gap: 7px;
-		min-height: 24px;
-		padding: 4px 7px;
-		border: 1px solid #cbd5e1;
-		background: var(--color-surface);
-		color: var(--text-primary);
-		font-size: 10.5px;
-		font-weight: 800;
-		cursor: pointer;
-		user-select: none;
-		transition:
-			background 0.16s ease,
-			border-color 0.16s ease,
-			color 0.16s ease,
-			box-shadow 0.16s ease;
-	}
-
-	.column-filter-option input {
-		position: relative;
-		appearance: none;
-		width: 14px;
-		height: 14px;
-		margin: 0;
-		border: 1px solid #64748b;
-		background: rgba(15, 23, 42, 0.28);
-		display: inline-grid;
-		place-items: center;
-		transition:
-			background 0.16s ease,
-			border-color 0.16s ease,
-			box-shadow 0.16s ease;
-	}
-
-	.column-filter-option input::after {
-		content: '';
-		width: 7px;
-		height: 4px;
-		border-left: 2px solid #ffffff;
-		border-bottom: 2px solid #ffffff;
-		transform: rotate(-45deg) scale(0);
-		transform-origin: center;
-		transition: transform 0.14s ease;
-	}
-
-	.column-filter-option input:checked {
-		border-color: #60a5fa;
-		background: #2563eb;
-		box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
-	}
-
-	.column-filter-option input:checked::after {
-		transform: rotate(-45deg) scale(1);
-	}
-
-	.column-filter-option.is-selected {
-		border-color: rgba(96, 165, 250, 0.8);
-		background: rgba(37, 99, 235, 0.22);
-		color: #dbeafe;
-		box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.18);
-	}
-
-	.fuel-source-option {
-		background: rgba(37, 99, 235, 0.07);
-		border-color: rgba(37, 99, 235, 0.22);
-	}
-
-	.fuel-source-option.is-selected {
-		background: rgba(37, 99, 235, 0.3);
-		border-color: rgba(96, 165, 250, 0.9);
-	}
-
-	.monthly-table-wrapper {
-		width: 100%;
-		max-height: 100vh;
-		min-height: 260px;
-		overflow: auto;
-		background: var(--color-surface);
-	}
-
-	.monthly-report-table {
-		width: max-content;
-		min-width: 100%;
-		border-collapse: separate;
-		border-spacing: 0;
-		font-size: 11px;
-	}
-
-	.monthly-report-table thead th {
-		position: sticky;
-		top: 0;
-		z-index: 5;
-		background: #3478e5;
-		color: #ffffff;
-		border-right: 1px solid rgba(255, 255, 255, 0.32);
-		border-bottom: 1px solid rgba(255, 255, 255, 0.32);
-		text-align: center;
-		vertical-align: middle;
-		padding: 8px 8px;
-		font-size: 10.5px;
-		line-height: 1.15;
-		font-weight: 900;
-		white-space: nowrap;
-	}
-
-	.monthly-report-table thead tr:nth-child(2) th {
-		top: 31px;
-		background: #3b82f6;
-	}
-
-	.monthly-report-table thead tr:nth-child(3) th {
-		top: 62px;
-		background: #4b8bf0;
-	}
-
-	.monthly-report-table tbody td {
-		border-right: 1px solid #d7dee8;
-		border-bottom: 1px solid #d7dee8;
-		padding: 7px 9px;
-		text-align: center;
-		white-space: nowrap;
-		font-size: 11px;
-		font-weight: 700;
-		color: var(--text-primary);
-		background: var(--color-surface);
-	}
-
-	.monthly-report-table tbody tr:nth-child(even) td {
-		background: var(--color-elevated);
-	}
-
-	.monthly-report-table tbody tr:hover td {
-		background: var(--color-elevated);
-	}
-
-	.monthly-report-table .sticky-col {
-		position: sticky;
-		left: 0;
-		z-index: 7;
-		min-width: 44px;
-	}
-
-	.monthly-report-table thead .sticky-col {
-		z-index: 9;
-		background: #3478e5 !important;
-		box-shadow: 1px 0 0 rgba(255, 255, 255, 0.22);
-	}
-
-	.monthly-report-table tbody .sticky-col {
-		background: inherit;
-		box-shadow: 1px 0 0 #d7dee8;
-	}
-
-	.monthly-report-table .date-cell {
-		font-weight: 900;
-		color: var(--text-primary);
-	}
-
-	.monthly-report-table .total-col {
-		font-weight: 900;
-		color: var(--text-primary);
-		background: var(--color-elevated);
-	}
-
-	.raw-box {
-		margin-top: 12px;
-		padding: 12px 14px;
-	}
-
-	.raw-box summary {
-		cursor: pointer;
-		font-size: 12px;
-		font-weight: 900;
-		color: #1d4ed8;
-	}
-
-	.raw-box pre {
-		margin-top: 12px;
-		padding: 12px;
-		max-height: 360px;
-		overflow: auto;
-		background: #0f172a;
-		color: #e2e8f0;
-		font-size: 11px;
-		line-height: 1.5;
-	}
-
-	.empty-box {
-		padding: 18px 14px;
-		color: var(--text-secondary);
-		font-size: 12px;
-		font-weight: 800;
-	}
-
-	.future-row td {
-		color: #94a3b8;
-		background: var(--color-elevated);
-	}
-
-	@media (max-width: 1100px) {
-		.monthly-header-card {
-			grid-template-columns: 1fr;
-			align-items: start;
-		}
-
-		.monthly-header-filters {
-			justify-items: stretch;
-		}
-
-		.filter-card,
-		.filter-card:has(label:nth-of-type(4)) {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-		}
-
-		.filter-actions,
-		.filter-hint {
-			grid-column: 1 / -1;
-		}
-
-		.summary-grid {
-			grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
-		}
-
-		.section-header {
-			align-items: flex-start;
-			flex-direction: column;
-		}
-
-		.section-header-actions {
-			width: 100%;
-			justify-content: space-between;
-			align-items: flex-start;
-		}
-
-		.column-filter-panel {
-			min-width: 0;
-			flex: 1;
-		}
-	}
-
-	@media (max-width: 760px) {
-		.monthly-page {
-			padding: 10px;
-		}
-
-		.monthly-header-card {
-			padding: 14px;
-		}
-
-		.header-meta {
-			width: 100%;
-			text-align: left;
-		}
-
-		.summary-grid {
-			grid-template-columns: 1fr;
-		}
-
-		.filter-card,
-		.filter-card:has(label:nth-of-type(4)) {
-			grid-template-columns: 1fr;
-		}
-
-		.filter-card input,
-		.filter-card select {
-			min-width: 100%;
-		}
-
-		.filter-actions {
-			grid-column: auto;
-			flex-direction: column;
-			width: 100%;
-		}
-
-		.filter-hint {
-			grid-column: auto;
-		}
-
-		.section-header-actions {
-			flex-direction: column;
-		}
-
-		.column-filter-panel {
-			width: 100%;
-			box-sizing: border-box;
-		}
-
-		.primary-btn,
-		.export-btn {
-			width: 100%;
-		}
-
-		.monthly-table-wrapper {
-			max-height: calc(100vh - 360px);
-		}
-	}
-</style>

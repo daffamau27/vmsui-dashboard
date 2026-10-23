@@ -158,8 +158,34 @@ window.fetch = (input, init) => {
 			]
 		});
 	if (url.includes('/all-vessel-summary/data')) return jsonResponse({ data: { rows: [] } });
+	if (url.includes('/users/my-vessels'))
+		return jsonResponse({
+			data: [
+				{ vesselId: 101, vesselName: 'MV Nusantara Jaya' },
+				{ vesselId: 102, vesselName: 'MT Samudra Biru' },
+				{ vesselId: 103, vesselName: 'MV Bahari Indah' }
+			]
+		});
+	if (url.includes('/users/my-assets'))
+		return jsonResponse({
+			data: [
+				{ assetId: 'a-01', assetName: 'Engine Monitor 01', assetType: 'engine' },
+				{ assetId: 'a-02', assetName: 'Fuel Flow Meter 02', assetType: 'sensor' }
+			]
+		});
 	if (url.includes('/users/current-user'))
-		return jsonResponse({ data: { id: 1, permissionAccess: { mode: 'all' } } });
+		return jsonResponse({
+			data: {
+				id: 1,
+				name: 'Mahesa Pratama',
+				username: 'mahesa',
+				email: 'mahesa@example.com',
+				createdAt: '2025-01-15T08:00:00Z',
+				permissionAccess: { mode: 'all' },
+				vesselAccess: { mode: 'assigned' },
+				assetAccess: { mode: 'assigned' }
+			}
+		});
 	if (url.includes('/data-logs/available-columns'))
 		return jsonResponse({ data: { available_columns: dataLogMock.columns } });
 	if (url.includes('/data-logs/data-deviation'))

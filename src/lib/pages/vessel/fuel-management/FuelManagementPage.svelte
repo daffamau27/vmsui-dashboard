@@ -4,6 +4,12 @@
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import { apiRequest } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import FuelManagementHeader from './FuelManagementHeader.svelte';
+	import FuelManagementToast from './FuelManagementToast.svelte';
+	import FuelManagementSummary from './FuelManagementSummary.svelte';
+	import FuelManagementTables from './FuelManagementTables.svelte';
+	import FuelManagementHistory from './FuelManagementHistory.svelte';
+	import './fuel-management-page.css';
 	import {
 		getFuelManagementData,
 		getFuelManagementHistory,
@@ -15,7 +21,6 @@
 		downloadVdorTemplate,
 		getFuelVdorComparison
 	} from '$lib/api/fuelManagementApi.js';
-	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
 
 	let { active = true } = $props();
@@ -176,16 +181,14 @@
 			null
 	);
 	let vdorPreviewSystemDaily = $derived(
-		vdorPreviewSystemComparison?.dailySystem ||
-			vdorPreviewSystemComparison?.daily_system ||
-			null
+		vdorPreviewSystemComparison?.dailySystem || vdorPreviewSystemComparison?.daily_system || null
 	);
 	let vdorPreviewIsFod = $derived(
 		Boolean(
 			vdorPreviewData?.isFod ??
-				vdorPreviewData?.is_fod ??
-				vdorPreviewSystemDaily?.isFod ??
-				vdorPreviewSystemDaily?.is_fod
+			vdorPreviewData?.is_fod ??
+			vdorPreviewSystemDaily?.isFod ??
+			vdorPreviewSystemDaily?.is_fod
 		)
 	);
 	let vdorPreviewVdorTotal = $derived(getStoredComparisonTotal(vdorPreviewConsumption || {}));
@@ -319,7 +322,9 @@
 	}
 
 	function formatFuelSourceLabel(value) {
-		const normalized = String(value || '').trim().toLowerCase();
+		const normalized = String(value || '')
+			.trim()
+			.toLowerCase();
 
 		if (['fm', 'fms'].includes(normalized)) return 'FM';
 		if (normalized === 'ecu') return 'ECU';
@@ -330,11 +335,17 @@
 	}
 
 	function isDailyConsumptionAction(action) {
-		return String(action || '').trim().toLowerCase().includes('daily consumption');
+		return String(action || '')
+			.trim()
+			.toLowerCase()
+			.includes('daily consumption');
 	}
 
 	function isFuelSourceChangeAction(action) {
-		return String(action || '').trim().toLowerCase().includes('fuel source change');
+		return String(action || '')
+			.trim()
+			.toLowerCase()
+			.includes('fuel source change');
 	}
 
 	function getHistoryActionSource(item) {
@@ -441,7 +452,9 @@
 	let canManageTransactions = $derived(hasPermission('manage_fuel_transactions'));
 	let canImportVdor = $derived(hasPermission('import_fuel_vdor'));
 	let canManageFuelOperations = $derived(canManageRob || canManageTransactions || canImportVdor);
-	let shouldShowDateRangeOverlay = $derived(!hasLoadedDateRange || !historyStartDate || !historyEndDate);
+	let shouldShowDateRangeOverlay = $derived(
+		!hasLoadedDateRange || !historyStartDate || !historyEndDate
+	);
 	let autoTimezoneLabel = $derived(
 		getAutoTimezoneLabelFromSources(dashboardData, dashboardData?.data, $selectedVesselInfo)
 	);
@@ -503,6 +516,49 @@
 
 		return cards;
 	});
+
+	let fuelTableCards = $derived(
+		tableConfigs.filter(canViewTableConfig).map((config) => {
+			const section = getSection(config.key);
+
+			return {
+				key: config.key,
+				title: getTableTitle(config),
+				description: getTableDescription(config),
+				columns: config.columns,
+				rows: getRows(config.key).map((row) =>
+					config.columns.map((column) => ({
+						text: formatValue(row?.[column.field], column.type),
+						right: column.align === 'right'
+					}))
+				),
+				totalLabel: section?.grand_total !== undefined ? formatLiter(section.grand_total) : '',
+				subtotalAeLabel: section?.subtotal_ae !== undefined ? formatLiter(section.subtotal_ae) : '',
+				subtotalMeLabel: section?.subtotal_me !== undefined ? formatLiter(section.subtotal_me) : '',
+				grandTotalLabel: section?.grand_total !== undefined ? formatLiter(section.grand_total) : '-'
+			};
+		})
+	);
+
+	let fuelHistoryViewRows = $derived(
+		historyRows.map((item, index) => ({
+			key: item.id || `${item.date}-${index}`,
+			raw: item,
+			dateLabel: formatHistoryDate(item.date),
+			periodLabel: item.period_label,
+			action: item.action || '-',
+			source: getHistoryActionSource(item),
+			isSourceChange: isFuelSourceChangeAction(item.action),
+			user: item.user || '-',
+			receivedLabel: hasPositiveFuelValue(item.received) ? formatLiter(item.received) : '',
+			consumptionLabel:
+				!hasPositiveFuelValue(item.received) && hasPositiveFuelValue(item.consumption)
+					? formatLiter(item.consumption)
+					: '',
+			robAfter: item.rob_after || '-',
+			hasNote: hasHistoryNote(item)
+		}))
+	);
 
 	$effect(() => {
 		if (!active) return;
@@ -701,10 +757,7 @@
 						user: dayItem?.user || '-',
 						received: 0,
 						consumption:
-							sourceItem?.consumption_l ??
-							sourceItem?.consumptionL ??
-							sourceItem?.consumption ??
-							0,
+							sourceItem?.consumption_l ?? sourceItem?.consumptionL ?? sourceItem?.consumption ?? 0,
 						rob_after: dayItem?.rob_after ?? dayItem?.rob_end ?? dayItem?.robEnd ?? '-',
 						rob_before: dayItem?.rob_before ?? dayItem?.rob_start ?? dayItem?.robStart ?? '-',
 						note:
@@ -730,10 +783,7 @@
 							user: dayItem?.user || '-',
 							received: dayItem?.received ?? 0,
 							consumption:
-								dayItem?.consumption ??
-								dayItem?.consumption_l ??
-								dayItem?.consumptionL ??
-								0,
+								dayItem?.consumption ?? dayItem?.consumption_l ?? dayItem?.consumptionL ?? 0,
 							rob_after: dayItem?.rob_after ?? dayItem?.rob_end ?? dayItem?.robEnd ?? '-',
 							rob_before: dayItem?.rob_before ?? dayItem?.rob_start ?? dayItem?.robStart ?? '-',
 							note: dayItem?.note || '-',
@@ -779,7 +829,9 @@
 
 			const transactionRows = transactions.map((transaction) => {
 				const quantity = Number(transaction?.quantity_l ?? transaction?.quantityL ?? 0);
-				const type = String(transaction?.transaction_type || transaction?.transactionType || '').toUpperCase();
+				const type = String(
+					transaction?.transaction_type || transaction?.transactionType || ''
+				).toUpperCase();
 				const isConsumption = ['BOUT', 'CONSUMPTION', 'OUT'].includes(type);
 
 				return {
@@ -789,7 +841,8 @@
 					received: !isConsumption && quantity > 0 ? quantity : 0,
 					consumption: isConsumption && quantity > 0 ? quantity : 0,
 					rob_after: transaction?.rob_after ?? transaction?.robAfter ?? dayItem?.rob_end ?? '-',
-					rob_before: transaction?.rob_before ?? transaction?.robBefore ?? dayItem?.rob_start ?? '-',
+					rob_before:
+						transaction?.rob_before ?? transaction?.robBefore ?? dayItem?.rob_start ?? '-',
 					note: transaction?.note || '-',
 					is_deletable: Boolean(
 						transaction?.is_deletable ?? transaction?.isDeletable ?? transaction?.id
@@ -930,7 +983,15 @@
 		}
 	}
 
-	async function loadHistoryFor({ vesselId, startDate, endDate, mode, offset, page = 1, limit = 10 }) {
+	async function loadHistoryFor({
+		vesselId,
+		startDate,
+		endDate,
+		mode,
+		offset,
+		page = 1,
+		limit = 10
+	}) {
 		loadingHistory = true;
 		historyError = '';
 
@@ -1272,8 +1333,7 @@
 		if (!Array.isArray(rows)) return [];
 
 		return rows.map((item) => {
-			const vdorValue =
-				optionalFuelNumber(item?.vdor_consumption_l ?? item?.vdorConsumptionL) ?? 0;
+			const vdorValue = optionalFuelNumber(item?.vdor_consumption_l ?? item?.vdorConsumptionL) ?? 0;
 			const systemValue =
 				optionalFuelNumber(
 					item?.daily_system_consumption_l ??
@@ -1283,7 +1343,13 @@
 				) ?? 0;
 
 			return {
-				label: item?.label || item?.engine_name || item?.engineName || item?.tank_name || item?.tankName || '-',
+				label:
+					item?.label ||
+					item?.engine_name ||
+					item?.engineName ||
+					item?.tank_name ||
+					item?.tankName ||
+					'-',
 				vdor: vdorValue,
 				system: systemValue,
 				difference:
@@ -1295,10 +1361,15 @@
 	function normalizeVdorDetailForSave(detail, includeHours = false) {
 		const breakdown = getVdorBreakdown(detail).map((item) => {
 			const normalized = {
-				label: item?.label || item?.engineName || item?.engine_name || item?.tankName || item?.tank_name || '-',
-				consumption_l: optionalFuelNumber(
-					item?.consumption_l ?? item?.consumptionL ?? item?.consumption
-				) ?? 0
+				label:
+					item?.label ||
+					item?.engineName ||
+					item?.engine_name ||
+					item?.tankName ||
+					item?.tank_name ||
+					'-',
+				consumption_l:
+					optionalFuelNumber(item?.consumption_l ?? item?.consumptionL ?? item?.consumption) ?? 0
 			};
 
 			if (includeHours) normalized.hours = String(item?.hours ?? item?.runtime ?? '');
@@ -1638,10 +1709,6 @@
 		return Array.isArray(rows) ? rows : [];
 	}
 
-	function hasSectionRows(key) {
-		return getRows(key).length > 0;
-	}
-
 	function formatValue(value, type = 'text') {
 		if (type === 'liter') return formatLiter(value);
 		if (value === null || value === undefined || value === '') return '-';
@@ -1698,15 +1765,18 @@
 		return groups.flatMap(({ key, detail }) =>
 			getVdorBreakdown(detail).map((item) => {
 				const label =
-					item?.label || item?.engine_name || item?.engineName || item?.tank_name || item?.tankName || '-';
+					item?.label ||
+					item?.engine_name ||
+					item?.engineName ||
+					item?.tank_name ||
+					item?.tankName ||
+					'-';
 
 				return {
 					key: `${key}:${String(label).trim().toLowerCase()}`,
 					label,
 					value:
-						optionalFuelNumber(
-							item?.consumption_l ?? item?.consumptionL ?? item?.consumption
-						) ?? 0
+						optionalFuelNumber(item?.consumption_l ?? item?.consumptionL ?? item?.consumption) ?? 0
 				};
 			})
 		);
@@ -1742,350 +1812,50 @@
 </script>
 
 <section class="fuel-management-page">
-	<header class="fuel-header-card">
-		<div>
-			<div class="page-kicker">Fuel Management</div>
-			<h1>{currentVesselName}</h1>
-			<p>Fuel ROB logs, bunkering transactions, VDOR imports, and fuel comparison by engine.</p>
-		</div>
+	<FuelManagementHeader
+		vesselName={currentVesselName}
+		latestRob={latestRobHeader}
+		loading={loadingData}
+	/>
 
-		<div class="header-actions">
-			<div class="header-rob-card">
-				<span>Latest ROB</span>
-				<strong>{loadingData ? 'Loading...' : latestRobHeader}</strong>
-			</div>
-		</div>
-	</header>
+	<FuelManagementToast
+		showNoVessel={!currentVesselId && !hideNoVesselNotice}
+		{errorMessage}
+		{successMessage}
+		onCloseNoVessel={() => (hideNoVesselNotice = true)}
+		onCloseError={() => (errorMessage = '')}
+		onCloseSuccess={() => (successMessage = '')}
+	/>
 
-	{#if (!currentVesselId && !hideNoVesselNotice) || errorMessage || successMessage}
-		<div class="fuel-toast-layer" aria-live="polite">
-			{#if !currentVesselId && !hideNoVesselNotice}
-				<div class="fuel-toast warning">
-					<div>
-						<strong>No vessel selected</strong>
-						<span>Please select a vessel first to display Fuel Management data.</span>
-					</div>
-					<button
-						type="button"
-						class="toast-close"
-						onclick={() => (hideNoVesselNotice = true)}
-						aria-label="Close notification">×</button
-					>
-				</div>
-			{/if}
+	<FuelManagementSummary loading={loadingData} cards={summaryCards} />
 
-			{#if errorMessage}
-				<div class="fuel-toast danger">
-					<div>
-						<strong>Action failed</strong>
-						<span>{errorMessage}</span>
-					</div>
-					<button
-						type="button"
-						class="toast-close"
-						onclick={() => (errorMessage = '')}
-						aria-label="Close notification">×</button
-					>
-				</div>
-			{/if}
+	<FuelManagementTables loading={loadingData} cards={fuelTableCards} />
 
-			{#if successMessage}
-				<div class="fuel-toast success">
-					<div>
-						<strong>Action success</strong>
-						<span>{successMessage}</span>
-					</div>
-					<button
-						type="button"
-						class="toast-close"
-						onclick={() => (successMessage = '')}
-						aria-label="Close notification">×</button
-					>
-				</div>
-			{/if}
-		</div>
-	{/if}
-
-	<section class="summary-grid">
-		{#if loadingData}
-			<LoadingSkeleton
-				label="Loading fuel summary"
-				variant="fuel-summary"
-				rows={summaryCards.length || 4}
-			/>
-		{:else}
-			{#each summaryCards as card}
-				<article class="summary-card">
-					<span>{card.label}</span>
-					<strong>{card.value}</strong>
-					<small>{card.note}</small>
-				</article>
-			{/each}
-		{/if}
-	</section>
-
-	<section class="table-grid">
-		{#each tableConfigs.filter(canViewTableConfig) as config}
-			<article class="panel table-panel">
-				<div class="panel-header">
-					<div>
-						<h2>{getTableTitle(config)}</h2>
-						<p>{getTableDescription(config)}</p>
-					</div>
-					{#if getSection(config.key)?.grand_total !== undefined}
-						<span class="badge">Total {formatLiter(getSection(config.key)?.grand_total)}</span>
-					{/if}
-				</div>
-
-				{#if loadingData}
-					<LoadingSkeleton
-						label={`Loading ${getTableTitle(config)}`}
-						variant="fuel-table"
-						rows={5}
-						columns={config.columns.length}
-					/>
-				{:else if hasSectionRows(config.key)}
-					<div class="table-wrap">
-						<table>
-							<thead>
-								<tr>
-									{#each config.columns as column}
-										<th class:right={column.align === 'right'}>{column.label}</th>
-									{/each}
-								</tr>
-							</thead>
-							<tbody>
-								{#each getRows(config.key) as row}
-									<tr>
-										{#each config.columns as column}
-											<td class:right={column.align === 'right'}
-												>{formatValue(row?.[column.field], column.type)}</td
-											>
-										{/each}
-									</tr>
-								{/each}
-							</tbody>
-							<tfoot>
-								{#if getSection(config.key)?.subtotal_ae !== undefined}
-									<tr>
-										<td colspan={config.columns.length - 1}>Subtotal AE</td>
-										<td class="right">{formatLiter(getSection(config.key)?.subtotal_ae)}</td>
-									</tr>
-								{/if}
-								{#if getSection(config.key)?.subtotal_me !== undefined}
-									<tr>
-										<td colspan={config.columns.length - 1}>Subtotal ME</td>
-										<td class="right">{formatLiter(getSection(config.key)?.subtotal_me)}</td>
-									</tr>
-								{/if}
-								<tr>
-									<td colspan={config.columns.length - 1}>Grand Total</td>
-									<td class="right">{formatLiter(getSection(config.key)?.grand_total)}</td>
-								</tr>
-							</tfoot>
-						</table>
-					</div>
-				{:else}
-					<div class="empty-state">
-						Data is not available or permission for this table has not been granted.
-					</div>
-				{/if}
-			</article>
-		{/each}
-	</section>
-
-	<section class="panel history-panel">
-		<div class="panel-header">
-			<div>
-				<h2>Fuel History Timeline</h2>
-				<p>ROB transactions, carry over, daily consumption, and deletable bunkering logs.</p>
-			</div>
-
-			<div class="history-toolbar">
-				<div class="history-filters">
-					<label>
-						<span>Start Date</span>
-						<input type="date" use:fourDigitDateYear bind:value={historyStartDate} onchange={markDateFilterDirty} />
-					</label>
-
-					<label>
-						<span>End Date</span>
-						<input type="date" use:fourDigitDateYear bind:value={historyEndDate} onchange={markDateFilterDirty} />
-					</label>
-
-					<label>
-						<span class="field-label-row">
-							Timezone
-							{#if timezoneMode === 'auto'}
-								<small class="timezone-auto-pill">Auto • {autoTimezoneLabel}</small>
-							{/if}
-						</span>
-						<select bind:value={timezoneMode} onchange={markDateFilterDirty}>
-							{#each TIMEZONE_MODE_OPTIONS as option}
-								<option value={option.value}>{option.label}</option>
-							{/each}
-						</select>
-					</label>
-
-					{#if timezoneMode === 'manual'}
-						<label class="offset-field">
-							<span>Offset</span>
-							<select bind:value={timezoneOffset} onchange={markDateFilterDirty}>
-								{#each TIMEZONE_OFFSET_OPTIONS as option}
-									<option value={option.value}>{option.label}</option>
-								{/each}
-							</select>
-						</label>
-					{/if}
-				</div>
-
-				<button
-					class="primary-button history-load-button"
-					type="button"
-					onclick={() => loadHistoryCurrent(1)}
-					disabled={loadingHistory || !historyStartDate || !historyEndDate}
-				>
-					{loadingHistory ? 'Loading...' : 'Load History'}
-				</button>
-
-				<button
-					class="secondary-button history-operation-button"
-					type="button"
-					onclick={openFuelOperationOverlay}
-				>
-					Fuel Operations
-				</button>
-			</div>
-		</div>
-
-		<div class="history-load-area load-required-area" class:is-locked={shouldShowDateRangeOverlay}>
-			{#if historyError}
-				<div class="alert danger compact">{historyError}</div>
-			{/if}
-
-			{#if loadingHistory}
-				<LoadingSkeleton label="Loading fuel history" variant="fuel-history" rows={6} columns={7} />
-			{:else if historyRows.length}
-				<div class="table-wrap">
-					<table>
-						<thead>
-							<tr>
-								<th>Date</th>
-								<th>Action</th>
-								<th>User</th>
-								<th class="right">Fuel Movement</th>
-								<th class="right">ROB After</th>
-								<th>Note</th>
-								<!-- <th class="right">Action</th> -->
-							</tr>
-						</thead>
-						<tbody>
-							{#each historyRows as item}
-								<tr>
-									<td>
-										<div class="history-date-cell">
-											<strong>{formatHistoryDate(item.date)}</strong>
-											{#if item.period_label}
-												<small>{item.period_label}</small>
-											{/if}
-										</div>
-									</td>
-									<td>
-										<span
-											class="action-chip"
-											class:has-source={getHistoryActionSource(item)}
-											class:is-source-change={isFuelSourceChangeAction(item.action)}
-										>
-											<strong>{item.action || '-'}</strong>
-											{#if getHistoryActionSource(item)}
-												<small>{getHistoryActionSource(item)}</small>
-											{/if}
-										</span>
-									</td>
-									<td>{item.user || '-'}</td>
-									<td class="right">
-										{#if hasPositiveFuelValue(item.received)}
-											<div class="fuel-movement-chip received">
-												<span>Received</span>
-												<strong>{formatLiter(item.received)}</strong>
-											</div>
-										{:else if hasPositiveFuelValue(item.consumption)}
-											<div class="fuel-movement-chip consumption">
-												<span>Consumption</span>
-												<strong>{formatLiter(item.consumption)}</strong>
-											</div>
-										{:else}
-											<span class="muted">-</span>
-										{/if}
-									</td>
-									<td class="right"><strong>{item.rob_after || '-'}</strong></td>
-									<td>
-										{#if hasHistoryNote(item)}
-											<button type="button" class="note-view-button" onclick={() => openHistoryNote(item)}>
-												View note
-											</button>
-										{:else}
-											<span class="muted">-</span>
-										{/if}
-									</td>
-									<!-- <td class="right">
-										{#if item.is_deletable && item.id && canManageTransactions}
-											<button
-												type="button"
-												class="danger-button"
-												onclick={() => removeTransaction(item)}
-												disabled={actionLoading === `delete-${item.id}`}
-											>
-												{actionLoading === `delete-${item.id}` ? 'Deleting...' : 'Delete'}
-											</button>
-										{:else}
-											<span class="muted">-</span>
-										{/if}
-									</td> -->
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				</div>
-				<div class="history-control history-control-bottom">
-					<button
-						type="button"
-						onclick={() => loadHistoryPage(historyPage - 1)}
-						disabled={loadingHistory || historyPage <= 1}
-					>
-						Prev
-					</button>
-					<span>Page {historyPage} / {historyPagination?.total_pages || 1}</span>
-					<button
-						type="button"
-						onclick={() => loadHistoryPage(historyPage + 1)}
-						disabled={loadingHistory || historyPage >= Number(historyPagination?.total_pages || 1)}
-					>
-						Next
-					</button>
-				</div>
-			{:else}
-				<div class="empty-state">History is not available for this date range.</div>
-			{/if}
-
-		{#if shouldShowDateRangeOverlay}
-			<div class="load-required-overlay">
-				<div class="load-required-card">
-					<div class="load-required-icon">!</div>
-					<span class="section-kicker">Waiting for date</span>
-					<h2>Choose a fuel history range first</h2>
-					<p>
-						Select the fuel history range and timezone in the history header, then click <strong>Load History</strong>
-						to display the timeline.
-					</p>
-				</div>
-			</div>
-		{/if}
-		</div>
-	</section>
+	<FuelManagementHistory
+		bind:startDate={historyStartDate}
+		bind:endDate={historyEndDate}
+		bind:timezoneMode
+		bind:timezoneOffset
+		{autoTimezoneLabel}
+		error={historyError}
+		loading={loadingHistory}
+		rows={fuelHistoryViewRows}
+		page={historyPage}
+		totalPages={Number(historyPagination?.total_pages || 1)}
+		{shouldShowDateRangeOverlay}
+		onLoad={() => loadHistoryCurrent(1)}
+		onPage={loadHistoryPage}
+		onOpenOperations={openFuelOperationOverlay}
+		onOpenNote={openHistoryNote}
+		onFilterChange={markDateFilterDirty}
+	/>
 
 	{#if showFuelOperationOverlay}
-		<div class="fuel-operation-modal-backdrop" role="presentation" onclick={closeFuelOperationOverlay}>
+		<div
+			class="fuel-operation-modal-backdrop"
+			role="presentation"
+			onclick={closeFuelOperationOverlay}
+		>
 			<section
 				class="fuel-operation-modal-card"
 				role="dialog"
@@ -2127,7 +1897,11 @@
 									<h3>Save / Adjust ROB</h3>
 									<label>
 										<span>Datetime</span>
-										<input type="datetime-local" use:fourDigitDateYear bind:value={robForm.datetime} />
+										<input
+											type="datetime-local"
+											use:fourDigitDateYear
+											bind:value={robForm.datetime}
+										/>
 									</label>
 									<label>
 										<span>ROB (L)</span>
@@ -2141,7 +1915,11 @@
 									</label>
 									<label>
 										<span>Note</span>
-										<input type="text" bind:value={robForm.note} placeholder="Initial tank sounding" />
+										<input
+											type="text"
+											bind:value={robForm.note}
+											placeholder="Initial tank sounding"
+										/>
 									</label>
 									<button type="submit" disabled={actionLoading === 'rob'}>
 										{actionLoading === 'rob' ? 'Saving...' : 'Save ROB'}
@@ -2160,7 +1938,11 @@
 									<h3>Bunkering Transaction</h3>
 									<label>
 										<span>Datetime</span>
-										<input type="datetime-local" use:fourDigitDateYear bind:value={transactionForm.datetime} />
+										<input
+											type="datetime-local"
+											use:fourDigitDateYear
+											bind:value={transactionForm.datetime}
+										/>
 									</label>
 									<div class="split-fields">
 										<label>
@@ -2203,7 +1985,10 @@
 									<div class="vdor-import-heading">
 										<div>
 											<h3>VDOR vs System</h3>
-											<p>Review an existing comparison by date, or preview a new VDOR file before saving it.</p>
+											<p>
+												Review an existing comparison by date, or preview a new VDOR file before
+												saving it.
+											</p>
 										</div>
 										<span class="vdor-step-badge">Comparison workspace</span>
 									</div>
@@ -2213,14 +1998,22 @@
 											<span class="vdor-context-icon" aria-hidden="true">01</span>
 											<div>
 												<strong>Existing comparison</strong>
-												<small>Select a date to compare the saved VDOR against the system calculation for that day.</small>
+												<small
+													>Select a date to compare the saved VDOR against the system calculation
+													for that day.</small
+												>
 											</div>
 										</div>
 
 										<div class="vdor-context-actions">
 											<label>
 												<span>VDOR date</span>
-												<input type="date" use:fourDigitDateYear bind:value={vdorDate} onchange={handleVdorDateChange} />
+												<input
+													type="date"
+													use:fourDigitDateYear
+													bind:value={vdorDate}
+													onchange={handleVdorDateChange}
+												/>
 											</label>
 											<button
 												type="button"
@@ -2238,12 +2031,19 @@
 											<div>
 												<span class="section-kicker">Existing VDOR lookup</span>
 												<h4>{currentVesselName} · {vdorStoredComparisonData?.date || vdorDate}</h4>
-												<p>When VDOR data exists, its fuel is compared label-by-label with the daily system calculation.</p>
+												<p>
+													When VDOR data exists, its fuel is compared label-by-label with the daily
+													system calculation.
+												</p>
 											</div>
 											{#if vdorStoredComparisonData}
 												<div class="vdor-comparison-badges">
 													<span>{vdorStoredIsFod ? 'Tank basis' : 'Engine basis'}</span>
-													<span>Source: {formatFuelSourceLabel(vdorStoredSystem?.fuel_source ?? vdorStoredSystem?.fuelSource)}</span>
+													<span
+														>Source: {formatFuelSourceLabel(
+															vdorStoredSystem?.fuel_source ?? vdorStoredSystem?.fuelSource
+														)}</span
+													>
 													<span class:available={Boolean(vdorStoredVdor?.present)}>
 														{vdorStoredVdor?.present ? 'VDOR available' : 'No VDOR'}
 													</span>
@@ -2252,28 +2052,69 @@
 										</header>
 
 										{#if vdorComparisonLoading}
-											<LoadingSkeleton label="Loading VDOR and system data" variant="fuel-comparison" />
+											<LoadingSkeleton
+												label="Loading VDOR and system data"
+												variant="fuel-comparison"
+											/>
 										{:else if vdorComparisonError}
 											<div class="vdor-comparison-state error">
-												<div><strong>Data unavailable</strong><span>{vdorComparisonError}</span></div>
-												<button type="button" class="secondary-button" onclick={refreshStoredVdorComparison}>Try Again</button>
+												<div>
+													<strong>Data unavailable</strong><span>{vdorComparisonError}</span>
+												</div>
+												<button
+													type="button"
+													class="secondary-button"
+													onclick={refreshStoredVdorComparison}>Try Again</button
+												>
 											</div>
 										{:else if vdorStoredComparisonData}
 											<div class="vdor-stored-metrics">
 												<article class="vdor-comparison-metric">
-													<span>VDOR Total Consumption</span><strong>{formatLiter(vdorStoredVdorTotal)}</strong>
-													<small>{vdorStoredVdor?.present ? 'Imported crew report' : 'Not imported'}</small>
+													<span>VDOR Total Consumption</span><strong
+														>{formatLiter(vdorStoredVdorTotal)}</strong
+													>
+													<small
+														>{vdorStoredVdor?.present
+															? 'Imported crew report'
+															: 'Not imported'}</small
+													>
 												</article>
 												<article class="vdor-comparison-metric">
-													<span>System Total Consumption</span><strong>{formatLiter(vdorStoredSystemTotal)}</strong>
-													<small>{formatFuelSourceLabel(vdorStoredSystem?.fuel_source ?? vdorStoredSystem?.fuelSource)} calculation</small>
+													<span>System Total Consumption</span><strong
+														>{formatLiter(vdorStoredSystemTotal)}</strong
+													>
+													<small
+														>{formatFuelSourceLabel(
+															vdorStoredSystem?.fuel_source ?? vdorStoredSystem?.fuelSource
+														)} calculation</small
+													>
 												</article>
-												<article class="vdor-comparison-metric" class:variance={Boolean(vdorStoredVariance?.has_variance ?? vdorStoredVariance?.hasVariance)}>
-													<span>Total Difference</span><strong>{formatLiter(vdorStoredDifference)}</strong>
-													<small>{vdorStoredVariance?.has_variance ?? vdorStoredVariance?.hasVariance ? 'Variance detected' : 'No variance detected'}</small>
+												<article
+													class="vdor-comparison-metric"
+													class:variance={Boolean(
+														vdorStoredVariance?.has_variance ?? vdorStoredVariance?.hasVariance
+													)}
+												>
+													<span>Total Difference</span><strong
+														>{formatLiter(vdorStoredDifference)}</strong
+													>
+													<small
+														>{(vdorStoredVariance?.has_variance ?? vdorStoredVariance?.hasVariance)
+															? 'Variance detected'
+															: 'No variance detected'}</small
+													>
 												</article>
-												<article class="vdor-comparison-metric" class:variance={Boolean(vdorStoredVariance?.has_variance ?? vdorStoredVariance?.hasVariance)}>
-													<span>Difference %</span><strong>{vdorStoredPercentDifference === null ? '-' : `${formatNumber(vdorStoredPercentDifference)}%`}</strong>
+												<article
+													class="vdor-comparison-metric"
+													class:variance={Boolean(
+														vdorStoredVariance?.has_variance ?? vdorStoredVariance?.hasVariance
+													)}
+												>
+													<span>Difference %</span><strong
+														>{vdorStoredPercentDifference === null
+															? '-'
+															: `${formatNumber(vdorStoredPercentDifference)}%`}</strong
+													>
 													<small>VDOR against system</small>
 												</article>
 											</div>
@@ -2282,7 +2123,9 @@
 												<div class="vdor-missing-guide">
 													<div class="vdor-missing-guide-copy">
 														<strong>No VDOR imported for {vdorDate}</strong>
-														<span>A comparison cannot be created until a VDOR file is imported.</span>
+														<span
+															>A comparison cannot be created until a VDOR file is imported.</span
+														>
 														<div class="vdor-missing-steps">
 															<span><b>1</b> Download the template for this date</span>
 															<span><b>2</b> Complete the VDOR values in Excel</span>
@@ -2295,16 +2138,30 @@
 														onclick={downloadTemplate}
 														disabled={actionLoading === 'template' || !vdorDate}
 													>
-														{actionLoading === 'template' ? 'Downloading...' : 'Download VDOR Template'}
+														{actionLoading === 'template'
+															? 'Downloading...'
+															: 'Download VDOR Template'}
 													</button>
 												</div>
 											{:else if vdorStoredDifferenceRows.length}
 												<div class="vdor-difference-table-wrap">
 													<table class="vdor-difference-table">
-														<thead><tr><th>{vdorStoredIsFod ? 'Tank' : 'Engine'}</th><th>VDOR</th><th>System</th><th>Difference</th></tr></thead>
+														<thead
+															><tr
+																><th>{vdorStoredIsFod ? 'Tank' : 'Engine'}</th><th>VDOR</th><th
+																	>System</th
+																><th>Difference</th></tr
+															></thead
+														>
 														<tbody>
 															{#each vdorStoredDifferenceRows as row}
-																<tr><td>{row.label}</td><td>{formatLiter(row.vdor)}</td><td>{formatLiter(row.system)}</td><td class={deltaClass(row.difference)}>{formatLiter(row.difference)}</td></tr>
+																<tr
+																	><td>{row.label}</td><td>{formatLiter(row.vdor)}</td><td
+																		>{formatLiter(row.system)}</td
+																	><td class={deltaClass(row.difference)}
+																		>{formatLiter(row.difference)}</td
+																	></tr
+																>
 															{/each}
 														</tbody>
 													</table>
@@ -2313,13 +2170,31 @@
 
 											{#if vdorStoredSystem?.opening_rob_l !== undefined || vdorStoredSystem?.openingRobL !== undefined || vdorStoredSystem?.closing_rob_l !== undefined || vdorStoredSystem?.closingRobL !== undefined}
 												<div class="vdor-system-context">
-													<div><span>System Opening ROB</span><strong>{formatLiter(vdorStoredSystem?.opening_rob_l ?? vdorStoredSystem?.openingRobL)}</strong></div>
-													<div><span>System Closing ROB</span><strong>{formatLiter(vdorStoredSystem?.closing_rob_l ?? vdorStoredSystem?.closingRobL)}</strong></div>
+													<div>
+														<span>System Opening ROB</span><strong
+															>{formatLiter(
+																vdorStoredSystem?.opening_rob_l ?? vdorStoredSystem?.openingRobL
+															)}</strong
+														>
+													</div>
+													<div>
+														<span>System Closing ROB</span><strong
+															>{formatLiter(
+																vdorStoredSystem?.closing_rob_l ?? vdorStoredSystem?.closingRobL
+															)}</strong
+														>
+													</div>
 												</div>
 											{/if}
-														{:else}
-															<div class="vdor-comparison-state empty"><div><strong>Ready to compare</strong><span>Select a date and click Get Comparison to load VDOR and system values.</span></div></div>
-														{/if}
+										{:else}
+											<div class="vdor-comparison-state empty">
+												<div>
+													<strong>Ready to compare</strong><span
+														>Select a date and click Get Comparison to load VDOR and system values.</span
+													>
+												</div>
+											</div>
+										{/if}
 									</section>
 
 									<section class="vdor-upload-workflow">
@@ -2327,32 +2202,54 @@
 											<span>02</span>
 											<div>
 												<strong>Preview a new comparison</strong>
-												<small>Upload a completed VDOR Excel file. Its report date is read from the file and compared with system data.</small>
+												<small
+													>Upload a completed VDOR Excel file. Its report date is read from the file
+													and compared with system data.</small
+												>
 											</div>
 										</div>
 
 										<div class="vdor-workflow-actions preview-actions">
 											<label class="vdor-file-picker">
-												<input type="file" accept=".xlsx" onchange={handleFileInput} disabled={importPreviewLoading || importSaveLoading} />
+												<input
+													type="file"
+													accept=".xlsx"
+													onchange={handleFileInput}
+													disabled={importPreviewLoading || importSaveLoading}
+												/>
 												<span>Choose Excel</span>
 												<strong>{selectedImportFileName || 'No file selected'}</strong>
 											</label>
-											<button type="button" class="vdor-preview-button" onclick={previewImportVdor} disabled={importPreviewLoading || importSaveLoading || !selectedImportFile}>
+											<button
+												type="button"
+												class="vdor-preview-button"
+												onclick={previewImportVdor}
+												disabled={importPreviewLoading || importSaveLoading || !selectedImportFile}
+											>
 												{importPreviewLoading ? 'Generating...' : 'Preview VDOR'}
 											</button>
 										</div>
 									</section>
 
 									{#if importPreviewLoading}
-										<LoadingSkeleton label="Parsing VDOR and preparing comparison" variant="fuel-comparison" />
+										<LoadingSkeleton
+											label="Parsing VDOR and preparing comparison"
+											variant="fuel-comparison"
+										/>
 									{:else if vdorPreviewData}
 										<section class="vdor-preview-panel">
 											<div class="vdor-preview-header">
 												<div>
 													<span class="section-kicker">New import preview</span>
-													<h4>{currentVesselName} · {getVdorPreviewDate() || 'Date unavailable'}</h4>
+													<h4>
+														{currentVesselName} · {getVdorPreviewDate() || 'Date unavailable'}
+													</h4>
 												</div>
-												<strong>{formatLiter(buildVdorConsumptionForSave().totalEnginesConsumption)}</strong>
+												<strong
+													>{formatLiter(
+														buildVdorConsumptionForSave().totalEnginesConsumption
+													)}</strong
+												>
 											</div>
 
 											<section class="vdor-source-selection">
@@ -2360,7 +2257,10 @@
 													<div>
 														<span class="section-kicker">Daily values comparison</span>
 														<h4>VDOR vs System daily values</h4>
-														<p>Compare the daily values side by side. System values are used when the VDOR is saved.</p>
+														<p>
+															Compare the daily values side by side. System values are used when the
+															VDOR is saved.
+														</p>
 													</div>
 													<span class="vdor-source-help">System used on save</span>
 												</header>
@@ -2374,17 +2274,35 @@
 															</div>
 
 															<div class="vdor-source-values">
-																<div class="selected"><span>System</span><strong>{formatLiter(row.system)}</strong></div>
-																<div class="vdor-reference"><span>VDOR</span><strong>{formatLiter(row.vdor)}</strong></div>
+																<div class="selected">
+																	<span>System</span><strong>{formatLiter(row.system)}</strong>
+																</div>
+																<div class="vdor-reference">
+																	<span>VDOR</span><strong>{formatLiter(row.vdor)}</strong>
+																</div>
 															</div>
 														</article>
 													{/each}
 												</div>
 
 												<div class="vdor-midnight-reference">
-													<div><span>Midnight ROB</span><small>Reference only; it is not sent as a save option.</small></div>
-													<div><span>VDOR</span><strong>{formatLiter(getVdorDailyValue('midnightRob', 'midnight_rob'))}</strong></div>
-													<div><span>System</span><strong>{formatLiter(getPreviewSystemValue('midnightRob'))}</strong></div>
+													<div>
+														<span>Midnight ROB</span><small
+															>Reference only; it is not sent as a save option.</small
+														>
+													</div>
+													<div>
+														<span>VDOR</span><strong
+															>{formatLiter(
+																getVdorDailyValue('midnightRob', 'midnight_rob')
+															)}</strong
+														>
+													</div>
+													<div>
+														<span>System</span><strong
+															>{formatLiter(getPreviewSystemValue('midnightRob'))}</strong
+														>
+													</div>
 												</div>
 											</section>
 
@@ -2393,57 +2311,113 @@
 													<div>
 														<span class="section-kicker">Import preview comparison</span>
 														<h4>Excel VDOR vs Daily System</h4>
-														<p>This comparison comes from the uploaded file date, before anything is saved.</p>
+														<p>
+															This comparison comes from the uploaded file date, before anything is
+															saved.
+														</p>
 													</div>
 													<div class="vdor-comparison-badges">
 														<span>Preview only</span>
 														<span>{vdorPreviewIsFod ? 'Tank basis' : 'Engine basis'}</span>
-														<span>Source: {formatFuelSourceLabel(vdorPreviewSystemComparison?.system_fuel_source ?? vdorPreviewSystemComparison?.systemFuelSource ?? vdorPreviewSystemDaily?.fuel_source)}</span>
+														<span
+															>Source: {formatFuelSourceLabel(
+																vdorPreviewSystemComparison?.system_fuel_source ??
+																	vdorPreviewSystemComparison?.systemFuelSource ??
+																	vdorPreviewSystemDaily?.fuel_source
+															)}</span
+														>
 													</div>
 												</header>
 
 												<div class="vdor-stored-metrics preview-metrics">
 													<article class="vdor-comparison-metric">
-														<span>Excel VDOR</span><strong>{formatLiter(vdorPreviewVdorTotal)}</strong><small>Uploaded file</small>
+														<span>Excel VDOR</span><strong
+															>{formatLiter(vdorPreviewVdorTotal)}</strong
+														><small>Uploaded file</small>
 													</article>
 													<article class="vdor-comparison-metric">
-														<span>Daily System</span><strong>{formatLiter(vdorPreviewSystemTotal)}</strong><small>{formatFuelSourceLabel(vdorPreviewSystemComparison?.system_fuel_source ?? vdorPreviewSystemComparison?.systemFuelSource ?? vdorPreviewSystemDaily?.fuel_source)} calculation</small>
+														<span>Daily System</span><strong
+															>{formatLiter(vdorPreviewSystemTotal)}</strong
+														><small
+															>{formatFuelSourceLabel(
+																vdorPreviewSystemComparison?.system_fuel_source ??
+																	vdorPreviewSystemComparison?.systemFuelSource ??
+																	vdorPreviewSystemDaily?.fuel_source
+															)} calculation</small
+														>
 													</article>
-													<article class="vdor-comparison-metric" class:variance={vdorPreviewDifference !== 0}>
-														<span>Difference</span><strong>{formatLiter(vdorPreviewDifference)}</strong><small>{vdorPreviewDifference === 0 ? 'Values match' : 'Review variance'}</small>
+													<article
+														class="vdor-comparison-metric"
+														class:variance={vdorPreviewDifference !== 0}
+													>
+														<span>Difference</span><strong
+															>{formatLiter(vdorPreviewDifference)}</strong
+														><small
+															>{vdorPreviewDifference === 0
+																? 'Values match'
+																: 'Review variance'}</small
+														>
 													</article>
-													<article class="vdor-comparison-metric" class:variance={vdorPreviewDifference !== 0}>
-														<span>Difference %</span><strong>{vdorPreviewDifferencePercent === null ? '-' : `${formatNumber(vdorPreviewDifferencePercent)}%`}</strong><small>Excel against system</small>
+													<article
+														class="vdor-comparison-metric"
+														class:variance={vdorPreviewDifference !== 0}
+													>
+														<span>Difference %</span><strong
+															>{vdorPreviewDifferencePercent === null
+																? '-'
+																: `${formatNumber(vdorPreviewDifferencePercent)}%`}</strong
+														><small>Excel against system</small>
 													</article>
 												</div>
 
 												{#if vdorPreviewDifferenceRows.length}
 													<div class="vdor-difference-table-wrap">
 														<table class="vdor-difference-table">
-															<thead><tr><th>{vdorPreviewIsFod ? 'Tank' : 'Engine'}</th><th>Excel VDOR</th><th>System</th><th>Difference</th></tr></thead>
+															<thead
+																><tr
+																	><th>{vdorPreviewIsFod ? 'Tank' : 'Engine'}</th><th>Excel VDOR</th
+																	><th>System</th><th>Difference</th></tr
+																></thead
+															>
 															<tbody>
 																{#each vdorPreviewDifferenceRows as row}
-																	<tr><td>{row.label}</td><td>{formatLiter(row.vdor)}</td><td>{formatLiter(row.system)}</td><td class={deltaClass(row.difference)}>{formatLiter(row.difference)}</td></tr>
+																	<tr
+																		><td>{row.label}</td><td>{formatLiter(row.vdor)}</td><td
+																			>{formatLiter(row.system)}</td
+																		><td class={deltaClass(row.difference)}
+																			>{formatLiter(row.difference)}</td
+																		></tr
+																	>
 																{/each}
 															</tbody>
 														</table>
 													</div>
 												{:else}
-													<div class="vdor-comparison-empty">No per-{vdorPreviewIsFod ? 'tank' : 'engine'} comparison rows were returned.</div>
+													<div class="vdor-comparison-empty">
+														No per-{vdorPreviewIsFod ? 'tank' : 'engine'} comparison rows were returned.
+													</div>
 												{/if}
 											</section>
 
 											<section class="vdor-save-workflow">
 												<div class="vdor-workflow-heading compact">
 													<span>03</span>
-													<div><strong>Save reviewed VDOR</strong><small>Save only after the VDOR and system differences have been reviewed.</small></div>
+													<div>
+														<strong>Save reviewed VDOR</strong><small
+															>Save only after the VDOR and system differences have been reviewed.</small
+														>
+													</div>
 												</div>
 												<div class="vdor-confirm-row">
 													<label>
 														<span>Import note</span>
 														<input type="text" bind:value={vdorImportNote} />
 													</label>
-													<button type="button" onclick={submitImportVdor} disabled={importSaveLoading}>
+													<button
+														type="button"
+														onclick={submitImportVdor}
+														disabled={importSaveLoading}
+													>
 														{importSaveLoading ? 'Saving...' : 'Save VDOR'}
 													</button>
 												</div>
@@ -2478,9 +2452,16 @@
 					<div>
 						<span class="page-kicker">Fuel Note</span>
 						<h2>{selectedHistoryNote.action}</h2>
-						<p>{selectedHistoryNote.formattedDate || selectedHistoryNote.date} • {selectedHistoryNote.user}</p>
+						<p>
+							{selectedHistoryNote.formattedDate || selectedHistoryNote.date} • {selectedHistoryNote.user}
+						</p>
 					</div>
-					<button type="button" class="note-modal-close" onclick={closeHistoryNote} aria-label="Close note">
+					<button
+						type="button"
+						class="note-modal-close"
+						onclick={closeHistoryNote}
+						aria-label="Close note"
+					>
 						×
 					</button>
 				</header>
@@ -2492,2010 +2473,3 @@
 		</div>
 	{/if}
 </section>
-
-<style>
-	:global(*) {
-		box-sizing: border-box;
-	}
-
-	.fuel-management-page {
-		width: 100%;
-		height: 100%;
-		max-height: 100%;
-		min-height: 0;
-		overflow-y: auto;
-		overflow-x: hidden;
-		padding: 14px;
-		background: var(--color-base);
-		color: var(--text-primary);
-	}
-
-	h1,
-	h2,
-	h3,
-	p {
-		margin: 0;
-	}
-
-	.fuel-header-card,
-	.panel,
-	.summary-card {
-		background: var(--color-surface);
-		border: 1px solid #d9e2ec;
-		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
-	}
-
-	.fuel-header-card {
-		padding: 16px;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 16px;
-		margin-bottom: 14px;
-	}
-
-	.page-kicker {
-		display: inline-flex;
-		width: fit-content;
-		padding: 4px 9px;
-		border-radius: 999px;
-		background: var(--color-accent-muted);
-		color: #1d4ed8;
-		font-size: 10px;
-		font-weight: 900;
-		letter-spacing: 0.07em;
-		text-transform: uppercase;
-	}
-
-	.fuel-header-card h1 {
-		margin-top: 8px;
-		font-size: 22px;
-		line-height: 1.2;
-		font-weight: 900;
-		color: var(--text-primary);
-	}
-
-	.fuel-header-card p {
-		margin-top: 7px;
-		color: var(--text-secondary);
-		font-size: 12px;
-		font-weight: 700;
-		line-height: 1.45;
-	}
-
-	.header-actions {
-		display: flex;
-		align-items: end;
-		justify-content: flex-end;
-		gap: 10px;
-		flex-wrap: wrap;
-		min-width: 230px;
-	}
-
-	.header-rob-card {
-		min-width: 220px;
-		padding: 12px 14px;
-		border: 1px solid rgba(34, 197, 94, 0.28);
-		border-radius: 16px;
-		background:
-			linear-gradient(135deg, rgba(16, 185, 129, 0.16), rgba(37, 99, 235, 0.08)),
-			rgba(15, 23, 42, 0.5);
-		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-	}
-
-	.header-rob-card span,
-	.header-rob-card small {
-		display: block;
-		color: #9fb0c9;
-		font-size: 10px;
-		font-weight: 850;
-		letter-spacing: 0.07em;
-		text-transform: uppercase;
-	}
-
-	.header-rob-card strong {
-		display: block;
-		margin-top: 6px;
-		color: #ecfdf5;
-		font-size: 22px;
-		font-weight: 900;
-		line-height: 1.05;
-	}
-
-	.header-rob-card small {
-		margin-top: 7px;
-		color: #86efac;
-	}
-
-	.history-toolbar {
-		display: flex;
-		align-items: flex-end;
-		justify-content: flex-end;
-		gap: 10px;
-		flex-wrap: wrap;
-	}
-
-	.history-filters {
-		display: flex;
-		align-items: flex-end;
-		gap: 9px;
-		flex-wrap: wrap;
-	}
-
-	.history-load-button {
-		height: 32px;
-		padding: 0 13px;
-	}
-
-	.history-operation-button {
-		height: 32px;
-		padding: 0 13px;
-		border-color: rgba(147, 197, 253, 0.34);
-		background:
-			linear-gradient(135deg, rgba(37, 99, 235, 0.18), rgba(14, 165, 233, 0.08)),
-			rgba(15, 23, 42, 0.42);
-		color: #dbeafe;
-	}
-
-	.history-operation-button:hover:not(:disabled) {
-		border-color: rgba(147, 197, 253, 0.72);
-		background:
-			linear-gradient(135deg, rgba(37, 99, 235, 0.3), rgba(14, 165, 233, 0.14)),
-			rgba(15, 23, 42, 0.58);
-		color: #ffffff;
-	}
-
-	.history-load-area {
-		min-height: 260px;
-		margin-top: 0;
-	}
-
-	.history-load-area .load-required-overlay {
-		border-top-left-radius: 0;
-		border-top-right-radius: 0;
-	}
-
-	label {
-		display: grid;
-		gap: 5px;
-	}
-
-	label span {
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 900;
-		text-transform: uppercase;
-	}
-
-	.field-label-row {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 8px;
-	}
-
-	.timezone-auto-pill {
-		display: inline-flex;
-		align-items: center;
-		min-height: 18px;
-		padding: 2px 7px;
-		border: 1px solid rgba(96, 165, 250, 0.28);
-		border-radius: 999px;
-		background: rgba(37, 99, 235, 0.1);
-		color: #bfdbfe;
-		font-size: 10px;
-		font-weight: 800;
-		letter-spacing: 0;
-		text-transform: none;
-		white-space: nowrap;
-	}
-
-	input,
-	select {
-		height: 32px;
-		min-width: 140px;
-		border: 1px solid #cbd5e1;
-		background: var(--color-surface);
-		padding: 0 9px;
-		color: var(--text-primary);
-		font-size: 12px;
-		font-weight: 700;
-		outline: none;
-	}
-
-	input:focus,
-	select:focus {
-		border-color: #2563eb;
-		box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
-	}
-
-	.offset-field select {
-		min-width: 118px;
-		width: 118px;
-	}
-
-	button {
-		height: 32px;
-		border: none;
-		padding: 0 12px;
-		font-size: 11px;
-		font-weight: 900;
-		cursor: pointer;
-		transition:
-			background 0.16s ease,
-			opacity 0.16s ease;
-	}
-
-	button:disabled {
-		cursor: not-allowed;
-		opacity: 0.55;
-	}
-
-	.primary-button,
-	.mini-form button:not(.secondary-button),
-	.history-control button {
-		background: #2563eb;
-		color: #ffffff;
-	}
-
-	.primary-button:hover:not(:disabled),
-	.mini-form button:not(.secondary-button):hover:not(:disabled),
-	.history-control button:hover:not(:disabled) {
-		background: #1d4ed8;
-	}
-
-	.secondary-button {
-		border: 1px solid #cbd5e1;
-		background: rgba(255, 255, 255, 0.06);
-		color: var(--text-primary);
-	}
-
-	.secondary-button:hover:not(:disabled) {
-		background: #cbd5e1;
-	}
-
-	.danger-button {
-		height: 28px;
-		border: 1px solid #fecaca;
-		background: var(--color-danger-muted);
-		color: #be123c;
-	}
-
-	.danger-button:hover:not(:disabled) {
-		background: var(--color-danger-muted);
-	}
-
-	.fuel-toast-layer {
-		position: fixed;
-		top: 68px;
-		right: 18px;
-		z-index: 9999;
-		display: grid;
-		gap: 10px;
-		width: min(390px, calc(100vw - 36px));
-		pointer-events: none;
-	}
-
-	.fuel-toast {
-		display: grid;
-		grid-template-columns: 1fr auto;
-		gap: 10px;
-		align-items: flex-start;
-		padding: 11px 12px;
-		border: 1px solid #d9e2ec;
-		border-radius: 12px;
-		background: rgba(248, 250, 252, 0.98);
-		box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14);
-		backdrop-filter: blur(10px);
-		pointer-events: auto;
-		animation: fuel-toast-in 0.22s ease both;
-	}
-
-	.fuel-toast div {
-		display: grid;
-		gap: 3px;
-		min-width: 0;
-	}
-
-	.fuel-toast strong {
-		font-size: 12px;
-		font-weight: 900;
-		color: #0f172a !important;
-	}
-
-	.fuel-toast span {
-		font-size: 12px;
-		font-weight: 700;
-		line-height: 1.35;
-		color: #334155 !important;
-		text-transform: none;
-	}
-
-	.fuel-toast.warning {
-		border-color: #fde68a;
-		background: rgba(255, 251, 235, 0.96);
-	}
-
-	.fuel-toast.warning strong,
-	.fuel-toast.warning span {
-		color: #92400e;
-	}
-
-	.fuel-toast.danger {
-		border-color: #fecaca;
-		background: rgba(255, 241, 242, 0.96);
-	}
-
-	.fuel-toast.danger strong,
-	.fuel-toast.danger span {
-		color: #be123c;
-	}
-
-	.fuel-toast.success {
-		border-color: #bbf7d0;
-		background: rgba(240, 253, 244, 0.96);
-	}
-
-	.fuel-toast.success strong,
-	.fuel-toast.success span {
-		color: #166534;
-	}
-
-	.toast-close {
-		width: 24px;
-		height: 24px;
-		padding: 0;
-		border: 0;
-		border-radius: 999px;
-		background: rgba(15, 23, 42, 0.08);
-		color: #334155 !important;
-		font-size: 17px;
-		font-weight: 900;
-		line-height: 1;
-	}
-
-	.toast-close:hover:not(:disabled) {
-		background: rgba(15, 23, 42, 0.14);
-	}
-
-	@keyframes fuel-toast-in {
-		from {
-			opacity: 0;
-			transform: translateY(-8px);
-		}
-		to {
-			opacity: 1;
-			transform: translateY(0);
-		}
-	}
-
-	.alert {
-		padding: 10px 12px;
-		font-size: 12px;
-		font-weight: 900;
-		margin-bottom: 12px;
-	}
-
-	.alert.compact {
-		margin: 10px 0;
-	}
-
-	.alert.warning {
-		border: 1px solid #fde68a;
-		background: var(--color-warning-muted);
-		color: #92400e;
-	}
-
-	.alert.danger {
-		border: 1px solid #fecaca;
-		background: var(--color-danger-muted);
-		color: #be123c;
-	}
-
-	.alert.success {
-		border: 1px solid #bbf7d0;
-		background: var(--color-success-muted);
-		color: #166534;
-	}
-
-	.summary-grid {
-		margin-top: 14px;
-		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
-		gap: 14px;
-		margin-bottom: 14px;
-	}
-
-	.summary-card {
-		min-height: 96px;
-		padding: 16px;
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
-		min-width: 0;
-	}
-
-	.summary-card span,
-	.comparison-grid span {
-		display: block;
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-weight: 900;
-		text-transform: uppercase;
-	}
-
-	.summary-card strong,
-	.comparison-grid strong {
-		display: block;
-		margin-top: 10px;
-		color: var(--text-primary);
-		font-size: 22px;
-		line-height: 1.1;
-		font-weight: 900;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-
-	.summary-card small {
-		display: block;
-		margin-top: 8px;
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-weight: 700;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-
-	.main-grid {
-		display: grid;
-		grid-template-columns: minmax(320px, 0.9fr) minmax(460px, 1.4fr);
-		gap: 14px;
-		margin-bottom: 14px;
-	}
-
-	.full-width-panel {
-		grid-column: 1 / -1;
-	}
-
-	.table-grid {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(360px, 1fr));
-		gap: 14px;
-		margin-bottom: 14px;
-	}
-
-	.panel {
-		padding: 0;
-		overflow: hidden;
-		min-width: 0;
-	}
-
-	.panel-header {
-		min-height: 58px;
-		padding: 12px 14px;
-		border-bottom: 1px solid #e5edf5;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-		background: var(--color-surface);
-	}
-
-	.panel-header h2 {
-		color: var(--text-primary);
-		font-size: 17px;
-		font-weight: 900;
-		line-height: 1.2;
-	}
-
-	.panel-header p {
-		margin-top: 5px;
-		color: var(--text-secondary);
-		font-size: 12px;
-		font-weight: 700;
-		line-height: 1.4;
-	}
-
-	.badge {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		min-height: 25px;
-		padding: 5px 10px;
-		border-radius: 999px;
-		background: var(--color-accent-muted);
-		border: 1px solid #bfdbfe;
-		color: #1d4ed8;
-		font-size: 11px;
-		font-weight: 900;
-		white-space: nowrap;
-	}
-
-	.comparison-grid {
-		padding: 14px;
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 10px;
-		background: var(--color-elevated);
-	}
-
-	.comparison-grid > div {
-		min-width: 0;
-		padding: 14px;
-		background: var(--color-surface);
-		border: 1px solid #d9e2ec;
-		border-radius: 10px;
-	}
-
-	.comparison-grid > div.positive {
-		border-color: #bbf7d0;
-		background: var(--color-success-muted);
-	}
-
-	.comparison-grid > div.negative {
-		border-color: #fecaca;
-		background: var(--color-danger-muted);
-	}
-
-	.comparison-grid > div.neutral {
-		border-color: #d9e2ec;
-		background: var(--color-surface);
-	}
-
-	.operation-grid {
-		padding: 14px;
-		display: grid;
-		grid-template-columns: repeat(3, minmax(190px, 1fr));
-		gap: 12px;
-		background: var(--color-elevated);
-	}
-
-	.mini-form {
-		display: grid;
-		align-content: start;
-		gap: 9px;
-		min-width: 0;
-		padding: 12px;
-		background: var(--color-surface);
-		border: 1px solid #d9e2ec;
-		border-radius: 10px;
-	}
-
-	.mini-form h3 {
-		color: var(--text-primary);
-		font-size: 13px;
-		font-weight: 900;
-	}
-
-	.vdor-import-form {
-		grid-column: 1 / -1;
-		gap: 14px;
-		padding: 16px;
-		border-color: rgba(96, 165, 250, 0.28);
-		background:
-			linear-gradient(135deg, rgba(37, 99, 235, 0.09), transparent 38%),
-			var(--color-surface);
-	}
-
-	.vdor-import-heading,
-	.vdor-preview-header,
-	.vdor-comparison-heading {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 14px;
-	}
-
-	.vdor-import-heading p,
-	.vdor-comparison-heading p {
-		margin: 5px 0 0;
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-weight: 650;
-		line-height: 1.45;
-	}
-
-	.vdor-step-badge {
-		flex: 0 0 auto;
-		padding: 5px 9px;
-		border: 1px solid rgba(96, 165, 250, 0.34);
-		border-radius: 999px;
-		background: rgba(37, 99, 235, 0.14);
-		color: #93c5fd;
-		font-size: 10px;
-		font-weight: 850;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-	}
-
-	.vdor-flow-rail {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 8px;
-	}
-
-	.vdor-flow-rail > div {
-		display: flex;
-		align-items: center;
-		gap: 9px;
-		min-width: 0;
-		padding: 9px 10px;
-		border: 1px solid rgba(148, 163, 184, 0.14);
-		border-radius: 10px;
-		background: rgba(15, 23, 42, 0.28);
-		opacity: 0.68;
-	}
-
-	.vdor-flow-rail > div.active {
-		border-color: rgba(96, 165, 250, 0.34);
-		background: rgba(37, 99, 235, 0.09);
-		opacity: 1;
-	}
-
-	.vdor-flow-rail > div > span {
-		flex: 0 0 25px;
-		display: grid;
-		place-items: center;
-		width: 25px;
-		height: 25px;
-		border-radius: 50%;
-		background: rgba(71, 85, 105, 0.7);
-		color: #cbd5e1;
-		font-size: 9px;
-		font-weight: 900;
-	}
-
-	.vdor-flow-rail > div.active > span {
-		background: #2563eb;
-		color: #ffffff;
-	}
-
-	.vdor-flow-rail > div > div {
-		min-width: 0;
-		display: grid;
-		gap: 2px;
-	}
-
-	.vdor-flow-rail strong,
-	.vdor-flow-rail small {
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.vdor-flow-rail strong {
-		color: var(--text-primary);
-		font-size: 10px;
-		font-weight: 900;
-	}
-
-	.vdor-flow-rail small {
-		color: var(--text-secondary);
-		font-size: 9px;
-		font-weight: 650;
-	}
-
-	.vdor-date-context {
-		min-width: 0;
-		display: grid;
-		grid-template-columns: minmax(240px, 1fr) minmax(300px, auto);
-		align-items: end;
-		gap: 16px;
-		padding: 14px;
-		border: 1px solid rgba(96, 165, 250, 0.28);
-		border-radius: 14px;
-		background:
-			linear-gradient(120deg, rgba(37, 99, 235, 0.13), transparent 52%),
-			rgba(15, 23, 42, 0.38);
-	}
-
-	.vdor-context-copy {
-		min-width: 0;
-		display: flex;
-		align-items: flex-start;
-		gap: 11px;
-	}
-
-	.vdor-context-icon {
-		flex: 0 0 34px;
-		display: grid;
-		place-items: center;
-		width: 34px;
-		height: 34px;
-		border: 1px solid rgba(96, 165, 250, 0.36);
-		border-radius: 10px;
-		background: rgba(37, 99, 235, 0.18);
-		color: #bfdbfe;
-		font-size: 11px;
-		font-weight: 900;
-	}
-
-	.vdor-context-copy > div {
-		min-width: 0;
-		display: grid;
-		gap: 4px;
-	}
-
-	.vdor-context-copy strong {
-		color: var(--text-primary);
-		font-size: 13px;
-		font-weight: 900;
-	}
-
-	.vdor-context-copy small {
-		max-width: 560px;
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 650;
-		line-height: 1.45;
-	}
-
-	.vdor-context-actions {
-		display: grid;
-		grid-template-columns: minmax(160px, 1fr) auto;
-		align-items: end;
-		gap: 8px;
-	}
-
-	.vdor-context-actions > button {
-		min-height: 38px;
-		padding-inline: 13px;
-		white-space: nowrap;
-	}
-
-	.vdor-refresh-button {
-		border: 1px solid rgba(96, 165, 250, 0.36) !important;
-		background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
-		color: #ffffff !important;
-	}
-
-	.vdor-stored-comparison {
-		display: grid;
-		gap: 12px;
-		padding: 14px;
-		border: 1px solid rgba(148, 163, 184, 0.18);
-		border-radius: 14px;
-		background: rgba(2, 6, 23, 0.24);
-	}
-
-	.vdor-stored-heading {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 14px;
-	}
-
-	.vdor-stored-heading h4 {
-		margin: 4px 0 0;
-		color: var(--text-primary);
-		font-size: 14px;
-		font-weight: 900;
-	}
-
-	.vdor-stored-heading p {
-		margin: 5px 0 0;
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 650;
-		line-height: 1.45;
-	}
-
-	.vdor-comparison-badges {
-		display: flex;
-		justify-content: flex-end;
-		gap: 6px;
-		flex-wrap: wrap;
-	}
-
-	.vdor-comparison-badges span {
-		padding: 5px 8px;
-		border: 1px solid rgba(148, 163, 184, 0.2);
-		border-radius: 999px;
-		background: rgba(30, 41, 59, 0.72);
-		color: #cbd5e1;
-		font-size: 9px;
-		font-weight: 850;
-		white-space: nowrap;
-	}
-
-	.vdor-comparison-badges span.available {
-		border-color: rgba(52, 211, 153, 0.34);
-		background: rgba(16, 185, 129, 0.13);
-		color: #6ee7b7;
-	}
-
-	.vdor-stored-metrics {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-		gap: 8px;
-	}
-
-	.vdor-comparison-metric {
-		min-width: 0;
-		padding: 11px;
-		border: 1px solid rgba(148, 163, 184, 0.16);
-		border-radius: 11px;
-		background: rgba(30, 41, 59, 0.48);
-	}
-
-	.vdor-comparison-metric > span,
-	.vdor-system-context span {
-		color: var(--text-secondary);
-		font-size: 9px;
-		font-weight: 850;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
-	}
-
-	.vdor-comparison-metric strong {
-		display: block;
-		margin-top: 7px;
-		color: var(--text-primary);
-		font-size: 16px;
-		font-weight: 900;
-	}
-
-	.vdor-comparison-metric small {
-		display: block;
-		margin-top: 5px;
-		color: var(--text-secondary);
-		font-size: 9px;
-		font-weight: 650;
-	}
-
-	.vdor-comparison-metric.variance {
-		border-color: rgba(251, 146, 60, 0.35);
-		background: rgba(194, 65, 12, 0.12);
-	}
-
-	.vdor-comparison-state {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-		padding: 12px;
-		border: 1px dashed rgba(96, 165, 250, 0.3);
-		border-radius: 11px;
-		background: rgba(37, 99, 235, 0.08);
-	}
-
-	.vdor-comparison-state > div {
-		display: grid;
-		gap: 3px;
-	}
-
-	.vdor-comparison-state strong {
-		color: #dbeafe;
-		font-size: 11px;
-		font-weight: 900;
-	}
-
-	.vdor-comparison-state span {
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 650;
-	}
-
-	.vdor-comparison-state.error {
-		border-color: rgba(248, 113, 113, 0.32);
-		background: rgba(127, 29, 29, 0.14);
-	}
-
-	.vdor-comparison-state.error strong {
-		color: #fecaca;
-	}
-
-	.vdor-missing-guide {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 16px;
-		padding: 14px;
-		border: 1px solid rgba(251, 191, 36, 0.28);
-		border-radius: 12px;
-		background: linear-gradient(120deg, rgba(180, 83, 9, 0.13), rgba(15, 23, 42, 0.28));
-	}
-
-	.vdor-missing-guide-copy {
-		min-width: 0;
-		display: grid;
-		gap: 5px;
-	}
-
-	.vdor-missing-guide-copy > strong {
-		color: #fde68a;
-		font-size: 12px;
-		font-weight: 900;
-	}
-
-	.vdor-missing-guide-copy > span {
-		color: #cbd5e1;
-		font-size: 10px;
-		font-weight: 650;
-	}
-
-	.vdor-missing-steps {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 6px;
-		margin-top: 5px;
-	}
-
-	.vdor-missing-steps span {
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		padding: 5px 7px;
-		border: 1px solid rgba(251, 191, 36, 0.17);
-		border-radius: 7px;
-		background: rgba(15, 23, 42, 0.32);
-		color: #dbeafe;
-		font-size: 9px;
-		font-weight: 750;
-	}
-
-	.vdor-missing-steps b {
-		display: grid;
-		place-items: center;
-		width: 16px;
-		height: 16px;
-		border-radius: 50%;
-		background: #d97706;
-		color: #ffffff;
-		font-size: 8px;
-		font-weight: 900;
-	}
-
-	.vdor-empty-download-button {
-		flex: 0 0 auto;
-		min-height: 38px;
-		padding-inline: 14px;
-		border: 1px solid rgba(251, 191, 36, 0.42) !important;
-		background: linear-gradient(135deg, #d97706, #b45309) !important;
-		color: #ffffff !important;
-		white-space: nowrap;
-	}
-
-	.vdor-difference-table-wrap {
-		overflow: auto;
-		border: 1px solid rgba(148, 163, 184, 0.14);
-		border-radius: 11px;
-	}
-
-	.vdor-difference-table {
-		width: 100%;
-		min-width: 560px;
-		border-collapse: collapse;
-	}
-
-	.vdor-difference-table th,
-	.vdor-difference-table td {
-		padding: 9px 11px;
-		border-bottom: 1px solid rgba(148, 163, 184, 0.11);
-		font-size: 10px;
-		text-align: right;
-	}
-
-	.vdor-difference-table th:first-child,
-	.vdor-difference-table td:first-child {
-		text-align: left;
-	}
-
-	.vdor-difference-table th {
-		background: rgba(30, 41, 59, 0.82);
-		color: #94a3b8;
-		font-size: 9px;
-		font-weight: 850;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
-	}
-
-	.vdor-difference-table td {
-		color: #cbd5e1;
-		font-weight: 700;
-	}
-
-	.vdor-difference-table td.positive,
-	.vdor-difference-table td.negative {
-		color: #fca5a5;
-		font-weight: 900;
-	}
-
-	.vdor-difference-table td.neutral {
-		color: #86efac;
-	}
-
-	.vdor-system-context {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 8px;
-	}
-
-	.vdor-system-context > div {
-		padding: 9px 11px;
-		border: 1px solid rgba(148, 163, 184, 0.13);
-		border-radius: 10px;
-		background: rgba(15, 23, 42, 0.32);
-	}
-
-	.vdor-system-context strong {
-		display: block;
-		margin-top: 5px;
-		color: var(--text-primary);
-		font-size: 12px;
-		font-weight: 900;
-	}
-
-	.vdor-upload-workflow {
-		min-width: 0;
-		display: grid;
-		grid-template-columns: minmax(230px, 0.72fr) minmax(380px, 1.28fr);
-		align-items: center;
-		gap: 16px;
-		padding: 13px;
-		border: 1px solid rgba(148, 163, 184, 0.17);
-		border-radius: 12px;
-		background: rgba(15, 23, 42, 0.32);
-	}
-
-	.vdor-workflow-heading {
-		display: flex;
-		align-items: flex-start;
-		gap: 10px;
-	}
-
-	.vdor-workflow-heading > span {
-		flex: 0 0 24px;
-		display: grid;
-		place-items: center;
-		width: 24px;
-		height: 24px;
-		border-radius: 50%;
-		background: #2563eb;
-		color: #ffffff;
-		font-size: 11px;
-		font-weight: 900;
-	}
-
-	.vdor-workflow-heading div {
-		min-width: 0;
-		display: grid;
-		gap: 3px;
-	}
-
-	.vdor-workflow-heading strong {
-		color: var(--text-primary);
-		font-size: 12px;
-		font-weight: 900;
-	}
-
-	.vdor-workflow-heading small {
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 650;
-		line-height: 1.4;
-	}
-
-	.vdor-workflow-actions {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		align-items: end;
-		gap: 8px;
-	}
-
-	.vdor-workflow-actions > button {
-		min-height: 38px;
-		padding-inline: 14px;
-		white-space: nowrap;
-	}
-
-	.vdor-file-picker {
-		position: relative;
-		min-width: 0;
-		min-height: 38px;
-		display: grid;
-		grid-template-columns: auto minmax(0, 1fr);
-		align-items: center;
-		gap: 9px;
-		padding: 4px;
-		border: 1px solid rgba(148, 163, 184, 0.24);
-		border-radius: 9px;
-		background: rgba(15, 23, 42, 0.38);
-		cursor: pointer;
-		box-sizing: border-box;
-	}
-
-	.vdor-file-picker input {
-		position: absolute;
-		inset: 0;
-		opacity: 0;
-		cursor: pointer;
-	}
-
-	.vdor-file-picker:has(input:disabled) {
-		opacity: 0.58;
-		cursor: not-allowed;
-	}
-
-	.vdor-file-picker > span {
-		padding: 6px 9px;
-		background: rgba(51, 65, 85, 0.88);
-		color: #dbeafe;
-		font-size: 10px;
-		font-weight: 850;
-		white-space: nowrap;
-	}
-
-	.vdor-file-picker > strong {
-		min-width: 0;
-		overflow: hidden;
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-weight: 700;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.vdor-preview-button {
-		background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
-		color: #ffffff !important;
-	}
-
-	.vdor-preview-panel {
-		display: grid;
-		gap: 12px;
-		padding: 14px;
-		border: 1px solid rgba(45, 212, 191, 0.28);
-		border-radius: 14px;
-		background:
-			linear-gradient(145deg, rgba(13, 148, 136, 0.08), transparent 38%),
-			rgba(15, 23, 42, 0.35);
-	}
-
-	.vdor-preview-header {
-		align-items: center;
-	}
-
-	.vdor-preview-header h4,
-	.vdor-comparison-heading h4 {
-		margin: 4px 0 0;
-		color: var(--text-primary);
-		font-size: 14px;
-		font-weight: 900;
-	}
-
-	.vdor-preview-header > strong {
-		color: #86efac;
-		font-size: 18px;
-		font-weight: 900;
-		white-space: nowrap;
-	}
-
-	.vdor-source-selection {
-		display: grid;
-		gap: 10px;
-		padding: 12px;
-		border: 1px solid rgba(45, 212, 191, 0.18);
-		border-radius: 12px;
-		background: rgba(2, 6, 23, 0.22);
-	}
-
-	.vdor-source-selection-heading,
-	.vdor-preview-comparison-heading {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 12px;
-	}
-
-	.vdor-source-selection-heading h4,
-	.vdor-preview-comparison-heading h4 {
-		margin: 4px 0 0;
-		color: var(--text-primary);
-		font-size: 13px;
-		font-weight: 900;
-	}
-
-	.vdor-source-selection-heading p,
-	.vdor-preview-comparison-heading p {
-		margin: 4px 0 0;
-		color: var(--text-secondary);
-		font-size: 10.5px;
-		font-weight: 650;
-		line-height: 1.45;
-	}
-
-	.vdor-source-help {
-		flex: 0 0 auto;
-		padding: 5px 8px;
-		border: 1px solid rgba(45, 212, 191, 0.3);
-		border-radius: 999px;
-		background: rgba(13, 148, 136, 0.12);
-		color: #99f6e4;
-		font-size: 9px;
-		font-weight: 850;
-		letter-spacing: 0.03em;
-		text-transform: uppercase;
-		white-space: nowrap;
-	}
-
-	.vdor-source-grid {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 9px;
-	}
-
-	.vdor-source-option {
-		display: grid;
-		gap: 9px;
-		min-width: 0;
-		padding: 10px;
-		border: 1px solid rgba(148, 163, 184, 0.17);
-		border-radius: 10px;
-		background: rgba(30, 41, 59, 0.46);
-		transition: border-color 150ms ease, background 150ms ease;
-	}
-
-	.vdor-source-option.uses-system {
-		border-color: rgba(96, 165, 250, 0.32);
-		background: rgba(37, 99, 235, 0.07);
-	}
-
-	.vdor-source-option-head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 8px;
-	}
-
-	.vdor-source-option-head > span {
-		color: var(--text-secondary);
-		font-size: 9px;
-		font-weight: 850;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
-	}
-
-	.vdor-system-badge {
-		display: inline-flex;
-		align-items: center;
-		min-height: 22px;
-		padding: 3px 7px;
-		border: 1px solid rgba(96, 165, 250, 0.34);
-		border-radius: 999px;
-		background: rgba(37, 99, 235, 0.1);
-		color: #bfdbfe;
-		font-size: 9px;
-		font-weight: 900;
-		letter-spacing: 0.03em;
-		text-transform: uppercase;
-		white-space: nowrap;
-	}
-
-	.vdor-source-values {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 6px;
-	}
-
-	.vdor-source-values > div {
-		min-width: 0;
-		padding: 7px;
-		border: 1px solid rgba(148, 163, 184, 0.12);
-		border-radius: 8px;
-		background: rgba(2, 6, 23, 0.2);
-		opacity: 0.64;
-	}
-
-	.vdor-source-values > div.selected {
-		border-color: rgba(96, 165, 250, 0.34);
-		background: rgba(37, 99, 235, 0.1);
-		opacity: 1;
-	}
-
-	.vdor-source-values > div.vdor-reference {
-		border-color: rgba(45, 212, 191, 0.3);
-		background: rgba(13, 148, 136, 0.09);
-		opacity: 1;
-	}
-
-	.vdor-source-values > div.vdor-reference span {
-		color: #99f6e4;
-	}
-
-	.vdor-source-values span,
-	.vdor-source-selected span,
-	.vdor-midnight-reference span {
-		display: block;
-		color: var(--text-secondary);
-		font-size: 8.5px;
-		font-weight: 850;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
-	}
-
-	.vdor-source-values strong {
-		display: block;
-		margin-top: 4px;
-		color: var(--text-primary);
-		font-size: 12px;
-		font-weight: 900;
-		white-space: nowrap;
-	}
-
-	.vdor-source-selected {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto auto;
-		align-items: center;
-		gap: 7px;
-		padding-top: 8px;
-		border-top: 1px solid rgba(148, 163, 184, 0.12);
-	}
-
-	.vdor-source-selected strong {
-		color: var(--text-primary);
-		font-size: 12px;
-		font-weight: 900;
-		white-space: nowrap;
-	}
-
-	.vdor-source-selected small {
-		padding: 3px 5px;
-		border-radius: 5px;
-		background: rgba(45, 212, 191, 0.13);
-		color: #99f6e4;
-		font-size: 8px;
-		font-weight: 900;
-		text-transform: uppercase;
-	}
-
-	.uses-system .vdor-source-selected small {
-		background: rgba(59, 130, 246, 0.14);
-		color: #bfdbfe;
-	}
-
-	.vdor-midnight-reference {
-		display: grid;
-		grid-template-columns: minmax(180px, 1fr) auto auto;
-		align-items: center;
-		gap: 20px;
-		padding: 9px 10px;
-		border: 1px dashed rgba(148, 163, 184, 0.22);
-		border-radius: 9px;
-		background: rgba(15, 23, 42, 0.32);
-	}
-
-	.vdor-midnight-reference small {
-		display: block;
-		margin-top: 3px;
-		color: var(--text-secondary);
-		font-size: 9px;
-	}
-
-	.vdor-midnight-reference strong {
-		display: block;
-		margin-top: 3px;
-		color: var(--text-primary);
-		font-size: 12px;
-		font-weight: 900;
-		white-space: nowrap;
-	}
-
-	.vdor-preview-comparison {
-		display: grid;
-		gap: 10px;
-		padding: 12px;
-		border: 1px solid rgba(96, 165, 250, 0.2);
-		border-radius: 12px;
-		background: rgba(15, 23, 42, 0.28);
-	}
-
-	.vdor-preview-comparison-heading {
-		padding-bottom: 10px;
-		border-bottom: 1px solid rgba(148, 163, 184, 0.12);
-	}
-
-	.vdor-comparison-card {
-		overflow: hidden;
-		border: 1px solid rgba(148, 163, 184, 0.18);
-		border-radius: 12px;
-		background: rgba(2, 6, 23, 0.2);
-	}
-
-	.vdor-comparison-heading {
-		padding: 11px 12px;
-		border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-	}
-
-	.vdor-comparison-card .comparison-grid {
-		padding: 10px;
-		background: transparent;
-	}
-
-	.vdor-comparison-empty,
-	.vdor-preview-placeholder {
-		padding: 13px;
-		border: 1px dashed rgba(148, 163, 184, 0.28);
-		border-radius: 10px;
-		background: rgba(15, 23, 42, 0.25);
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-weight: 700;
-		text-align: center;
-	}
-
-	.vdor-comparison-empty {
-		margin: 10px;
-	}
-
-	.vdor-save-workflow {
-		display: grid;
-		gap: 11px;
-		padding: 12px;
-		border: 1px solid rgba(34, 197, 94, 0.24);
-		border-radius: 12px;
-		background: rgba(22, 163, 74, 0.06);
-	}
-
-	.vdor-workflow-heading.compact {
-		align-items: center;
-	}
-
-	.vdor-workflow-heading.compact > span {
-		background: #16a34a;
-	}
-
-	.vdor-confirm-row {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		align-items: end;
-		gap: 10px;
-	}
-
-	.vdor-confirm-row button {
-		min-height: 38px;
-		padding-inline: 18px;
-		background: linear-gradient(135deg, #16a34a, #15803d) !important;
-		color: #ffffff !important;
-		white-space: nowrap;
-	}
-
-	.split-fields {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 8px;
-	}
-
-	.file-picker input {
-		padding-top: 6px;
-	}
-
-	.file-picker small {
-		font-size: 11px;
-		font-weight: 700;
-		color: var(--text-secondary);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-
-	.table-wrap {
-		width: 100%;
-		overflow: auto;
-	}
-
-	table {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 12px;
-		min-width: 520px;
-	}
-
-	th,
-	td {
-		text-align: left;
-		white-space: nowrap;
-	}
-
-	th {
-		position: sticky;
-		top: 0;
-		z-index: 1;
-		background: var(--color-elevated);
-		color: var(--text-secondary);
-		font-size: 10.5px;
-		font-weight: 900;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		padding: 10px 12px;
-		border-bottom: 1px solid #e2e8f0;
-	}
-
-	td {
-		color: var(--text-primary);
-		font-size: 12px;
-		font-weight: 700;
-		padding: 10px 12px;
-		border-bottom: 1px solid #eef2f7;
-	}
-
-	tbody tr:hover td {
-		background: var(--color-elevated);
-	}
-
-	tfoot td {
-		background: var(--color-accent-muted);
-		color: var(--text-primary);
-		font-weight: 900;
-	}
-
-	.right {
-		text-align: right;
-	}
-
-	.history-panel table {
-		min-width: 720px;
-	}
-
-	.fuel-movement-chip {
-		width: 178px;
-		display: inline-grid;
-		grid-template-columns: 74px minmax(0, 1fr);
-		align-items: center;
-		gap: 10px;
-		padding: 5px 10px;
-		border-radius: 999px;
-		background: rgba(15, 23, 42, 0.18);
-		border: 1px solid rgba(148, 163, 184, 0.18);
-		color: var(--text-muted);
-	}
-
-	.fuel-movement-chip.received {
-		background: rgba(34, 197, 94, 0.12);
-		border-color: rgba(34, 197, 94, 0.28);
-		color: #bbf7d0;
-	}
-
-	.fuel-movement-chip.consumption {
-		background: rgba(248, 113, 113, 0.1);
-		border-color: rgba(248, 113, 113, 0.26);
-		color: #fecaca;
-	}
-
-	.fuel-movement-chip span {
-		font-size: 10px;
-		font-weight: 850;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		text-align: left;
-	}
-
-	.fuel-movement-chip strong {
-		color: var(--text-primary);
-		font-size: 11.5px;
-		font-weight: 850;
-		text-align: right;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-
-	.note-view-button {
-		min-height: 28px;
-		padding: 0 11px;
-		border: 1px solid rgba(96, 165, 250, 0.34);
-		border-radius: 999px;
-		background: rgba(37, 99, 235, 0.12);
-		color: #bfdbfe;
-		font-size: 11px;
-		font-weight: 850;
-		cursor: pointer;
-		transition:
-			transform 0.16s ease,
-			border-color 0.16s ease,
-			background 0.16s ease,
-			color 0.16s ease;
-	}
-
-	.note-view-button:hover {
-		transform: translateY(-1px);
-		border-color: rgba(147, 197, 253, 0.72);
-		background: rgba(37, 99, 235, 0.26);
-		color: #ffffff;
-	}
-
-	.note-modal-backdrop {
-		position: fixed;
-		inset: 0;
-		z-index: 80;
-		display: grid;
-		place-items: center;
-		padding: 18px;
-		background: rgba(3, 7, 18, 0.66);
-		backdrop-filter: blur(8px);
-	}
-
-	.fuel-operation-modal-backdrop {
-		position: fixed;
-		inset: var(--vessel-topbar-height, 62px) 0 0;
-		z-index: 82;
-		display: grid;
-		place-items: start center;
-		padding: 16px 20px 20px;
-		overflow-y: auto;
-		background: rgba(3, 7, 18, 0.68);
-		backdrop-filter: blur(9px);
-	}
-
-	.note-modal-card {
-		width: min(520px, 100%);
-		max-height: min(620px, calc(100vh - 36px));
-		overflow: hidden;
-		border: 1px solid rgba(148, 163, 184, 0.22);
-		border-radius: 22px;
-		background:
-			linear-gradient(145deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.98)),
-			var(--color-surface);
-		box-shadow: 0 26px 80px rgba(0, 0, 0, 0.46);
-	}
-
-	.fuel-operation-modal-card {
-		width: min(1120px, calc(100vw - 40px));
-		max-height: min(760px, calc(100dvh - var(--vessel-topbar-height, 62px) - 36px));
-		overflow: hidden;
-		border: 1px solid rgba(148, 163, 184, 0.24);
-		border-radius: 24px;
-		background:
-			linear-gradient(145deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.98)),
-			var(--color-surface);
-		box-shadow: 0 30px 90px rgba(0, 0, 0, 0.52);
-	}
-
-	.note-modal-header {
-		padding: 18px 18px 15px;
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 16px;
-		border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-	}
-
-	.fuel-operation-modal-header {
-		padding: 20px 20px 16px;
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		gap: 16px;
-		border-bottom: 1px solid rgba(148, 163, 184, 0.16);
-		background:
-			linear-gradient(135deg, rgba(37, 99, 235, 0.12), transparent 48%),
-			rgba(15, 23, 42, 0.24);
-	}
-
-	.note-modal-header h2 {
-		margin: 6px 0 5px;
-		color: var(--text-primary);
-		font-size: 18px;
-		font-weight: 850;
-	}
-
-	.fuel-operation-modal-header h2 {
-		margin: 6px 0 5px;
-		color: var(--text-primary);
-		font-size: 22px;
-		font-weight: 850;
-	}
-
-	.note-modal-header p {
-		margin: 0;
-		color: #9fb0c9;
-		font-size: 12px;
-		font-weight: 700;
-	}
-
-	.fuel-operation-modal-header p {
-		margin: 0;
-		color: #9fb0c9;
-		font-size: 13px;
-		font-weight: 700;
-	}
-
-	.note-modal-close {
-		width: 34px;
-		height: 34px;
-		min-width: 34px;
-		border: 1px solid rgba(148, 163, 184, 0.2);
-		border-radius: 12px;
-		background: rgba(15, 23, 42, 0.5);
-		color: #cbd5e1;
-		font-size: 22px;
-		line-height: 1;
-		cursor: pointer;
-	}
-
-	.note-modal-close:hover {
-		background: rgba(239, 68, 68, 0.16);
-		color: #fecaca;
-		border-color: rgba(248, 113, 113, 0.36);
-	}
-
-	.note-modal-body {
-		padding: 18px;
-		max-height: 420px;
-		overflow: auto;
-	}
-
-	.fuel-operation-modal-body {
-		max-height: calc(
-			min(700px, calc(100dvh - var(--vessel-topbar-height, 62px) - 36px)) - 88px
-		);
-		overflow: auto;
-		padding: 16px;
-		background:
-			radial-gradient(circle at top left, rgba(37, 99, 235, 0.08), transparent 34%),
-			rgba(8, 13, 26, 0.28);
-	}
-
-	.modal-operation-grid {
-		padding: 0;
-		grid-template-columns: repeat(2, minmax(280px, 1fr));
-		background: transparent;
-	}
-
-	.note-modal-body p {
-		margin: 0;
-		padding: 14px;
-		border: 1px solid rgba(148, 163, 184, 0.16);
-		border-radius: 16px;
-		background: rgba(15, 23, 42, 0.38);
-		color: #e2e8f0;
-		font-size: 13px;
-		font-weight: 650;
-		line-height: 1.65;
-		white-space: pre-wrap;
-	}
-
-	.history-control {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		font-size: 12px;
-		font-weight: 900;
-		color: var(--text-secondary);
-	}
-
-	.history-control-bottom {
-		justify-content: flex-end;
-		padding: 10px 14px;
-		border-top: 1px solid rgba(148, 163, 184, 0.16);
-		background: rgba(15, 23, 42, 0.22);
-	}
-
-	.history-control button {
-		height: 30px;
-		padding: 0 10px;
-	}
-
-	.history-date-cell {
-		display: grid;
-		gap: 4px;
-		min-width: 190px;
-	}
-
-	.history-date-cell strong {
-		color: var(--text-primary);
-		font-size: 12px;
-		font-weight: 800;
-		line-height: 1.2;
-	}
-
-	.history-date-cell small {
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 700;
-		line-height: 1.35;
-		white-space: normal;
-	}
-
-	.action-chip {
-		display: inline-flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		min-width: 52px;
-		min-height: 24px;
-		gap: 2px;
-		padding: 5px 10px;
-		border-radius: 12px;
-		background: var(--color-accent-muted);
-		border: 1px solid #bfdbfe;
-		color: #1d4ed8;
-		font-size: 10px;
-		font-weight: 900;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
-	}
-
-	.action-chip strong {
-		color: inherit;
-		font-size: 10px;
-		font-weight: 900;
-		line-height: 1.1;
-	}
-
-	.action-chip small {
-		color: #93c5fd;
-		font-size: 9px;
-		font-weight: 900;
-		letter-spacing: 0.08em;
-		line-height: 1;
-	}
-
-	.action-chip.has-source {
-		align-items: flex-start;
-		min-width: 132px;
-		background:
-			linear-gradient(135deg, rgba(37, 99, 235, 0.18), rgba(14, 165, 233, 0.08)),
-			rgba(15, 23, 42, 0.34);
-		border-color: rgba(147, 197, 253, 0.34);
-		color: #dbeafe;
-	}
-
-	.action-chip.is-source-change {
-		background:
-			linear-gradient(135deg, rgba(245, 158, 11, 0.22), rgba(251, 191, 36, 0.08)),
-			rgba(69, 26, 3, 0.32);
-		border-color: rgba(251, 191, 36, 0.48);
-		color: #fde68a;
-	}
-
-	.action-chip.is-source-change small {
-		color: #fbbf24;
-	}
-
-	.empty-state {
-		margin: 14px;
-		padding: 18px 14px;
-		border: 1px dashed #cbd5e1;
-		border-radius: 10px;
-		background: var(--color-surface);
-		color: var(--text-secondary);
-		font-size: 12px;
-		font-weight: 800;
-		text-align: center;
-	}
-
-	.comparison-grid + .empty-state,
-	.operation-grid + .empty-state {
-		margin-top: 0;
-	}
-
-	.muted {
-		color: #94a3b8;
-	}
-
-	@media (max-width: 1280px) {
-		.summary-grid {
-			grid-template-columns: repeat(3, minmax(160px, 1fr));
-		}
-
-		.main-grid,
-		.table-grid {
-			grid-template-columns: 1fr;
-		}
-
-		.vdor-date-context,
-		.vdor-upload-workflow {
-			grid-template-columns: 1fr;
-		}
-	}
-
-	@media (max-width: 760px) {
-		.fuel-management-page {
-			padding: 10px;
-		}
-
-		.fuel-header-card {
-			display: grid;
-			align-items: stretch;
-			gap: 12px;
-		}
-
-		.header-actions {
-			justify-content: stretch;
-			min-width: 0;
-		}
-
-		.header-rob-card,
-		.history-toolbar,
-		.history-filters,
-		.history-filters label,
-		.history-filters input,
-		.history-filters select,
-		.history-operation-button,
-		.history-load-button {
-			width: 100%;
-		}
-
-		.history-toolbar {
-			justify-content: stretch;
-		}
-
-		.summary-grid,
-		.operation-grid,
-		.comparison-grid,
-		.vdor-flow-rail,
-		.vdor-source-grid,
-		.vdor-confirm-row,
-		.vdor-workflow-actions,
-		.vdor-context-actions,
-		.vdor-system-context,
-		.vdor-midnight-reference,
-		.split-fields {
-			grid-template-columns: 1fr;
-		}
-
-		.vdor-import-heading,
-		.vdor-preview-header,
-		.vdor-comparison-heading,
-		.vdor-stored-heading,
-		.vdor-source-selection-heading,
-		.vdor-preview-comparison-heading {
-			align-items: stretch;
-			flex-direction: column;
-		}
-
-		.vdor-comparison-badges {
-			justify-content: flex-start;
-		}
-
-		.vdor-comparison-state,
-		.vdor-missing-guide {
-			align-items: stretch;
-			flex-direction: column;
-		}
-
-		.vdor-comparison-state > button,
-		.vdor-missing-guide > button {
-			width: 100%;
-		}
-
-		.vdor-step-badge {
-			align-self: flex-start;
-		}
-
-		.fuel-operation-modal-backdrop {
-			padding: 10px;
-		}
-
-		.fuel-operation-modal-card {
-			width: 100%;
-			max-height: calc(100dvh - var(--vessel-topbar-height, 56px) - 20px);
-			border-radius: 18px;
-		}
-
-		.fuel-operation-modal-header {
-			padding: 16px;
-		}
-
-		.fuel-operation-modal-body {
-			max-height: calc(100dvh - var(--vessel-topbar-height, 56px) - 118px);
-			padding: 12px;
-		}
-
-		.fuel-header-card h1 {
-			font-size: 19px;
-		}
-
-		.panel-header {
-			display: grid;
-			align-items: start;
-		}
-
-		.history-control {
-			flex-wrap: wrap;
-		}
-	}
-</style>

@@ -1,16 +1,12 @@
 <script>
 	import { onMount, tick } from 'svelte';
-	import {
-		SvelteFlow,
-		ConnectionLineType
-	} from '@xyflow/svelte';
-	import '@xyflow/svelte/dist/style.css';
 	import { apiRequest } from '$lib/api/authApi.js';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
-	import SingleLineFlowControls from '$lib/components/single-line/SingleLineFlowControls.svelte';
-	import SingleLineWireEdge from '$lib/components/single-line/SingleLineWireEdge.svelte';
-	import SingleLineNode from '$lib/components/single-line/SingleLineNode.svelte';
-	import SingleLineSectionNode from '$lib/components/single-line/SingleLineSectionNode.svelte';
+	import SingleLineHero from './SingleLineHero.svelte';
+	import SingleLineSkeleton from './SingleLineSkeleton.svelte';
+	import SingleLineErrorCard from './SingleLineErrorCard.svelte';
+	import SingleLineCanvas from './SingleLineCanvas.svelte';
+	import './single-line-page.css';
 
 	let { active = true } = $props();
 
@@ -21,16 +17,7 @@
 	let flowNodes = $state([]);
 	let flowEdges = $state([]);
 	let diagramFullscreen = $state(false);
-	let diagramShellElement;
-
-	const nodeTypes = {
-		sldNode: SingleLineNode,
-		sldSection: SingleLineSectionNode
-	};
-
-	const edgeTypes = {
-		sldWire: SingleLineWireEdge
-	};
+	let diagramShellElement = $state(null);
 
 	const CABLES = {
 		canbus: {
@@ -85,12 +72,7 @@
 	let hasEi = $derived(Boolean(ei));
 	let hasWayjun = $derived(Boolean(wayjun));
 	let legacyEipProcessor = $derived(
-		Boolean(
-			eip &&
-				!hasEi &&
-				!hasWayjun &&
-				(eip?.engines_rpm || eip?.fuel_source || eip?.ae_load)
-		)
+		Boolean(eip && !hasEi && !hasWayjun && (eip?.engines_rpm || eip?.fuel_source || eip?.ae_load))
 	);
 	let engines = $derived([
 		...withProcessor(wayjun?.engines_rpm, 'wayjun'),
@@ -325,7 +307,9 @@
 		const wayjunInputCount = engineRows.filter((engine) => engine?.processor === 'wayjun').length;
 		const eiInputCount = engineRows.filter((engine) => engine?.processor === 'ei').length;
 		const eipInputCount = engineRows.filter((engine) => engine?.processor === 'eip').length;
-		const wayjunOutputCount = outputRows.filter((row) => resolveOutputProcessor(row) === 'wayjun').length;
+		const wayjunOutputCount = outputRows.filter(
+			(row) => resolveOutputProcessor(row) === 'wayjun'
+		).length;
 		const eiOutputCount = outputRows.filter((row) => resolveOutputProcessor(row) === 'ei').length;
 		const eipOutputCount = outputRows.filter((row) => resolveOutputProcessor(row) === 'eip').length;
 		const wheelhouseSectionWidth = 1010;
@@ -355,7 +339,8 @@
 		const eipHeight = eipHasModules
 			? Math.max(
 					320,
-					(firstModuleY - eipY) +
+					firstModuleY -
+						eipY +
 						(hasWayjun ? wayjunHeight : 0) +
 						(hasEi ? eiHeight : 0) +
 						(hasWayjun && hasEi ? moduleGap : 0) +
@@ -382,12 +367,26 @@
 		const aeNodeGap = 154;
 		const fuelNodeStartY = aeRows.length ? 940 : 700;
 		const fuelNodeGap = 154;
-		const mcpToProcessorCables = mcpProcessorTargetId ? (hasEip ? ['power', 'ethernet', 'canbus'] : ['canbus']) : [];
+		const mcpToProcessorCables = mcpProcessorTargetId
+			? hasEip
+				? ['power', 'ethernet', 'canbus']
+				: ['canbus']
+			: [];
 		const mcpBottomPorts = mcpToProcessorCables.map((name, index) =>
-			makePort(`${mcpProcessorTargetId}-${name}-out`, 'source', 'bottom', spreadOffset(index, mcpToProcessorCables.length, 38, 62))
+			makePort(
+				`${mcpProcessorTargetId}-${name}-out`,
+				'source',
+				'bottom',
+				spreadOffset(index, mcpToProcessorCables.length, 38, 62)
+			)
 		);
 		const processorTopPorts = mcpToProcessorCables.map((name, index) =>
-			makePort(`${name}-in`, 'target', 'top', spreadOffset(index, mcpToProcessorCables.length, 38, 62))
+			makePort(
+				`${name}-in`,
+				'target',
+				'top',
+				spreadOffset(index, mcpToProcessorCables.length, 38, 62)
+			)
 		);
 		function enginePortsForProcessor(processor) {
 			const processorRows = engineRows
@@ -423,25 +422,27 @@
 			const rows = outgoingConnections.filter((entry) => entry.processor === processor);
 
 			return rows.map((entry, localIndex) =>
-				makePort(
-					entry.handleId,
-					'source',
-					'right',
-					spreadOffset(localIndex, rows.length, 18, 82)
-				)
+				makePort(entry.handleId, 'source', 'right', spreadOffset(localIndex, rows.length, 18, 82))
 			);
 		}
 
 		function sourcePortsFromHandles(handles, min = 22, max = 82) {
 			return handles.map((entry, localIndex) =>
-				makePort(entry.handleId, 'source', 'right', spreadOffset(localIndex, handles.length, min, max))
+				makePort(
+					entry.handleId,
+					'source',
+					'right',
+					spreadOffset(localIndex, handles.length, min, max)
+				)
 			);
 		}
 
 		const eipOutputPorts = outputPortsForProcessor('eip');
 		const wayjunOutputPorts = outputPortsForProcessor('wayjun');
 		const eiOutputPorts = outputPortsForProcessor('ei');
-		const mcpDirectOutputConnections = outgoingConnections.filter((entry) => entry.processor === 'mcp');
+		const mcpDirectOutputConnections = outgoingConnections.filter(
+			(entry) => entry.processor === 'mcp'
+		);
 		const mcpRightHandleEntries = [
 			{ handleId: 'mast-out' },
 			{ handleId: 'router-out' },
@@ -469,9 +470,30 @@
 		);
 
 		const nextNodes = [
-			makeSection('wheelhouse-section', 'WHEELHOUSE', 20, 10, wheelhouseSectionWidth, wheelhouseSectionHeight),
-			makeSection('mast-section', 'MAST LOCATION', mastSectionX, 10, mastSectionWidth, wheelhouseSectionHeight),
-			makeSection('engine-section', 'ENGINE ROOM', 20, engineSectionY, engineSectionWidth, engineSectionHeight),
+			makeSection(
+				'wheelhouse-section',
+				'WHEELHOUSE',
+				20,
+				10,
+				wheelhouseSectionWidth,
+				wheelhouseSectionHeight
+			),
+			makeSection(
+				'mast-section',
+				'MAST LOCATION',
+				mastSectionX,
+				10,
+				mastSectionWidth,
+				wheelhouseSectionHeight
+			),
+			makeSection(
+				'engine-section',
+				'ENGINE ROOM',
+				20,
+				engineSectionY,
+				engineSectionWidth,
+				engineSectionHeight
+			),
 
 			makeSection('wheelhouse-system-group', 'VESSEL SYSTEM', 82, 70, 200, 205, {
 				variant: 'group'
@@ -561,11 +583,7 @@
 							width: eipWidth,
 							height: eipHeight,
 							zIndex: eipHasModules ? 1 : 10,
-							handles: [
-								...processorTopPorts,
-								...eipLegacyEngineTargetPorts,
-								...eipOutputPorts
-							]
+							handles: [...processorTopPorts, ...eipLegacyEngineTargetPorts, ...eipOutputPorts]
 						})
 					]
 				: []),
@@ -595,10 +613,7 @@
 							variant: 'device',
 							width: eiWidth,
 							height: eiHeight,
-							handles: [
-								...eiEngineTargetPorts,
-								...eiOutputPorts
-							]
+							handles: [...eiEngineTargetPorts, ...eiOutputPorts]
 						})
 					]
 				: [])
@@ -606,14 +621,20 @@
 
 		engineRows.forEach((engine, index) => {
 			nextNodes.push(
-				makeNode(`engine-${index}`, engine.name, engineNodeX, engineNodeStartY + index * engineNodeGap, {
-					online: engine.online,
-					icon: '/assets/engine.png',
-					variant: 'sensor',
-					width: sideNodeWidth,
-					height: sideNodeHeight,
-					handles: [makePort('out', 'source', 'right', 50)]
-				})
+				makeNode(
+					`engine-${index}`,
+					engine.name,
+					engineNodeX,
+					engineNodeStartY + index * engineNodeGap,
+					{
+						online: engine.online,
+						icon: '/assets/engine.png',
+						variant: 'sensor',
+						width: sideNodeWidth,
+						height: sideNodeHeight,
+						handles: [makePort('out', 'source', 'right', 50)]
+					}
+				)
 			);
 		});
 
@@ -665,11 +686,17 @@
 				pathOffset: getMcpRightBendOffset('mast-out')
 			}),
 			...mcpToProcessorCables.map((name, index) =>
-				makeEdge(`mcp-${name}-to-${mcpProcessorTargetId}`, 'mcp', mcpProcessorTargetId, name === 'power' ? 'powerDc' : name, {
-					sourceHandle: `${mcpProcessorTargetId}-${name}-out`,
-					targetHandle: `${name}-in`,
-					pathOffset: laneOffset(index, mcpToProcessorCables.length, 32, 24)
-				})
+				makeEdge(
+					`mcp-${name}-to-${mcpProcessorTargetId}`,
+					'mcp',
+					mcpProcessorTargetId,
+					name === 'power' ? 'powerDc' : name,
+					{
+						sourceHandle: `${mcpProcessorTargetId}-${name}-out`,
+						targetHandle: `${name}-in`,
+						pathOffset: laneOffset(index, mcpToProcessorCables.length, 32, 24)
+					}
+				)
 			)
 		];
 
@@ -677,11 +704,17 @@
 			const targetProcessor = engine?.processor || defaultEngineProcessorId;
 			if (targetProcessor) {
 				nextEdges.push(
-					makeEdge(`engine-${index}-to-${targetProcessor}`, `engine-${index}`, targetProcessor, 'canbus', {
-						sourceHandle: 'out',
-						targetHandle: `engine-${index}-in`,
-						pathOffset: sectionNodeBendOffset(index, engineRows.length, 46, 32)
-					})
+					makeEdge(
+						`engine-${index}-to-${targetProcessor}`,
+						`engine-${index}`,
+						targetProcessor,
+						'canbus',
+						{
+							sourceHandle: 'out',
+							targetHandle: `engine-${index}-in`,
+							pathOffset: sectionNodeBendOffset(index, engineRows.length, 46, 32)
+						}
+					)
 				);
 			}
 		});
@@ -845,802 +878,20 @@
 </script>
 
 <section class="single-line-page" aria-hidden={!active}>
-	<div class="page-hero">
-		<div>
-			<span class="eyebrow">Single Line Diagram</span>
-			<h1>{vesselName}</h1>
-			<p>
-				Live vessel system topology for MCP, Router, GPS, IP panel, engine signals, fuel source, and
-				auxiliary load monitoring.
-			</p>
-		</div>
-		<div class="hero-status {overallOnline ? 'online' : 'offline'}">
-			<span class="overall-label"><i></i> Overall status</span>
-			<strong>{overallOnline ? 'Online' : 'Offline'}</strong>
-			<small>{mcp?.uptime ? `MCP uptime: ${mcp.uptime}` : 'Realtime component state'}</small>
-		</div>
-	</div>
+	<SingleLineHero {vesselName} {overallOnline} uptime={mcp?.uptime} />
 
 	{#if loading}
-		<div class="diagram-shell sld-skeleton-shell" aria-label="Loading single line diagram">
-			<div class="sld-skeleton-canvas">
-				<div class="sld-skeleton-section wheelhouse">
-					<span></span>
-				</div>
-				<div class="sld-skeleton-section mast">
-					<span></span>
-				</div>
-				<div class="sld-skeleton-section engine-room">
-					<span></span>
-				</div>
-
-				<div class="sld-skeleton-group vessel-system top"></div>
-				<div class="sld-skeleton-group engine-system"></div>
-				<div class="sld-skeleton-group output-system"></div>
-
-				<div class="sld-skeleton-node small gps"></div>
-				<div class="sld-skeleton-node small power"></div>
-				<div class="sld-skeleton-node panel mcp"></div>
-				<div class="sld-skeleton-node device router"></div>
-				<div class="sld-skeleton-node device mast-gps"></div>
-				<div class="sld-skeleton-node panel eip"></div>
-				<div class="sld-skeleton-node small engine-one"></div>
-				<div class="sld-skeleton-node small engine-two"></div>
-				<div class="sld-skeleton-node small engine-three"></div>
-				<div class="sld-skeleton-node small engine-four"></div>
-				<div class="sld-skeleton-node device ae-one"></div>
-				<div class="sld-skeleton-node device ae-two"></div>
-				<div class="sld-skeleton-node device fuel-one"></div>
-				<div class="sld-skeleton-node device fuel-two"></div>
-
-				<div class="sld-skeleton-wire wire-gps"></div>
-				<div class="sld-skeleton-wire wire-power"></div>
-				<div class="sld-skeleton-wire wire-router"></div>
-				<div class="sld-skeleton-wire wire-mast"></div>
-				<div class="sld-skeleton-wire wire-down-one"></div>
-				<div class="sld-skeleton-wire wire-down-two"></div>
-				<div class="sld-skeleton-wire wire-eip-out-one"></div>
-				<div class="sld-skeleton-wire wire-eip-out-two"></div>
-				<div class="sld-skeleton-label">Loading single line diagram...</div>
-			</div>
-		</div>
+		<SingleLineSkeleton />
 	{:else if errorMessage}
-		<section class="empty-card">
-			<span class="eyebrow">Unable to load</span>
-			<h2>Single line diagram is not available</h2>
-			<p>{errorMessage}</p>
-			<button type="button" onclick={() => loadDiagram(true)}>Retry</button>
-		</section>
+		<SingleLineErrorCard message={errorMessage} onRetry={() => loadDiagram(true)} />
 	{:else}
-		<div
-			class="diagram-shell"
-			class:diagram-fullscreen={diagramFullscreen}
-			bind:this={diagramShellElement}
-		>
-			<div class="flow-canvas" aria-label="Single line diagram flow">
-				<button
-					type="button"
-					class="refresh-btn sld-floating-refresh"
-					onclick={() => loadDiagram(true)}
-					disabled={loading}
-				>
-					Refresh
-				</button>
-				<SvelteFlow
-					id="single-line-diagram-flow"
-					nodes={flowNodes}
-					edges={flowEdges}
-					{nodeTypes}
-					{edgeTypes}
-					fitView
-					fitViewOptions={{ padding: 0.1, minZoom: 0.34, maxZoom: 1.0, duration: 260 }}
-					minZoom={0.28}
-					maxZoom={1.8}
-					nodesDraggable={false}
-					nodesConnectable={false}
-					elementsSelectable={false}
-					nodesFocusable={false}
-					edgesFocusable={false}
-					connectionLineType={ConnectionLineType.SmoothStep}
-					proOptions={{ hideAttribution: true }}
-				>
-					<SingleLineFlowControls
-						fullscreen={diagramFullscreen}
-						onToggleFullscreen={toggleDiagramFullscreen}
-					/>
-				</SvelteFlow>
-			</div>
-		</div>
+		<SingleLineCanvas
+			nodes={flowNodes}
+			edges={flowEdges}
+			fullscreen={diagramFullscreen}
+			onToggleFullscreen={toggleDiagramFullscreen}
+			onRefresh={() => loadDiagram(true)}
+			bind:shellElement={diagramShellElement}
+		/>
 	{/if}
 </section>
-
-<style>
-	.single-line-page {
-		height: 100%;
-		min-height: 0;
-		box-sizing: border-box;
-		display: flex;
-		flex-direction: column;
-		padding: 18px;
-		overflow: hidden;
-		background: #0a0e1a;
-		color: #f4f7fb;
-	}
-
-	.page-hero,
-	.diagram-shell,
-	.empty-card {
-		background: var(--color-surface);
-		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
-	}
-
-	.page-hero {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 16px;
-		padding: 16px;
-		margin-bottom: 14px;
-	}
-
-	.eyebrow {
-		display: inline-flex;
-		width: fit-content;
-		padding: 4px 9px;
-		border-radius: 999px;
-		background: var(--color-accent-muted);
-		color: #1d4ed8;
-		font-size: 10px;
-		font-weight: 900;
-		letter-spacing: 0.07em;
-		text-transform: uppercase;
-	}
-
-	h1,
-	h2,
-	p {
-		margin: 0;
-	}
-
-	h1 {
-		margin-top: 8px;
-		font-size: 22px;
-		line-height: 1.2;
-		font-weight: 900;
-		color: var(--text-primary);
-	}
-
-	p {
-		margin-top: 7px;
-		max-width: 780px;
-		color: var(--text-secondary);
-		font-size: 12px;
-		line-height: 1.5;
-		font-weight: 700;
-	}
-
-	.hero-status {
-		display: grid;
-		gap: 5px;
-		min-width: 180px;
-		padding: 10px 12px;
-		border: 1px solid rgba(148, 163, 184, 0.22);
-		background: rgba(30, 41, 59, 0.72);
-		border-radius: 12px;
-		text-align: right;
-	}
-
-	.hero-status.online {
-		border-color: rgba(34, 197, 94, 0.42);
-		background: rgba(22, 101, 52, 0.16);
-	}
-
-	.hero-status.offline {
-		border-color: rgba(148, 163, 184, 0.26);
-	}
-
-	.hero-status span,
-	.hero-status small {
-		color: #9fb0c9;
-		font-size: 11px;
-		font-weight: 800;
-	}
-
-	.overall-label {
-		display: inline-flex;
-		align-items: center;
-		justify-content: flex-end;
-		gap: 7px;
-	}
-
-	.overall-label i {
-		width: 9px;
-		height: 9px;
-		border-radius: 999px;
-		background: #64748b;
-		box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
-	}
-
-	.hero-status.online .overall-label i {
-		background: #22c55e;
-		box-shadow:
-			0 0 0 3px rgba(34, 197, 94, 0.18),
-			0 0 16px rgba(34, 197, 94, 0.34);
-	}
-
-	.hero-status strong {
-		font-size: 16px;
-		line-height: 1.2;
-		color: var(--text-primary);
-	}
-
-	.empty-card {
-		padding: 22px;
-	}
-
-	.empty-card button,
-	.refresh-btn {
-		height: 40px;
-		border: 0;
-		padding: 0 18px;
-		background: #2563eb;
-		color: #fff;
-		font-weight: 700;
-		cursor: pointer;
-	}
-
-	.empty-card button {
-		margin-top: 18px;
-	}
-
-	.refresh-btn:disabled {
-		opacity: 0.55;
-		cursor: not-allowed;
-	}
-
-	.diagram-shell {
-		flex: 1 1 auto;
-		min-height: 0;
-		overflow: hidden;
-	}
-
-	.diagram-shell.diagram-fullscreen {
-		position: fixed;
-		inset: 0;
-		z-index: 50000;
-		box-sizing: border-box;
-		display: flex;
-		padding: 14px;
-		border-radius: 0;
-		background: #0a0e1a;
-	}
-
-	.diagram-shell.diagram-fullscreen .flow-canvas {
-		flex: 1 1 auto;
-		height: 100%;
-		border-radius: 16px;
-	}
-
-	.flow-canvas {
-		position: relative;
-		width: 100%;
-		height: 100%;
-		min-height: 0;
-		border: 1px solid rgba(148, 163, 184, 0.18);
-		background:
-			radial-gradient(circle at 18% 12%, rgba(37, 99, 235, 0.16), transparent 30%),
-			linear-gradient(180deg, #0f172a 0%, #0b1220 100%);
-		box-shadow: 0 22px 60px rgba(0, 0, 0, 0.35);
-	}
-
-	.sld-floating-refresh {
-		position: absolute;
-		top: 14px;
-		right: 14px;
-		z-index: 10;
-		border-radius: 12px;
-		box-shadow: 0 14px 30px rgba(0, 0, 0, 0.34);
-	}
-
-	.sld-skeleton-shell {
-		flex: 1 1 auto;
-		min-height: 0;
-		overflow: hidden;
-	}
-
-	.sld-skeleton-canvas {
-		position: relative;
-		width: 100%;
-		height: 100%;
-		min-height: 0;
-		border: 1px solid rgba(148, 163, 184, 0.18);
-		background:
-			radial-gradient(circle at 18% 12%, rgba(37, 99, 235, 0.16), transparent 30%),
-			linear-gradient(180deg, #0f172a 0%, #0b1220 100%);
-		box-shadow: 0 22px 60px rgba(0, 0, 0, 0.35);
-		overflow: hidden;
-	}
-
-	.sld-skeleton-section,
-	.sld-skeleton-group,
-	.sld-skeleton-node,
-	.sld-skeleton-wire,
-	.sld-skeleton-label {
-		position: absolute;
-	}
-
-	.sld-skeleton-section {
-		border: 2px dashed rgba(147, 197, 253, 0.3);
-		background: rgba(11, 18, 32, 0.16);
-	}
-
-	.sld-skeleton-section span {
-		position: absolute;
-		top: 16px;
-		left: 24px;
-		width: 150px;
-		height: 22px;
-		border-radius: 8px;
-		background: rgba(226, 232, 240, 0.18);
-		overflow: hidden;
-	}
-
-	.sld-skeleton-section.wheelhouse {
-		left: 2%;
-		top: 4%;
-		width: 58%;
-		height: 34%;
-	}
-
-	.sld-skeleton-section.mast {
-		right: 3%;
-		top: 4%;
-		width: 30%;
-		height: 34%;
-	}
-
-	.sld-skeleton-section.engine-room {
-		left: 2%;
-		bottom: 4%;
-		width: 62%;
-		height: 51%;
-	}
-
-	.sld-skeleton-group {
-		border: 1px dashed rgba(147, 197, 253, 0.24);
-		background: rgba(15, 23, 42, 0.28);
-	}
-
-	.sld-skeleton-group.top {
-		left: 6%;
-		top: 10%;
-		width: 13%;
-		height: 24%;
-	}
-
-	.sld-skeleton-group.engine-system {
-		left: 6%;
-		top: 48%;
-		width: 15%;
-		height: 40%;
-	}
-
-	.sld-skeleton-group.output-system {
-		left: 48%;
-		top: 48%;
-		width: 17%;
-		height: 40%;
-	}
-
-	.sld-skeleton-node {
-		border: 1px solid rgba(186, 230, 253, 0.44);
-		border-radius: 12px;
-		background: linear-gradient(180deg, rgba(226, 232, 240, 0.14), rgba(148, 163, 184, 0.08));
-		box-shadow:
-			0 16px 32px rgba(0, 0, 0, 0.2),
-			inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-		overflow: hidden;
-	}
-
-	.sld-skeleton-node::before,
-	.sld-skeleton-section span::before,
-	.sld-skeleton-wire::before,
-	.sld-skeleton-label::before {
-		content: '';
-		position: absolute;
-		inset: 0;
-		transform: translateX(-100%);
-		background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
-		animation: sld-shimmer 1.45s ease-in-out infinite;
-	}
-
-	.sld-skeleton-node.small {
-		width: 8.8%;
-		height: 9%;
-	}
-
-	.sld-skeleton-node.panel {
-		width: 11%;
-		height: 20%;
-	}
-
-	.sld-skeleton-node.device {
-		width: 9.5%;
-		height: 10%;
-	}
-
-	.sld-skeleton-node.gps {
-		left: 8%;
-		top: 13%;
-	}
-
-	.sld-skeleton-node.power {
-		left: 8%;
-		top: 23%;
-	}
-
-	.sld-skeleton-node.mcp {
-		left: 25%;
-		top: 16%;
-	}
-
-	.sld-skeleton-node.router {
-		left: 46%;
-		top: 23%;
-	}
-
-	.sld-skeleton-node.mast-gps {
-		right: 12%;
-		top: 15%;
-	}
-
-	.sld-skeleton-node.eip {
-		left: 27%;
-		top: 56%;
-	}
-
-	.sld-skeleton-node.engine-one {
-		left: 8%;
-		top: 50%;
-	}
-
-	.sld-skeleton-node.engine-two {
-		left: 8%;
-		top: 61%;
-	}
-
-	.sld-skeleton-node.engine-three {
-		left: 8%;
-		top: 72%;
-	}
-
-	.sld-skeleton-node.engine-four {
-		left: 8%;
-		top: 83%;
-	}
-
-	.sld-skeleton-node.ae-one {
-		left: 53%;
-		top: 52%;
-	}
-
-	.sld-skeleton-node.ae-two {
-		left: 53%;
-		top: 65%;
-	}
-
-	.sld-skeleton-node.fuel-one {
-		left: 53%;
-		top: 78%;
-	}
-
-	.sld-skeleton-node.fuel-two {
-		left: 53%;
-		top: 91%;
-	}
-
-	.sld-skeleton-wire {
-		height: 4px;
-		border-radius: 999px;
-		background: rgba(16, 185, 129, 0.42);
-		overflow: hidden;
-		box-shadow: 0 0 16px rgba(16, 185, 129, 0.12);
-	}
-
-	.sld-skeleton-wire.wire-router {
-		background: rgba(14, 165, 233, 0.44);
-	}
-
-	.sld-skeleton-wire.wire-gps {
-		left: 17%;
-		top: 18%;
-		width: 9%;
-	}
-
-	.sld-skeleton-wire.wire-power {
-		left: 17%;
-		top: 28%;
-		width: 9%;
-		background: rgba(245, 158, 11, 0.42);
-	}
-
-	.sld-skeleton-wire.wire-router {
-		left: 36%;
-		top: 28%;
-		width: 11%;
-	}
-
-	.sld-skeleton-wire.wire-mast {
-		left: 36%;
-		top: 18%;
-		width: 47%;
-	}
-
-	.sld-skeleton-wire.wire-down-one,
-	.sld-skeleton-wire.wire-down-two {
-		width: 4px;
-		height: 26%;
-		top: 36%;
-		left: 31%;
-	}
-
-	.sld-skeleton-wire.wire-down-two {
-		left: 33%;
-		background: rgba(14, 165, 233, 0.44);
-	}
-
-	.sld-skeleton-wire.wire-eip-out-one {
-		left: 37%;
-		top: 62%;
-		width: 17%;
-	}
-
-	.sld-skeleton-wire.wire-eip-out-two {
-		left: 37%;
-		top: 75%;
-		width: 17%;
-	}
-
-	.sld-skeleton-label {
-		right: 18px;
-		top: 18px;
-		width: 210px;
-		height: 40px;
-		display: grid;
-		place-items: center;
-		border: 1px solid rgba(147, 197, 253, 0.18);
-		border-radius: 12px;
-		background: rgba(15, 23, 42, 0.78);
-		color: #bfdbfe;
-		font-size: 12px;
-		font-weight: 850;
-		overflow: hidden;
-	}
-
-	@keyframes sld-shimmer {
-		100% {
-			transform: translateX(100%);
-		}
-	}
-
-	:global(.single-line-page .svelte-flow) {
-		background:
-			radial-gradient(circle at 18% 12%, rgba(37, 99, 235, 0.16), transparent 30%),
-			linear-gradient(180deg, #0f172a 0%, #0b1220 100%);
-		--xy-background-color: #0f172a;
-		--xy-edge-stroke-default: #04af55;
-		--xy-edge-stroke-width-default: 4;
-		--xy-node-border-default: 0;
-		--xy-node-boxshadow-default: none;
-	}
-
-	:global(.single-line-page .svelte-flow__node) {
-		border: 0 !important;
-		background: transparent !important;
-		box-shadow: none !important;
-	}
-
-	:global(.single-line-page .svelte-flow__node .sld-node .node-copy strong) {
-		color: var(--sld-title-color, #0f172a) !important;
-	}
-
-	:global(.single-line-page .svelte-flow__node .sld-node .node-copy span) {
-		color: var(--sld-subtitle-color, #334155) !important;
-	}
-
-	:global(.single-line-page .svelte-flow__node .sld-node .node-copy small) {
-		color: var(--sld-meta-color, #475569) !important;
-	}
-
-	:global(.single-line-page .svelte-flow__node .sld-node.ip-panel .node-copy strong) {
-		color: #f8fbff !important;
-	}
-
-	:global(.single-line-page .svelte-flow__node .sld-node.ip-panel .node-copy span),
-	:global(.single-line-page .svelte-flow__node .sld-node.ip-panel .node-copy small) {
-		color: #d9e8ff !important;
-	}
-
-	:global(.single-line-page .svelte-flow__edge-path) {
-		stroke-linecap: square;
-		stroke-linejoin: miter;
-	}
-
-	:global(.single-line-page .svelte-flow__edge-text) {
-		font-family: inherit;
-	}
-
-	:global(.single-line-page .svelte-flow__controls) {
-		border-radius: 14px;
-		overflow: hidden;
-		box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
-	}
-
-	:global(.single-line-page .svelte-flow__controls-button) {
-		border-color: rgba(148, 163, 184, 0.22);
-		background: rgba(15, 23, 42, 0.92);
-		color: #f8fafc;
-	}
-
-	:global(.single-line-page .sld-custom-flow-controls) {
-		border: 1px solid rgba(148, 163, 184, 0.2);
-		background: rgba(15, 23, 42, 0.9);
-		backdrop-filter: blur(12px);
-	}
-
-	:global(.single-line-page .sld-custom-flow-controls .svelte-flow__controls-button) {
-		width: 34px;
-		height: 34px;
-		display: grid;
-		place-items: center;
-		border-bottom: 1px solid rgba(148, 163, 184, 0.18);
-	}
-
-	:global(.single-line-page .sld-custom-flow-controls .svelte-flow__controls-button:last-child) {
-		border-bottom: 0;
-	}
-
-	:global(.single-line-page .sld-custom-flow-controls .svelte-flow__controls-button:hover) {
-		background: rgba(37, 99, 235, 0.34);
-		color: #ffffff;
-	}
-
-	:global(.single-line-page .sld-control-icon) {
-		position: relative;
-		width: 18px;
-		height: 18px;
-		display: inline-block;
-		color: currentColor;
-	}
-
-	:global(.single-line-page .sld-control-icon.plus::before),
-	:global(.single-line-page .sld-control-icon.plus::after),
-	:global(.single-line-page .sld-control-icon.minus::before) {
-		content: '';
-		position: absolute;
-		left: 3px;
-		right: 3px;
-		top: 50%;
-		height: 2px;
-		border-radius: 999px;
-		background: currentColor;
-		transform: translateY(-50%);
-	}
-
-	:global(.single-line-page .sld-control-icon.plus::after) {
-		left: 50%;
-		right: auto;
-		top: 3px;
-		bottom: 3px;
-		width: 2px;
-		height: auto;
-		transform: translateX(-50%);
-	}
-
-	:global(.single-line-page .sld-control-icon.fullscreen::before),
-	:global(.single-line-page .sld-control-icon.fullscreen::after) {
-		content: '';
-		position: absolute;
-		inset: 2px;
-		border: 2px solid currentColor;
-		border-radius: 3px;
-		clip-path: polygon(
-			0 0,
-			42% 0,
-			42% 18%,
-			18% 18%,
-			18% 42%,
-			0 42%,
-			0 0,
-			58% 0,
-			100% 0,
-			100% 42%,
-			82% 42%,
-			82% 18%,
-			58% 18%,
-			58% 0,
-			100% 58%,
-			100% 100%,
-			58% 100%,
-			58% 82%,
-			82% 82%,
-			82% 58%,
-			100% 58%,
-			42% 100%,
-			0 100%,
-			0 58%,
-			18% 58%,
-			18% 82%,
-			42% 82%,
-			42% 100%
-		);
-	}
-
-	:global(.single-line-page .sld-control-icon.fullscreen.active::before) {
-		inset: 3px;
-		clip-path: polygon(
-			18% 0,
-			42% 0,
-			42% 18%,
-			58% 18%,
-			58% 0,
-			82% 0,
-			82% 42%,
-			100% 42%,
-			100% 58%,
-			82% 58%,
-			82% 100%,
-			58% 100%,
-			58% 82%,
-			42% 82%,
-			42% 100%,
-			18% 100%,
-			18% 58%,
-			0 58%,
-			0 42%,
-			18% 42%
-		);
-	}
-
-	:global(.single-line-page .sld-control-icon.fit::before),
-	:global(.single-line-page .sld-control-icon.fit::after) {
-		content: '';
-		position: absolute;
-		border: 2px solid currentColor;
-		border-radius: 3px;
-	}
-
-	:global(.single-line-page .sld-control-icon.fit::before) {
-		inset: 3px;
-		opacity: 0.92;
-	}
-
-	:global(.single-line-page .sld-control-icon.fit::after) {
-		left: 6px;
-		right: 6px;
-		top: 6px;
-		bottom: 6px;
-		border-radius: 999px;
-		background: currentColor;
-	}
-
-	@media (max-width: 900px) {
-		.single-line-page {
-			padding: 12px;
-		}
-
-		.page-hero {
-			display: grid;
-			align-items: start;
-		}
-
-		.hero-status {
-			text-align: left;
-		}
-
-		.flow-canvas {
-			height: 100%;
-			min-height: 0;
-		}
-	}
-</style>

@@ -1,5 +1,4 @@
 <script>
-	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { onMount } from 'svelte';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
 	import {
@@ -9,14 +8,24 @@
 	import { apiRequest, downloadApiFile } from '$lib/api/authApi.js';
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
 	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
+	import { buildPeriodicalEngineFuelSummary } from '$lib/utils/periodicalReport.js';
 	import {
-		buildPeriodicalEngineFuelSummary,
-		buildPeriodicalRpmMatrices,
-		formatRpmRuntime,
-		getPeriodicalRpmRuntimePercent
-	} from '$lib/utils/periodicalReport.js';
+		formatLiter,
+		formatNumber,
+		formatRuntimeFromMinutes,
+		toFuelNumber
+	} from '$lib/utils/periodicalFormat.js';
+	import PeriodicalHeader from './PeriodicalHeader.svelte';
+	import PeriodicalSummary from './PeriodicalSummary.svelte';
+	import PeriodicalTravelDistance from './PeriodicalTravelDistance.svelte';
+	import PeriodicalRuntimeTable from './PeriodicalRuntimeTable.svelte';
+	import PeriodicalRpmTable from './PeriodicalRpmTable.svelte';
+	import PeriodicalFuelTable from './PeriodicalFuelTable.svelte';
+	import PeriodicalHighRpmTable from './PeriodicalHighRpmTable.svelte';
+	import PeriodicalSpeedStats from './PeriodicalSpeedStats.svelte';
+	import PeriodicalLoadOverlay from './PeriodicalLoadOverlay.svelte';
+	import './periodical-page.css';
 
 	let loading = $state(false);
 	let exporting = $state(false);
@@ -34,9 +43,7 @@
 	let currentUserLoaded = $state(false);
 
 	let { active = false } = $props();
-	let shouldShowDateRangeOverlay = $derived(
-		!hasLoadedDateRange || !startDateTime || !endDateTime
-	);
+	let shouldShowDateRangeOverlay = $derived(!hasLoadedDateRange || !startDateTime || !endDateTime);
 
 	async function loadCurrentUser() {
 		if (currentUser || currentUserLoading) return currentUser;
@@ -98,41 +105,6 @@
 		)}:${pad(date.getMinutes())}:00`;
 	}
 
-	function formatNumber(value, digits = 1, fallback = '-') {
-		const number = Number(value);
-		if (!Number.isFinite(number)) return fallback;
-
-		return number.toLocaleString('en-US', {
-			minimumFractionDigits: digits,
-			maximumFractionDigits: digits
-		});
-	}
-
-	function toFuelNumber(value) {
-		if (value === undefined || value === null || value === '' || value === '-') {
-			return 0;
-		}
-
-		const number = Number(value);
-		return Number.isFinite(number) ? number : 0;
-	}
-
-	function formatLiter(value) {
-		return `${formatNumber(toFuelNumber(value), 1)} L`;
-	}
-
-	function formatRpmRangeLabel(value) {
-		if (value === undefined || value === null || value === '') return '-';
-
-		const text = String(value).trim();
-		if (!text || text === '-' || text === '—' || text === 'â€”') return '—';
-
-		return text.replace(/-?\d+(?:[.,]\d+)?/g, (match) => {
-			const number = Number(match.replace(',', '.'));
-			return Number.isFinite(number) ? String(Math.round(number)) : match;
-		});
-	}
-
 	function pickArray(...values) {
 		for (const value of values) {
 			if (Array.isArray(value)) return value;
@@ -176,45 +148,6 @@
 		if (sourceKey === 'ecu') return 'ECU';
 
 		return sourceKey || '-';
-	}
-
-	function getRpmTableLabel(table) {
-		const sourceKeys = Array.isArray(table?.sourceKeys) ? table.sourceKeys : [];
-
-		if (sourceKeys.length === 2 && sourceKeys.includes('fms') && sourceKeys.includes('ecu')) {
-			return 'FMS / ECU';
-		}
-
-		if (sourceKeys.length === 1) return getRpmSourceLabel(sourceKeys[0]);
-
-		return table?.label || '-';
-	}
-
-	function formatRpmMatrixCell(row, metric, engineRows) {
-		if (!row) return '-';
-		if (metric.key === 'runtime') return formatRpmRuntime(row);
-		if (metric.key === 'runtime_percent') {
-			const percent = getPeriodicalRpmRuntimePercent(row, engineRows);
-			return percent === null ? '-' : `${formatNumber(percent, 1)}%`;
-		}
-		const value = metric.key === 'lh'
-			? row.lh_ems ?? row.lhEms ?? row.lh_maker ?? row.lhMaker ?? row.lh
-			: getRpmFuelValue(row, metric.sourceKey);
-		if ((typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '' || !Number.isFinite(Number(value))) return '-';
-		return metric.key === 'lh' ? formatNumber(value, 2) : formatLiter(value);
-	}
-
-	function formatRuntimeFromMinutes(minutes) {
-		const totalMinutes = Number(minutes);
-
-		if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) {
-			return '0h 0m';
-		}
-
-		const h = Math.floor(totalMinutes / 60);
-		const m = Math.round(totalMinutes % 60);
-
-		return `${h}h ${m}m`;
 	}
 
 	function normalizeEngineName(value) {
@@ -264,8 +197,6 @@
 	let autoTimezoneLabel = $derived(
 		getAutoTimezoneLabelFromSources(normalizedData, reportData, $selectedVesselInfo)
 	);
-
-	let hasRawData = $derived(Boolean(reportData));
 
 	let dataReceivedStats = $derived(
 		normalizedData?.data_received_stats || normalizedData?.dataReceivedStats || {}
@@ -361,14 +292,6 @@
 		buildPeriodicalEngineFuelSummary(engineRuntimeRows, visibleFuelSources)
 	);
 
-	let totalRuntimeHours = $derived(
-		engineRuntimeRows.reduce((sum, row) => {
-			return sum + toFuelNumber(row?.runtime_hours ?? row?.runtimeHours);
-		}, 0)
-	);
-
-	let totalRuntimeMinutes = $derived(totalRuntimeHours * 60);
-
 	let totalRobBunkerFuel = $derived(
 		toFuelNumber(robBunker?.total_fod_l ?? robBunker?.totalFodL) +
 			toFuelNumber(robBunker?.bunker_l ?? robBunker?.bunkerL)
@@ -416,10 +339,7 @@
 		const consumptionRows = getConsumptionPerRangeRows(normalizedData);
 		const hasFmsRows = consumptionRows.some((row) => hasPresentRpmFuelValue(row, 'fms'));
 		const hasEcuRows = consumptionRows.some((row) => hasPresentRpmFuelValue(row, 'ecu'));
-		const consumptionSourceKeys = [
-			...(hasFmsRows ? ['fms'] : []),
-			...(hasEcuRows ? ['ecu'] : [])
-		];
+		const consumptionSourceKeys = [...(hasFmsRows ? ['fms'] : []), ...(hasEcuRows ? ['ecu'] : [])];
 
 		const candidates = [
 			{
@@ -472,38 +392,6 @@
 
 	let rpmRangeTables = $derived(getRpmRangePayload());
 
-	let selectedRpmRangeTable = $derived(
-		rpmRangeTables.find((table) => table.key === selectedRpmRuntimeFuelTableKey) ||
-			rpmRangeTables[0] ||
-			null
-	);
-	let selectedRpmMatrices = $derived(
-		buildPeriodicalRpmMatrices(selectedRpmRangeTable?.details || [])
-	);
-	let rpmMatrixMetrics = $derived([
-		{ key: 'runtime', label: 'Runtime' },
-		{ key: 'runtime_percent', label: 'Runtime %' },
-		{ key: 'lh', label: 'L/H' },
-		...(selectedRpmRangeTable?.sourceKeys || []).map((sourceKey) => ({
-			key: `fuel_${sourceKey}`,
-			sourceKey,
-			label: selectedRpmRangeTable.sourceKeys.length === 1 ? 'Fuel (L)' : `${getRpmSourceLabel(sourceKey)} Fuel (L)`
-		}))
-	]);
-
-	$effect(() => {
-		const keys = rpmRangeTables.map((table) => table.key);
-
-		if (!keys.length) {
-			selectedRpmRuntimeFuelTableKey = '';
-			return;
-		}
-
-		if (!keys.includes(selectedRpmRuntimeFuelTableKey)) {
-			selectedRpmRuntimeFuelTableKey = keys[0];
-		}
-	});
-
 	let highRpmLowSpeed = $derived(
 		normalizedData?.high_rpm_low_speed || normalizedData?.highRpmLowSpeed || {}
 	);
@@ -512,9 +400,7 @@
 		Array.isArray(highRpmLowSpeed?.engines) ? highRpmLowSpeed.engines : []
 	);
 
-	let canViewHighRpmLowSpeedTable = $derived(
-		hasPermission('view_high_rpm_low_speed_table')
-	);
+	let canViewHighRpmLowSpeedTable = $derived(hasPermission('view_high_rpm_low_speed_table'));
 
 	let canViewRpmRangeRuntimeFuelTable = $derived(
 		hasPermission('view_rpm_ranges_runtime_fuel_table')
@@ -606,13 +492,116 @@
 	let hasAverageSpeed = $derived(Number.isFinite(averageSpeed));
 	let hasMaxSpeed = $derived(Number.isFinite(maxSpeed));
 
-	let periodicalFuelSkeletonColumns = $derived(
-		Math.max(visibleFuelSources.length + 2, 4)
+	let periodicalFuelSkeletonColumns = $derived(Math.max(visibleFuelSources.length + 2, 4));
+
+	let periodicalTableSkeletonRows = $derived(Math.max(engineRuntimeRows.length + 1, 4));
+
+	let dataReceivedLabel = $derived(
+		dataReceivedStats?.received_minutes !== undefined &&
+			dataReceivedStats?.total_minutes !== undefined
+			? `${dataReceivedStats.received_minutes} of ${dataReceivedStats.total_minutes} (${dataReceivedStats.percentage ?? '-'}%)`
+			: '-'
 	);
 
-	let periodicalTableSkeletonRows = $derived(
-		Math.max(engineRuntimeRows.length + 1, 4)
+	let engineFuelCards = $derived(
+		engineFuelSummary.map((engine) => ({
+			key: engine.key,
+			engineName: engine.engineName,
+			fuelLabel: engine.fuel === null ? '-' : formatLiter(engine.fuel),
+			sourceLabel: engine.sourceLabel
+		}))
 	);
+
+	let totalFuelLabel = $derived(totalFuel === null ? '-' : formatLiter(totalFuel));
+
+	let bunkerFuelLabel = $derived(formatLiter(totalRobBunkerFuel));
+
+	let totalDistanceLabel = $derived(
+		Number.isFinite(totalDistanceNm) ? `${formatNumber(totalDistanceNm, 3)} NM` : null
+	);
+
+	let outsideSafetyZoneLabel = $derived(
+		Number.isFinite(outsideSafetyZoneDistanceNm)
+			? `${formatNumber(outsideSafetyZoneDistanceNm, 3)} NM`
+			: null
+	);
+
+	let averageSpeedLabel = $derived(
+		hasAverageSpeed ? `${formatNumber(averageSpeed, 2)} knot` : null
+	);
+
+	let maxSpeedLabel = $derived(hasMaxSpeed ? `${formatNumber(maxSpeed, 2)} knot` : null);
+
+	let literPerNmCardLabels = $derived(
+		literPerNmCards.map((card, index) => ({
+			key: index,
+			label: card.label,
+			valueLabel: `${formatNumber(card.value, 2)} L/NM`
+		}))
+	);
+
+	let engineRuntimeTableRows = $derived(
+		engineRuntimeRows.map((row, index) => ({
+			key: index,
+			engineName: row.engine_name || row.engineName || '-',
+			runtimeFormatted: row.runtime_formatted || row.runtimeFormatted || '-',
+			runtimeHoursLabel: formatNumber(row.runtime_hours ?? row.runtimeHours, 2)
+		}))
+	);
+
+	let fuelTableSources = $derived(
+		visibleFuelSources.map((source) => ({
+			key: source.key,
+			label: source.label,
+			totalLabel: formatLiter(source.total)
+		}))
+	);
+
+	let fuelTableRows = $derived(
+		engineRuntimeRows.map((engine, index) => {
+			const engineName = engine.engine_name || engine.engineName;
+
+			return {
+				key: index,
+				engineName: engineName || '-',
+				values: visibleFuelSources.map((source) => ({
+					key: source.key,
+					label: formatLiter(getFuelForEngine(source, engineName))
+				}))
+			};
+		})
+	);
+
+	let robBunkerCardLabels = $derived(
+		robBunkerCards.map((card, index) => ({
+			key: index,
+			label: card.label,
+			valueLabel: formatLiter(card.value),
+			total: card.total
+		}))
+	);
+
+	let highRpmLowSpeedTableRows = $derived(
+		highRpmLowSpeedRows.map((row, index) => ({
+			key: index,
+			engineName: row.engine_name || row.engineName || '-',
+			durationLabel:
+				row.duration_formatted ||
+				row.durationFormatted ||
+				formatRuntimeFromMinutes(row.duration_minutes ?? row.durationMinutes),
+			fuelLabel: formatLiter(row.fuel_used_l ?? row.fuelUsedL ?? row.fuel)
+		}))
+	);
+
+	let highRpmLowSpeedTotal = $derived({
+		durationLabel:
+			highRpmLowSpeed?.grand_total_duration_formatted ||
+			highRpmLowSpeed?.grandTotalDurationFormatted ||
+			formatRuntimeFromMinutes(
+				highRpmLowSpeed?.grand_total_duration_minutes ?? highRpmLowSpeed?.grandTotalDurationMinutes
+			),
+		fuelLabel: formatLiter(highRpmLowSpeed?.grand_total_l ?? highRpmLowSpeed?.grandTotalL)
+	});
 
 	async function loadPeriodicalReport() {
 		if (!$selectedVesselId) {
@@ -728,1181 +717,84 @@
 		if (!active || currentUserLoaded || currentUserLoading) return;
 		loadCurrentUser();
 	});
-
 </script>
 
 <section class="periodical-page">
-	<section class="periodical-header-card">
-		<div class="periodical-header-copy">
-			<div class="page-kicker">Periodical Report</div>
-			<h1>{vesselName}</h1>
-			<p>
-				Periodical operation report for custom date-time ranges with runtime, fuel consumption, data
-				received, and telemetry summary.
-			</p>
-		</div>
-
-		<div class="periodical-header-filters">
-			<div class="filter-card">
-		<label>
-			<span>Start</span>
-			<input type="datetime-local" use:fourDigitDateYear bind:value={startDateTime} oninput={markDateFilterDirty} />
-		</label>
-
-		<label>
-			<span>End</span>
-			<input type="datetime-local" use:fourDigitDateYear bind:value={endDateTime} oninput={markDateFilterDirty} />
-		</label>
-
-		<label>
-			<span class="field-label-row">
-				Timezone Mode
-				{#if timezoneMode === 'auto'}
-					<small class="timezone-auto-pill">Auto • {autoTimezoneLabel}</small>
-				{/if}
-			</span>
-			<select bind:value={timezoneMode} onchange={markDateFilterDirty}>
-				{#each TIMEZONE_MODE_OPTIONS as option}
-					<option value={option.value}>{option.label}</option>
-				{/each}
-			</select>
-		</label>
-
-		{#if timezoneMode === 'manual'}
-			<label>
-				<span>Timezone Offset</span>
-				<select bind:value={timezoneOffset} onchange={markDateFilterDirty}>
-					{#each TIMEZONE_OFFSET_OPTIONS as option}
-						<option value={option.value}>{option.label}</option>
-					{/each}
-				</select>
-			</label>
-		{/if}
-
-		<div class="filter-actions">
-			<button type="button" class="primary-btn" onclick={loadPeriodicalReport} disabled={loading || !startDateTime || !endDateTime}>
-				{loading ? 'Loading...' : 'Load Data'}
-			</button>
-
-			<button type="button" class="export-btn" onclick={handleExportExcel} disabled={exporting || shouldShowDateRangeOverlay}>
-				{exporting ? 'Exporting...' : 'Export Excel'}
-			</button>
-		</div>
-			</div>
-		</div>
-	</section>
+	<PeriodicalHeader
+		bind:startDateTime
+		bind:endDateTime
+		bind:timezoneMode
+		bind:timezoneOffset
+		{vesselName}
+		{autoTimezoneLabel}
+		{loading}
+		{exporting}
+		exportDisabled={shouldShowDateRangeOverlay}
+		onLoad={loadPeriodicalReport}
+		onExport={handleExportExcel}
+		onFilterChange={markDateFilterDirty}
+	/>
 
 	<div class="load-required-area" class:is-locked={shouldShowDateRangeOverlay}>
-	{#if error}
-		<div class="status-box error-box">
-			{error}
-		</div>
-	{/if}
-
-	{#if loading}
-		<LoadingSkeleton
-			label="Loading periodical report data"
-			variant="periodical-report"
-			rows={periodicalTableSkeletonRows}
-			columns={periodicalFuelSkeletonColumns}
-		/>
-	{:else}
-		<section class="data-received-card">
-			<span>Data Received</span>
-			<strong>
-				{dataReceivedStats?.received_minutes !== undefined &&
-				dataReceivedStats?.total_minutes !== undefined
-					? `${dataReceivedStats.received_minutes} of ${dataReceivedStats.total_minutes} (${dataReceivedStats.percentage ?? '-'}%)`
-					: '-'}
-			</strong>
-		</section>
-
-	<section class="summary-grid">
-		{#each engineFuelSummary as engine (engine.key)}
-			<article class="summary-card engine-fuel-card">
-				<span>{engine.engineName} Fuel</span>
-				<strong>{engine.fuel === null ? '-' : formatLiter(engine.fuel)}</strong>
-				<small>{engine.sourceLabel || 'Fuel data unavailable'}</small>
-			</article>
-		{/each}
-
-		<article class="summary-card">
-			<span>Bunker Fuel</span>
-			<strong>{formatLiter(totalRobBunkerFuel)}</strong>
-		</article>
-
-		<article class="summary-card">
-			<span>Total Fuel</span>
-			<strong>{totalFuel === null ? '-' : formatLiter(totalFuel)}</strong>
-			<small>Engine fuel only</small>
-		</article>
-
-		{#if Number.isFinite(totalDistanceNm)}
-			<article class="summary-card">
-				<span>Total Distance</span>
-				<strong>{formatNumber(totalDistanceNm, 3)} NM</strong>
-			</article>
+		{#if error}
+			<div class="status-box error-box">
+				{error}
+			</div>
 		{/if}
 
-		{#if Number.isFinite(outsideSafetyZoneDistanceNm)}
-			<article class="summary-card">
-				<span>Outside Safety Zone</span>
-				<strong>{formatNumber(outsideSafetyZoneDistanceNm, 3)} NM</strong>
-			</article>
-		{/if}
-
-		{#if hasAverageSpeed}
-			<article class="summary-card">
-				<span>Average Speed</span>
-				<strong>{formatNumber(averageSpeed, 2)} knot</strong>
-			</article>
-		{/if}
-
-		{#if hasMaxSpeed}
-			<article class="summary-card">
-				<span>Max Speed</span>
-				<strong>{formatNumber(maxSpeed, 2)} knot</strong>
-			</article>
-		{/if}
-
-	</section>
-
-	{#if hasTravelDistance || literPerNmCards.length}
-		<section class="table-section">
-			<div class="section-header">
-				<div>
-					<span class="section-kicker">Distance</span>
-					<h2>Travel Distance & Fuel Efficiency</h2>
-				</div>
-			</div>
-
-			<div class="speed-detail-grid">
-				{#if Number.isFinite(totalDistanceNm)}
-					<article>
-						<span>Total Distance</span>
-						<strong>{formatNumber(totalDistanceNm, 3)} NM</strong>
-					</article>
-				{/if}
-
-				{#if Number.isFinite(outsideSafetyZoneDistanceNm)}
-					<article>
-						<span>Outside Safety Zone</span>
-						<strong>{formatNumber(outsideSafetyZoneDistanceNm, 3)} NM</strong>
-					</article>
-				{/if}
-
-				{#each literPerNmCards as card}
-					<article>
-						<span>{card.label} Fuel per NM</span>
-						<strong>{formatNumber(card.value, 2)} L/NM</strong>
-					</article>
-				{/each}
-			</div>
-		</section>
-	{/if}
-
-	<section class="table-section">
-		<div class="section-header">
-			<div>
-				<span class="section-kicker">Runtime</span>
-				<h2>Engine Runtime</h2>
-			</div>
-
-			<strong>{engineRuntimeRows.length} engines</strong>
-		</div>
-
-		{#if engineRuntimeRows.length}
-			<div class="table-wrapper">
-				<table>
-					<thead>
-						<tr>
-							<th>Engine</th>
-							<th>Running Hour</th>
-							<th>Runtime Hours</th>
-						</tr>
-					</thead>
-
-					<tbody>
-						{#each engineRuntimeRows as row}
-							<tr>
-								<td>{row.engine_name || row.engineName || '-'}</td>
-								<td>{row.runtime_formatted || row.runtimeFormatted || '-'}</td>
-								<td>{formatNumber(row.runtime_hours ?? row.runtimeHours, 2)}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
+		{#if loading}
+			<LoadingSkeleton
+				label="Loading periodical report data"
+				variant="periodical-report"
+				rows={periodicalTableSkeletonRows}
+				columns={periodicalFuelSkeletonColumns}
+			/>
 		{:else}
-			<div class="empty-box">Engine runtime data is not available yet.</div>
-		{/if}
-	</section>
+			<PeriodicalSummary
+				{dataReceivedLabel}
+				{engineFuelCards}
+				{bunkerFuelLabel}
+				{totalFuelLabel}
+				{totalDistanceLabel}
+				{outsideSafetyZoneLabel}
+				{averageSpeedLabel}
+				{maxSpeedLabel}
+			/>
 
-	{#if canViewRpmRangeRuntimeFuelTable}
-	<section class="table-section">
-		<div class="section-header">
-			<div>
-				<span class="section-kicker">RPM</span>
-				<h2>RPM Range Runtime & Fuel</h2>
-			</div>
-
-			<div class="rpm-source-control">
-				<label for="periodical-rpm-source">Table Source</label>
-				<select id="periodical-rpm-source" bind:value={selectedRpmRuntimeFuelTableKey}>
-					{#each rpmRangeTables as table}
-						<option value={table.key}>{getRpmTableLabel(table)}</option>
-					{/each}
-				</select>
-			</div>
-		</div>
-
-		{#if selectedRpmRangeTable}
-			<div class="periodical-rpm-table-list">
-				{#each selectedRpmMatrices as matrix (matrix.key)}
-					<article class="periodical-rpm-card">
-						<div class="periodical-rpm-card-header">
-							<div>
-								<span>{getRpmTableLabel(selectedRpmRangeTable)}</span>
-								<strong>{matrix.label}</strong>
-							</div>
-							<small>{matrix.engines.length} engines</small>
-						</div>
-
-						<!-- svelte-ignore a11y_no_noninteractive_tabindex (The scrollable table region needs keyboard access.) -->
-						<div class="table-wrapper periodical-rpm-matrix-wrap" role="region" aria-label={`${matrix.label} RPM range comparison`} tabindex="0">
-							<table class="periodical-rpm-matrix">
-								<thead>
-									<tr>
-										<th rowspan="2" scope="col" class="rpm-range-column">RPM Range</th>
-										{#each rpmMatrixMetrics as metric (metric.key)}
-											<th colspan={matrix.engines.length} scope="colgroup" class="rpm-metric-start">{metric.label}</th>
-										{/each}
-									</tr>
-									<tr>
-										{#each rpmMatrixMetrics as metric (metric.key)}
-											{#each matrix.engines as engine, engineIndex (engine.key)}
-												<th scope="col" title={engine.engineName} class:rpm-metric-start={engineIndex === 0}>{engine.label}</th>
-											{/each}
-										{/each}
-									</tr>
-								</thead>
-
-								<tbody>
-									{#each matrix.rows as row (row.key)}
-										<tr class:total-row={row.isTotal}>
-											<th scope="row" class="rpm-range-column">{row.isTotal ? 'Total' : formatRpmRangeLabel(row.label)}</th>
-											{#each rpmMatrixMetrics as metric (metric.key)}
-												{#if row.isTotal && metric.key === 'lh'}
-													<td colspan={matrix.engines.length} class="rpm-total-spacer rpm-metric-start" aria-label="Not applicable"></td>
-												{:else}
-													{#each matrix.engines as engine, engineIndex (engine.key)}
-														<td class:rpm-metric-start={engineIndex === 0}>{formatRpmMatrixCell(row.cells[engineIndex], metric, engine.rows)}</td>
-													{/each}
-												{/if}
-											{/each}
-										</tr>
-									{:else}
-										<tr>
-											<td colspan={1 + rpmMatrixMetrics.length * matrix.engines.length}>All RPM ranges have zero runtime.</td>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
-						</div>
-					</article>
-				{/each}
-			</div>
-			{#if selectedRpmRangeTable.grandTotal && Object.keys(selectedRpmRangeTable.grandTotal).length}
-				<div class="table-wrapper periodical-rpm-grand-total">
-					<table>
-						<thead>
-							<tr>
-								<th>Summary</th>
-								<th>Runtime</th>
-								{#each selectedRpmRangeTable.sourceKeys as sourceKey}
-									<th>{getRpmSourceLabel(sourceKey)} Fuel</th>
-								{/each}
-							</tr>
-						</thead>
-						<tbody>
-							<tr class="total-row">
-								<td>Grand Total</td>
-								<td>{formatRpmRuntime(selectedRpmRangeTable.grandTotal)}</td>
-								{#each selectedRpmRangeTable.sourceKeys as sourceKey}
-									<td>{formatLiter(getRpmFuelValue(selectedRpmRangeTable.grandTotal, sourceKey))}</td>
-								{/each}
-							</tr>
-						</tbody>
-					</table>
-				</div>
+			{#if hasTravelDistance || literPerNmCards.length}
+				<PeriodicalTravelDistance
+					{totalDistanceLabel}
+					{outsideSafetyZoneLabel}
+					literPerNmCards={literPerNmCardLabels}
+				/>
 			{/if}
-		{:else}
-			<div class="empty-box">RPM range data is not available yet.</div>
-		{/if}
-	</section>
-	{/if}
 
-	<section class="table-section fuel-section">
-		<div class="section-header">
-			<div>
-				<span class="section-kicker">Fuel</span>
-				<h2>Fuel Consumption</h2>
-			</div>
+			<PeriodicalRuntimeTable rows={engineRuntimeTableRows} />
 
-			<strong>{visibleFuelSources.length} sources</strong>
-		</div>
+			<PeriodicalRpmTable
+				tables={rpmRangeTables}
+				bind:selectedKey={selectedRpmRuntimeFuelTableKey}
+				show={canViewRpmRangeRuntimeFuelTable}
+			/>
 
-		{#if hasRobBunkerData}
-			<div class="fod-usage-summary">
-				{#each robBunkerCards as card}
-					<article class:fod-total-card={card.total}>
-						<span>{card.label}</span>
-						<strong>{formatLiter(card.value)}</strong>
-					</article>
-				{/each}
-			</div>
+			<PeriodicalFuelTable
+				sources={fuelTableSources}
+				rows={fuelTableRows}
+				robBunkerCards={robBunkerCardLabels}
+				{hasRobBunkerData}
+			/>
+
+			<PeriodicalHighRpmTable
+				show={canViewHighRpmLowSpeedTable}
+				rows={highRpmLowSpeedTableRows}
+				total={highRpmLowSpeedTotal}
+			/>
+
+			<PeriodicalSpeedStats {averageSpeedLabel} {maxSpeedLabel} />
 		{/if}
 
-		{#if visibleFuelSources.length}
-			<div class="table-wrapper">
-				<table>
-					<thead>
-						<tr>
-							<th>Engine</th>
-
-							{#each visibleFuelSources as source}
-								<th>{source.label}</th>
-							{/each}
-						</tr>
-					</thead>
-
-					<tbody>
-						{#each engineRuntimeRows as engine}
-							{@const engineName = engine.engine_name || engine.engineName}
-
-							<tr>
-								<td>{engineName || '-'}</td>
-
-								{#each visibleFuelSources as source}
-									<td>{formatLiter(getFuelForEngine(source, engineName))}</td>
-								{/each}
-							</tr>
-						{/each}
-
-						<tr class="total-row">
-							<td>Grand Total</td>
-
-							{#each visibleFuelSources as source}
-								<td>{formatLiter(source.total)}</td>
-							{/each}
-						</tr>
-					</tbody>
-				</table>
-			</div>
-		{:else}
-			<div class="empty-box">Fuel consumption data is not available yet.</div>
-		{/if}
-	</section>
-	
-	{#if canViewHighRpmLowSpeedTable}
-		<section class="table-section">
-			<div class="section-header">
-				<div>
-					<span class="section-kicker">SRITI</span>
-					<h2>High RPM Low Speed</h2>
-				</div>
-
-				<strong>{highRpmLowSpeedRows.length} engines</strong>
-			</div>
-
-			{#if highRpmLowSpeedRows.length}
-				<div class="table-wrapper">
-					<table>
-						<thead>
-							<tr>
-								<th>Engine</th>
-								<th>Duration</th>
-								<th>Fuel Used</th>
-							</tr>
-						</thead>
-
-						<tbody>
-							{#each highRpmLowSpeedRows as row}
-								<tr>
-									<td>{row.engine_name || row.engineName || '-'}</td>
-									<td>{row.duration_formatted || row.durationFormatted || formatRuntimeFromMinutes(row.duration_minutes ?? row.durationMinutes)}</td>
-									<td>{formatLiter(row.fuel_used_l ?? row.fuelUsedL ?? row.fuel)}</td>
-								</tr>
-							{/each}
-
-							<tr class="total-row">
-								<td>Grand Total</td>
-								<td>{highRpmLowSpeed?.grand_total_duration_formatted || highRpmLowSpeed?.grandTotalDurationFormatted || formatRuntimeFromMinutes(highRpmLowSpeed?.grand_total_duration_minutes ?? highRpmLowSpeed?.grandTotalDurationMinutes)}</td>
-								<td>{formatLiter(highRpmLowSpeed?.grand_total_l ?? highRpmLowSpeed?.grandTotalL)}</td>
-							</tr>
-						</tbody>
-					</table>
-				</div>
-			{:else}
-				<div class="empty-box">High RPM low speed data is not available yet.</div>
-			{/if}
-		</section>
-	{/if}
-
-	{#if hasAverageSpeed || hasMaxSpeed}
-		<section class="table-section">
-			<div class="section-header">
-				<div>
-					<span class="section-kicker">Speed</span>
-					<h2>Speed Statistics</h2>
-				</div>
-			</div>
-
-			<div class="speed-detail-grid">
-				{#if hasAverageSpeed}
-					<article>
-						<span>Average Speed</span>
-						<strong>{formatNumber(averageSpeed, 2)} knot</strong>
-					</article>
-				{/if}
-
-				{#if hasMaxSpeed}
-					<article>
-						<span>Max Speed</span>
-						<strong>{formatNumber(maxSpeed, 2)} knot</strong>
-					</article>
-				{/if}
-			</div>
-		</section>
-	{/if}
-{/if}
 		{#if shouldShowDateRangeOverlay}
-			<div class="load-required-overlay">
-				<div class="load-required-card">
-					<div class="load-required-icon">!</div>
-					<span class="section-kicker">Waiting for date range</span>
-					<h2>Choose a period range first</h2>
-					<p>
-						Select Start, End, and timezone above, then click <strong>Load Data</strong>
-						to display the periodical report.
-					</p>
-				</div>
-			</div>
+			<PeriodicalLoadOverlay />
 		{/if}
 	</div>
 </section>
-
-<style>
-	.periodical-page {
-		width: 100%;
-		height: 100%;
-		max-height: 100%;
-		min-height: 0;
-		padding: 14px;
-		background: var(--color-base);
-		color: var(--text-primary);
-		overflow-y: auto;
-		overflow-x: hidden;
-		box-sizing: border-box;
-	}
-
-	.periodical-page * {
-		box-sizing: border-box;
-	}
-
-	.periodical-header-card,
-	.summary-card,
-	.table-section,
-	.raw-box,
-	.data-received-card,
-	.speed-detail-grid article {
-		background: var(--color-surface);
-		border: 1px solid #d9e2ec;
-		border-radius: 0;
-		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
-	}
-
-	.periodical-header-card {
-		padding: 16px;
-		display: grid;
-		grid-template-columns: minmax(240px, 0.75fr) minmax(620px, 1.25fr);
-		align-items: center;
-		gap: 18px;
-	}
-
-	.periodical-header-copy {
-		min-width: 0;
-		max-width: 580px;
-	}
-
-	.periodical-header-filters {
-		min-width: 0;
-		display: grid;
-		justify-items: end;
-	}
-
-	.page-kicker,
-	.section-kicker {
-		display: inline-flex;
-		width: fit-content;
-		padding: 4px 9px;
-		border-radius: 999px;
-		background: var(--color-accent-muted);
-		color: #1d4ed8;
-		font-size: 10px;
-		font-weight: 900;
-		letter-spacing: 0.07em;
-		text-transform: uppercase;
-	}
-
-	.periodical-header-card h1 {
-		margin: 8px 0 0;
-		color: var(--text-primary);
-		font-size: 22px;
-		line-height: 1.2;
-		font-weight: 900;
-	}
-
-	.periodical-header-card p {
-		margin: 7px 0 0;
-		color: var(--text-secondary);
-		font-size: 12px;
-		line-height: 1.45;
-		font-weight: 700;
-	}
-
-	.header-meta {
-		min-width: 120px;
-		padding: 10px 12px;
-		border-radius: 12px;
-		background: var(--color-elevated);
-		border: 1px solid #e2e8f0;
-		text-align: right;
-	}
-
-	.header-meta span {
-		display: block;
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 900;
-		text-transform: uppercase;
-	}
-
-	.header-meta strong {
-		display: block;
-		margin-top: 5px;
-		color: var(--text-primary);
-		font-size: 14px;
-		font-weight: 900;
-	}
-
-	.filter-card {
-		width: 100%;
-		display: grid;
-		grid-template-columns: minmax(165px, 1fr) minmax(165px, 1fr) minmax(175px, 1fr) auto;
-		align-items: end;
-		gap: 10px;
-	}
-
-	.filter-card:has(label:nth-of-type(4)) {
-		grid-template-columns:
-			minmax(150px, 1fr)
-			minmax(150px, 1fr)
-			minmax(150px, 0.9fr)
-			minmax(130px, 0.75fr)
-			auto;
-	}
-
-	.filter-card label {
-		display: grid;
-		gap: 5px;
-	}
-
-	.filter-card label span {
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 900;
-		text-transform: uppercase;
-	}
-
-	.field-label-row {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 8px;
-	}
-
-	.timezone-auto-pill {
-		display: inline-flex;
-		align-items: center;
-		min-height: 18px;
-		padding: 2px 7px;
-		border: 1px solid rgba(96, 165, 250, 0.28);
-		border-radius: 999px;
-		background: rgba(37, 99, 235, 0.1);
-		color: #bfdbfe;
-		font-size: 10px;
-		font-weight: 800;
-		letter-spacing: 0;
-		text-transform: none;
-		white-space: nowrap;
-	}
-
-	.filter-card input,
-	.filter-card select {
-		height: 32px;
-		width: 100%;
-		min-width: 0;
-		border: 1px solid #cbd5e1;
-		border-radius: 0;
-		background: var(--color-surface);
-		padding: 0 9px;
-		color: var(--text-primary);
-		font-size: 12px;
-		font-weight: 700;
-		outline: none;
-	}
-
-	.filter-card input:focus,
-	.filter-card select:focus {
-		border-color: #2563eb;
-		box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
-	}
-
-	.filter-actions {
-		display: flex;
-		gap: 8px;
-		flex-wrap: nowrap;
-		justify-content: flex-end;
-	}
-
-	.primary-btn,
-	.export-btn {
-		height: 32px;
-		padding: 0 12px;
-		border: none;
-		border-radius: 0;
-		font-size: 11px;
-		font-weight: 900;
-		cursor: pointer;
-	}
-
-	.primary-btn {
-		background: #2563eb;
-		color: #ffffff;
-	}
-
-	.export-btn {
-		background: #16a34a;
-		color: #ffffff;
-	}
-
-	.primary-btn:hover:not(:disabled),
-	.export-btn:hover:not(:disabled) {
-		filter: brightness(0.96);
-	}
-
-	.primary-btn:disabled,
-	.export-btn:disabled {
-		opacity: 0.55;
-		cursor: not-allowed;
-	}
-
-	.status-box {
-		margin-top: 14px;
-		padding: 10px 12px;
-		border-radius: 10px;
-		font-size: 12px;
-		font-weight: 900;
-	}
-
-	.error-box {
-		background: var(--color-danger-muted);
-		color: #b91c1c;
-		border: 1px solid #fecaca;
-	}
-
-	.data-received-card {
-		margin-top: 14px;
-		padding: 14px 16px;
-		display: flex;
-		justify-content: space-between;
-		gap: 12px;
-		align-items: center;
-	}
-
-	.data-received-card span {
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-weight: 900;
-		text-transform: uppercase;
-	}
-
-	.data-received-card strong {
-		color: var(--text-primary);
-		font-size: 16px;
-		line-height: 1.2;
-		font-weight: 900;
-	}
-
-	.summary-grid {
-		--periodical-summary-card-min: clamp(160px, 22vw, 260px);
-		margin-top: 14px;
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--periodical-summary-card-min)), 1fr));
-		gap: 14px;
-		align-items: stretch;
-	}
-
-	.summary-card {
-		min-height: 96px;
-		padding: 16px;
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
-	}
-
-	.summary-card span {
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-weight: 900;
-		text-transform: uppercase;
-	}
-
-	.summary-card strong {
-		margin-top: 10px;
-		color: var(--text-primary);
-		font-size: 22px;
-		line-height: 1.1;
-		font-weight: 900;
-	}
-
-	.summary-card small {
-		margin-top: 8px;
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-weight: 700;
-	}
-
-	.table-section {
-		margin-top: 14px;
-		overflow: hidden;
-	}
-
-	.section-header {
-		min-height: 58px;
-		padding: 12px 14px;
-		border-bottom: 1px solid #e5edf5;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-		background: var(--color-surface);
-	}
-
-	.section-header h2 {
-		margin: 7px 0 0;
-		color: var(--text-primary);
-		font-size: 17px;
-		line-height: 1.2;
-		font-weight: 900;
-	}
-
-	.section-header > strong {
-		padding: 5px 10px;
-		border-radius: 999px;
-		background: var(--color-accent-muted);
-		border: 1px solid #bfdbfe;
-		color: #1d4ed8;
-		font-size: 11px;
-		font-weight: 900;
-		white-space: nowrap;
-	}
-
-	.rpm-source-control {
-		min-width: min(260px, 100%);
-		display: grid;
-		gap: 6px;
-	}
-
-	.rpm-source-control label {
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-	}
-
-	.rpm-source-control select {
-		width: 100%;
-		min-height: 42px;
-		padding: 0 38px 0 14px;
-		border: 1px solid var(--border-soft);
-		border-radius: 12px;
-		background: var(--color-surface);
-		color: var(--text-primary);
-		font: inherit;
-		font-weight: 700;
-		outline: none;
-	}
-
-	.rpm-source-control select:focus {
-		border-color: var(--color-accent);
-		box-shadow: 0 0 0 3px rgba(47, 110, 236, 0.18);
-	}
-
-	.table-wrapper {
-		width: 100%;
-		overflow: auto;
-	}
-
-	table {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 12px;
-	}
-
-	th {
-		background: var(--color-elevated);
-		color: var(--text-secondary);
-		font-size: 10.5px;
-		font-weight: 900;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		text-align: left;
-		padding: 10px 12px;
-		border-bottom: 1px solid #e2e8f0;
-		white-space: nowrap;
-	}
-
-	td {
-		color: var(--text-primary);
-		font-size: 12px;
-		font-weight: 700;
-		padding: 10px 12px;
-		border-bottom: 1px solid #eef2f7;
-		white-space: nowrap;
-	}
-
-	tr:hover td {
-		background: var(--color-elevated);
-	}
-
-	.total-row td {
-		background: var(--color-accent-muted);
-		color: var(--text-primary);
-		font-weight: 900;
-	}
-
-	.empty-box {
-		padding: 18px 14px;
-		color: var(--text-secondary);
-		font-size: 12px;
-		font-weight: 800;
-	}
-
-	.periodical-rpm-table-list {
-		padding: 14px;
-		display: grid;
-		grid-template-columns: minmax(0, 1fr);
-		gap: 14px;
-		align-items: start;
-		background: var(--color-elevated);
-	}
-
-	.periodical-rpm-card {
-		min-width: 0;
-		overflow: hidden;
-		background: var(--color-surface);
-		border: 1px solid #d9e2ec;
-		border-radius: 12px;
-		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
-	}
-
-	.periodical-rpm-grand-total {
-		border-top: 1px solid #e5edf5;
-	}
-
-	.periodical-rpm-matrix-wrap {
-		max-height: 520px;
-		overscroll-behavior: contain;
-	}
-
-	.periodical-rpm-matrix-wrap:focus-visible {
-		outline: 2px solid var(--color-accent, #2563eb);
-		outline-offset: -2px;
-	}
-
-	.periodical-rpm-matrix {
-		--rpm-header-height: 38px;
-		border-collapse: separate;
-		border-spacing: 0;
-	}
-
-	.periodical-rpm-matrix th,
-	.periodical-rpm-matrix td {
-		min-width: 96px;
-		text-align: center;
-		border-right: 1px solid var(--color-border-subtle, #d9e2ec);
-	}
-
-	.periodical-rpm-matrix thead th {
-		position: sticky;
-		top: 0;
-		z-index: 2;
-		height: var(--rpm-header-height);
-		padding: 8px 12px;
-		line-height: 1.2;
-		background: var(--color-elevated);
-	}
-
-	.periodical-rpm-matrix thead tr:nth-child(2) th {
-		top: var(--rpm-header-height);
-	}
-
-	.periodical-rpm-matrix .rpm-range-column {
-		position: sticky;
-		left: 0;
-		z-index: 1;
-		width: 130px;
-		min-width: 130px;
-		background: var(--color-surface);
-		text-align: left;
-	}
-
-	.periodical-rpm-matrix thead .rpm-range-column {
-		z-index: 3;
-		background: var(--color-elevated);
-	}
-
-	.periodical-rpm-matrix .rpm-metric-start {
-		border-left: 1px solid var(--color-border-subtle, #d9e2ec);
-	}
-
-	.periodical-rpm-matrix .total-row .rpm-range-column {
-		background: var(--color-accent-muted);
-	}
-
-	.periodical-rpm-matrix .total-row .rpm-total-spacer {
-		background: var(--color-surface);
-	}
-
-	.periodical-rpm-card-header {
-		min-height: 52px;
-		padding: 10px 14px;
-		border-bottom: 1px solid #e5edf5;
-		background: var(--color-surface);
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-	}
-
-	.periodical-rpm-card-header span,
-	.periodical-rpm-card-header small {
-		display: block;
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 900;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-
-	.periodical-rpm-card-header strong {
-		display: block;
-		margin-top: 3px;
-		color: var(--text-primary);
-		font-size: 15px;
-		font-weight: 900;
-	}
-
-	.periodical-rpm-card-header small {
-		flex-shrink: 0;
-		padding: 5px 10px;
-		border-radius: 999px;
-		background: var(--color-accent-muted);
-		border: 1px solid #bfdbfe;
-		color: #1d4ed8;
-	}
-
-	.fod-usage-summary {
-		padding: 12px 14px 0;
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 10px;
-		background: var(--color-elevated);
-	}
-
-	.fod-usage-summary article {
-		min-height: 68px;
-		padding: 12px 14px;
-		background: var(--color-surface);
-		border: 1px solid #d9e2ec;
-		border-radius: 10px;
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
-	}
-
-	.fod-usage-summary span,
-	.speed-detail-grid span {
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 900;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-	}
-
-	.fod-usage-summary strong,
-	.speed-detail-grid strong {
-		margin-top: 6px;
-		color: var(--text-primary);
-		font-size: 18px;
-		line-height: 1.15;
-		font-weight: 900;
-	}
-
-	.fod-total-card {
-		background: var(--color-accent-muted) !important;
-		border-color: #bfdbfe !important;
-	}
-
-	.fod-total-card strong {
-		color: #1d4ed8;
-	}
-
-	.speed-detail-grid {
-		--periodical-speed-card-min: clamp(170px, 26vw, 280px);
-		padding: 14px;
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--periodical-speed-card-min)), 1fr));
-		gap: 12px;
-		background: var(--color-elevated);
-	}
-
-	.speed-detail-grid article {
-		min-height: 80px;
-		padding: 14px;
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
-	}
-
-	.raw-box {
-		margin-top: 14px;
-		padding: 12px 14px;
-	}
-
-	.raw-box summary {
-		cursor: pointer;
-		color: #1d4ed8;
-		font-size: 12px;
-		font-weight: 900;
-	}
-
-	.raw-box pre {
-		margin-top: 12px;
-		max-height: 360px;
-		overflow: auto;
-		padding: 12px;
-		border-radius: 0;
-		background: #0f172a;
-		color: #e2e8f0;
-		font-size: 11px;
-		line-height: 1.5;
-	}
-
-	@media (max-width: 1100px) {
-		.periodical-header-card {
-			grid-template-columns: 1fr;
-			align-items: start;
-		}
-
-		.periodical-header-filters {
-			justify-items: stretch;
-		}
-
-		.filter-card,
-		.filter-card:has(label:nth-of-type(4)) {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-		}
-
-		.filter-actions {
-			grid-column: 1 / -1;
-		}
-
-		.fod-usage-summary {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-		}
-	}
-
-	@media (max-width: 760px) {
-		.periodical-page {
-			padding: 10px;
-		}
-
-		.periodical-header-card,
-		.data-received-card {
-			align-items: flex-start;
-		}
-
-		.summary-grid {
-			--periodical-summary-card-min: clamp(140px, 44vw, 220px);
-			gap: 10px;
-		}
-
-		.speed-detail-grid {
-			--periodical-speed-card-min: clamp(140px, 44vw, 220px);
-			padding: 10px;
-			gap: 10px;
-		}
-
-		.summary-card,
-		.speed-detail-grid article {
-			min-height: 76px;
-			padding: 12px;
-		}
-
-		.summary-card strong,
-		.speed-detail-grid strong {
-			font-size: clamp(15px, 4.2vw, 18px);
-		}
-
-		.fod-usage-summary {
-			grid-template-columns: 1fr;
-		}
-
-		.filter-card {
-			display: grid;
-		}
-
-		.filter-card,
-		.filter-card:has(label:nth-of-type(4)) {
-			grid-template-columns: 1fr;
-		}
-
-		.filter-card input,
-		.filter-card select {
-			min-width: 100%;
-			width: 100%;
-		}
-
-		.filter-actions {
-			grid-column: auto;
-			flex-direction: column;
-			width: 100%;
-		}
-
-		.primary-btn,
-		.export-btn {
-			width: 100%;
-		}
-	}
-
-	@media (max-width: 360px) {
-		.summary-grid,
-		.speed-detail-grid {
-			grid-template-columns: 1fr;
-		}
-	}
-</style>

@@ -25,6 +25,7 @@ export default defineConfig({
         browser: {
           enabled: true,
           provider: playwright(),
+          api: 63320,
           instances: [{
             browser: 'chromium',
             headless: true
@@ -55,6 +56,7 @@ export default defineConfig({
           enabled: true,
           headless: true,
           provider: playwright({}),
+          api: 63320,
           instances: [{
             browser: 'chromium'
           }]

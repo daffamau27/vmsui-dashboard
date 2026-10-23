@@ -5,6 +5,7 @@
 	const { Story } = defineMeta({
 		title: 'Pages/App/FleetViewPage',
 		component: FleetViewPage,
+		tags: ['autodocs'],
 		parameters: {
 			layout: 'fullscreen',
 			docs: {

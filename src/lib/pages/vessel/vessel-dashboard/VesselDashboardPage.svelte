@@ -1,7 +1,6 @@
 <script>
 	import { onDestroy, tick, untrack } from 'svelte';
 	import { browser } from '$app/environment';
-	import RpmCard from '$lib/components/RpmCard.svelte';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
 	import { getLatestCctvSnapshots, getVesselDashboard } from '$lib/api/dashboardApi.js';
 	import { getFleetAssets } from '$lib/api/fleetApi.js';
@@ -9,8 +8,15 @@
 	import { addMapTileLayer } from '$lib/utils/mapStyle.js';
 	import { addLeafletZoomAndScale } from '$lib/utils/leafletControls.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
-	import CctvSnapshotImage from '$lib/components/CctvSnapshotImage.svelte';
+	import VesselDashboardHeader from './VesselDashboardHeader.svelte';
+	import VesselDashboardCctv from './VesselDashboardCctv.svelte';
+	import VesselDashboardMap from './VesselDashboardMap.svelte';
+	import VesselDashboardInfoPanel from './VesselDashboardInfoPanel.svelte';
+	import VesselDashboardRpmPanel from './VesselDashboardRpmPanel.svelte';
+	import VesselDashboardSummary from './VesselDashboardSummary.svelte';
+	import VesselDashboardEnvironment from './VesselDashboardEnvironment.svelte';
+	import VesselDashboardFuel from './VesselDashboardFuel.svelte';
+	import './vessel-dashboard-page.css';
 	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
 	import {
 		addMapZonesToLeafletMap,
@@ -45,7 +51,7 @@
 	let dashboardRequestInFlight = false;
 	const DASHBOARD_POLL_INTERVAL_MS = 60_000;
 
-	let dashboardMapContainer;
+	let dashboardMapContainer = $state(null);
 	let dashboardMap = null;
 	let L = null;
 	let dashboardMapInitializing = false;
@@ -689,6 +695,130 @@
 				? `${formatNumber(dashboardData.totalDistance, 2, '0.00')} NM`
 				: '-'
 	});
+
+	let dashboardInfoCards = $derived([
+		{
+			key: 'latitude',
+			label: 'Latitude',
+			coordinate: {
+				value: vesselInfo.latitude === null ? '-' : formatNumber(vesselInfo.latitude, 6),
+				display: vesselInfo.latitude === null ? '-' : `${formatNumber(vesselInfo.latitude, 6)}°`
+			}
+		},
+		{
+			key: 'longitude',
+			label: 'Longitude',
+			coordinate: {
+				value: vesselInfo.longitude === null ? '-' : formatNumber(vesselInfo.longitude, 6),
+				display: vesselInfo.longitude === null ? '-' : `${formatNumber(vesselInfo.longitude, 6)}°`
+			}
+		},
+		{
+			key: 'vessel-time',
+			label: 'Vessel Time',
+			value: vesselInfo.vesselLocalTime === null ? '-' : vesselInfo.vesselLocalTime
+		},
+		{ key: 'local-time', label: 'Local Time', value: vesselInfo.localTime },
+		{
+			key: 'current-speed',
+			label: 'Current Speed',
+			value: vesselInfo.currentSpeed,
+			highlight: true
+		},
+		{
+			key: 'heading',
+			label: 'Heading',
+			value: vesselInfo.heading === null ? '-' : `${formatNumber(vesselInfo.heading, 1, '-')}°`
+		},
+		{ key: 'weather', label: 'Weather', value: vesselInfo.weatherForecast },
+		{
+			key: 'data-received',
+			label: 'Data Received',
+			value: `${dataReceivedSummary.receivedMinutes}/${dataReceivedSummary.totalMinutes} min · ${formatNumber(
+				dataReceivedSummary.percentage,
+				1,
+				'0.0'
+			)}%`
+		},
+		{
+			key: 'ocean-current',
+			label: 'Ocean Current',
+			value: oceanCurrentSummary.current
+				? `${formatNumber(oceanCurrentSummary.current.speed_kph, 1, '0.0')} kph · ${formatCurrentDirectionAngle(
+						oceanCurrentSummary.current
+					)}`
+				: '-'
+		}
+	]);
+
+	let canViewSpeedStatsTable = $derived(hasPermission('view_speed_stats_table'));
+
+	let canViewTravelDistanceTable = $derived(hasPermission('view_travel_distance_table'));
+
+	let dashboardSummaryCards = $derived([
+		...(canViewSpeedStatsTable
+			? [
+					{ key: 'top-speed', label: 'Top Speed', value: speedSummary.topSpeed },
+					{ key: 'average-speed', label: 'Average Speed', value: speedSummary.averageSpeed }
+				]
+			: []),
+		...(canViewTravelDistanceTable
+			? [{ key: 'total-distance', label: 'Total Distance', value: speedSummary.totalDistance }]
+			: [])
+	]);
+
+	let dashboardForecastDays = $derived(
+		environmentForecastDays.map((day) => ({
+			key: day.key,
+			label: day.label,
+			weatherLabel: day.weather
+				? day.key === 'today'
+					? `${formatNumber(day.weather.temp_c, 1)}°C`
+					: `${formatNumber(day.weather.temp_min_c, 1)}–${formatNumber(day.weather.temp_max_c, 1)}°C`
+				: '-',
+			weatherCondition: day.weather?.condition || '-',
+			currentLabel: day.current ? `${formatNumber(day.current.speed_kph, 1)} kph` : '-',
+			currentDirection: day.current ? formatCurrentDirectionAngle(day.current) : '-'
+		}))
+	);
+
+	let dashboardWeatherCards = $derived([
+		{
+			key: 'current',
+			label: 'Current',
+			value: weatherSummary.current ? `${formatNumber(weatherSummary.current.temp_c, 1)}°C` : '-',
+			condition: weatherSummary.current?.condition || '-'
+		},
+		{
+			key: 'tomorrow',
+			label: 'Tomorrow',
+			value: weatherSummary.tomorrow
+				? `${formatNumber(weatherSummary.tomorrow.temp_min_c, 1)}–${formatNumber(weatherSummary.tomorrow.temp_max_c, 1)}°C`
+				: '-',
+			condition: weatherSummary.tomorrow?.condition || '-'
+		},
+		{
+			key: 'day-after',
+			label: 'Day After',
+			value: weatherSummary.dayAfter
+				? `${formatNumber(weatherSummary.dayAfter.temp_min_c, 1)}–${formatNumber(weatherSummary.dayAfter.temp_max_c, 1)}°C`
+				: '-',
+			condition: weatherSummary.dayAfter?.condition || '-'
+		}
+	]);
+
+	let dashboardCurrentCards = $derived(
+		[
+			{ key: 'current', fallbackLabel: 'Today', current: oceanCurrentSummary.current },
+			{ key: 'tomorrow', fallbackLabel: 'Tomorrow', current: oceanCurrentSummary.tomorrow },
+			{ key: 'day-after', fallbackLabel: 'Day After', current: oceanCurrentSummary.dayAfter }
+		].map((item) => ({
+			key: item.key,
+			label: item.current?.label || item.fallbackLabel,
+			value: item.current ? `${formatNumber(item.current.speed_kph, 1)} kph` : '-',
+			direction: item.current ? formatCurrentDirectionAngle(item.current) : '-'
+		}))
+	);
 
 	function getDashboardEngineByConfig(configEngine) {
 		const dashboardEngines = Array.isArray(dashboardData?.engines) ? dashboardData.engines : [];
@@ -1765,10 +1895,6 @@
 
 	let canViewEngineRpmStatsTable = $derived(hasPermission('view_engine_rpm_stats_table'));
 
-	let canViewSpeedStatsTable = $derived(hasPermission('view_speed_stats_table'));
-
-	let canViewTravelDistanceTable = $derived(hasPermission('view_travel_distance_table'));
-
 	let canViewFuelConsumptionTable = $derived(hasPermission('view_fuel_consumption_table'));
 
 	let canViewFuelEcu = $derived(hasPermission('view_fuel_ecu'));
@@ -2116,16 +2242,7 @@
 </script>
 
 <section class="dashboard-content">
-	<section class="dashboard-header-card">
-		<div>
-			<span class="page-kicker">Vessel Dashboard</span>
-			<h1>{vesselInfo.vesselName}</h1>
-			<p>
-				Real-time monitoring for vessel status, position, engine RPM, weather, ocean current, and
-				daily fuel consumption.
-			</p>
-		</div>
-	</section>
+	<VesselDashboardHeader vesselName={vesselInfo.vesselName} />
 
 	{#if loading || currentUserLoading}
 		<LoadingSkeleton label="Loading vessel dashboard data" variant="vessel-dashboard" />
@@ -2143,2042 +2260,54 @@
 		</div>
 	{:else}
 		<section class="hero-grid">
-			<div class="monitoring-card cctv-section">
-				<div class="section-header">
-					<div>
-						<span class="section-kicker">CCTV Monitoring</span>
-						<h2>Latest Camera Snapshot</h2>
-					</div>
-
-					<strong>{cctvSnapshotsLoading ? 'Loading...' : `${cctvItems.length} cameras`}</strong>
-				</div>
-
-				<div class="cctv-grid" class:empty-cctv={cctvItems.length === 0 && !cctvSnapshotsLoading}>
-					{#if cctvSnapshotsLoading}
-						<div class="cctv-focus-layout">
-							<div class="cctv-box cctv-skeleton" aria-hidden="true">
-								<span></span>
-								<strong></strong>
-								<small></small>
-							</div>
-
-							<div class="cctv-thumbnail-row" aria-hidden="true">
-								{#each Array(3) as _}
-									<div class="cctv-box cctv-skeleton cctv-thumb-box">
-										<strong></strong>
-									</div>
-								{/each}
-							</div>
-						</div>
-					{:else if cctvItems.length === 0}
-						<div class="cctv-empty">
-							<div class="cctv-icon">▣</div>
-							<strong>CCTV is not available yet</strong>
-							<span
-								>{cctvSnapshotsError ||
-									'Latest snapshot is not available for this vessel yet.'}</span
-							>
-						</div>
-					{:else}
-						<div class="cctv-focus-layout">
-							{#if mainDashboardCctv}
-								<div
-									class:offline={!mainDashboardCctv.online}
-									class:has-snapshot={Boolean(mainDashboardCctv.url)}
-									class="cctv-box cctv-main-box"
-								>
-									{#if mainDashboardCctv.url}
-										<CctvSnapshotImage
-											class="cctv-snapshot-img"
-											src={mainDashboardCctv.url}
-											filePath={mainDashboardCctv.location}
-											alt={`${mainDashboardCctv.name} latest snapshot`}
-											loading="eager"
-										/>
-									{/if}
-									<div class="cctv-top">
-										<span class="camera-dot" title={mainDashboardCctv.status}></span>
-										<span class="cctv-status-text"
-											>{mainDashboardCctv.online ? 'Snapshot ready' : 'No snapshot'}</span
-										>
-									</div>
-
-									<div class="cctv-content">
-										<div class="cctv-icon">▣</div>
-										<div class="cctv-name">{mainDashboardCctv.name}</div>
-										{#if mainDashboardCctv.capturedAtText}
-											<div class="cctv-location">Captured {mainDashboardCctv.capturedAtText}</div>
-										{:else}
-											<div class="cctv-location">{mainDashboardCctv.location}</div>
-										{/if}
-										{#if mainDashboardCctv.fileSizeText}
-											<div class="cctv-file-size">{mainDashboardCctv.fileSizeText}</div>
-										{/if}
-									</div>
-								</div>
-							{/if}
-
-							{#if miniDashboardCctvItems.length}
-								<div class="cctv-thumbnail-row" aria-label="CCTV camera list">
-									{#each miniDashboardCctvItems as cctv (cctv.key)}
-										<button
-											type="button"
-											class:offline={!cctv.online}
-											class:has-snapshot={Boolean(cctv.url)}
-											class="cctv-box cctv-thumb-box"
-											onclick={() => selectDashboardCctv(cctv)}
-											title={`Show ${cctv.name}`}
-										>
-											{#if cctv.url}
-												<CctvSnapshotImage
-													class="cctv-snapshot-img"
-													src={cctv.url}
-													filePath={cctv.location}
-													alt={`${cctv.name} latest snapshot`}
-													loading="lazy"
-												/>
-											{/if}
-
-											<div class="cctv-content">
-												<div class="cctv-name">{cctv.name}</div>
-											</div>
-										</button>
-									{/each}
-								</div>
-							{/if}
-						</div>
-					{/if}
-				</div>
-			</div>
-
-			{#if canViewDailyPathMap}
-				<div class="monitoring-card map-section">
-					<div class="section-header">
-						<div>
-							<span class="section-kicker">Position</span>
-							<h2>Current Vessel Location</h2>
-						</div>
-
-						<strong>{vesselInfo.currentSpeed}</strong>
-					</div>
-
-					<div class="map-box">
-						{#if active}
-							<div class="dashboard-leaflet-map" bind:this={dashboardMapContainer}></div>
-						{/if}
-
-						{#if vesselInfo.latitude === null || vesselInfo.longitude === null}
-							<div class="dashboard-map-status">Vessel coordinates are not available yet.</div>
-						{/if}
-
-						<div class="dashboard-map-legend">
-							{#each dashboardZones as zone}
-								<span class="dashboard-zone-legend-item">
-									<i
-										class="dashboard-zone-legend-swatch"
-										style={`--zone-color: ${zone.color}; --zone-fill: ${zone.fillColor};`}
-										aria-hidden="true"
-									></i>
-									{zone.name}
-								</span>
-							{/each}
-
-							<button
-								type="button"
-								class:active-wind-toggle={showWindParticles}
-								class="wind-toggle-btn"
-								onclick={() => (showWindParticles = !showWindParticles)}
-							>
-								<span class="wind-legend-line"></span>
-								Wind: {showWindParticles ? 'On' : 'Off'}
-							</button>
-
-							<button
-								type="button"
-								class:active-current-toggle={showCurrentParticles}
-								class="current-toggle-btn"
-								onclick={() => (showCurrentParticles = !showCurrentParticles)}
-							>
-								<span class="current-legend-line"></span>
-								Current: {showCurrentParticles ? 'On' : 'Off'}
-							</button>
-						</div>
-					</div>
-				</div>
-			{:else}
-				<div class="monitoring-card permission-empty">
-					<strong>Map is not displayed</strong>
-					<span>The user does not have the view_daily_path_map permission.</span>
-				</div>
-			{/if}
+			<VesselDashboardCctv
+				items={cctvItems}
+				main={mainDashboardCctv}
+				miniItems={miniDashboardCctvItems}
+				loading={cctvSnapshotsLoading}
+				error={cctvSnapshotsError}
+				onSelect={selectDashboardCctv}
+			/>
+			<VesselDashboardMap
+				{active}
+				canViewMap={canViewDailyPathMap}
+				{vesselInfo}
+				zones={dashboardZones}
+				bind:showWindParticles
+				bind:showCurrentParticles
+				bind:mapContainer={dashboardMapContainer}
+			/>
 		</section>
 
 		<section class="info-rpm-section">
-			<section class="vessel-panel">
-				<div class="section-header">
-					<div>
-						<span class="section-kicker">Vessel Status</span>
-						<h2>{vesselInfo.vesselName}</h2>
-					</div>
-
-					<div class="online-badge" class:offline-badge={!vesselInfo.online}>
-						<span></span>
-						{vesselInfo.online ? 'Online' : 'Offline'}
-					</div>
-				</div>
-
-				<div class="vessel-info-grid">
-					<article class="compact-info-card">
-						<span class="info-label">Latitude</span>
-						<strong>
-							<CopyableCoordinate
-								value={vesselInfo.latitude === null ? '-' : formatNumber(vesselInfo.latitude, 6)}
-								display={vesselInfo.latitude === null
-									? '-'
-									: `${formatNumber(vesselInfo.latitude, 6)}°`}
-								label="latitude"
-								compact
-							/>
-						</strong>
-					</article>
-
-					<article class="compact-info-card">
-						<span class="info-label">Longitude</span>
-						<strong>
-							<CopyableCoordinate
-								value={vesselInfo.longitude === null ? '-' : formatNumber(vesselInfo.longitude, 6)}
-								display={vesselInfo.longitude === null
-									? '-'
-									: `${formatNumber(vesselInfo.longitude, 6)}°`}
-								label="longitude"
-								compact
-							/>
-						</strong>
-					</article>
-
-					<article class="compact-info-card">
-						<span class="info-label">Vessel Time</span>
-						<strong>{vesselInfo.vesselLocalTime === null ? '-' : vesselInfo.vesselLocalTime}</strong
-						>
-					</article>
-
-					<article class="compact-info-card">
-						<span class="info-label">Local Time</span>
-						<strong>{vesselInfo.localTime}</strong>
-					</article>
-
-					<article class="compact-info-card highlight">
-						<span class="info-label">Current Speed</span>
-						<strong>{vesselInfo.currentSpeed}</strong>
-					</article>
-
-					<article class="compact-info-card">
-						<span class="info-label">Heading</span>
-						<strong
-							>{vesselInfo.heading === null
-								? '-'
-								: `${formatNumber(vesselInfo.heading, 1, '-')}°`}</strong
-						>
-					</article>
-
-					<article class="compact-info-card">
-						<span class="info-label">Weather</span>
-						<strong>{vesselInfo.weatherForecast}</strong>
-					</article>
-
-					<article class="compact-info-card">
-						<span class="info-label">Data Received</span>
-						<strong
-							>{dataReceivedSummary.receivedMinutes}/{dataReceivedSummary.totalMinutes} min · {formatNumber(
-								dataReceivedSummary.percentage,
-								1,
-								'0.0'
-							)}%</strong
-						>
-					</article>
-
-					<article class="compact-info-card">
-						<span class="info-label">Ocean Current</span>
-						<strong>
-							{#if oceanCurrentSummary.current}
-								{formatNumber(oceanCurrentSummary.current.speed_kph, 1, '0.0')} kph · {formatCurrentDirectionAngle(
-									oceanCurrentSummary.current
-								)}
-							{:else}
-								-
-							{/if}
-						</strong>
-					</article>
-				</div>
-			</section>
-
-			{#if canViewEngineRpmStatsTable}
-				<section class="rpm-panel">
-					<div class="section-header">
-						<div>
-							<span class="section-kicker">Engine Monitoring</span>
-							<h2>RPM Overview</h2>
-						</div>
-
-						<strong>{rpmCards.length} engines</strong>
-					</div>
-
-					<div class="rpm-grid">
-						{#each rpmCards as card}
-							<RpmCard
-								title={card.title}
-								status={card.status}
-								lastData={card.lastData}
-								value={card.value}
-								avg={card.avg}
-								top={card.top}
-								max={2200}
-							/>
-						{/each}
-					</div>
-				</section>
-			{:else}
-				<section class="rpm-panel permission-empty">
-					<strong>RPM Overview is not displayed</strong>
-					<span>The user does not have the view_engine_rpm_stats_table permission.</span>
-				</section>
-			{/if}
+			<VesselDashboardInfoPanel
+				vesselName={vesselInfo.vesselName}
+				online={vesselInfo.online}
+				cards={dashboardInfoCards}
+			/>
+			<VesselDashboardRpmPanel visible={canViewEngineRpmStatsTable} cards={rpmCards} />
 		</section>
 
-		{#if canViewSpeedStatsTable || canViewTravelDistanceTable}
-			<section class="summary-grid">
-				{#if canViewSpeedStatsTable}
-					<article class="summary-card">
-						<span>Top Speed</span>
-						<strong>{speedSummary.topSpeed}</strong>
-					</article>
+		<VesselDashboardSummary cards={dashboardSummaryCards} />
 
-					<article class="summary-card">
-						<span>Average Speed</span>
-						<strong>{speedSummary.averageSpeed}</strong>
-					</article>
-				{/if}
+		<VesselDashboardEnvironment
+			forecastDays={dashboardForecastDays}
+			weatherCards={dashboardWeatherCards}
+			currentCards={dashboardCurrentCards}
+		/>
 
-				{#if canViewTravelDistanceTable}
-					<article class="summary-card">
-						<span>Total Distance</span>
-						<strong>{speedSummary.totalDistance}</strong>
-					</article>
-				{/if}
-			</section>
-		{/if}
-
-		<section class="environment-summary combined-environment-summary">
-			<section class="table-section environment-card">
-				<div class="section-header">
-					<div>
-						<span class="section-kicker">Environment Forecast</span>
-						<h2>Weather & Ocean Current</h2>
-					</div>
-				</div>
-
-				<div class="environment-grid">
-					{#each environmentForecastDays as day}
-						<article>
-							<span>{day.label}</span>
-
-							<div class="environment-metric">
-								<small>Weather</small>
-								<strong>
-									{#if day.weather}
-										{day.key === 'today'
-											? `${formatNumber(day.weather.temp_c, 1)}°C`
-											: `${formatNumber(day.weather.temp_min_c, 1)}–${formatNumber(day.weather.temp_max_c, 1)}°C`}
-									{:else}
-										-
-									{/if}
-								</strong>
-								<em>{day.weather?.condition || '-'}</em>
-							</div>
-
-							<div class="environment-metric">
-								<small>Current</small>
-								<strong
-									>{day.current ? `${formatNumber(day.current.speed_kph, 1)} kph` : '-'}</strong
-								>
-								<em>Direction : {day.current ? formatCurrentDirectionAngle(day.current) : '-'}</em>
-							</div>
-						</article>
-					{/each}
-				</div>
-			</section>
-		</section>
-
-		<section class="environment-summary">
-			<section class="table-section environment-card">
-				<div class="section-header">
-					<div>
-						<span class="section-kicker">Weather Forecast</span>
-						<h2>Today · Tomorrow · Day After</h2>
-					</div>
-				</div>
-
-				<div class="environment-grid">
-					<article>
-						<span>Current</span>
-						<strong
-							>{weatherSummary.current
-								? `${formatNumber(weatherSummary.current.temp_c, 1)}°C`
-								: '-'}</strong
-						>
-						<small>{weatherSummary.current?.condition || '-'}</small>
-					</article>
-
-					<article>
-						<span>Tomorrow</span>
-						<strong
-							>{weatherSummary.tomorrow
-								? `${formatNumber(weatherSummary.tomorrow.temp_min_c, 1)}–${formatNumber(weatherSummary.tomorrow.temp_max_c, 1)}°C`
-								: '-'}</strong
-						>
-						<small>{weatherSummary.tomorrow?.condition || '-'}</small>
-					</article>
-
-					<article>
-						<span>Day After</span>
-						<strong
-							>{weatherSummary.dayAfter
-								? `${formatNumber(weatherSummary.dayAfter.temp_min_c, 1)}–${formatNumber(weatherSummary.dayAfter.temp_max_c, 1)}°C`
-								: '-'}</strong
-						>
-						<small>{weatherSummary.dayAfter?.condition || '-'}</small>
-					</article>
-				</div>
-			</section>
-
-			<section class="table-section environment-card">
-				<div class="section-header">
-					<div>
-						<span class="section-kicker">Ocean Current</span>
-						<h2>Current Forecast</h2>
-					</div>
-				</div>
-
-				<div class="environment-grid">
-					<article>
-						<span>{oceanCurrentSummary.current?.label || 'Today'}</span>
-						<strong
-							>{oceanCurrentSummary.current
-								? `${formatNumber(oceanCurrentSummary.current.speed_kph, 1)} kph`
-								: '-'}</strong
-						>
-						<small
-							>{oceanCurrentSummary.current
-								? formatCurrentDirectionAngle(oceanCurrentSummary.current)
-								: '-'}</small
-						>
-					</article>
-
-					<article>
-						<span>{oceanCurrentSummary.tomorrow?.label || 'Tomorrow'}</span>
-						<strong
-							>{oceanCurrentSummary.tomorrow
-								? `${formatNumber(oceanCurrentSummary.tomorrow.speed_kph, 1)} kph`
-								: '-'}</strong
-						>
-						<small
-							>{oceanCurrentSummary.tomorrow
-								? formatCurrentDirectionAngle(oceanCurrentSummary.tomorrow)
-								: '-'}</small
-						>
-					</article>
-
-					<article>
-						<span>{oceanCurrentSummary.dayAfter?.label || 'Day After'}</span>
-						<strong
-							>{oceanCurrentSummary.dayAfter
-								? `${formatNumber(oceanCurrentSummary.dayAfter.speed_kph, 1)} kph`
-								: '-'}</strong
-						>
-						<small
-							>{oceanCurrentSummary.dayAfter
-								? formatCurrentDirectionAngle(oceanCurrentSummary.dayAfter)
-								: '-'}</small
-						>
-					</article>
-				</div>
-			</section>
-		</section>
-
-		<section class="fuel-summary">
-			<section class="table-section main-fuel-card">
-				<div class="section-header">
-					<div>
-						<span class="section-kicker">Fuel Monitoring</span>
-						<h2>Current Daily Consumption So Far</h2>
-					</div>
-				</div>
-
-				{#if canViewFuelConsumptionTable && hasVisibleFuelSource}
-					<div class="fuel-cols">
-						{#if canShowFuelEmsInternal}
-							<article class="fuel-metric">
-								<span class="fuel-label">{shouldShowVmsFuelLabel ? 'VMS' : 'EMS'}</span>
-								<strong class="fuel-value">{fuelSummary.emsInternal}</strong>
-							</article>
-						{/if}
-
-						{#if canShowFuelEmsExternal}
-							<article class="fuel-metric">
-								<span class="fuel-label">EMS</span>
-								<strong class="fuel-value">{fuelSummary.emsExternal}</strong>
-							</article>
-						{/if}
-
-						{#if canShowFuelFms}
-							<article class="fuel-metric">
-								<span class="fuel-label">FMS</span>
-								<strong class="fuel-value">{fuelSummary.fms}</strong>
-							</article>
-						{/if}
-
-						{#if canShowFuelEcu}
-							<article class="fuel-metric">
-								<span class="fuel-label">ECU</span>
-								<strong class="fuel-value">{fuelSummary.ecu}</strong>
-							</article>
-						{/if}
-					</div>
-				{:else}
-					<div class="empty-box">
-						Fuel consumption is not displayed because the view_fuel_consumption_table permission or
-						fuel source permission is not available.
-					</div>
-				{/if}
-
-				{#if canShowFodUsage}
-					<div class="fod-usage-summary">
-						<article>
-							<span>FOD</span>
-							<strong>{formatLiter(fodUsage?.accumulatedLiters || 0)}</strong>
-						</article>
-					</div>
-				{/if}
-			</section>
-
-			{#if canShowRob}
-				<section class="table-section rob-card">
-					<div class="section-header">
-						<div>
-							<span class="section-kicker">Tank Status</span>
-							<h2>Latest ROB</h2>
-						</div>
-					</div>
-
-					<div class="rob-content">
-						<span>Remaining On Board</span>
-						<strong class="rob-value">{fuelSummary.latestRob}</strong>
-					</div>
-				</section>
-			{/if}
-		</section>
+		<VesselDashboardFuel
+			canViewFuel={canViewFuelConsumptionTable}
+			{hasVisibleFuelSource}
+			canShowEmsInternal={canShowFuelEmsInternal}
+			canShowEmsExternal={canShowFuelEmsExternal}
+			canShowFms={canShowFuelFms}
+			canShowEcu={canShowFuelEcu}
+			vmsLabel={shouldShowVmsFuelLabel ? 'VMS' : 'EMS'}
+			{fuelSummary}
+			{canShowFodUsage}
+			fodLabel={formatLiter(fodUsage?.accumulatedLiters || 0)}
+			{canShowRob}
+		/>
 	{/if}
 </section>
-
-<style>
-	:global(*) {
-		box-sizing: border-box;
-	}
-
-	:global(html),
-	:global(body) {
-		margin: 0;
-		padding: 0;
-		font-family:
-			'Plus Jakarta Sans',
-			ui-sans-serif,
-			system-ui,
-			-apple-system,
-			BlinkMacSystemFont,
-			'Segoe UI',
-			sans-serif;
-		color: var(--text-primary);
-		background: var(--color-base);
-	}
-
-	button,
-	input,
-	textarea,
-	select {
-		font: inherit;
-	}
-
-	button {
-		cursor: pointer;
-	}
-
-	button:disabled {
-		cursor: not-allowed;
-		opacity: 0.55;
-	}
-
-	h1,
-	h2,
-	p {
-		margin: 0;
-	}
-
-	.dashboard-content {
-		width: 100%;
-		height: 100%;
-		max-height: 100%;
-		min-height: 0;
-		padding: 14px;
-		background: var(--color-base);
-		color: var(--text-primary);
-		overflow-y: auto;
-		overflow-x: hidden;
-	}
-
-	.dashboard-header-card,
-	.monitoring-card,
-	.vessel-panel,
-	.rpm-panel,
-	.summary-card,
-	.table-section {
-		background: var(--color-surface);
-		border: 1px solid #d9e2ec;
-		border-radius: 12px;
-		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
-		overflow: hidden;
-	}
-
-	.dashboard-header-card {
-		padding: 16px;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 16px;
-	}
-
-	.page-kicker,
-	.section-kicker {
-		display: inline-flex;
-		width: fit-content;
-		padding: 4px 9px;
-		border-radius: 999px;
-		background: var(--color-accent-muted);
-		color: #1d4ed8;
-		font-size: 10px;
-		font-weight: 900;
-		letter-spacing: 0.07em;
-		text-transform: uppercase;
-	}
-
-	.dashboard-header-card h1 {
-		margin: 8px 0 0;
-		font-size: 22px;
-		line-height: 1.2;
-		font-weight: 900;
-		color: var(--text-primary);
-	}
-
-	.dashboard-header-card p {
-		margin: 7px 0 0;
-		color: var(--text-secondary);
-		font-size: 12px;
-		line-height: 1.5;
-		font-weight: 700;
-	}
-
-	.status-box {
-		margin-top: 14px;
-		padding: 10px 12px;
-		border-radius: 10px;
-		font-size: 12px;
-		font-weight: 900;
-	}
-
-	.loading-box {
-		background: var(--color-accent-muted);
-		color: #1d4ed8;
-		border: 1px solid #bfdbfe;
-	}
-
-	.error-box {
-		background: var(--color-danger-muted);
-		color: #b91c1c;
-		border: 1px solid #fecaca;
-	}
-
-	.hero-grid {
-		display: grid;
-		grid-template-columns: minmax(330px, 440px) minmax(0, 1fr);
-		gap: 14px;
-		min-height: 430px;
-		margin-top: 14px;
-	}
-
-	.cctv-section,
-	.map-section {
-		min-width: 0;
-		min-height: 430px;
-		display: flex;
-		flex-direction: column;
-	}
-
-	.cctv-section {
-		align-self: start;
-	}
-
-	.section-header {
-		min-height: 58px;
-		padding: 12px 14px;
-		border-bottom: 1px solid #e5edf5;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-		background: var(--color-surface);
-	}
-
-	.section-header h2 {
-		margin: 7px 0 0;
-		color: var(--text-primary);
-		font-size: 17px;
-		line-height: 1.2;
-		font-weight: 900;
-	}
-
-	.section-header > strong {
-		flex-shrink: 0;
-		padding: 5px 10px;
-		border-radius: 999px;
-		background: var(--color-accent-muted);
-		border: 1px solid #bfdbfe;
-		color: #1d4ed8;
-		font-size: 11px;
-		font-weight: 900;
-		white-space: nowrap;
-	}
-
-	.cctv-grid {
-		flex: 1;
-		display: block;
-		padding: 14px;
-		background: var(--color-elevated);
-	}
-
-	.empty-cctv {
-		display: grid;
-		grid-template-columns: 1fr;
-	}
-
-	.cctv-focus-layout {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-		width: 100%;
-		min-height: 0;
-	}
-
-	.cctv-thumbnail-row {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 7px;
-		width: 100%;
-	}
-
-	.cctv-box {
-		position: relative;
-		min-height: 0;
-		aspect-ratio: 4 / 3;
-		border-radius: 12px;
-		overflow: hidden;
-		background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0)), #334155;
-		border: 1px solid rgba(255, 255, 255, 0.1);
-		color: #ffffff;
-		display: flex;
-		flex-direction: column;
-		justify-content: space-between;
-		padding: 12px;
-	}
-
-	button.cctv-box {
-		appearance: none;
-		width: 100%;
-		font: inherit;
-		text-align: left;
-		cursor: pointer;
-	}
-
-	.cctv-main-box {
-		width: 100%;
-		aspect-ratio: auto;
-		display: grid;
-		grid-template-rows: auto auto;
-		justify-content: stretch;
-		padding: 0;
-		border-radius: 12px;
-		border-color: rgba(148, 163, 184, 0.2);
-		background: #111827;
-		box-shadow: none;
-		cursor: default;
-		isolation: isolate;
-	}
-
-	.cctv-main-box.has-snapshot {
-		border-color: rgba(148, 163, 184, 0.2);
-		background: #111827;
-	}
-
-	.cctv-main-box.offline {
-		border-color: rgba(148, 163, 184, 0.24);
-		background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0)), #111827;
-	}
-
-	.cctv-main-box:not(.has-snapshot) {
-		aspect-ratio: 4 / 3;
-	}
-
-	.cctv-main-box::before,
-	.cctv-main-box::after {
-		display: none;
-	}
-
-	.cctv-main-box:hover {
-		transform: none;
-		border-color: rgba(148, 163, 184, 0.2);
-		box-shadow: none;
-	}
-
-	.cctv-thumb-box {
-		border-radius: 10px;
-		padding: 8px;
-		min-width: 0;
-	}
-
-	.cctv-thumb-box:hover {
-		border-color: rgba(96, 165, 250, 0.52);
-		filter: brightness(1.08);
-	}
-
-	.cctv-box::before {
-		content: '';
-		position: absolute;
-		inset: 0;
-		background:
-			linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
-			linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px);
-		background-size: 22px 22px;
-		opacity: 0.35;
-		z-index: 1;
-	}
-
-	.cctv-box.has-snapshot::before {
-		background: linear-gradient(
-			180deg,
-			rgba(15, 23, 42, 0.7) 0%,
-			rgba(15, 23, 42, 0.08) 42%,
-			rgba(15, 23, 42, 0.82) 100%
-		);
-		opacity: 1;
-	}
-
-	.cctv-main-box.has-snapshot::before,
-	.cctv-main-box.has-snapshot::after {
-		display: none;
-	}
-
-	:global(.cctv-snapshot-img) {
-		position: absolute;
-		inset: 0;
-		z-index: 0;
-		width: 100%;
-		height: 100%;
-		object-fit: cover;
-		transform: scale(1.01);
-	}
-
-	.cctv-main-box :global(.cctv-snapshot-img) {
-		position: relative;
-		inset: auto;
-		grid-column: 1;
-		grid-row: 1;
-		display: block;
-		width: 100%;
-		height: auto;
-		aspect-ratio: 4 / 3;
-		object-fit: cover;
-		transform: none;
-		background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0)), #4f5658;
-	}
-
-	.cctv-main-box :global(.cctv-snapshot-img)::after {
-		content: '';
-		position: absolute;
-		inset: 0;
-		z-index: 2;
-		background:
-			linear-gradient(180deg, rgba(15, 23, 42, 0.1), rgba(15, 23, 42, 0.78)),
-			linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-			linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-		background-size:
-			auto,
-			22px 22px,
-			22px 22px;
-		pointer-events: none;
-	}
-
-	.cctv-box.offline {
-		background: #64748b;
-		color: #e5e7eb;
-	}
-
-	.cctv-top,
-	.cctv-content {
-		position: relative;
-		z-index: 2;
-	}
-
-	.cctv-top {
-		display: flex;
-		align-items: center;
-		width: fit-content;
-		max-width: 100%;
-		gap: 8px;
-		padding: 7px 10px;
-		border: 1px solid rgba(191, 219, 254, 0.18);
-		border-radius: 999px;
-		background: rgba(15, 23, 42, 0.68);
-		box-shadow: 0 10px 24px rgba(2, 6, 23, 0.22);
-		backdrop-filter: blur(10px);
-	}
-
-	.cctv-main-box .cctv-top {
-		position: absolute;
-		top: 8px;
-		left: 8px;
-		z-index: 4;
-		padding: 5px 8px;
-		border-color: rgba(148, 163, 184, 0.18);
-		background: rgba(15, 23, 42, 0.74);
-		box-shadow: none;
-	}
-
-	.camera-dot {
-		width: 12px;
-		height: 12px;
-		border-radius: 999px;
-		background: #22c55e;
-		box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.14);
-	}
-
-	.offline .camera-dot {
-		background: #94a3b8;
-		box-shadow: 0 0 0 5px rgba(148, 163, 184, 0.16);
-	}
-
-	.cctv-status-text {
-		margin-left: 0;
-		color: #dbeafe;
-		font-size: 10px;
-		font-weight: 900;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
-	}
-
-	.cctv-content {
-		display: grid;
-		place-items: center;
-		text-align: center;
-		gap: 5px;
-		margin-bottom: 10px;
-	}
-
-	.cctv-box.has-snapshot .cctv-content {
-		place-items: start;
-		align-self: stretch;
-		margin: auto 0 0;
-		padding: 9px 10px;
-		border-radius: 12px;
-		background: rgba(15, 23, 42, 0.74);
-		border: 1px solid rgba(148, 163, 184, 0.18);
-		backdrop-filter: blur(8px);
-		text-align: left;
-	}
-
-	.cctv-main-box.has-snapshot .cctv-content {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		grid-row: 2;
-		align-items: center;
-		column-gap: 10px;
-		margin: 0;
-		padding: 7px 10px 8px;
-		border: 0;
-		border-radius: 0;
-		background: #111827;
-		box-shadow: none;
-		text-align: left;
-	}
-
-	.cctv-main-box:not(.has-snapshot) .cctv-content {
-		grid-row: 1 / span 2;
-		min-height: 0;
-		margin: 0;
-		padding: 18px;
-		border: 0;
-		border-radius: 0;
-		background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0)), #4f5658;
-	}
-
-	.cctv-box.has-snapshot .cctv-icon {
-		display: none;
-	}
-
-	.cctv-thumb-box .cctv-content {
-		place-items: start;
-		align-self: stretch;
-		margin: auto 0 0;
-		padding: 7px 8px;
-		border-radius: 9px;
-		background: rgba(15, 23, 42, 0.78);
-		border: 1px solid rgba(148, 163, 184, 0.14);
-		text-align: left;
-	}
-
-	.cctv-thumb-box.has-snapshot .cctv-content {
-		padding: 7px 8px;
-		border-radius: 9px;
-	}
-
-	.cctv-thumb-box .cctv-name {
-		font-size: 12px;
-		line-height: 1.2;
-	}
-
-	.cctv-icon {
-		width: 38px;
-		height: 38px;
-		border-radius: 12px;
-		background: rgba(255, 255, 255, 0.14);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		font-size: 18px;
-	}
-
-	.cctv-name {
-		font-size: 15px;
-		font-weight: 900;
-	}
-
-	.cctv-main-box .cctv-name {
-		grid-column: 1;
-		color: #f8fafc;
-		font-size: 12px;
-		line-height: 1.15;
-		font-weight: 850;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.cctv-location {
-		color: #dbe3ec;
-		font-size: 11px;
-		font-weight: 700;
-	}
-
-	.cctv-main-box .cctv-location {
-		grid-column: 1;
-		color: #cbd5e1;
-		font-size: 10px;
-		font-weight: 700;
-		line-height: 1.15;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.cctv-file-size {
-		color: #93c5fd;
-		font-size: 10px;
-		font-weight: 800;
-		letter-spacing: 0.03em;
-		text-transform: uppercase;
-	}
-
-	.cctv-main-box .cctv-file-size {
-		grid-column: 2;
-		grid-row: 1 / span 2;
-		align-self: center;
-		width: auto;
-		max-width: none;
-		padding: 0;
-		border: 0;
-		border-radius: 0;
-		background: transparent;
-		color: #93c5fd;
-		font-size: 9px;
-		line-height: 1.15;
-		white-space: nowrap;
-	}
-
-	.cctv-skeleton {
-		display: grid;
-		align-content: end;
-		gap: 10px;
-		background: #111827;
-	}
-
-	.cctv-skeleton span,
-	.cctv-skeleton strong,
-	.cctv-skeleton small {
-		position: relative;
-		z-index: 2;
-		display: block;
-		overflow: hidden;
-		border-radius: 999px;
-		background: rgba(148, 163, 184, 0.16);
-	}
-
-	.cctv-skeleton span {
-		width: 58px;
-		height: 18px;
-	}
-
-	.cctv-skeleton strong {
-		width: 68%;
-		height: 20px;
-	}
-
-	.cctv-skeleton small {
-		width: 46%;
-		height: 12px;
-	}
-
-	.cctv-skeleton span::after,
-	.cctv-skeleton strong::after,
-	.cctv-skeleton small::after {
-		content: '';
-		position: absolute;
-		inset: 0;
-		transform: translateX(-100%);
-		background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.16), transparent);
-		animation: cctv-shimmer 1.35s infinite;
-	}
-
-	@keyframes cctv-shimmer {
-		100% {
-			transform: translateX(100%);
-		}
-	}
-
-	.cctv-empty {
-		min-height: 260px;
-		border-radius: 12px;
-		background: var(--color-surface);
-		border: 1px dashed #bfdbfe;
-		color: var(--text-secondary);
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		text-align: center;
-		gap: 8px;
-		padding: 20px;
-	}
-
-	.cctv-empty .cctv-icon {
-		color: #2563eb;
-		background: var(--color-accent-muted);
-	}
-
-	.cctv-empty strong {
-		color: var(--text-primary);
-		font-size: 15px;
-		font-weight: 900;
-	}
-
-	.cctv-empty span {
-		color: var(--text-secondary);
-		font-size: 12px;
-		font-weight: 700;
-	}
-
-	.map-box {
-		flex: 1;
-		width: 100%;
-		min-height: 320px;
-		background: var(--color-elevated);
-		overflow: hidden;
-		position: relative;
-	}
-
-	.dashboard-leaflet-map {
-		width: 100%;
-		height: 100%;
-		min-height: 320px;
-		background: var(--color-elevated);
-	}
-
-	.dashboard-map-status {
-		position: absolute;
-		top: 10px;
-		left: 50%;
-		z-index: 760;
-		transform: translateX(-50%);
-		min-height: 28px;
-		display: inline-flex;
-		align-items: center;
-		padding: 0 12px;
-		border-radius: 999px;
-		background: rgba(17, 24, 39, 0.94);
-		border: 1px solid #bfdbfe;
-		color: #1d4ed8;
-		font-size: 10px;
-		font-weight: 900;
-		box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
-	}
-
-	.dashboard-map-legend {
-		position: absolute;
-		left: 8px;
-		bottom: 8px;
-		z-index: 740;
-		display: inline-flex;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 5px;
-		max-width: calc(100% - 16px);
-		padding: 5px 7px;
-		border-radius: 8px;
-		background: rgba(17, 24, 39, 0.94);
-		border: 1px solid #dbe4ef;
-		box-shadow: 0 4px 10px rgba(15, 23, 42, 0.07);
-	}
-
-	.dashboard-zone-legend-item {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		min-height: 28px;
-		color: #cbd5e1;
-		font-size: 10px;
-		font-weight: 800;
-		white-space: nowrap;
-	}
-
-	.dashboard-zone-legend-swatch {
-		width: 22px;
-		height: 16px;
-		border: 2px dashed var(--zone-color, #38bdf8);
-		border-radius: 6px;
-		background: color-mix(in srgb, var(--zone-fill, #0ea5e9) 24%, transparent);
-		flex: 0 0 auto;
-	}
-
-	.wind-legend-line,
-	.current-legend-line {
-		width: 15px;
-		height: 2px;
-		border-radius: 999px;
-		flex-shrink: 0;
-	}
-
-	.wind-legend-line {
-		background: var(--color-surface);
-		box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12);
-	}
-
-	.current-legend-line {
-		background: linear-gradient(90deg, rgba(56, 189, 248, 0.14), #38bdf8);
-		box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14);
-	}
-
-	.wind-toggle-btn,
-	.current-toggle-btn {
-		height: 21px;
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		padding: 0 7px;
-		border-radius: 999px;
-		background: var(--color-surface);
-		font-size: 8px;
-		line-height: 1;
-		font-weight: 900;
-		cursor: pointer;
-	}
-
-	.wind-toggle-btn {
-		border: 1px solid #bae6fd;
-		color: #0369a1;
-	}
-
-	.wind-toggle-btn.active-wind-toggle,
-	.wind-toggle-btn:hover {
-		background: var(--color-elevated);
-		border-color: #0ea5e9;
-	}
-
-	.current-toggle-btn {
-		border: 1px solid #bae6fd;
-		color: #075985;
-	}
-
-	.current-toggle-btn.active-current-toggle,
-	.current-toggle-btn:hover {
-		background: var(--color-elevated);
-		border-color: #38bdf8;
-	}
-
-	:global(.wind-particle-canvas),
-	:global(.current-particle-canvas) {
-		position: absolute;
-		top: 0;
-		left: 0;
-		pointer-events: none;
-	}
-
-	:global(.wind-particle-canvas) {
-		opacity: 0.9;
-		mix-blend-mode: normal;
-	}
-
-	:global(.current-particle-canvas) {
-		opacity: 0.86;
-		mix-blend-mode: screen;
-	}
-
-	:global(.dashboard-vessel-leaflet-icon) {
-		background: transparent;
-		border: none;
-	}
-
-	:global(.dashboard-vessel-marker-icon) {
-		width: 100%;
-		height: 100%;
-		object-fit: contain;
-		display: block;
-		transform-origin: center center;
-		filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.95))
-			drop-shadow(0 9px 16px rgba(15, 23, 42, 0.32));
-	}
-
-	:global(.dashboard-vessel-leaflet-icon.offline .dashboard-vessel-marker-icon) {
-		opacity: 0.68;
-		filter: grayscale(1) brightness(0.82) drop-shadow(0 0 5px rgba(15, 23, 42, 0.72))
-			drop-shadow(0 9px 16px rgba(15, 23, 42, 0.34));
-	}
-
-	:global(.dashboard-asset-leaflet-icon) {
-		background: transparent;
-		border: none;
-	}
-
-	:global(.dashboard-asset-marker-icon) {
-		width: 32px;
-		height: 32px;
-		object-fit: contain;
-		display: block;
-		filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.9))
-			drop-shadow(0 7px 12px rgba(15, 23, 42, 0.34));
-	}
-
-	:global(.dashboard-asset-boundary-circle) {
-		pointer-events: none;
-	}
-
-	:global(.dashboard-asset-leaflet-popup .leaflet-popup-content-wrapper) {
-		width: 300px;
-		background: #111827;
-		color: #f8fafc;
-		border-radius: 16px;
-		border: 1px solid rgba(148, 163, 184, 0.24);
-		box-shadow:
-			0 18px 38px rgba(2, 6, 23, 0.46),
-			0 0 0 1px rgba(255, 255, 255, 0.03) inset;
-		overflow: hidden;
-	}
-
-	:global(.dashboard-asset-leaflet-popup .leaflet-popup-content) {
-		width: 300px !important;
-		margin: 0;
-	}
-
-	:global(.dashboard-asset-leaflet-popup .leaflet-popup-tip) {
-		background: #111827;
-		border: 1px solid rgba(148, 163, 184, 0.24);
-	}
-
-	:global(.dashboard-asset-leaflet-popup .leaflet-popup-close-button) {
-		top: 10px;
-		right: 10px;
-		width: 26px;
-		height: 26px;
-		border-radius: 9px;
-		color: #cbd5e1 !important;
-		background: rgba(30, 41, 59, 0.88);
-		border: 1px solid rgba(148, 163, 184, 0.18);
-		font-size: 18px;
-		line-height: 24px;
-	}
-
-	:global(.dashboard-asset-popup) {
-		color: #f8fafc;
-	}
-
-	:global(.dashboard-asset-popup-hero) {
-		display: grid;
-		grid-template-columns: 46px minmax(0, 1fr) auto;
-		gap: 10px;
-		align-items: center;
-		padding: 14px 38px 14px 14px;
-		background: #1f2937;
-		border-bottom: 1px solid rgba(148, 163, 184, 0.16);
-	}
-
-	:global(.dashboard-asset-popup-icon) {
-		width: 42px;
-		height: 42px;
-		border-radius: 14px;
-		display: grid;
-		place-items: center;
-		background: rgba(37, 99, 235, 0.16);
-		border: 1px solid rgba(96, 165, 250, 0.28);
-	}
-
-	:global(.dashboard-asset-popup-icon img) {
-		width: 30px;
-		height: 30px;
-		object-fit: contain;
-	}
-
-	:global(.dashboard-asset-popup-heading) {
-		min-width: 0;
-	}
-
-	:global(.dashboard-asset-popup-heading span) {
-		display: block;
-		color: #60a5fa;
-		font-size: 10px;
-		font-weight: 900;
-		letter-spacing: 0.12em;
-		text-transform: uppercase;
-	}
-
-	:global(.dashboard-asset-popup-heading strong) {
-		display: block;
-		margin-top: 3px;
-		color: #f8fafc;
-		font-size: 17px;
-		line-height: 1.15;
-		font-weight: 800;
-		overflow-wrap: anywhere;
-	}
-
-	:global(.dashboard-asset-popup-hero em) {
-		padding: 5px 9px;
-		border-radius: 999px;
-		background: rgba(37, 99, 235, 0.22);
-		border: 1px solid rgba(96, 165, 250, 0.32);
-		color: #dbeafe;
-		font-size: 10px;
-		font-style: normal;
-		font-weight: 900;
-		text-transform: uppercase;
-	}
-
-	:global(.dashboard-asset-popup-grid) {
-		display: grid;
-		gap: 8px;
-		padding: 12px 14px 14px;
-		background: #111827;
-	}
-
-	:global(.dashboard-asset-popup-grid > div) {
-		min-height: 42px;
-		padding: 9px 10px;
-		border-radius: 10px;
-		background: #1f2937;
-		border: 1px solid rgba(148, 163, 184, 0.15);
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 10px;
-	}
-
-	:global(.dashboard-asset-popup-grid span) {
-		color: #94a3b8;
-		font-size: 10px;
-		font-weight: 900;
-		letter-spacing: 0.05em;
-		text-transform: uppercase;
-	}
-
-	:global(.dashboard-asset-popup-grid strong),
-	:global(.dashboard-asset-popup-grid .copyable-coordinate-value) {
-		color: #f8fafc;
-		font-size: 12px;
-		font-weight: 800;
-		text-align: right;
-	}
-
-	:global(.dashboard-asset-popup-grid .copy-coordinate-button) {
-		width: 28px;
-		height: 28px;
-		border-radius: 9px;
-		background: rgba(37, 99, 235, 0.2);
-		border: 1px solid rgba(96, 165, 250, 0.34);
-		color: #bfdbfe;
-	}
-
-	:global(.dashboard-leaflet-popup .leaflet-popup-content-wrapper) {
-		background: var(--color-surface);
-		color: var(--text-primary);
-		border-radius: 10px;
-		border: 1px solid #dbe4ef;
-		box-shadow:
-			0 9px 20px rgba(15, 23, 42, 0.14),
-			0 1px 4px rgba(15, 23, 42, 0.08);
-		overflow: hidden;
-	}
-
-	:global(.dashboard-leaflet-popup .leaflet-popup-content) {
-		margin: 0;
-		width: 215px !important;
-	}
-
-	:global(.dashboard-leaflet-popup .leaflet-popup-tip) {
-		background: var(--color-surface);
-		border: 1px solid #dbe4ef;
-	}
-
-	:global(.vms-zone-popup-wrapper .leaflet-popup-content-wrapper) {
-		border: 1px solid rgba(96, 165, 250, 0.28);
-		border-radius: 12px;
-		background: rgba(15, 23, 42, 0.94);
-		color: #f8fafc;
-		box-shadow: 0 18px 36px rgba(15, 23, 42, 0.36);
-		overflow: hidden;
-	}
-
-	:global(.vms-zone-popup-wrapper .leaflet-popup-content) {
-		margin: 0;
-		width: 180px !important;
-	}
-
-	:global(.vms-zone-popup-wrapper .leaflet-popup-tip) {
-		background: rgba(15, 23, 42, 0.94);
-	}
-
-	:global(.vms-zone-popup) {
-		display: grid;
-		gap: 5px;
-		padding: 10px 12px;
-	}
-
-	:global(.vms-zone-popup strong) {
-		color: #f8fafc;
-		font-size: 13px;
-		font-weight: 800;
-	}
-
-	:global(.vms-zone-popup span) {
-		color: #94a3b8;
-		font-size: 11px;
-		font-weight: 650;
-	}
-
-	:global(.vms-zone-tooltip) {
-		border: 1px solid rgba(96, 165, 250, 0.26);
-		border-radius: 999px;
-		background: rgba(15, 23, 42, 0.88);
-		color: #f8fafc;
-		font-size: 10px;
-		font-weight: 800;
-		box-shadow: 0 10px 20px rgba(15, 23, 42, 0.28);
-	}
-
-	:global(.dashboard-map-popup-title) {
-		padding: 8px 30px 7px 9px;
-		background:
-			linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(37, 99, 235, 0)), var(--color-elevated);
-		color: var(--text-primary);
-		font-size: 11.5px;
-		font-weight: 900;
-		line-height: 1.1;
-		border-bottom: 1px solid #e2e8f0;
-	}
-
-	:global(.dashboard-map-popup-row) {
-		display: grid;
-		grid-template-columns: 60px 1fr;
-		gap: 5px;
-		align-items: start;
-		padding: 5px 9px;
-		border-bottom: 1px solid #eef2f7;
-	}
-
-	:global(.dashboard-map-popup-row span) {
-		color: var(--text-secondary);
-		font-size: 8px;
-		font-weight: 800;
-	}
-
-	:global(.dashboard-map-popup-row strong) {
-		color: var(--text-primary);
-		font-size: 8.8px;
-		line-height: 1.25;
-		font-weight: 900;
-		text-align: right;
-	}
-
-	:global(.leaflet-control-attribution) {
-		border-radius: 8px 0 0 0;
-		background: rgba(17, 24, 39, 0.94) !important;
-		color: var(--text-secondary) !important;
-		font-size: 8px !important;
-		font-weight: 700;
-		backdrop-filter: blur(8px);
-	}
-
-	:global(.leaflet-control-attribution a) {
-		color: #2563eb !important;
-		font-weight: 800;
-	}
-
-	.permission-empty {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		gap: 8px;
-		min-height: 220px;
-		padding: 20px;
-		text-align: center;
-		color: var(--text-secondary);
-	}
-
-	.permission-empty strong {
-		color: var(--text-primary);
-		font-size: 15px;
-		font-weight: 900;
-	}
-
-	.permission-empty span {
-		color: var(--text-secondary);
-		font-size: 12px;
-		font-weight: 700;
-	}
-
-	.info-rpm-section {
-		display: grid;
-		grid-template-columns: minmax(420px, 0.9fr) minmax(540px, 1.1fr);
-		gap: 14px;
-		margin-top: 14px;
-		align-items: stretch;
-	}
-
-	.vessel-panel,
-	.rpm-panel {
-		min-width: 0;
-	}
-
-	.vessel-info-grid {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 10px;
-		padding: 14px;
-		background: var(--color-elevated);
-	}
-
-	.compact-info-card {
-		min-height: 72px;
-		padding: 12px;
-		border: 1px solid #d9e2ec;
-		border-radius: 10px;
-		background: var(--color-surface);
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
-	}
-
-	.compact-info-card.highlight {
-		border-color: #bfdbfe;
-		background: var(--color-accent-muted);
-	}
-
-	.info-label {
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 900;
-		letter-spacing: 0.05em;
-		text-transform: uppercase;
-	}
-
-	.compact-info-card strong {
-		display: block;
-		margin-top: 7px;
-		color: var(--text-primary);
-		font-size: 13px;
-		line-height: 1.25;
-		font-weight: 900;
-		word-break: break-word;
-	}
-
-	.compact-info-card.highlight strong {
-		color: #1d4ed8;
-		font-size: 20px;
-	}
-
-	.online-badge {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 7px;
-		min-height: 30px;
-		padding: 0 11px;
-		border-radius: 999px;
-		background: var(--color-success-muted);
-		border: 1px solid #bbf7d0;
-		color: #047857;
-		font-size: 12px;
-		font-weight: 900;
-		white-space: nowrap;
-	}
-
-	.online-badge.offline-badge {
-		background: var(--color-elevated);
-		border-color: #cbd5e1;
-		color: var(--text-secondary);
-	}
-
-	.online-badge span {
-		width: 8px;
-		height: 8px;
-		border-radius: 999px;
-		background: #10b981;
-	}
-
-	.online-badge.offline-badge span {
-		background: #94a3b8;
-	}
-
-	.rpm-grid {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(180px, 1fr));
-		gap: 10px;
-		padding: 14px;
-		background: var(--color-elevated);
-		min-width: 0;
-	}
-
-	.summary-grid {
-		margin-top: 14px;
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 14px;
-	}
-
-	.summary-card {
-		min-height: 96px;
-		padding: 16px;
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
-	}
-
-	.summary-card span {
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-weight: 900;
-		text-transform: uppercase;
-	}
-
-	.summary-card strong {
-		margin-top: 10px;
-		color: var(--text-primary);
-		font-size: 22px;
-		line-height: 1.1;
-		font-weight: 900;
-	}
-
-	.environment-summary {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 14px;
-		margin-top: 14px;
-	}
-
-	.environment-summary:not(.combined-environment-summary) {
-		display: none;
-	}
-
-	.combined-environment-summary {
-		grid-template-columns: minmax(0, 1fr);
-	}
-
-	.environment-grid {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 10px;
-		padding: 14px;
-		background: var(--color-elevated);
-	}
-
-	.environment-grid article {
-		min-height: 82px;
-		padding: 12px;
-		border-radius: 10px;
-		background: var(--color-surface);
-		border: 1px solid #d9e2ec;
-	}
-
-	.combined-environment-summary .environment-grid article {
-		display: grid;
-		gap: 12px;
-	}
-
-	.environment-metric {
-		display: grid;
-		gap: 5px;
-		padding-top: 10px;
-		border-top: 1px solid rgba(148, 163, 184, 0.18);
-	}
-
-	.environment-metric small {
-		margin-top: 0;
-	}
-
-	.environment-metric:first-of-type {
-		border-top: 0;
-		padding-top: 0;
-	}
-
-	.environment-grid span,
-	.environment-grid small {
-		display: block;
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 900;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-	}
-
-	.environment-grid strong {
-		display: block;
-		margin-top: 9px;
-		color: var(--text-primary);
-		font-size: 17px;
-		line-height: 1.1;
-		font-weight: 900;
-	}
-
-	.environment-grid small {
-		margin-top: 8px;
-		text-transform: none;
-		letter-spacing: 0;
-		font-size: 11px;
-	}
-
-	.environment-grid em {
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-style: normal;
-		font-weight: 700;
-	}
-
-	.fuel-summary {
-		display: grid;
-		grid-template-columns: 1.45fr 0.85fr;
-		gap: 14px;
-		margin-top: 14px;
-	}
-
-	.fuel-cols {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 12px;
-		padding: 14px;
-		background: var(--color-elevated);
-	}
-
-	.fuel-metric {
-		min-height: 92px;
-		padding: 14px;
-		border-radius: 10px;
-		border: 1px solid #d9e2ec;
-		background: var(--color-surface);
-	}
-
-	.fuel-label {
-		display: block;
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-weight: 900;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-	}
-
-	.fuel-value {
-		display: block;
-		margin-top: 12px;
-		color: var(--text-primary);
-		font-size: 24px;
-		font-weight: 900;
-		line-height: 1.1;
-	}
-
-	.empty-box {
-		padding: 18px 14px;
-		color: var(--text-secondary);
-		background: var(--color-elevated);
-		font-size: 12px;
-		font-weight: 800;
-	}
-
-	.fod-usage-summary {
-		padding: 0 14px 14px;
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 10px;
-		background: var(--color-elevated);
-	}
-
-	.fod-usage-summary article {
-		min-height: 68px;
-		padding: 12px 14px;
-		background: var(--color-surface);
-		border: 1px solid #d9e2ec;
-		border-radius: 10px;
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
-	}
-
-	.fod-usage-summary span {
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 900;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-	}
-
-	.fod-usage-summary strong {
-		margin-top: 6px;
-		color: var(--text-primary);
-		font-size: 18px;
-		font-weight: 900;
-	}
-
-	.fod-total-card {
-		background: var(--color-accent-muted) !important;
-		border-color: #bfdbfe !important;
-	}
-
-	.fod-total-card strong {
-		color: #1d4ed8;
-	}
-
-	.rob-card {
-		min-height: 180px;
-	}
-
-	.rob-content {
-		padding: 18px 16px;
-		background: var(--color-elevated);
-	}
-
-	.rob-content span {
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-weight: 900;
-		text-transform: uppercase;
-	}
-
-	.rob-value {
-		display: block;
-		margin-top: 14px;
-		color: #1d4ed8;
-		font-size: 30px;
-		line-height: 1;
-		font-weight: 900;
-	}
-
-	@media (max-width: 1100px) {
-		.hero-grid,
-		.info-rpm-section,
-		.environment-summary,
-		.fuel-summary {
-			grid-template-columns: 1fr;
-		}
-
-		.hero-grid,
-		.cctv-section,
-		.map-section {
-			min-height: auto;
-		}
-
-		.map-box {
-			height: 320px;
-			flex: none;
-		}
-	}
-
-	@media (max-width: 780px) {
-		.dashboard-content {
-			padding: 10px;
-		}
-
-		.dashboard-header-card,
-		.section-header {
-			flex-direction: column;
-			align-items: flex-start;
-		}
-
-		.vessel-info-grid,
-		.rpm-grid,
-		.summary-grid,
-		.environment-grid,
-		.fuel-cols,
-		.fod-usage-summary {
-			grid-template-columns: 1fr;
-		}
-
-		.cctv-box {
-			min-height: 0;
-		}
-
-		.cctv-grid {
-			padding: 10px;
-		}
-
-		.cctv-thumbnail-row {
-			gap: 6px;
-		}
-
-		.cctv-thumb-box {
-			border-radius: 9px;
-			padding: 6px;
-		}
-
-		.cctv-thumb-box .cctv-name {
-			font-size: 11px;
-		}
-
-		.cctv-main-box.has-snapshot .cctv-content {
-			grid-template-columns: 1fr;
-			gap: 5px;
-			padding: 10px 12px;
-		}
-
-		.cctv-main-box .cctv-file-size {
-			grid-column: 1;
-			grid-row: auto;
-			justify-self: start;
-		}
-
-		.summary-card {
-			min-height: 88px;
-		}
-	}
-</style>
