@@ -45,6 +45,15 @@
 	let lastPlaybackToggleAt = 0;
 	let playbackSpeedMultiplier = $state(1);
 	let playbackDirection = $state(1);
+	let isTraceFullscreen = $state(false);
+	let traceRoot = $state(null);
+	let fullscreenPending = $state(false);
+	let fullscreenError = $state('');
+	let fullscreenCctvOpen = $state(false);
+	let bottomPanelHeight = $state(0);
+	let mapControlsBottom = $state(46);
+	let showCctvTimeline = $derived(!isTraceFullscreen || fullscreenCctvOpen);
+	let destroyed = false;
 
 	let startDateTime = $state('');
 	let endDateTime = $state('');
@@ -2510,12 +2519,63 @@
 		if (event.target === event.currentTarget) closeMotionVideo();
 	}
 
+	function syncTraceFullscreen() {
+		const nextFullscreen = Boolean(traceRoot?.matches(':fullscreen'));
+		if (nextFullscreen && !isTraceFullscreen) setFullscreenCctvOpen(false);
+		isTraceFullscreen = nextFullscreen;
+	}
+
+	function setFullscreenCctvOpen(open) {
+		fullscreenCctvOpen = open;
+		if (!open) activeTraceMarkKey = '';
+	}
+
+	async function exitTraceFullscreen() {
+		if (!traceRoot?.matches(':fullscreen') || !document.fullscreenElement) return;
+		try {
+			await document.exitFullscreen();
+		} catch {
+			if (!destroyed) fullscreenError = 'Unable to exit fullscreen. Press Esc to leave fullscreen.';
+		}
+	}
+
+	async function toggleTraceFullscreen() {
+		if (fullscreenPending) return;
+		fullscreenError = '';
+		if (isTraceFullscreen) {
+			await exitTraceFullscreen();
+			return;
+		}
+		if (!traceRoot?.requestFullscreen || !document.fullscreenEnabled) {
+			fullscreenError = 'Fullscreen is unavailable in this browser or embedded view.';
+			return;
+		}
+		fullscreenPending = true;
+		try {
+			// Request native browser fullscreen directly from the user's click.
+			await traceRoot.requestFullscreen({ navigationUI: 'hide' });
+			if (!active || destroyed) await exitTraceFullscreen();
+		} catch {
+			if (!destroyed) {
+				fullscreenError =
+					'Could not enter fullscreen. Please try again or check your browser permissions.';
+			}
+		} finally {
+			if (!destroyed) fullscreenPending = false;
+		}
+	}
+
 	function handleTraceWindowKeydown(event) {
 		if (event.key !== 'Escape') return;
 		document.querySelector('.timeline-camera-filter[open]')?.removeAttribute('open');
 
 		if (motionVideoOpen) {
 			closeMotionVideo();
+			return;
+		}
+
+		if (isTraceFullscreen) {
+			void exitTraceFullscreen();
 			return;
 		}
 
@@ -2595,10 +2655,36 @@
 	}
 
 	onDestroy(() => {
+		destroyed = true;
+		void exitTraceFullscreen();
 		clearPlaybackInterval('destroy');
 		cctvSnapshotRequestId += 1;
 		cctvImageBuffer.clear();
 		motionVideoRequestId += 1;
+	});
+
+	$effect(() => {
+		if (!isTraceFullscreen || !traceRoot) return;
+		const root = traceRoot;
+		let resizeObserver;
+		const mutationObserver = new MutationObserver(observeMapControls);
+		function observeMapControls() {
+			const controls = root.querySelector('.map-panel .leaflet-top.leaflet-left');
+			if (!controls) return;
+			mutationObserver.disconnect();
+			const update = () => {
+				mapControlsBottom = controls.getBoundingClientRect().bottom - root.getBoundingClientRect().top;
+			};
+			resizeObserver = new ResizeObserver(update);
+			resizeObserver.observe(controls);
+			update();
+		}
+		mutationObserver.observe(root, { childList: true, subtree: true });
+		observeMapControls();
+		return () => {
+			mutationObserver.disconnect();
+			resizeObserver?.disconnect();
+		};
 	});
 
 	$effect(() => {
@@ -2635,6 +2721,7 @@
 		if (!active) {
 			stopPlayback('inactive-page');
 			if (motionVideoOpen) closeMotionVideo();
+			if (isTraceFullscreen) void exitTraceFullscreen();
 		}
 	});
 
@@ -2674,8 +2761,47 @@
 </script>
 
 <svelte:window onkeydown={handleTraceWindowKeydown} onclick={handleTraceWindowClick} />
+<svelte:document onfullscreenchange={syncTraceFullscreen} />
 
-<section class="trace-root page-content">
+<section
+	class="trace-root page-content"
+	class:trace-fullscreen={isTraceFullscreen}
+	class:fullscreen-cctv-hidden={isTraceFullscreen && !fullscreenCctvOpen}
+	style:--trace-dock-height={`${bottomPanelHeight}px`}
+	style:--trace-map-controls-bottom={`${mapControlsBottom}px`}
+	bind:this={traceRoot}
+>
+	{#if fullscreenError}
+		<div class="trace-fullscreen-error" role="alert">
+			<span>{fullscreenError}</span>
+			<button
+				type="button"
+				aria-label="Dismiss fullscreen error"
+				onclick={() => (fullscreenError = '')}>&times;</button
+			>
+		</div>
+	{/if}
+	{#if isTraceFullscreen}
+		<button
+			type="button"
+			class="trace-fullscreen-cctv-toggle trace-floating-control"
+			aria-expanded={fullscreenCctvOpen}
+			aria-controls="trace-floating-cctv"
+			onclick={() => setFullscreenCctvOpen(!fullscreenCctvOpen)}
+		>{fullscreenCctvOpen ? 'Hide CCTV' : 'Show CCTV'}</button
+		>
+		<button
+			type="button"
+			class="trace-fullscreen-exit trace-floating-control"
+			onclick={exitTraceFullscreen}
+			aria-label="Exit fullscreen"
+			title="Exit fullscreen (Esc)"
+		>
+			<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+				<path d="M9 3v6H3m18 0h-6V3M3 15h6v6m6 0v-6h6" />
+			</svg>
+		</button>
+	{/if}
 	<section class="trace-viewport">
 		<TraceHeader
 			vesselName={vesselInfo.vesselName}
@@ -2713,6 +2839,8 @@
 			{:else}
 				<section class="main-monitor-grid">
 					<TraceCctv
+						panelId="trace-floating-cctv"
+						onClose={isTraceFullscreen ? () => setFullscreenCctvOpen(false) : null}
 						mainPanel={traceCctvMainView}
 						miniPanels={traceCctvMiniView}
 						error={cctvSnapshotsError}
@@ -2736,10 +2864,12 @@
 							!isValidTraceCoordinate(vesselInfo.latitude, vesselInfo.longitude)
 						)}
 						usingPreviousPosition={activePoint.isPositionCarriedForward}
+						isFullscreen={isTraceFullscreen}
+						onToggleFullscreen={toggleTraceFullscreen}
 					/>
 				</section>
 
-				<section class="bottom-panel">
+				<section class="bottom-panel" bind:clientHeight={bottomPanelHeight}>
 					<TracePlayback
 						{isPlaying}
 						direction={playbackDirection}
@@ -2752,6 +2882,8 @@
 						activeMarkKey={activeTraceMarkKey}
 						cameraOptions={traceMarkCameraOptions}
 						selectedCameraKeys={selectedTraceMarkCameraKeys}
+						showCameraFilter={showCctvTimeline}
+						showCameraMarks={showCctvTimeline}
 						progress={timelineProgress}
 						timeLabel={activeTimelineLabel}
 						sourceLabel={activeTimelineSourceLabel}

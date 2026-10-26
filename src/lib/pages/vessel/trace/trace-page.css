@@ -883,6 +883,12 @@
 		gap: 7px;
 	}
 
+	.playback-main {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+	}
+
 	.speed-controls {
 		position: relative;
 		display: inline-flex;
@@ -1992,7 +1998,31 @@
 
 		.playback-controls {
 			grid-row: 1;
-			flex-wrap: wrap;
+			display: grid;
+			grid-template-areas:
+				'main main main'
+				'prev speed next';
+			grid-template-columns: auto minmax(0, auto) auto;
+			justify-content: center;
+			justify-items: center;
+			gap: 7px;
+		}
+
+		.playback-main {
+			grid-area: main;
+			justify-content: center;
+		}
+
+		.playback-controls .step-btn:first-child {
+			grid-area: prev;
+		}
+
+		.playback-controls .speed-controls {
+			grid-area: speed;
+		}
+
+		.playback-controls .step-btn:last-child {
+			grid-area: next;
 		}
 
 		.timeline-shell {
@@ -2001,6 +2031,8 @@
 
 		.timeline-camera-filter {
 			grid-row: 3;
+			width: 100%;
+			max-width: 100%;
 		}
 
 		.timeline-time {
@@ -2067,6 +2099,610 @@
 
 		.coordinate-badge {
 			display: none;
+		}
+
+		.vms-map-controls .vms-scale-control {
+			min-width: 0;
+			padding: 4px 6px;
+		}
+	}
+
+	&.trace-fullscreen {
+		--trace-floating-gap: 24px;
+		--trace-cctv-top: calc(var(--trace-map-controls-bottom, 46px) + 58px);
+		position: fixed;
+		inset: 0;
+		z-index: 2000;
+		width: 100%;
+		height: 100%;
+		max-width: none;
+		max-height: none;
+		margin: 0;
+		padding: 0;
+		box-sizing: border-box;
+		overflow: hidden;
+		transform: none;
+		background: var(--color-base);
+	}
+
+	&.trace-fullscreen .trace-viewport {
+		position: absolute;
+		inset: 0;
+		height: 100%;
+		min-height: 0;
+		padding: 0;
+		display: block;
+		overflow: hidden;
+	}
+
+	&.trace-fullscreen .trace-header-card,
+	&.trace-fullscreen .map-header {
+		display: none;
+	}
+
+	&.trace-fullscreen .trace-load-required-area {
+		position: absolute;
+		inset: 0;
+		display: block;
+		height: 100%;
+		min-height: 0;
+		margin-top: 0;
+	}
+
+	&.trace-fullscreen .main-monitor-grid {
+		position: absolute;
+		inset: 0;
+		min-height: 0;
+		display: block;
+	}
+
+	&.trace-fullscreen .monitor-card.cctv-card {
+		position: absolute;
+		top: calc(var(--trace-cctv-top) + env(safe-area-inset-top, 0px));
+		left: calc(var(--trace-floating-gap) + env(safe-area-inset-left, 0px));
+		z-index: 800;
+		width: clamp(280px, 30vw, 440px);
+		max-width: calc(100% - var(--trace-floating-gap) * 2);
+		max-height: min(
+			55dvh,
+			calc(
+				100dvh - var(--trace-dock-height) - var(--trace-floating-gap) * 2 - var(--trace-cctv-top) -
+					var(--trace-legend-clearance, 0px)
+			)
+		);
+		border: 1px solid rgba(148, 163, 184, 0.28);
+		border-radius: 14px;
+		box-shadow: 0 16px 48px rgba(0, 0, 0, 0.38);
+		overflow: hidden;
+	}
+
+	&.trace-fullscreen.fullscreen-cctv-hidden .cctv-card {
+		display: none;
+	}
+
+	&.trace-fullscreen .cctv-card .card-header {
+		flex: 0 0 auto;
+	}
+
+	&.trace-fullscreen .cctv-card .card-header > div {
+		min-width: 0;
+	}
+
+	&.trace-fullscreen .cctv-layout {
+		min-height: 0;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+
+	&.trace-fullscreen .cctv-focus-layout {
+		flex: 0 0 auto;
+		height: auto;
+		overflow: visible;
+	}
+
+	&.trace-fullscreen .cctv-camera-main .cctv-camera-frame {
+		min-height: 0;
+	}
+
+	&.trace-fullscreen .cctv-thumbnail-row {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
+
+	&.trace-fullscreen .map-card {
+		height: 100%;
+		border: 0;
+	}
+
+	&.trace-fullscreen .map-panel,
+	&.trace-fullscreen .map-panel .vessel-map-root,
+	&.trace-fullscreen .map-panel .vessel-map-shell {
+		height: 100%;
+		min-height: 0;
+	}
+
+	&.trace-fullscreen:fullscreen .bottom-panel {
+		position: absolute;
+		left: calc(var(--trace-floating-gap) + env(safe-area-inset-left, 0px));
+		right: calc(var(--trace-floating-gap) + env(safe-area-inset-right, 0px));
+		bottom: calc(var(--trace-floating-gap) + env(safe-area-inset-bottom, 0px));
+		width: auto;
+		min-width: 0;
+		max-width: none;
+		grid-template-columns: minmax(0, 1fr);
+		margin-inline: auto;
+		gap: 20px;
+		background: transparent !important;
+		border: 0;
+		box-shadow: none;
+		pointer-events: none;
+	}
+
+	&.trace-fullscreen:fullscreen .playback-card,
+	&.trace-fullscreen:fullscreen .bottom-data-grid {
+		width: 100%;
+		min-width: 0;
+		max-width: 100%;
+		pointer-events: auto;
+		border: 1px solid rgba(148, 163, 184, 0.35) !important;
+		border-radius: 20px !important;
+		background: rgba(15, 23, 42, 0.62) !important;
+		box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
+		backdrop-filter: blur(12px);
+	}
+
+	&.trace-fullscreen .bottom-data-grid {
+		display: flex;
+		flex-direction: column;
+		max-height: min(280px, 34dvh);
+		padding: 8px;
+		gap: 8px;
+		overflow: auto;
+		overscroll-behavior: contain;
+	}
+
+	&.trace-fullscreen .timeline-time {
+		min-width: 0;
+		white-space: normal;
+		overflow-wrap: anywhere;
+	}
+
+	&.trace-fullscreen .compact-info-grid {
+		display: flex;
+		flex: 0 0 auto;
+		overflow-x: auto;
+		overflow-y: hidden;
+		min-height: 85px;
+		max-height: 85px;
+		gap: 8px;
+		scroll-snap-type: x proximity;
+		-webkit-overflow-scrolling: touch;
+		scrollbar-width: thin;
+	}
+
+	&.trace-fullscreen .info-card {
+		flex: 0 0 110px;
+		height: 85px;
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		align-items: center;
+		gap: 5px;
+		padding: 8px 6px;
+		scroll-snap-align: start;
+		border-radius: 10px;
+	}
+
+	&.trace-fullscreen .info-card strong {
+		font-size: 15px;
+	}
+
+	&.trace-fullscreen .rpm-panel {
+		flex: 0 0 auto;
+		grid-template-rows: auto auto;
+		overflow: visible;
+		padding: 0;
+		gap: 6px;
+	}
+
+	&.trace-fullscreen .rpm-header {
+		min-height: 18px;
+		padding: 0 4px;
+	}
+
+	&.trace-fullscreen .rpm-header span {
+		font-size: 11px;
+	}
+
+	&.trace-fullscreen .rpm-header strong {
+		font-size: 10px;
+	}
+
+	&.trace-fullscreen .rpm-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(105px, 100%), 1fr));
+		gap: 6px;
+		min-height: 0;
+		max-height: none;
+		overflow: visible;
+	}
+
+	&.trace-fullscreen .rpm-card {
+		min-width: 0;
+		min-height: 54px;
+		height: auto;
+		display: grid;
+		align-items: center;
+		padding: 7px 8px;
+		border-radius: 14px;
+	}
+
+	&.trace-fullscreen .rpm-card span {
+		display: block;
+		white-space: normal;
+		overflow: visible;
+		overflow-wrap: anywhere;
+		line-height: 1.3;
+	}
+
+	&.trace-fullscreen .rpm-card strong {
+		font-size: 11px;
+		color: #93c5fd;
+	}
+
+	&.trace-fullscreen:fullscreen .info-card,
+	&.trace-fullscreen:fullscreen .rpm-panel,
+	&.trace-fullscreen:fullscreen .rpm-card {
+		background: rgba(15, 23, 42, 0.16) !important;
+		border-color: rgba(148, 163, 184, 0.22) !important;
+		border-radius: 12px !important;
+		box-shadow: none;
+	}
+
+	.trace-fullscreen-cctv-toggle {
+		position: absolute;
+		top: calc(var(--trace-map-controls-bottom, 46px) + 12px);
+		left: calc(var(--trace-floating-gap, 24px) + env(safe-area-inset-left, 0px));
+		z-index: 1500;
+	}
+
+	.trace-fullscreen-exit {
+		position: absolute;
+		right: calc(var(--trace-floating-gap, 24px) + env(safe-area-inset-right, 0px));
+		bottom: calc(var(--trace-floating-gap, 24px) + env(safe-area-inset-bottom, 0px));
+		z-index: 1500;
+		display: grid;
+		place-items: center;
+		width: 44px;
+		height: 44px;
+	}
+
+	.trace-floating-control,
+	.trace-cctv-close {
+		min-height: 34px;
+		padding: 7px 12px;
+		border: 1px solid rgba(148, 163, 184, 0.35);
+		border-radius: 10px;
+		background: rgba(15, 23, 42, 0.92);
+		color: #f1f5f9;
+		font-size: 11px;
+		font-weight: 800;
+		cursor: pointer;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+	}
+
+	&.trace-fullscreen:fullscreen .trace-floating-control {
+		border-radius: 12px !important;
+	}
+
+	.trace-fullscreen-exit {
+		padding: 0;
+	}
+
+	.trace-cctv-close {
+		flex: 0 0 auto;
+		width: 30px;
+		min-height: 30px;
+		padding: 0;
+		font-size: 20px;
+	}
+
+	.trace-floating-control:hover,
+	.trace-cctv-close:hover {
+		background: #1e3a5f;
+	}
+
+	.trace-floating-control:focus-visible,
+	.trace-cctv-close:focus-visible {
+		outline: 2px solid #60a5fa;
+		outline-offset: 3px;
+	}
+
+	.trace-fullscreen-error {
+		position: fixed;
+		top: 80px;
+		right: 24px;
+		z-index: 50000;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		max-width: min(420px, calc(100vw - 48px));
+		padding: 12px 16px;
+		border: 1px solid #fca5a5;
+		border-radius: 12px;
+		background: #fff1f2;
+		color: #881337;
+		font-size: 13px;
+		box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+	}
+
+	.trace-fullscreen-error button {
+		padding: 4px;
+		border: 0;
+		background: transparent;
+		color: inherit;
+		font-size: 20px;
+		cursor: pointer;
+	}
+
+	@media (max-width: 760px), (max-height: 500px) {
+		&.trace-fullscreen {
+			--trace-floating-gap: 12px;
+		}
+
+		&.trace-fullscreen:fullscreen .bottom-panel {
+			gap: 16px;
+		}
+
+		&.trace-fullscreen .playback-card {
+			gap: 6px;
+			padding: 6px 8px;
+		}
+
+		&.trace-fullscreen .playback-main,
+		&.trace-fullscreen .playback-controls {
+			gap: 6px;
+		}
+
+		&.trace-fullscreen .monitor-card.cctv-card {
+			width: 240px;
+		}
+	}
+
+	@media (max-width: 760px) {
+		&.trace-fullscreen:fullscreen .bottom-panel {
+			gap: 12px;
+			right: calc(var(--trace-floating-gap, 12px) + env(safe-area-inset-right, 0px));
+		}
+
+		&.trace-fullscreen .bottom-data-grid {
+			display: flex;
+			flex-direction: column;
+			max-height: min(280px, 34dvh);
+			padding: 6px 8px;
+			gap: 5px;
+			overflow: auto;
+		}
+
+		&.trace-fullscreen .compact-info-grid {
+			display: flex;
+			overflow-x: auto;
+			overflow-y: hidden;
+			min-height: 74px;
+			max-height: 74px;
+			gap: 8px;
+			scroll-snap-type: x proximity;
+			-webkit-overflow-scrolling: touch;
+			scrollbar-width: none;
+		}
+
+		&.trace-fullscreen .compact-info-grid::-webkit-scrollbar {
+			display: none;
+		}
+
+		&.trace-fullscreen .info-card {
+			flex: 0 0 110px;
+			height: 70px;
+			display: flex;
+			flex-direction: column;
+			justify-content: center;
+			align-items: center;
+			gap: 5px;
+			padding: 6px;
+			scroll-snap-align: start;
+			border-radius: 10px;
+		}
+
+		&.trace-fullscreen .info-card span {
+			font-size: 9px;
+			letter-spacing: 0.03em;
+		}
+
+		&.trace-fullscreen .info-card strong {
+			font-size: 15px;
+			line-height: 1.1;
+		}
+
+		&.trace-fullscreen .rpm-panel {
+			gap: 4px;
+			padding: 0;
+		}
+
+		&.trace-fullscreen .rpm-header {
+			min-height: 16px;
+			padding: 0 4px;
+		}
+
+		&.trace-fullscreen .rpm-header span {
+			font-size: 10px;
+		}
+
+		&.trace-fullscreen .rpm-header strong {
+			font-size: 9px;
+		}
+
+		&.trace-fullscreen .rpm-grid {
+			display: grid;
+			gap: 6px;
+			min-height: 0;
+			max-height: none;
+		}
+
+		&.trace-fullscreen .rpm-card {
+			min-width: 0;
+			height: auto;
+			display: grid;
+			align-items: center;
+			padding: 7px 6px;
+			border-radius: 13px;
+			background: rgba(37, 99, 235, 0.18);
+			border: 1px solid rgba(96, 165, 250, 0.35);
+		}
+
+		&.trace-fullscreen .rpm-card span {
+			display: block;
+		}
+
+		&.trace-fullscreen .rpm-card strong {
+			font-size: 11px;
+			color: #93c5fd;
+		}
+
+		&.trace-fullscreen .timeline-time span {
+			display: none;
+		}
+
+		&.trace-fullscreen .trace-fullscreen-exit {
+			bottom: calc(
+				var(--trace-dock-height, 0px) + var(--trace-floating-gap, 12px) * 2 +
+					env(safe-area-inset-bottom, 0px)
+			);
+			width: auto;
+			height: 26px;
+			min-height: 26px;
+			padding: 0 8px;
+			border-radius: 7px;
+		}
+
+		&.trace-fullscreen .trace-fullscreen-exit svg {
+			width: 16px;
+			height: 16px;
+		}
+	}
+
+	@media (max-width: 500px) {
+		&.trace-fullscreen {
+			--trace-floating-gap: 8px;
+		}
+
+		&.trace-fullscreen .monitor-card.cctv-card {
+			width: 200px;
+		}
+
+		&.trace-fullscreen .play-button {
+			min-width: 58px;
+			padding: 0 8px;
+			font-size: 10px;
+		}
+
+		&.trace-fullscreen .speed-controls {
+			--speed-button-width: 30px;
+		}
+
+		&.trace-fullscreen .speed-btn {
+			width: 30px;
+			font-size: 10px;
+		}
+
+		&.trace-fullscreen .playback-card {
+			padding: 5px 6px;
+		}
+
+		&.trace-fullscreen .bottom-data-grid {
+			padding: 4px 6px;
+			max-height: min(280px, 28dvh);
+		}
+
+		&.trace-fullscreen .info-card {
+			flex: 0 0 95px;
+		}
+	}
+
+	@media (max-width: 800px) {
+		&.trace-fullscreen {
+			--trace-legend-clearance: 112px;
+			--trace-legend-max-height: 94px;
+			--trace-cctv-top: calc(var(--trace-map-controls-bottom, 46px) + 58px);
+		}
+
+		&.trace-fullscreen .vms-map-controls .leaflet-top.leaflet-left {
+			top: 0;
+			left: auto;
+			right: 12px;
+			flex-wrap: wrap;
+		}
+	}
+
+	@media (max-width: 1200px) {
+		&.trace-fullscreen .playback-card,
+		&.trace-fullscreen .playback-card.has-camera-filter {
+			grid-template-columns: minmax(0, 1fr) minmax(120px, 200px);
+		}
+
+		&.trace-fullscreen .playback-controls {
+			min-width: 0;
+			flex-wrap: wrap;
+			grid-column: 1;
+			grid-row: 1;
+		}
+
+		&.trace-fullscreen .timeline-time {
+			grid-column: 2;
+			grid-row: 1;
+		}
+
+		&.trace-fullscreen .timeline-shell {
+			grid-column: 1 / -1;
+			grid-row: 2;
+		}
+
+		&.trace-fullscreen .timeline-camera-filter {
+			grid-column: 1 / -1;
+			grid-row: 3;
+		}
+	}
+
+	@media (max-width: 600px) {
+		&.trace-fullscreen {
+			--trace-legend-clearance: 40px;
+		}
+
+		&.trace-fullscreen .playback-card,
+		&.trace-fullscreen .playback-card.has-camera-filter {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		&.trace-fullscreen .timeline-time {
+			grid-column: 1;
+			grid-row: 4;
+			text-align: left;
+		}
+	}
+
+	@media (max-width: 760px), (max-height: 500px) {
+		&.trace-fullscreen .rpm-panel {
+			order: -1;
+		}
+	}
+
+	@media (max-height: 500px) {
+		&.trace-fullscreen {
+			--trace-cctv-top: var(--trace-floating-gap);
+			--trace-legend-clearance: 0px;
+		}
+
+		&.trace-fullscreen .monitor-card.cctv-card {
+			left: auto;
+			right: var(--trace-floating-gap);
 		}
 	}
 }
