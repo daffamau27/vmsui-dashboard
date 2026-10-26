@@ -74,6 +74,8 @@
 	let modulePermissions = {};
 	let currentUser = null;
 
+	export let initialTab = 'users';
+
 	let activeAdminTab = 'users';
 	const adminTabOrder = [
 		'users',
@@ -85,6 +87,7 @@
 		'alarm',
 		'global-audit-logs'
 	];
+	activeAdminTab = adminTabOrder.includes(initialTab) ? initialTab : 'users';
 	let adminTabDirection = 1;
 	let adminTabsElement;
 	let adminTabIndicatorStyle = 'width: 0px; transform: translateX(0px); opacity: 0;';
@@ -2024,6 +2027,19 @@
 
 		bootLoading = false;
 		await tick();
+
+		if (initialTab === 'alarm') {
+			openAlarmTab();
+
+			if (reportingVessels.length) {
+				openReportingVessel(reportingVessels[0], false);
+			}
+		} else if (initialTab === 'cctv-config') {
+			openCctvConfigTab();
+		} else if (initialTab === 'reporting' && reportingVessels.length) {
+			openReportingVessel(reportingVessels[0]);
+		}
+
 		scheduleAdminTabIndicatorUpdate();
 	}
 

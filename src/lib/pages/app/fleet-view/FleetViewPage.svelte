@@ -3283,71 +3283,71 @@
 					onFilter={(value) => (statusFilter = value)}
 					onCloseMobile={closeMobileSidebar}
 				/>
+			</div>
 
-				<div class="vessel-list" bind:this={vesselListContainer}>
-					{#if fleetLoading && !vesselData.length}
-						<LoadingSkeleton label="Loading fleet vessels" variant="fleet-list" rows={7} compact />
-					{:else}
-						{#each filteredVessels as vessel}
-							<article
-								data-vessel-id={String(vessel.id)}
-								class:selected-card={String(selectedVesselId) === String(vessel.id)}
-								class:offline-card={!vessel.online}
-								class="vessel-card"
+			<div class="vessel-list" bind:this={vesselListContainer}>
+				{#if fleetLoading && !vesselData.length}
+					<LoadingSkeleton label="Loading fleet vessels" variant="fleet-list" rows={7} compact />
+				{:else}
+					{#each filteredVessels as vessel}
+						<article
+							data-vessel-id={String(vessel.id)}
+							class:selected-card={String(selectedVesselId) === String(vessel.id)}
+							class:offline-card={!vessel.online}
+							class="vessel-card"
+						>
+							<button
+								type="button"
+								class:selected-select={String(selectedVesselId) === String(vessel.id)}
+								class:offline-select={!vessel.online}
+								class="vessel-select"
+								aria-pressed={String(selectedVesselId) === String(vessel.id)}
+								onclick={() => selectVessel(vessel.id)}
 							>
-								<button
-									type="button"
-									class:selected-select={String(selectedVesselId) === String(vessel.id)}
-									class:offline-select={!vessel.online}
-									class="vessel-select"
-									aria-pressed={String(selectedVesselId) === String(vessel.id)}
-									onclick={() => selectVessel(vessel.id)}
-								>
-									<div class="vessel-main-row">
-										<div class="vessel-identity">
-											<span
-												class:online={vessel.online}
-												class:offline={!vessel.online}
-												class="status-dot"
-											></span>
+								<div class="vessel-main-row">
+									<div class="vessel-identity">
+										<span
+											class:online={vessel.online}
+											class:offline={!vessel.online}
+											class="status-dot"
+										></span>
 
-											<div class="vessel-name-block">
-												<h3>{vessel.name}</h3>
-												<p>Last Updated:</p>
-												<p>
-													{formatLastUpdatedBadge(vessel.lastUpdated, vessel.timezone)}
-												</p>
-											</div>
-										</div>
-
-										<div class="vessel-card-tools">
-											<span class="vessel-utc-badge">{getTelemetryUtcLabel(vessel)}</span>
-											<div
-												class="location-button"
-												class:has-coordinate={hasValidVesselCoordinate(vessel)}
-												title={hasValidVesselCoordinate(vessel)
-													? 'Coordinate available'
-													: 'Coordinate unavailable'}
-												aria-label={hasValidVesselCoordinate(vessel)
-													? 'Coordinate available'
-													: 'Coordinate unavailable'}
-											></div>
-											<span
-												class:on-hire={isOnHireStatus(vessel.hireStatus)}
-												class:off-hire={isOffHireStatus(vessel.hireStatus)}
-												class:unknown-hire={!isOnHireStatus(vessel.hireStatus) &&
-													!isOffHireStatus(vessel.hireStatus)}
-												class="vessel-hire-badge"
-											>
-												{normalizeHireStatus(vessel.hireStatus)}
-											</span>
+										<div class="vessel-name-block">
+											<h3>{vessel.name}</h3>
+											<p>Last Updated:</p>
+											<p>
+												{formatLastUpdatedBadge(vessel.lastUpdated, vessel.timezone)}
+											</p>
 										</div>
 									</div>
-								</button>
-							</article>
-						{/each}
-					{/if}
-				</div>
+
+									<div class="vessel-card-tools">
+										<span class="vessel-utc-badge">{getTelemetryUtcLabel(vessel)}</span>
+										<div
+											class="location-button"
+											class:has-coordinate={hasValidVesselCoordinate(vessel)}
+											title={hasValidVesselCoordinate(vessel)
+												? 'Coordinate available'
+												: 'Coordinate unavailable'}
+											aria-label={hasValidVesselCoordinate(vessel)
+												? 'Coordinate available'
+												: 'Coordinate unavailable'}
+										></div>
+										<span
+											class:on-hire={isOnHireStatus(vessel.hireStatus)}
+											class:off-hire={isOffHireStatus(vessel.hireStatus)}
+											class:unknown-hire={!isOnHireStatus(vessel.hireStatus) &&
+												!isOffHireStatus(vessel.hireStatus)}
+											class="vessel-hire-badge"
+										>
+											{normalizeHireStatus(vessel.hireStatus)}
+										</span>
+									</div>
+								</div>
+							</button>
+						</article>
+					{/each}
+				{/if}
 			</div>
 		</aside>
 

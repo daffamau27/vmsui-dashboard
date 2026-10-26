@@ -15,6 +15,8 @@
 		timeLabel = '-',
 		sourceLabel = 'Trace timeline',
 		marksError = '',
+		showCameraFilter = true,
+		showCameraMarks = true,
 		onStep,
 		onToggle,
 		onSpeed,
@@ -29,7 +31,7 @@
 	} = $props();
 </script>
 
-<div class="playback-card" class:has-camera-filter={cameraOptions.length > 0}>
+<div class="playback-card" class:has-camera-filter={cameraOptions.length > 0 && showCameraFilter}>
 	<div class="playback-controls">
 		<button
 			type="button"
@@ -40,31 +42,33 @@
 			‹
 		</button>
 
-		<button
-			type="button"
-			class="play-button"
-			onclick={(event) => {
-				event.preventDefault();
-				event.stopPropagation();
-				onToggle?.(-1);
-			}}
-			disabled={!eventCount}
-		>
-			{isPlaying && direction === -1 ? 'Pause' : 'Reverse'}
-		</button>
+		<div class="playback-main">
+			<button
+				type="button"
+				class="play-button"
+				onclick={(event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					onToggle?.(-1);
+				}}
+				disabled={!eventCount}
+			>
+				{isPlaying && direction === -1 ? 'Pause' : 'Reverse'}
+			</button>
 
-		<button
-			type="button"
-			class="play-button"
-			onclick={(event) => {
-				event.preventDefault();
-				event.stopPropagation();
-				onToggle?.(1);
-			}}
-			disabled={!eventCount}
-		>
-			{isPlaying && direction === 1 ? 'Pause' : 'Play'}
-		</button>
+			<button
+				type="button"
+				class="play-button"
+				onclick={(event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					onToggle?.(1);
+				}}
+				disabled={!eventCount}
+			>
+				{isPlaying && direction === 1 ? 'Pause' : 'Play'}
+			</button>
+		</div>
 
 		<div
 			class="speed-controls"
@@ -122,85 +126,87 @@
 			<div class="timeline-dot" style={`left: ${progress}%`}></div>
 		</div>
 
-		<div class="timeline-mark-layer" aria-label="CCTV motion recording marks">
-			{#each marks as mark (mark.key)}
-				<div
-					class="timeline-mark"
-					class:open={activeMarkKey === mark.key}
-					class:align-left={mark.left < 12}
-					class:align-right={mark.left > 88}
-					style={`left: ${mark.left}%; ${mark.pinStyle}`}
-				>
-					<button
-						type="button"
-						class="timeline-mark-trigger"
-						class:active={activeMarkKey === mark.key}
-						aria-label={`Show ${mark.recordings.length} recording${mark.recordings.length === 1 ? '' : 's'} grouped around ${mark.startedAtText}`}
-						aria-expanded={activeMarkKey === mark.key}
-						onpointerdown={(event) => event.stopPropagation()}
-						onclick={(event) => onToggleMark?.(mark, event)}
+		{#if showCameraMarks}
+			<div class="timeline-mark-layer" aria-label="CCTV motion recording marks">
+				{#each marks as mark (mark.key)}
+					<div
+						class="timeline-mark"
+						class:open={activeMarkKey === mark.key}
+						class:align-left={mark.left < 12}
+						class:align-right={mark.left > 88}
+						style={`left: ${mark.left}%; ${mark.pinStyle}`}
 					>
-						<span class="timeline-mark-pin" aria-hidden="true"></span>
-					</button>
-
-					{#if activeMarkKey === mark.key}
-						<div
-							class="timeline-mark-popup"
-							class:single-camera={mark.recordings.length === 1}
-							class:two-cameras={mark.recordings.length === 2}
-							class:four-cameras={mark.recordings.length === 4}
-							class:many-recordings={mark.recordings.length > 4}
-							role="group"
-							aria-label={`Camera recording group around ${mark.startedAtText}`}
+						<button
+							type="button"
+							class="timeline-mark-trigger"
+							class:active={activeMarkKey === mark.key}
+							aria-label={`Show ${mark.recordings.length} recording${mark.recordings.length === 1 ? '' : 's'} grouped around ${mark.startedAtText}`}
+							aria-expanded={activeMarkKey === mark.key}
+							onpointerdown={(event) => event.stopPropagation()}
+							onclick={(event) => onToggleMark?.(mark, event)}
 						>
-							<div class="timeline-mark-popup-header">
-								<strong
-									>{mark.recordings.length} recording{mark.recordings.length === 1
-										? ''
-										: 's'}</strong
-								>
-								<small
-									>{mark.cameraCount} camera{mark.cameraCount === 1 ? '' : 's'} - {mark.startedAtText}</small
-								>
-							</div>
+							<span class="timeline-mark-pin" aria-hidden="true"></span>
+						</button>
 
-							<div class="timeline-mark-camera-grid">
-								{#each mark.recordings as recording (recording.key)}
-									<button
-										type="button"
-										class="timeline-mark-camera"
-										style={recording.style}
-										onclick={(event) => onOpenRecording?.(recording, event)}
-										aria-label={`Play recording from ${recording.cameraName}`}
+						{#if activeMarkKey === mark.key}
+							<div
+								class="timeline-mark-popup"
+								class:single-camera={mark.recordings.length === 1}
+								class:two-cameras={mark.recordings.length === 2}
+								class:four-cameras={mark.recordings.length === 4}
+								class:many-recordings={mark.recordings.length > 4}
+								role="group"
+								aria-label={`Camera recording group around ${mark.startedAtText}`}
+							>
+								<div class="timeline-mark-popup-header">
+									<strong
+										>{mark.recordings.length} recording{mark.recordings.length === 1
+											? ''
+											: 's'}</strong
 									>
-										<span class="timeline-mark-thumbnail">
-											{#if recording.thumbnailUrl}
-												<img
-													src={recording.thumbnailUrl}
-													alt={`Motion thumbnail from ${recording.cameraName}`}
-													loading="lazy"
-													draggable="false"
-												/>
-											{:else}
-												<span class="timeline-mark-no-image">No thumbnail</span>
-											{/if}
-										</span>
-										<span class="timeline-mark-copy">
-											<strong>{recording.cameraName}</strong>
-											<small>{recording.startedAtText}</small>
-										</span>
-									</button>
-								{/each}
+									<small
+										>{mark.cameraCount} camera{mark.cameraCount === 1 ? '' : 's'} - {mark.startedAtText}</small
+									>
+								</div>
+
+								<div class="timeline-mark-camera-grid">
+									{#each mark.recordings as recording (recording.key)}
+										<button
+											type="button"
+											class="timeline-mark-camera"
+											style={recording.style}
+											onclick={(event) => onOpenRecording?.(recording, event)}
+											aria-label={`Play recording from ${recording.cameraName}`}
+										>
+											<span class="timeline-mark-thumbnail">
+												{#if recording.thumbnailUrl}
+													<img
+														src={recording.thumbnailUrl}
+														alt={`Motion thumbnail from ${recording.cameraName}`}
+														loading="lazy"
+														draggable="false"
+													/>
+												{:else}
+													<span class="timeline-mark-no-image">No thumbnail</span>
+												{/if}
+											</span>
+											<span class="timeline-mark-copy">
+												<strong>{recording.cameraName}</strong>
+												<small>{recording.startedAtText}</small>
+											</span>
+										</button>
+									{/each}
+								</div>
 							</div>
-						</div>
-						<span class="timeline-mark-popup-pointer" aria-hidden="true"></span>
-					{/if}
-				</div>
-			{/each}
-		</div>
+							<span class="timeline-mark-popup-pointer" aria-hidden="true"></span>
+						{/if}
+					</div>
+				{/each}
+			</div>
+		{/if}
 	</div>
 
-	{#if cameraOptions.length}
+	{#if cameraOptions.length && showCameraFilter}
 		<details class="timeline-camera-filter">
 			<summary aria-label="Filter timeline markers by camera">
 				<span class="timeline-camera-filter-title">Camera</span>
@@ -239,9 +245,9 @@
 
 	<div class="timeline-time">
 		<span
-			>{activeIndex + 1}/{eventCount || 0} • {sourceLabel}{marks.length
+			>{activeIndex + 1}/{eventCount || 0} • {sourceLabel}{showCameraMarks && marks.length
 				? ` • ${marks.length} marks`
-				: marksError
+				: showCameraMarks && marksError
 					? ' • marks unavailable'
 					: ''}</span
 		>

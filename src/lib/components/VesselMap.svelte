@@ -24,7 +24,9 @@
 		activeIndex = 0,
 		renderKey = 0,
 		showTraceLine = false,
-		followActivePoint = false
+		followActivePoint = false,
+		isFullscreen = false,
+		onToggleFullscreen = null
 	} = $props();
 
 	let hasInitialTraceFit = false;
@@ -36,6 +38,7 @@
 	let isMounted = false;
 	let mapZones = $state([]);
 	let mapAssets = $state([]);
+	let showMapLegend = $state(false);
 	let assetLegendItems = $derived.by(() => {
 		const seenTypes = new Set();
 
@@ -725,6 +728,16 @@
 		refreshMap();
 	});
 
+	$effect(() => {
+		isFullscreen;
+
+		if (!map || !L) return;
+
+		const timer = setTimeout(() => map?.invalidateSize(), 120);
+
+		return () => clearTimeout(timer);
+	});
+
 	onDestroy(() => {
 		isMounted = false;
 
@@ -776,53 +789,136 @@
 
 <div class="vessel-map-shell">
 	<div class="vessel-map-root" bind:this={mapContainer}></div>
-	{#if showTraceLine}
-		<div class="trace-speed-legend" aria-label="Trace speed legend">
-			{#each TRACE_SPEED_RANGES as range}
-				<span>
-					<i style={`--trace-speed-color: ${range.color};`} aria-hidden="true"></i>
-					{range.label}
-				</span>
-			{/each}
-		</div>
-	{/if}
-	{#if mapZones.length || assetLegendItems.length}
-		<div class="vessel-map-map-legend" aria-label="Map legend">
-			{#if assetLegendItems.length}
-				<div class="legend-group">
-					<span class="legend-title">Assets</span>
-					<div class="legend-items asset-items">
-						{#each assetLegendItems as asset}
-							<span>
-								<img src={asset.iconUrl} alt="" aria-hidden="true" />
-								{asset.label}
-							</span>
-						{/each}
-					</div>
-				</div>
-			{/if}
+	<div
+		class="vessel-map-legends"
+		class:fullscreen-legends={isFullscreen}
+		class:legends-collapsed={!showMapLegend}
+	>
+		{#if showTraceLine || mapZones.length || assetLegendItems.length}
+			<button
+				type="button"
+				class="legend-toggle"
+				aria-expanded={showMapLegend}
+				aria-label={showMapLegend ? 'Hide legend' : 'Show legend'}
+				onclick={() => (showMapLegend = !showMapLegend)}
+			>
+				Legend
+			</button>
 
-			{#if mapZones.length}
-				<div class="legend-group">
-					<span class="legend-title">Zones</span>
-					<div class="legend-items zone-items">
-						{#each mapZones as zone}
-							<span>
-								<i
-									style={`--zone-color: ${zone.color}; --zone-fill: ${zone.fillColor};`}
-									aria-hidden="true"
-								></i>
-								{zone.name}
-							</span>
-						{/each}
+			<div class="vessel-map-combined-legend" aria-label="Map legend">
+				{#if showTraceLine}
+					<div class="legend-group legend-speed-group">
+						<span class="legend-title">Speed</span>
+						<div class="legend-items legend-speed-items">
+							{#each TRACE_SPEED_RANGES as range}
+								<span>
+									<i style={`--trace-speed-color: ${range.color};`} aria-hidden="true"></i>
+									{range.label}
+								</span>
+							{/each}
+						</div>
 					</div>
-				</div>
-			{/if}
-		</div>
+				{/if}
+
+				{#if assetLegendItems.length || mapZones.length}
+					<div class="legend-asset-zone-row">
+						{#if assetLegendItems.length}
+							<div class="legend-group">
+								<span class="legend-title">Assets</span>
+								<div class="legend-items asset-items">
+									{#each assetLegendItems as asset}
+										<span>
+											<img src={asset.iconUrl} alt="" aria-hidden="true" />
+											{asset.label}
+										</span>
+									{/each}
+								</div>
+							</div>
+						{/if}
+
+						{#if mapZones.length}
+							<div class="legend-group">
+								<span class="legend-title">Zones</span>
+								<div class="legend-items zone-items">
+									{#each mapZones as zone}
+										<span>
+											<i
+												style={`--zone-color: ${zone.color}; --zone-fill: ${zone.fillColor};`}
+												aria-hidden="true"
+											></i>
+											{zone.name}
+										</span>
+									{/each}
+								</div>
+							</div>
+						{/if}
+					</div>
+				{/if}
+			</div>
+		{/if}
+	</div>
+	{#if showTraceLine && onToggleFullscreen && !isFullscreen}
+		<button
+			type="button"
+			class="trace-fullscreen-btn"
+			onclick={() => onToggleFullscreen?.()}
+			title="Enter fullscreen"
+			aria-label="Enter fullscreen">⤢</button
+		>
 	{/if}
 </div>
 
 <style>
+	.vessel-map-legends {
+		position: absolute;
+		left: 12px;
+		bottom: 12px;
+		z-index: 735;
+		display: flex;
+		align-items: flex-end;
+		gap: 10px;
+		max-width: calc(100% - 24px);
+		pointer-events: none;
+	}
+
+	.legend-toggle {
+		display: none;
+		align-items: center;
+		height: 30px;
+		padding: 0 10px;
+		border: 1px solid rgba(148, 163, 184, 0.32);
+		border-radius: 9px;
+		background: rgba(15, 23, 42, 0.82);
+		color: #e2e8f0;
+		font-size: 10px;
+		font-weight: 800;
+		white-space: nowrap;
+		cursor: pointer;
+		pointer-events: auto;
+		backdrop-filter: blur(10px);
+	}
+
+	.legend-toggle:hover {
+		background: rgba(15, 23, 42, 0.95);
+	}
+
+	.fullscreen-legends {
+		left: var(--trace-floating-gap, 24px);
+		bottom: calc(
+			var(--trace-dock-height, 180px) + var(--trace-floating-gap, 24px) * 2 +
+				env(safe-area-inset-bottom, 0px)
+		);
+		max-width: calc(100% - var(--trace-floating-gap, 24px) * 2);
+	}
+
+	.fullscreen-legends .vessel-map-combined-legend {
+		max-height: min(
+			var(--trace-legend-max-height, 220px),
+			calc(100dvh - var(--trace-dock-height, 180px) - 160px)
+		);
+		pointer-events: auto;
+	}
+
 	.vessel-map-shell {
 		position: relative;
 		width: 100%;
@@ -837,16 +933,12 @@
 		background: var(--color-accent-muted);
 	}
 
-	.vessel-map-map-legend {
-		position: absolute;
-		left: 10px;
-		bottom: 10px;
-		z-index: 720;
+	.vessel-map-combined-legend {
 		display: grid;
-		gap: 8px;
-		width: min(360px, calc(100% - 20px));
-		max-height: min(42%, 220px);
-		padding: 8px;
+		gap: 10px;
+		width: min(420px, calc(100vw - 160px));
+		max-height: 240px;
+		padding: 10px 11px;
 		border: 1px solid rgba(96, 165, 250, 0.24);
 		border-radius: 12px;
 		background: rgba(15, 23, 42, 0.7);
@@ -855,6 +947,18 @@
 		backdrop-filter: blur(10px);
 		pointer-events: none;
 		overflow: auto;
+		flex-shrink: 0;
+	}
+
+	.legend-speed-group {
+		padding-bottom: 6px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+	}
+
+	.legend-asset-zone-row {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+		gap: 10px;
 	}
 
 	.legend-group {
@@ -886,6 +990,14 @@
 		white-space: nowrap;
 	}
 
+	.legend-speed-items i {
+		width: 18px;
+		height: 8px;
+		border-radius: 2px;
+		background: var(--trace-speed-color, #94a3b8);
+		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12) inset;
+	}
+
 	.asset-items img {
 		width: 18px;
 		height: 18px;
@@ -903,11 +1015,34 @@
 	}
 
 	@media (max-width: 760px) {
-		.vessel-map-map-legend {
-			width: min(280px, calc(100% - 20px));
-			max-height: 156px;
-			padding: 7px;
+		.vessel-map-legends {
+			flex-direction: column;
+			align-items: flex-start;
 			gap: 6px;
+		}
+
+		.legend-toggle {
+			display: inline-flex;
+			height: 26px;
+			padding: 0 8px;
+			border-radius: 7px;
+			font-size: 9px;
+		}
+
+		.legends-collapsed .vessel-map-combined-legend {
+			display: none;
+		}
+
+		.vessel-map-combined-legend {
+			width: min(280px, calc(100vw - 24px));
+			max-height: 180px;
+			padding: 8px 9px;
+			gap: 8px;
+		}
+
+		.legend-asset-zone-row {
+			grid-template-columns: 1fr;
+			gap: 8px;
 		}
 
 		.legend-items {
@@ -924,41 +1059,30 @@
 		}
 	}
 
-	.trace-speed-legend {
+	.trace-fullscreen-btn {
 		position: absolute;
 		right: 12px;
 		bottom: 12px;
-		z-index: 735;
+		z-index: 740;
 		display: grid;
-		gap: 4px;
-		min-width: 96px;
-		padding: 8px 10px;
-		border: 1px solid rgba(148, 163, 184, 0.22);
-		border-radius: 12px;
-		background: rgba(15, 23, 42, 0.74);
+		place-items: center;
+		width: 32px;
+		height: 32px;
+		padding: 0;
+		border: 1px solid rgba(148, 163, 184, 0.32);
+		border-radius: 10px;
+		background: rgba(15, 23, 42, 0.78);
 		color: #e2e8f0;
-		box-shadow: 0 14px 28px rgba(15, 23, 42, 0.24);
+		font-size: 16px;
+		line-height: 1;
+		cursor: pointer;
 		backdrop-filter: blur(10px);
-		pointer-events: none;
+		box-shadow: 0 12px 24px rgba(15, 23, 42, 0.24);
 	}
 
-	.trace-speed-legend span {
-		display: grid;
-		grid-template-columns: 18px minmax(0, 1fr);
-		align-items: center;
-		gap: 7px;
-		font-size: 10px;
-		font-weight: 750;
-		line-height: 1.2;
-		white-space: nowrap;
-	}
-
-	.trace-speed-legend i {
-		width: 18px;
-		height: 8px;
-		border-radius: 2px;
-		background: var(--trace-speed-color, #94a3b8);
-		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12) inset;
+	.trace-fullscreen-btn:hover {
+		background: rgba(15, 23, 42, 0.92);
+		border-color: rgba(96, 165, 250, 0.5);
 	}
 
 	:global(.vms-zone-popup-wrapper .leaflet-popup-content-wrapper) {

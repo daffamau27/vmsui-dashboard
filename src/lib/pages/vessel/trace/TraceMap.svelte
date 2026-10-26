@@ -10,7 +10,9 @@
 		activeTraceIndex = 0,
 		renderTick = 0,
 		gpsUnavailable = false,
-		usingPreviousPosition = false
+		usingPreviousPosition = false,
+		isFullscreen = false,
+		onToggleFullscreen = null
 	} = $props();
 </script>
 
@@ -57,10 +59,12 @@
 				iconUrl="/assets/vessel.png"
 				zoom={12}
 				{tracePoints}
-				{activeTraceIndex}
+				activeIndex={activeTraceIndex}
 				renderKey={renderTick}
 				showTraceLine={true}
 				followActivePoint={false}
+				{isFullscreen}
+				{onToggleFullscreen}
 			/>
 		{/if}
 	</div>
