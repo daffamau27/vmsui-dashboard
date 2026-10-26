@@ -1278,6 +1278,10 @@ body .app-content .vms-map-controls .vms-map-source-control__label {
   text-transform: uppercase;
 }
 
+body .app-content .vms-map-controls .vms-map-source-control__select {
+  display: none;
+}
+
 body .app-content .vms-map-controls .vms-map-source-control__options {
   position: relative;
   display: inline-grid;
@@ -1431,6 +1435,10 @@ body .app-content .fleet-page :is(
 
   body .app-content .fleet-page .fleet-leaflet-popup .leaflet-popup-content {
     width: min(300px, calc(100vw - 42px)) !important;
+  }
+
+  body .app-content .vms-map-controls .leaflet-control-zoom {
+    display: none !important;
   }
 }
 

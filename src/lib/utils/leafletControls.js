@@ -87,6 +87,21 @@ function createMapSourceControl(leaflet, options = {}) {
 				button.dataset.sourceIndex = String(index);
 			});
 
+			const select = leaflet.DomUtil.create('select', 'vms-map-source-control__select', container);
+			select.setAttribute('aria-label', 'Map source');
+			sources.forEach((source) => {
+				const option = leaflet.DomUtil.create('option', '', select);
+				option.value = source.id;
+				option.textContent = source.label;
+			});
+			select.value = currentSourceId;
+			this._select = select;
+
+			leaflet.DomEvent.on(select, 'change', () => {
+				this._setActive(select.value);
+				options.onChange?.(select.value);
+			});
+
 			leaflet.DomEvent.disableClickPropagation(container);
 			leaflet.DomEvent.disableScrollPropagation(container);
 
@@ -94,6 +109,8 @@ function createMapSourceControl(leaflet, options = {}) {
 		},
 
 		_setActive(sourceId) {
+			if (this._select) this._select.value = sourceId;
+
 			Object.entries(this._buttons || {}).forEach(([id, button]) => {
 				const active = id === sourceId;
 				button.classList.toggle('active', active);

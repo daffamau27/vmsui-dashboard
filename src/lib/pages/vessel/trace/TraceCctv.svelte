@@ -3,6 +3,8 @@
 	import CctvSnapshotImage from '$lib/components/CctvSnapshotImage.svelte';
 
 	let {
+		panelId = undefined,
+		onClose = null,
 		mainPanel = null,
 		miniPanels = [],
 		error = '',
@@ -16,7 +18,7 @@
 	} = $props();
 </script>
 
-<section class="monitor-card cctv-card">
+<section id={panelId} class="monitor-card cctv-card">
 	<div class="card-header">
 		<div>
 			<div class="card-title">CCTV Monitoring</div>
@@ -25,6 +27,14 @@
 					`${loadedCount}/${total || loadedCount} snapshot records loaded${playbackBuffering ? ' • preparing playback...' : buffering ? ' • loading next pages...' : ''}`}
 			</div>
 		</div>
+		{#if onClose}
+			<button
+				type="button"
+				class="trace-cctv-close"
+				onclick={onClose}
+				aria-label="Close CCTV panel">&times;</button
+			>
+		{/if}
 	</div>
 
 	<div class="cctv-layout">
