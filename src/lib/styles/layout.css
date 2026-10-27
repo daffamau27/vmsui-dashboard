@@ -985,6 +985,11 @@ body .app-content :is(
   border-radius: 0 !important;
 }
 
+/* Keep Trace fullscreen controls rounded despite the vessel-page corner reset. */
+body .app-content .trace-root button:is(.trace-fullscreen-btn, .trace-fullscreen-exit) {
+  border-radius: 12px !important;
+}
+
 /* Dots and vessel/map symbols must stay round/correct because they communicate
    status or heading rather than acting as rectangular UI components. */
 body .app-content :is(

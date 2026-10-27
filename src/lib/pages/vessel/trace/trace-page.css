@@ -2368,7 +2368,10 @@
 	.trace-fullscreen-exit {
 		position: absolute;
 		right: calc(var(--trace-floating-gap, 24px) + env(safe-area-inset-right, 0px));
-		bottom: calc(var(--trace-floating-gap, 24px) + env(safe-area-inset-bottom, 0px));
+		bottom: calc(
+			var(--trace-dock-height, 0px) + var(--trace-floating-gap, 24px) * 2 +
+				env(safe-area-inset-bottom, 0px)
+		);
 		z-index: 1500;
 		display: grid;
 		place-items: center;
@@ -2572,10 +2575,6 @@
 		}
 
 		&.trace-fullscreen .trace-fullscreen-exit {
-			bottom: calc(
-				var(--trace-dock-height, 0px) + var(--trace-floating-gap, 12px) * 2 +
-					env(safe-area-inset-bottom, 0px)
-			);
 			width: auto;
 			height: 26px;
 			min-height: 26px;
