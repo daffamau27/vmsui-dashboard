@@ -6,11 +6,10 @@
 	import { activeMenu, setActiveMenu } from '$lib/stores/appNavigation.svelte.js';
 	import { addMapTileLayer } from '$lib/utils/mapStyle.js';
 	import { addLeafletZoomAndScale } from '$lib/utils/leafletControls.js';
-	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-	import FleetViewSidebarHeader from './FleetViewSidebarHeader.svelte';
+	import FleetViewSidebar from './FleetViewSidebar.svelte';
+	import FleetViewDetailPanel from './FleetViewDetailPanel.svelte';
+	import FleetViewMapLegend from './FleetViewMapLegend.svelte';
 	import './fleet-view-page.css';
-	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
-	import CctvSnapshotImage from '$lib/components/CctvSnapshotImage.svelte';
 	import { getLatestCctvSnapshots } from '$lib/api/dashboardApi.js';
 	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
 	import {
@@ -22,6 +21,13 @@
 		createCopyableCoordinateHtml,
 		handleCoordinateCopyClick
 	} from '$lib/utils/coordinateClipboard.js';
+	import {
+		formatDmsCoordinate,
+		formatNumber,
+		formatValue,
+		normalizeHireStatus
+	} from './fleetViewFormat.js';
+	import { createFleetPopupHtml } from './fleetViewPopup.js';
 	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 	import { slideScale, panelEnter } from '$lib/utils/modalTransition.js';
 	import { enableFleetPopupTransition } from '$lib/utils/leafletPopupTransition.js';
@@ -49,16 +55,6 @@
 	let detailCctvLoading = $state(false);
 	let detailCctvError = $state('');
 	let detailCctvLoadedVesselId = $state(null);
-	let selectedDetailCctvKey = $state('');
-
-	let voyageProgress = $derived(getVoyageProgress(selectedVessel));
-	let detailCctvItems = $derived(normalizeDetailCctvList(detailCctvSnapshots));
-	let mainDetailCctv = $derived(
-		detailCctvItems.find((item) => item.key === selectedDetailCctvKey) || detailCctvItems[0] || null
-	);
-	let detailCctvThumbnails = $derived(
-		mainDetailCctv ? detailCctvItems.filter((item) => item.key !== mainDetailCctv.key) : []
-	);
 
 	let assetData = $state([]);
 	let assetLoading = $state(false);
@@ -243,203 +239,6 @@
 		});
 	}
 
-	function padDatePart(value) {
-		return String(value ?? '').padStart(2, '0');
-	}
-
-	function normalizeUtcOffsetLabel(value) {
-		const match = String(value ?? '').match(/UTC\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?/i);
-		if (!match) return '';
-
-		const sign = match[1];
-		const hour = Number(match[2]);
-		const minute = Number(match[3] || 0);
-
-		if (!Number.isFinite(hour) || !Number.isFinite(minute)) return '';
-		return minute > 0 ? `UTC${sign}${hour}:${padDatePart(minute)}` : `UTC${sign}${hour}`;
-	}
-
-	function formatCctvSnapshotTime(value, timestampValue = null) {
-		if (!value) return '';
-
-		if (typeof value === 'string') {
-			const text = value.trim();
-			const localMatch = text.match(
-				/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?.*?(UTC\s*[+-]\s*\d{1,2}(?::?\d{2})?)/i
-			);
-
-			if (localMatch) {
-				const [, day, month, year, hour, minute, second = '00', utcText] = localMatch;
-				const utcLabel = normalizeUtcOffsetLabel(utcText);
-
-				return `${padDatePart(day)}/${padDatePart(month)}/${year} ${padDatePart(hour)}:${padDatePart(minute)}:${padDatePart(second)}${utcLabel ? ` (${utcLabel})` : ''}`;
-			}
-		}
-
-		const date = new Date(value);
-		if (Number.isNaN(date.getTime())) {
-			const timestamp = Number(timestampValue);
-			if (!Number.isFinite(timestamp)) return String(value);
-
-			const timestampDate = new Date(timestamp);
-			if (Number.isNaN(timestampDate.getTime())) return String(value);
-
-			return timestampDate.toLocaleString('id-ID', {
-				day: '2-digit',
-				month: '2-digit',
-				year: 'numeric',
-				hour: '2-digit',
-				minute: '2-digit',
-				second: '2-digit'
-			});
-		}
-
-		return date.toLocaleString('id-ID', {
-			day: '2-digit',
-			month: '2-digit',
-			year: 'numeric',
-			hour: '2-digit',
-			minute: '2-digit',
-			second: '2-digit'
-		});
-	}
-
-	function formatCctvFileSize(value) {
-		const bytes = Number(value);
-		if (!Number.isFinite(bytes) || bytes <= 0) return '';
-
-		const units = ['B', 'KB', 'MB', 'GB'];
-		let size = bytes;
-		let unitIndex = 0;
-
-		while (size >= 1024 && unitIndex < units.length - 1) {
-			size /= 1024;
-			unitIndex += 1;
-		}
-
-		return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
-	}
-
-	function normalizeDetailCctvList(value) {
-		const rawList = Array.isArray(value)
-			? value
-			: Array.isArray(value?.items)
-				? value.items
-				: Array.isArray(value?.cameras)
-					? value.cameras
-					: [];
-
-		const flattenedList = rawList.flatMap((item) => {
-			if (!Array.isArray(item?.cameras)) return [item];
-
-			return item.cameras.flatMap((camera) => {
-				const snapshots = Array.isArray(camera?.snapshots) ? camera.snapshots : [];
-
-				if (!snapshots.length) {
-					return [
-						{
-							...camera,
-							vesselId: item?.vesselId,
-							vesselName: item?.vesselName
-						}
-					];
-				}
-
-				return snapshots.map((snapshot) => ({
-					...snapshot,
-					camera_name: camera?.camera_name,
-					cameraName: camera?.cameraName,
-					camera_token: camera?.camera_token,
-					vesselId: item?.vesselId,
-					vesselName: item?.vesselName
-				}));
-			});
-		});
-
-		return flattenedList.map((item, index) => {
-			const snapshotUrl =
-				item?.presigned_url ||
-				item?.presignedUrl ||
-				item?.snapshotUrl ||
-				item?.snapshot_url ||
-				item?.url ||
-				item?.streamUrl ||
-				'';
-			const capturedAt =
-				item?.captured_at || item?.capturedAt || item?.updatedAt || item?.timestamp || '';
-			const fileSize = Number(item?.file_size ?? item?.fileSize);
-			const name = item?.camera_name || item?.cameraName || item?.name || `CCTV ${index + 1}`;
-
-			return {
-				key:
-					item?.camera_token ||
-					item?.cameraToken ||
-					name ||
-					`${snapshotUrl || item?.file_path || item?.filePath || 'cctv'}-${capturedAt || index}`,
-				name,
-				location: item?.location || item?.position || item?.file_path || item?.filePath || '-',
-				url: snapshotUrl,
-				capturedAt,
-				capturedAtText: formatCctvSnapshotTime(capturedAt, item?.timestamp),
-				fileSizeText: formatCctvFileSize(fileSize),
-				online: Boolean(snapshotUrl)
-			};
-		});
-	}
-
-	function selectDetailCctv(cctv) {
-		if (!cctv?.key) return;
-		selectedDetailCctvKey = cctv.key;
-	}
-
-	let onlineCount = $derived(vesselData.filter((v) => v.online).length);
-	let offlineCount = $derived(vesselData.filter((v) => !v.online).length);
-	let assetLegendItems = $derived.by(() => {
-		const items = new Map();
-
-		for (const asset of assetData) {
-			const rawType = getAssetTypeValue(asset);
-			if (!String(rawType || '').trim()) continue;
-
-			const label = getAssetTypeLabel(asset);
-			const key = String(rawType).trim().toLowerCase();
-
-			if (!items.has(key)) {
-				items.set(key, {
-					key,
-					label,
-					iconUrl: getAssetIconUrl(asset)
-				});
-			}
-		}
-
-		return Array.from(items.values()).sort((a, b) => a.label.localeCompare(b.label));
-	});
-
-	function getAssetTypeKey(assetOrItem = {}) {
-		return String(
-			assetOrItem.key || getAssetTypeValue(assetOrItem) || getAssetTypeLabel(assetOrItem) || 'asset'
-		)
-			.trim()
-			.toLowerCase();
-	}
-
-	function isAssetTypeVisible(assetOrItem = {}) {
-		if (!showAssets) return false;
-
-		const key = getAssetTypeKey(assetOrItem);
-		return visibleAssetTypes[key] !== false;
-	}
-
-	function toggleAssetType(item = {}) {
-		const key = getAssetTypeKey(item);
-
-		visibleAssetTypes = {
-			...visibleAssetTypes,
-			[key]: visibleAssetTypes[key] === false
-		};
-	}
-
 	function mergeVesselWithLiveDetail(vessel, liveDetail) {
 		if (!vessel && !liveDetail) return null;
 
@@ -495,107 +294,52 @@
 		};
 	}
 
-	function normalizeEngineName(value) {
-		return String(value || '')
-			.replace(/RPM/gi, '')
-			.replace(/_/g, ' ')
-			.replace(/\s+/g, ' ')
+	let onlineCount = $derived(vesselData.filter((v) => v.online).length);
+	let offlineCount = $derived(vesselData.filter((v) => !v.online).length);
+	let assetLegendItems = $derived.by(() => {
+		const items = new Map();
+
+		for (const asset of assetData) {
+			const rawType = getAssetTypeValue(asset);
+			if (!String(rawType || '').trim()) continue;
+
+			const label = getAssetTypeLabel(asset);
+			const key = String(rawType).trim().toLowerCase();
+
+			if (!items.has(key)) {
+				items.set(key, {
+					key,
+					label,
+					iconUrl: getAssetIconUrl(asset)
+				});
+			}
+		}
+
+		return Array.from(items.values()).sort((a, b) => a.label.localeCompare(b.label));
+	});
+
+	function getAssetTypeKey(assetOrItem = {}) {
+		return String(
+			assetOrItem.key || getAssetTypeValue(assetOrItem) || getAssetTypeLabel(assetOrItem) || 'asset'
+		)
 			.trim()
-			.toUpperCase();
+			.toLowerCase();
 	}
 
-	function getLiveEngineRpm(vessel, configEngine) {
-		const liveEngines = Array.isArray(vessel?.liveEngines) ? vessel.liveEngines : [];
+	function isAssetTypeVisible(assetOrItem = {}) {
+		if (!showAssets) return false;
 
-		const configName = normalizeEngineName(
-			configEngine?.engineName ||
-				configEngine?.name ||
-				configEngine?.engineKeyThingsboard ||
-				configEngine?.key
-		);
-
-		const found = liveEngines.find((item) => {
-			const liveName = normalizeEngineName(item?.name || item?.engineName);
-			return liveName === configName || liveName.includes(configName);
-		});
-
-		const rpm = found?.rpm ?? found?.value ?? found?.latestRpm;
-
-		if (rpm === null || rpm === undefined || rpm === '') return '-';
-
-		return `${rpm}`;
+		const key = getAssetTypeKey(assetOrItem);
+		return visibleAssetTypes[key] !== false;
 	}
 
-	function getEngineDisplayName(engine = {}) {
-		return engine?.engineName || engine?.name || engine?.engineKeyThingsboard || engine?.key || '-';
-	}
+	function toggleAssetType(item = {}) {
+		const key = getAssetTypeKey(item);
 
-	function getEngineSortRank(engine = {}) {
-		const name = normalizeEngineName(getEngineDisplayName(engine));
-
-		if (/^ME\b|MAIN ENGINE|\bME PORT\b|\bME STBD\b|\bME CENTER\b/.test(name)) return 0;
-		if (/^AE\b|AUX|GENSET/.test(name)) return 1;
-		return 2;
-	}
-
-	function sortVesselEngines(engines = []) {
-		if (!Array.isArray(engines)) return [];
-
-		return [...engines].sort((left, right) => {
-			const rankDiff = getEngineSortRank(left) - getEngineSortRank(right);
-			if (rankDiff !== 0) return rankDiff;
-
-			return getEngineDisplayName(left).localeCompare(getEngineDisplayName(right), undefined, {
-				numeric: true,
-				sensitivity: 'base'
-			});
-		});
-	}
-
-	function formatMissingValue(value, suffix = '') {
-		if (value === null || value === undefined || value === '' || value === '-') {
-			return '-';
-		}
-
-		const number = Number(value);
-
-		if (!Number.isFinite(number)) {
-			return `${value}${suffix}`;
-		}
-
-		return `${number}${suffix}`;
-	}
-
-	function formatOnlineStatus(value) {
-		if (value === true) return 'Online';
-		if (value === false) return 'Offline';
-		return '-';
-	}
-
-	function normalizeHireStatus(value) {
-		if (value === true) return 'On Hire';
-		if (value === false) return 'Off Hire';
-
-		const text = String(value ?? '').trim();
-
-		if (!text || text === '-') return 'Hire unknown';
-
-		const normalized = text.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
-
-		if (normalized.includes('off')) return 'Off Hire';
-		if (normalized.includes('on')) return 'On Hire';
-		if (['true', '1', 'active'].includes(normalized)) return 'On Hire';
-		if (['false', '0', 'inactive'].includes(normalized)) return 'Off Hire';
-
-		return text;
-	}
-
-	function isOnHireStatus(value) {
-		return normalizeHireStatus(value).toLowerCase() === 'on hire';
-	}
-
-	function isOffHireStatus(value) {
-		return normalizeHireStatus(value).toLowerCase() === 'off hire';
+		visibleAssetTypes = {
+			...visibleAssetTypes,
+			[key]: visibleAssetTypes[key] === false
+		};
 	}
 
 	async function openVesselDashboard(vessel) {
@@ -645,308 +389,10 @@
 			vesselData.find((v) => String(v.id) === String(selectedVesselId)) ||
 			null
 	);
-	let sortedDetailEngines = $derived(sortVesselEngines(selectedVessel?.engines || []));
-
 	let totalMeasureMeters = $derived(getTotalMeasureDistance(measurePoints));
-
-	function formatValue(value, fallback = '-') {
-		if (value === null || value === undefined || value === '') return fallback;
-		return value;
-	}
-
-	function formatNumber(value, digits = 1, fallback = '-') {
-		const number = Number(value);
-		if (!Number.isFinite(number)) return fallback;
-		return number.toFixed(digits);
-	}
-
-	function formatDmsCoordinate(value, axis = 'lat') {
-		const number = Number(value);
-		if (!Number.isFinite(number)) return '-';
-
-		const direction = axis === 'lng' ? (number >= 0 ? 'E' : 'W') : number >= 0 ? 'N' : 'S';
-		let absolute = Math.abs(number);
-		let degrees = Math.floor(absolute);
-		let minutesFloat = (absolute - degrees) * 60;
-		let minutes = Math.floor(minutesFloat);
-		let seconds = Number(((minutesFloat - minutes) * 60).toFixed(2));
-
-		if (seconds >= 60) {
-			seconds = 0;
-			minutes += 1;
-		}
-
-		if (minutes >= 60) {
-			minutes = 0;
-			degrees += 1;
-		}
-
-		const paddedMinutes = String(minutes).padStart(2, '0');
-		const paddedSeconds = seconds.toFixed(2).padStart(5, '0');
-
-		return `${degrees}\u00b0 ${paddedMinutes}' ${paddedSeconds}" ${direction}`;
-	}
-
-	function formatDmsPair(latitude, longitude) {
-		const latDms = formatDmsCoordinate(latitude, 'lat');
-		const lngDms = formatDmsCoordinate(longitude, 'lng');
-
-		if (latDms === '-' || lngDms === '-') return '-';
-
-		return `${latDms} \u2022 ${lngDms}`;
-	}
-
-	function hasValidVesselCoordinate(vessel) {
-		const lat = Number(vessel?.lat ?? vessel?.latitude);
-		const lng = Number(vessel?.lng ?? vessel?.longitude);
-
-		return Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
-	}
-
-	function parseVesselDateTime(value, timezoneHint = null) {
-		if (!value || value === '-') return null;
-
-		const text = String(value).trim();
-		const timezoneText = `${text} ${timezoneHint || ''}`;
-		const timezoneMatch = timezoneText.match(/\(?\bUTC\s*([+-])(\d{1,2})(?::?(\d{2}))?\)?/i);
-		const timezoneOffsetMinutes = timezoneMatch
-			? (timezoneMatch[1] === '-' ? -1 : 1) *
-				(Number(timezoneMatch[2]) * 60 + Number(timezoneMatch[3] || 0))
-			: null;
-
-		function buildDateWithOptionalTimezone({ year, month, day, hour, minute, second }) {
-			if (Number.isFinite(timezoneOffsetMinutes)) {
-				const utcTime =
-					Date.UTC(year, month - 1, day, hour, minute, second) - timezoneOffsetMinutes * 60 * 1000;
-
-				const date = new Date(utcTime);
-				return Number.isNaN(date.getTime()) ? null : date;
-			}
-
-			const date = new Date(year, month - 1, day, hour, minute, second);
-			return Number.isNaN(date.getTime()) ? null : date;
-		}
-
-		const match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
-
-		if (match) {
-			const [, dd, mm, yyyy, hh, min, ss] = match;
-
-			const date = buildDateWithOptionalTimezone({
-				year: Number(yyyy),
-				month: Number(mm),
-				day: Number(dd),
-				hour: Number(hh),
-				minute: Number(min),
-				second: Number(ss)
-			});
-
-			if (date) return date;
-		}
-
-		const isoLikeMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})[T\s]+(\d{2}):(\d{2})(?::(\d{2}))?/);
-
-		if (isoLikeMatch) {
-			const [, yyyy, mm, dd, hh, min, ss = '0'] = isoLikeMatch;
-			const date = buildDateWithOptionalTimezone({
-				year: Number(yyyy),
-				month: Number(mm),
-				day: Number(dd),
-				hour: Number(hh),
-				minute: Number(min),
-				second: Number(ss)
-			});
-
-			if (date) return date;
-		}
-
-		const fallbackDate = new Date(text);
-		if (!Number.isNaN(fallbackDate.getTime())) return fallbackDate;
-
-		return null;
-	}
-
-	function formatObservedAt(value) {
-		if (!value || value === '-') return '-';
-
-		const date = new Date(value);
-
-		if (Number.isNaN(date.getTime())) {
-			return value;
-		}
-
-		return date.toLocaleString('en-GB', {
-			day: '2-digit',
-			month: 'short',
-			year: 'numeric',
-			hour: '2-digit',
-			minute: '2-digit',
-			hour12: false
-		});
-	}
-
-	function formatLastUpdated(value, timezoneHint = null) {
-		if (!value || value === '-') return '-';
-
-		const date = parseVesselDateTime(value, timezoneHint);
-		if (!date) return value;
-
-		const diffMs = Date.now() - date.getTime();
-		const diffMinutes = Math.floor(diffMs / 60000);
-
-		if (diffMinutes < 0) return value;
-
-		if (diffMinutes < 1) {
-			return 'Just now';
-		}
-
-		if (diffMinutes < 10) {
-			return `${diffMinutes} minute${diffMinutes === 1 ? '' : 's'} ago`;
-		}
-
-		return value;
-	}
-
-	function stripUtcLabel(value) {
-		if (!value || value === '-') return '-';
-
-		const cleaned = String(value)
-			.replace(/\s*\(?\bUTC\s*[+-]\d{1,2}(?::?\d{2})?\)?\s*/gi, ' ')
-			.replace(/\s{2,}/g, ' ')
-			.trim();
-
-		return cleaned || '-';
-	}
-
-	function getUtcLabel(value) {
-		if (!value || value === '-') return null;
-
-		const text = String(value).trim();
-
-		if (/^Asia\/Jakarta$/i.test(text) || /^WIB$/i.test(text)) return 'UTC+07:00';
-		if (/^Asia\/Makassar$/i.test(text) || /^WITA$/i.test(text)) return 'UTC+08:00';
-		if (/^Asia\/Jayapura$/i.test(text) || /^WIT$/i.test(text)) return 'UTC+09:00';
-
-		const match =
-			text.match(/\bUTC\s*([+-]\d{1,2})(?::?(\d{2}))?/i) ||
-			text.match(/^([+-]\d{1,2})(?::?(\d{2}))?$/);
-		if (!match) return null;
-
-		const rawHour = match[1];
-		const sign = rawHour.startsWith('-') ? '-' : '+';
-		const hour = rawHour.replace(/^[+-]/, '').padStart(2, '0');
-		const minute = (match[2] || '00').padStart(2, '0');
-
-		return `UTC${sign}${hour}:${minute}`;
-	}
-
-	function getTelemetryUtcLabel(vessel) {
-		return (
-			getUtcLabel(vessel?.lastUpdated) ||
-			getUtcLabel(vessel?.lastConnectTime) ||
-			getUtcLabel(vessel?.lastDisconnectTime) ||
-			getUtcLabel(vessel?.timezone) ||
-			getUtcLabel(vessel?.timeZone) ||
-			getUtcLabel(vessel?.timezoneMode) ||
-			getUtcLabel(vessel?.utc) ||
-			getUtcLabel(vessel?.utcOffset) ||
-			getUtcLabel(vessel?.utc_offset) ||
-			'UTC+07:00'
-		);
-	}
-
-	function formatTelemetryTime(value) {
-		return stripUtcLabel(formatValue(value, '-'));
-	}
-
-	function formatLastUpdatedBadge(value, timezoneHint = null) {
-		return stripUtcLabel(formatLastUpdated(value, timezoneHint));
-	}
-
-	function formatActualLastUpdated(value) {
-		if (!value || value === '-') return '-';
-
-		const cleanedValue = stripUtcLabel(formatValue(value, '-'));
-		if (!cleanedValue || cleanedValue === '-') return '-';
-
-		if (/^(just now|\d+\s+minutes?\s+ago)$/i.test(cleanedValue)) {
-			const parsedDate = parseVesselDateTime(value);
-			if (!parsedDate) return cleanedValue;
-
-			return parsedDate.toLocaleString('en-GB', {
-				day: '2-digit',
-				month: 'short',
-				year: 'numeric',
-				hour: '2-digit',
-				minute: '2-digit',
-				second: '2-digit',
-				hour12: false
-			});
-		}
-
-		return cleanedValue;
-	}
-
-	function getLatestConnectionEvent(vessel) {
-		const connectedAt = parseVesselDateTime(vessel?.lastConnectTime);
-		const disconnectedAt = parseVesselDateTime(vessel?.lastDisconnectTime);
-
-		if (!connectedAt && !disconnectedAt) return null;
-		if (connectedAt && !disconnectedAt) return 'connected';
-		if (!connectedAt && disconnectedAt) return 'disconnected';
-
-		if (connectedAt.getTime() === disconnectedAt.getTime()) return null;
-		return connectedAt > disconnectedAt ? 'connected' : 'disconnected';
-	}
-
-	function getEngineRpm(vessel, keyword) {
-		const engines = Array.isArray(vessel?.engines) ? vessel.engines : [];
-		const key = String(keyword || '')
-			.toLowerCase()
-			.replace(/\s+/g, '_');
-
-		const engine = engines.find((item) => {
-			const name = String(item?.name || item?.engineName || '').toLowerCase();
-			const engineKey = String(item?.key || item?.engineKeyThingsboard || '').toLowerCase();
-
-			return name.includes(key.replace(/_/g, ' ')) || engineKey === key || engineKey.includes(key);
-		});
-
-		return formatValue(engine?.rpm ?? engine?.rpmValue ?? engine?.latestRpm ?? engine?.value, '-');
-	}
 
 	function getCurrentWeather(vessel) {
 		return vessel?.weather?.current || null;
-	}
-
-	function getVoyageProgress(vessel) {
-		const progress = vessel?.voyageProgress;
-
-		if (!progress) return null;
-
-		const percentage = Number(progress.voyagePercentage ?? 0);
-
-		return {
-			voyageName: progress.voyageName ?? '-',
-			voyagePercentage: Number.isFinite(percentage) ? percentage : 0,
-			assignedBy: progress.assignedBy ?? '-'
-		};
-	}
-
-	function formatVoyagePercentage(value) {
-		const number = Number(value);
-
-		if (!Number.isFinite(number)) return '0%';
-
-		return `${Math.max(0, Math.min(100, number)).toFixed(1)}%`;
-	}
-
-	function clampPercentage(value) {
-		const number = Number(value);
-
-		if (!Number.isFinite(number)) return 0;
-
-		return Math.max(0, Math.min(100, number));
 	}
 
 	function getTotalMeasureDistance(points) {
@@ -1181,10 +627,6 @@
 		isSidebarOpen = false;
 	}
 
-	function openMobileSidebar() {
-		openSidebar();
-	}
-
 	function closeMobileSidebar() {
 		closeSidebar();
 	}
@@ -1250,82 +692,6 @@
 		if (event.detail !== 'vessel-list') {
 			isSidebarOpen = false;
 		}
-	}
-
-	function createPopupHtml(vessel) {
-		const latitude = vessel.latitude ?? vessel.lat;
-		const longitude = vessel.longitude ?? vessel.lng;
-		const formattedLatitude = formatNumber(latitude, 6, '-');
-		const formattedLongitude = formatNumber(longitude, 6, '-');
-		const formattedLatitudeDms = formatDmsCoordinate(latitude, 'lat');
-		const formattedLongitudeDms = formatDmsCoordinate(longitude, 'lng');
-
-		return `
-      <div class="fleet-popup">
-        <div class="fleet-popup-hero">
-          <div class="fleet-popup-heading">
-            <span class="fleet-popup-eyebrow">Vessel overview</span>
-            <strong>${formatValue(vessel.name)}</strong>
-            <small>${formatValue(vessel.companyName)}</small>
-          </div>
-          <span class="fleet-popup-status ${vessel.online ? 'is-online' : 'is-offline'}">
-            ${vessel.online ? 'Online' : 'Offline'}
-          </span>
-        </div>
-
-        <div class="fleet-popup-metrics">
-          <div class="fleet-popup-metric">
-          <span>Speed</span>
-          <strong>${formatNumber(vessel.speed, 1, '0.0')} <small>kt</small></strong>
-          </div>
-
-          <div class="fleet-popup-metric">
-          <span>Heading</span>
-          <strong>${formatNumber(vessel.heading, 1, '0.0')}<small>°</small></strong>
-          </div>
-        </div>
-
-        <div class="fleet-popup-coordinates">
-          <div>
-            <span>Latitude</span>
-            ${createCopyableCoordinateHtml(formattedLatitude, 'latitude')}
-            <small class="coordinate-dms">${formattedLatitudeDms}</small>
-          </div>
-          <div>
-            <span>Longitude</span>
-            ${createCopyableCoordinateHtml(formattedLongitude, 'longitude')}
-            <small class="coordinate-dms">${formattedLongitudeDms}</small>
-          </div>
-        </div>
-
-        <div class="fleet-popup-meta">
-          <div class="fleet-popup-row">
-            <span>Last updated</span>
-            <strong>${formatActualLastUpdated(vessel.lastUpdated)}</strong>
-          </div>
-        </div>
-
-        <div class="fleet-popup-actions">
-        <button
-            type="button"
-            class="fleet-popup-detail-btn"
-            data-action="detail"
-            data-vessel-id="${vessel.id}"
-        >
-            View detail
-        </button>
-
-        <button
-            type="button"
-            class="fleet-popup-dashboard-btn"
-            data-action="dashboard"
-            data-vessel-id="${vessel.id}"
-        >
-            Dashboard
-        </button>
-        </div>
-      </div>
-    `;
 	}
 
 	function createVesselTooltipHtml(vessel) {
@@ -1753,7 +1119,7 @@
 
 		if (detail && String(selectedVesselId) === normalizedId && !showDetailPanel) {
 			const marker = markers.get(normalizedId);
-			marker?.setPopupContent?.(createPopupHtml(detail));
+			marker?.setPopupContent?.(createFleetPopupHtml(detail));
 			marker?.openPopup?.();
 		}
 	}
@@ -1815,7 +1181,7 @@
 				zIndexOffset: String(vesselId) === String(selectedVesselId) ? 1000 : 600
 			}).addTo(map);
 
-			marker.bindPopup(createPopupHtml(vessel), {
+			marker.bindPopup(createFleetPopupHtml(vessel), {
 				closeButton: true,
 				autoPan: true,
 				autoClose: true,
@@ -1915,7 +1281,7 @@
 
 		marker.setLatLng([lat, lng]);
 		marker.setIcon(createVesselIcon(vessel));
-		marker.setPopupContent(createPopupHtml(vessel));
+		marker.setPopupContent(createFleetPopupHtml(vessel));
 		const isSelected = String(vesselId) === String(selectedVesselId);
 
 		marker.options.pane = isSelected ? 'selectedVesselPane' : 'vesselPane';
@@ -2850,7 +2216,6 @@
 		if (!vesselId) {
 			detailCctvSnapshots = [];
 			detailCctvLoadedVesselId = null;
-			selectedDetailCctvKey = '';
 			return [];
 		}
 
@@ -2871,14 +2236,12 @@
 
 			detailCctvSnapshots = snapshots;
 			detailCctvLoadedVesselId = String(vesselId);
-			selectedDetailCctvKey = '';
 			return snapshots;
 		} catch (error) {
 			console.error('[FLEET_DETAIL_CCTV_ERROR]', error);
 			detailCctvSnapshots = [];
 			detailCctvError = error?.message || 'Failed to load CCTV snapshots.';
 			detailCctvLoadedVesselId = String(vesselId);
-			selectedDetailCctvKey = '';
 			return [];
 		} finally {
 			detailCctvLoading = false;
@@ -3189,24 +2552,12 @@
 			detailCctvError = '';
 			detailCctvLoading = false;
 			detailCctvLoadedVesselId = null;
-			selectedDetailCctvKey = '';
 			return;
 		}
 
 		if (String(detailCctvLoadedVesselId) === String(selectedVesselId) || detailCctvLoading) return;
 
 		loadDetailCctvSnapshots(selectedVesselId);
-	});
-
-	$effect(() => {
-		if (!detailCctvItems.length) {
-			if (selectedDetailCctvKey) selectedDetailCctvKey = '';
-			return;
-		}
-
-		if (!detailCctvItems.some((item) => item.key === selectedDetailCctvKey)) {
-			selectedDetailCctvKey = detailCctvItems[0]?.key || '';
-		}
 	});
 
 	$effect(() => {
@@ -3268,88 +2619,20 @@
 	{/if}
 
 	<div class:sidebar-collapsed={!isSidebarOpen} class="fleet-layout">
-		<aside
-			class:sidebar-open={isSidebarOpen}
-			class:sidebar-collapsed={!isSidebarOpen}
-			class="fleet-sidebar"
-		>
-			<div class="sidebar-fixed">
-				<FleetViewSidebarHeader
-					{statusFilter}
-					{onlineCount}
-					{offlineCount}
-					totalCount={vesselData.length}
-					bind:search
-					onFilter={(value) => (statusFilter = value)}
-					onCloseMobile={closeMobileSidebar}
-				/>
-			</div>
-
-			<div class="vessel-list" bind:this={vesselListContainer}>
-				{#if fleetLoading && !vesselData.length}
-					<LoadingSkeleton label="Loading fleet vessels" variant="fleet-list" rows={7} compact />
-				{:else}
-					{#each filteredVessels as vessel}
-						<article
-							data-vessel-id={String(vessel.id)}
-							class:selected-card={String(selectedVesselId) === String(vessel.id)}
-							class:offline-card={!vessel.online}
-							class="vessel-card"
-						>
-							<button
-								type="button"
-								class:selected-select={String(selectedVesselId) === String(vessel.id)}
-								class:offline-select={!vessel.online}
-								class="vessel-select"
-								aria-pressed={String(selectedVesselId) === String(vessel.id)}
-								onclick={() => selectVessel(vessel.id)}
-							>
-								<div class="vessel-main-row">
-									<div class="vessel-identity">
-										<span
-											class:online={vessel.online}
-											class:offline={!vessel.online}
-											class="status-dot"
-										></span>
-
-										<div class="vessel-name-block">
-											<h3>{vessel.name}</h3>
-											<p>Last Updated:</p>
-											<p>
-												{formatLastUpdatedBadge(vessel.lastUpdated, vessel.timezone)}
-											</p>
-										</div>
-									</div>
-
-									<div class="vessel-card-tools">
-										<span class="vessel-utc-badge">{getTelemetryUtcLabel(vessel)}</span>
-										<div
-											class="location-button"
-											class:has-coordinate={hasValidVesselCoordinate(vessel)}
-											title={hasValidVesselCoordinate(vessel)
-												? 'Coordinate available'
-												: 'Coordinate unavailable'}
-											aria-label={hasValidVesselCoordinate(vessel)
-												? 'Coordinate available'
-												: 'Coordinate unavailable'}
-										></div>
-										<span
-											class:on-hire={isOnHireStatus(vessel.hireStatus)}
-											class:off-hire={isOffHireStatus(vessel.hireStatus)}
-											class:unknown-hire={!isOnHireStatus(vessel.hireStatus) &&
-												!isOffHireStatus(vessel.hireStatus)}
-											class="vessel-hire-badge"
-										>
-											{normalizeHireStatus(vessel.hireStatus)}
-										</span>
-									</div>
-								</div>
-							</button>
-						</article>
-					{/each}
-				{/if}
-			</div>
-		</aside>
+		<FleetViewSidebar
+			bind:search
+			bind:statusFilter
+			vessels={filteredVessels}
+			loading={fleetLoading}
+			selectedId={selectedVesselId}
+			{onlineCount}
+			{offlineCount}
+			totalCount={vesselData.length}
+			open={isSidebarOpen}
+			onSelect={selectVessel}
+			onCloseMobile={closeMobileSidebar}
+			bind:listElement={vesselListContainer}
+		/>
 
 		<section class="fleet-map-panel">
 			<div class:is-fullscreen={isFleetFullscreen} class="map-stage" bind:this={mapStageContainer}>
@@ -3382,7 +2665,7 @@
 						</div>
 
 						<select bind:value={measureUnit} class="measure-unit-select">
-							{#each measureUnits as unit}
+							{#each measureUnits as unit (unit.value)}
 								<option value={unit.value}>{unit.label}</option>
 							{/each}
 						</select>
@@ -3414,466 +2697,28 @@
 							in:detailIntro|global
 							out:detailOutro|global
 						>
-							<div class="detail-panel-header">
-								<div class="detail-title-wrap">
-									<span
-										class="detail-status-dot"
-										class:online={selectedVessel.online}
-										class:offline={!selectedVessel.online}
-									></span>
-
-									<div class="detail-title-group">
-										<span class="detail-eyebrow">Live vessel</span>
-										<h2>{selectedVessel.name}</h2>
-										<p>{selectedVessel.companyName || 'Company information unavailable'}</p>
-									</div>
-
-									<button type="button" class="detail-close-btn" onclick={closeVesselDetail}>
-										×
-									</button>
-								</div>
-
-								<div class="detail-header-actions">
-									<span
-										class="detail-hire-pill"
-										class:on-hire={isOnHireStatus(selectedVessel.hireStatus)}
-										class:off-hire={isOffHireStatus(selectedVessel.hireStatus)}
-										class:unknown-hire={!isOnHireStatus(selectedVessel.hireStatus) &&
-											!isOffHireStatus(selectedVessel.hireStatus)}
-									>
-										{normalizeHireStatus(selectedVessel.hireStatus)}
-									</span>
-
-									<span
-										class="detail-status-pill"
-										class:online-pill={selectedVessel.online}
-										class:offline-pill={!selectedVessel.online}
-									>
-										{formatOnlineStatus(selectedVessel.online)}
-									</span>
-
-									<button
-										type="button"
-										class="detail-dashboard-btn"
-										onclick={() => openVesselDashboard(selectedVessel)}
-										title="Open vessel dashboard"
-									>
-										<span>Dashboard</span>
-										<span aria-hidden="true">↗</span>
-									</button>
-
-									<button type="button" class="detail-close-btn" onclick={closeVesselDetail}>
-										×
-									</button>
-								</div>
-							</div>
-
-							<div class="detail-panel-body">
-								<button
-									type="button"
-									class="detail-dashboard-cta"
-									onclick={() => openVesselDashboard(selectedVessel)}
-								>
-									<span>Open dashboard</span>
-									<span aria-hidden="true">↗</span>
-								</button>
-
-								<section class="detail-section detail-cctv-section">
-									<div class="detail-section-heading">
-										<div>
-											<span class="detail-section-kicker">CCTV</span>
-											<h3>Latest camera snapshot</h3>
-										</div>
-										<strong class="detail-cctv-count">
-											{detailCctvLoading ? 'Loading...' : `${detailCctvItems.length} cameras`}
-										</strong>
-									</div>
-
-									{#if detailCctvLoading}
-										<div class="detail-cctv-layout">
-											<div
-												class="detail-cctv-box detail-cctv-main detail-cctv-skeleton"
-												aria-hidden="true"
-											>
-												<span></span>
-												<strong></strong>
-												<small></small>
-											</div>
-											<div class="detail-cctv-thumb-row" aria-hidden="true">
-												{#each Array(3) as _}
-													<div class="detail-cctv-box detail-cctv-thumb detail-cctv-skeleton">
-														<strong></strong>
-													</div>
-												{/each}
-											</div>
-										</div>
-									{:else if !detailCctvItems.length}
-										<div class="detail-cctv-empty">
-											{detailCctvError || 'Latest CCTV snapshot is not available for this vessel.'}
-										</div>
-									{:else}
-										<div class="detail-cctv-layout">
-											{#if mainDetailCctv}
-												<div
-													class="detail-cctv-box detail-cctv-main"
-													class:has-snapshot={Boolean(mainDetailCctv.url)}
-													class:offline={!mainDetailCctv.online}
-												>
-													{#if mainDetailCctv.url}
-														<CctvSnapshotImage
-															class="detail-cctv-img"
-															src={mainDetailCctv.url}
-															filePath={mainDetailCctv.location}
-															alt={`${mainDetailCctv.name} latest snapshot`}
-															loading="eager"
-														/>
-													{/if}
-
-													<div class="detail-cctv-content">
-														<strong>{mainDetailCctv.name}</strong>
-														{#if mainDetailCctv.capturedAtText}
-															<span>{mainDetailCctv.capturedAtText}</span>
-														{/if}
-														{#if mainDetailCctv.fileSizeText}
-															<small>{mainDetailCctv.fileSizeText}</small>
-														{/if}
-													</div>
-												</div>
-											{/if}
-
-											{#if detailCctvThumbnails.length}
-												<div class="detail-cctv-thumb-row" aria-label="CCTV camera list">
-													{#each detailCctvThumbnails as cctv (cctv.key)}
-														<button
-															type="button"
-															class="detail-cctv-box detail-cctv-thumb"
-															class:has-snapshot={Boolean(cctv.url)}
-															class:offline={!cctv.online}
-															onclick={() => selectDetailCctv(cctv)}
-															title={`Show ${cctv.name}`}
-														>
-															{#if cctv.url}
-																<CctvSnapshotImage
-																	class="detail-cctv-img"
-																	src={cctv.url}
-																	filePath={cctv.location}
-																	alt={`${cctv.name} latest snapshot`}
-																	loading="lazy"
-																/>
-															{/if}
-
-															<div class="detail-cctv-content">
-																<strong>{cctv.name}</strong>
-															</div>
-														</button>
-													{/each}
-												</div>
-											{/if}
-										</div>
-									{/if}
-								</section>
-
-								<section class="detail-section">
-									<div class="detail-section-heading">
-										<div>
-											<span class="detail-section-kicker">Telemetry</span>
-											<h3>Operational snapshot</h3>
-										</div>
-										<div class="detail-time-stack">
-											<span class="detail-utc-badge">
-												{getTelemetryUtcLabel(selectedVessel)}
-											</span>
-										</div>
-									</div>
-
-									<div class="detail-hero-metrics">
-										<div class="detail-hero-metric">
-											<span>Speed</span>
-											<strong>{formatMissingValue(selectedVessel.speed)}</strong>
-											<small>knots</small>
-										</div>
-										<div class="detail-hero-metric">
-											<span>Heading</span>
-											<strong>{formatMissingValue(selectedVessel.heading, '°')}</strong>
-											<small>course</small>
-										</div>
-									</div>
-
-									<div class="detail-grid two-col">
-										<div class="detail-item detail-updated-item">
-											<span>Last Updated</span>
-											<strong>{formatActualLastUpdated(selectedVessel.lastUpdated)}</strong>
-										</div>
-
-										<div
-											class="detail-item connection-time-item"
-											class:latest-connected={getLatestConnectionEvent(selectedVessel) ===
-												'connected'}
-										>
-											<span>Last Connect</span>
-											<strong>{formatTelemetryTime(selectedVessel.lastConnectTime)}</strong>
-										</div>
-
-										<div
-											class="detail-item connection-time-item"
-											class:latest-disconnected={getLatestConnectionEvent(selectedVessel) ===
-												'disconnected'}
-										>
-											<span>Last Disconnect</span>
-											<strong>{formatTelemetryTime(selectedVessel.lastDisconnectTime)}</strong>
-										</div>
-
-										<div class="detail-item coordinates-detail-item">
-											<span>Coordinates</span>
-											<strong>
-												<CopyableCoordinate
-													value={`${formatMissingValue(selectedVessel.latitude ?? selectedVessel.lat)}, ${formatMissingValue(selectedVessel.longitude ?? selectedVessel.lng)}`}
-													display={`${formatMissingValue(selectedVessel.latitude ?? selectedVessel.lat)}, ${formatMissingValue(selectedVessel.longitude ?? selectedVessel.lng)}`}
-													label="latitude and longitude"
-													compact
-													class="coordinate-pair-copy"
-												/>
-											</strong>
-											<small class="coordinate-dms">
-												{formatDmsPair(
-													selectedVessel.latitude ?? selectedVessel.lat,
-													selectedVessel.longitude ?? selectedVessel.lng
-												)}
-											</small>
-										</div>
-									</div>
-								</section>
-
-								<section class="detail-section compact-voyage-section">
-									<div class="detail-section-heading">
-										<div>
-											<span class="detail-section-kicker">Route</span>
-											<h3>Voyage progress</h3>
-										</div>
-									</div>
-
-									{#if voyageProgress}
-										<div class="voyage-progress-mini">
-											<div class="voyage-progress-mini-top">
-												<strong>{voyageProgress.voyageName}</strong>
-												<span>{formatVoyagePercentage(voyageProgress.voyagePercentage)}</span>
-											</div>
-
-											<div class="voyage-progress-track">
-												<div
-													class="voyage-progress-fill"
-													style={`width: ${clampPercentage(voyageProgress.voyagePercentage)}%`}
-												></div>
-											</div>
-
-											<div class="voyage-progress-mini-bottom">
-												Assigned by {voyageProgress.assignedBy}
-											</div>
-										</div>
-									{:else}
-										<div class="empty-voyage">
-											No voyage plan / progress available for this vessel.
-										</div>
-									{/if}
-								</section>
-
-								<section class="detail-section">
-									<div class="detail-section-heading">
-										<div>
-											<span class="detail-section-kicker">Machinery</span>
-											<h3>Engine RPM</h3>
-										</div>
-									</div>
-
-									<div class="simple-table">
-										{#if sortedDetailEngines.length}
-											{#each sortedDetailEngines as engine}
-												<div class="simple-row">
-													<span>{getEngineDisplayName(engine)}</span>
-													<strong>
-														{getLiveEngineRpm(selectedVessel, engine)}
-													</strong>
-												</div>
-											{/each}
-										{:else}
-											<div class="empty-voyage">Engine list is not available.</div>
-										{/if}
-									</div>
-								</section>
-
-								<section class="detail-section">
-									<div class="detail-section-heading">
-										<div>
-											<span class="detail-section-kicker">Environment</span>
-											<h3>Weather & ocean current</h3>
-										</div>
-									</div>
-
-									{#if selectedVessel.weather?.current}
-										<div class="weather-current">
-											<div class="weather-icon">🌤️</div>
-
-											<div>
-												<strong>{selectedVessel.weather.current.temp_c}°C</strong>
-												<span>{selectedVessel.weather.current.condition || '-'}</span>
-											</div>
-
-											<div class="weather-meta">
-												<strong
-													>{selectedVessel.weather.current.wind_dir || '-'}
-													{selectedVessel.weather.current.wind_speed_kt || '-'} kt</strong
-												>
-												<span
-													>{selectedVessel.weather.current.humidity || '-'}% · {selectedVessel
-														.weather.current.pressure_hpa || '-'} hPa</span
-												>
-											</div>
-										</div>
-									{:else}
-										<div class="empty-voyage">Weather is not available.</div>
-									{/if}
-									<div class="environment-divider"></div>
-
-									{#if selectedVessel.oceanCurrent?.current}
-										<div class="simple-table ocean-current-card">
-											<div class="simple-row">
-												<span>Speed</span>
-												<strong>{selectedVessel.oceanCurrent.current.speed_kph} kph</strong>
-											</div>
-
-											<div class="simple-row">
-												<span>Direction</span>
-												<strong>
-													{selectedVessel.oceanCurrent.current.direction_to}
-													{selectedVessel.oceanCurrent.current.direction_to_deg}°
-												</strong>
-											</div>
-
-											<div class="simple-row ocean-observed-row">
-												<span>Observed At</span>
-												<strong
-													>{formatObservedAt(
-														selectedVessel.oceanCurrent.current.observed_at
-													)}</strong
-												>
-											</div>
-										</div>
-									{:else}
-										<div class="empty-voyage">Ocean current is not available.</div>
-									{/if}
-								</section>
-							</div>
+							<FleetViewDetailPanel
+								vessel={selectedVessel}
+								cctvSnapshots={detailCctvSnapshots}
+								cctvLoading={detailCctvLoading}
+								cctvError={detailCctvError}
+								onClose={closeVesselDetail}
+								onDashboard={() => openVesselDashboard(selectedVessel)}
+							/>
 						</aside>
 					{/key}
 				{/if}
 
-				<div
-					class:legend-collapsed={!isMapLegendOpen}
-					class="map-legend"
-					bind:this={mapLegendElement}
-				>
-					<div class="legend-header">
-						<div>
-							<span class="legend-title">Map Legend</span>
-							<span class="legend-subtitle">Fleet overlays</span>
-						</div>
-						<button
-							type="button"
-							class="legend-toggle-btn"
-							aria-expanded={isMapLegendOpen}
-							aria-label={isMapLegendOpen ? 'Hide map legend' : 'Show map legend'}
-							title={isMapLegendOpen ? 'Hide legend' : 'Show legend'}
-							onclick={() => (isMapLegendOpen = !isMapLegendOpen)}
-						>
-							{isMapLegendOpen ? '−' : '+'}
-						</button>
-					</div>
-
-					{#if isMapLegendOpen}
-						<div class="legend-body">
-							<div class="legend-scroll-area">
-								<div class="legend-section">
-									<div class="legend-item">
-										<span class="legend-vessel-marker online" aria-hidden="true"></span>
-										<span>Vessel online</span>
-									</div>
-
-									<div class="legend-item">
-										<span class="legend-vessel-marker offline" aria-hidden="true"></span>
-										<span>Vessel offline</span>
-									</div>
-
-									<div class="legend-item">
-										<span class="legend-vessel-marker selected" aria-hidden="true"></span>
-										<span>Selected vessel</span>
-									</div>
-								</div>
-
-								<div class="legend-section">
-									<div class="legend-item">
-										<span class="asset-boundary-legend" aria-hidden="true"></span>
-										<span>Boundary 1 km</span>
-									</div>
-
-									{#if assetLegendItems.length}
-										<div class="legend-asset-list" aria-label="Asset types on map">
-											{#each assetLegendItems as item}
-												<button
-													type="button"
-													class:asset-type-visible={isAssetTypeVisible(item)}
-													class="legend-asset-toggle-row"
-													title={`${isAssetTypeVisible(item) ? 'Hide' : 'Show'} ${item.label}`}
-													onclick={() => toggleAssetType(item)}
-												>
-													<img src={item.iconUrl} alt="" />
-													<span>{item.label}</span>
-													<i aria-hidden="true"></i>
-												</button>
-											{/each}
-										</div>
-									{/if}
-								</div>
-
-								{#if zoneData.length}
-									<div class="legend-section">
-										{#each zoneData as zone}
-											<div class="legend-item">
-												<span
-													class="zone-boundary-legend"
-													style={`--zone-color: ${zone.color}; --zone-fill: ${zone.fillColor};`}
-													aria-hidden="true"
-												></span>
-												<span>{zone.name}</span>
-											</div>
-										{/each}
-									</div>
-								{/if}
-							</div>
-
-							<div class="legend-actions">
-								<button
-									type="button"
-									class:active-wind-toggle={showWindParticles}
-									class="wind-toggle-btn"
-									onclick={() => (showWindParticles = !showWindParticles)}
-								>
-									<span class="wind-legend-line"></span>
-									Wind: {showWindParticles ? 'On' : 'Off'}
-								</button>
-
-								<button
-									type="button"
-									class:active-current-toggle={showCurrentParticles}
-									class="current-toggle-btn"
-									onclick={() => (showCurrentParticles = !showCurrentParticles)}
-								>
-									<span class="current-legend-line"></span>
-									Current: {showCurrentParticles ? 'On' : 'Off'}
-								</button>
-							</div>
-						</div>
-					{/if}
-				</div>
+				<FleetViewMapLegend
+					bind:element={mapLegendElement}
+					bind:open={isMapLegendOpen}
+					{assetLegendItems}
+					{zoneData}
+					isAssetVisible={isAssetTypeVisible}
+					onToggleAssetType={toggleAssetType}
+					bind:showWind={showWindParticles}
+					bind:showCurrent={showCurrentParticles}
+				/>
 			</div>
 		</section>
 	</div>

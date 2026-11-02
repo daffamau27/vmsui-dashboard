@@ -1,4 +1,5 @@
 <script>
+	import { onMount } from 'svelte';
 	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
@@ -23,7 +24,7 @@
 	} from '$lib/api/fuelManagementApi.js';
 	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
 
-	let { active = true } = $props();
+	let { active = true, autoLoad = false } = $props();
 
 	let historyStartDate = $state(daysAgoDate(30));
 	let historyEndDate = $state(todayDate());
@@ -86,6 +87,10 @@
 			dataReceived: '-',
 			sourcePage: 'Fuel Management'
 		});
+	});
+
+	onMount(() => {
+		if (autoLoad) loadHistoryCurrent(1);
 	});
 
 	const tableConfigs = [

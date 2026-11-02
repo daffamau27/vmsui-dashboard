@@ -1,5 +1,5 @@
 <script>
-	import { flushSync, onDestroy, untrack } from 'svelte';
+	import { flushSync, onDestroy, onMount, untrack } from 'svelte';
 	import TraceHeader from './TraceHeader.svelte';
 	import TraceCctv from './TraceCctv.svelte';
 	import TraceMap from './TraceMap.svelte';
@@ -29,7 +29,14 @@
 	} from '$lib/utils/traceCctvBuffer.js';
 	import { createSnapshotImageBuffer } from '$lib/utils/snapshotImageBuffer.js';
 
-	let { active = false } = $props();
+	let { active = false, autoLoad = false } = $props();
+
+	onMount(() => {
+		if (!autoLoad) return;
+
+		applyTimePreset('today');
+		loadTrace();
+	});
 
 	let loading = $state(false);
 	let error = $state('');
@@ -2673,7 +2680,8 @@
 			if (!controls) return;
 			mutationObserver.disconnect();
 			const update = () => {
-				mapControlsBottom = controls.getBoundingClientRect().bottom - root.getBoundingClientRect().top;
+				mapControlsBottom =
+					controls.getBoundingClientRect().bottom - root.getBoundingClientRect().top;
 			};
 			resizeObserver = new ResizeObserver(update);
 			resizeObserver.observe(controls);
@@ -2788,7 +2796,7 @@
 			aria-expanded={fullscreenCctvOpen}
 			aria-controls="trace-floating-cctv"
 			onclick={() => setFullscreenCctvOpen(!fullscreenCctvOpen)}
-		>{fullscreenCctvOpen ? 'Hide CCTV' : 'Show CCTV'}</button
+			>{fullscreenCctvOpen ? 'Hide CCTV' : 'Show CCTV'}</button
 		>
 		<button
 			type="button"
@@ -2797,7 +2805,17 @@
 			aria-label="Exit fullscreen"
 			title="Exit fullscreen (Esc)"
 		>
-			<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<svg
+				width="22"
+				height="22"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				aria-hidden="true"
+			>
 				<path d="M9 3v6H3m18 0h-6V3M3 15h6v6m6 0v-6h6" />
 			</svg>
 		</button>
