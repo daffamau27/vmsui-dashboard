@@ -3,7 +3,9 @@
 		loadingMonitor = false,
 		loadingEvents = false,
 		acknowledging = false,
+		unreadDeviationCount = 0,
 		onRefresh = () => {},
+		onViewDeviations = () => {},
 		onAcknowledgeAll = () => {}
 	} = $props();
 </script>
@@ -24,6 +26,19 @@
 		>
 			{loadingMonitor || loadingEvents ? 'Refreshing...' : 'Refresh'}
 		</button>
+
+		{#if unreadDeviationCount > 0}
+			<button
+				type="button"
+				class="secondary-btn deviation-alert-btn"
+				onclick={onViewDeviations}
+				disabled={acknowledging}
+				aria-haspopup="dialog"
+				title="Review unread data deviation alarms"
+			>
+				Data Deviations ({unreadDeviationCount})
+			</button>
+		{/if}
 
 		<button type="button" class="primary-btn" onclick={onAcknowledgeAll} disabled={acknowledging}>
 			{acknowledging ? 'Acknowledging...' : 'Acknowledge All'}
@@ -106,6 +121,16 @@
 
 	.secondary-btn:hover:not(:disabled) {
 		background: #cbd5e1;
+	}
+
+	.deviation-alert-btn {
+		border: 1px solid rgba(251, 146, 60, 0.5);
+		background: rgba(249, 115, 22, 0.12);
+		color: #fb923c;
+	}
+
+	.deviation-alert-btn:hover:not(:disabled) {
+		background: rgba(249, 115, 22, 0.24);
 	}
 
 	.primary-btn:disabled,

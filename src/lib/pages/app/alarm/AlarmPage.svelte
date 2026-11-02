@@ -1,7 +1,8 @@
 <script>
-	import { onMount, tick } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import { apiRequest } from '$lib/api/authApi.js';
+	import { currentUser } from '$lib/stores/authStore.js';
 	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 	import AlarmHeader from './AlarmHeader.svelte';
 	import AlarmToasts from './AlarmToasts.svelte';
@@ -33,6 +34,24 @@
 	let showDeviationOverlay = $state(false);
 	let deviationAcknowledged = $state(false);
 	let deviationAcknowledgeError = $state('');
+	let unreadDeviationCount = $state(0);
+	let canViewDeviations = $derived.by(() => {
+		const access = $currentUser?.permissionAccess;
+		if (access?.mode === 'all') return true;
+		if (access?.mode !== 'selected') return false;
+
+		const permissions = Array.isArray(access.permissions)
+			? access.permissions
+			: Array.isArray(access.details)
+				? access.details
+				: [];
+		const keys = permissions.map((item) =>
+			typeof item === 'string'
+				? item
+				: item?.key || item?.permissionKey || item?.name || item?.code || item?.permission
+		);
+		return ['access_alarm', 'view_data_log_data_deviations'].every((key) => keys.includes(key));
+	});
 	let pagination = $state({
 		page: 1,
 		pageSize: 20,
@@ -98,6 +117,9 @@
 
 	let refreshTimer = null;
 	let deviationRefreshTimer = null;
+	let deviationInitialLoadStarted = false;
+	let deviationRequest = null;
+	let deviationRequestVersion = 0;
 
 	let activeMonitorRows = $derived(
 		monitorRows.filter((row) => String(row?.status || '').toUpperCase() === 'ACTIVE')
@@ -132,6 +154,12 @@
 
 	function closeDeviationOverlay() {
 		showDeviationOverlay = false;
+	}
+
+	function openDeviationOverlay() {
+		if (!active || !canViewDeviations || !unreadDeviationCount || acknowledging) return;
+		deviationAcknowledgeError = '';
+		showDeviationOverlay = true;
 	}
 
 	function handleDeviationOverlayKeydown(event) {
@@ -169,10 +197,7 @@
 
 		const acknowledged = await handleMarkAllRead();
 
-		if (acknowledged) {
-			deviationAcknowledged = true;
-			return;
-		}
+		if (acknowledged) return;
 
 		deviationAcknowledgeError = error || 'Failed to acknowledge alarms.';
 	}
@@ -227,15 +252,27 @@
 		}
 	}
 
-	async function loadMonitorDeviations() {
-		if (loadingDeviations) return;
+	function cancelDeviationRequest() {
+		deviationRequestVersion += 1;
+		deviationRequest?.abort();
+		deviationRequest = null;
+		loadingDeviations = false;
+	}
 
+	async function loadMonitorDeviations({ openOverlay = false } = {}) {
+		if (!active || !canViewDeviations || loadingDeviations || acknowledging) return;
+
+		const requestVersion = ++deviationRequestVersion;
+		const controller = new AbortController();
+		deviationRequest = controller;
 		loadingDeviations = true;
 
 		try {
 			const response = await apiRequest('/alarm/monitor-deviations?page=1&pageSize=20', {
-				method: 'GET'
+				method: 'GET',
+				signal: controller.signal
 			});
+			if (requestVersion !== deviationRequestVersion || !active || !canViewDeviations) return;
 			const payload = response?.data || {};
 
 			const nextDeviationRows = Array.isArray(payload?.monitor)
@@ -253,24 +290,36 @@
 				hasPrevious: Boolean(payload?.pagination?.hasPrevious)
 			};
 
+			unreadDeviationCount = nextDeviationRows.length
+				? nextDeviationPagination.totalItems || nextDeviationRows.length
+				: 0;
+
 			if (nextDeviationRows.length > 0) {
 				deviationRows = nextDeviationRows;
 				deviationPagination = nextDeviationPagination;
 				deviationAcknowledged = false;
 				deviationAcknowledgeError = '';
-				showDeviationOverlay = true;
+				// Only the first page load may open automatically; polling just refreshes data.
+				if (openOverlay) showDeviationOverlay = true;
 			} else if (!showDeviationOverlay) {
 				deviationRows = [];
 				deviationPagination = nextDeviationPagination;
 			}
 		} catch (err) {
-			if (!showDeviationOverlay) deviationRows = [];
+			if (controller.signal.aborted || requestVersion !== deviationRequestVersion) return;
 
-			if (Number(err?.status) !== 403) {
+			if (Number(err?.status) === 403) {
+				unreadDeviationCount = 0;
+				deviationRows = [];
+				closeDeviationOverlay();
+			} else {
 				console.error('[ALARM_MONITOR_DEVIATIONS_ERROR]', err);
 			}
 		} finally {
-			loadingDeviations = false;
+			if (requestVersion === deviationRequestVersion) {
+				loadingDeviations = false;
+				deviationRequest = null;
+			}
 		}
 	}
 
@@ -332,6 +381,10 @@
 		await Promise.all([loadAlarmMonitor(), loadAlarmEvents()]);
 	}
 
+	async function refreshAlarmData() {
+		await Promise.all([loadAllAlarmData(), loadMonitorDeviations()]);
+	}
+
 	async function handleApplyFilter() {
 		page = 1;
 		await loadAlarmEvents();
@@ -361,6 +414,8 @@
 	}
 
 	async function handleMarkAllRead() {
+		if (acknowledging) return false;
+		cancelDeviationRequest();
 		acknowledging = true;
 		error = '';
 		successMessage = '';
@@ -371,6 +426,11 @@
 			});
 
 			successMessage = 'All alarms acknowledged successfully.';
+			unreadDeviationCount = 0;
+			deviationAcknowledged = true;
+			deviationAcknowledgeError = '';
+			// Keep the current overlay available for review until the user closes it.
+			if (!showDeviationOverlay) deviationRows = [];
 
 			await loadAllAlarmData();
 			return true;
@@ -414,16 +474,10 @@
 		}
 	}
 
-	onMount(() => {
-		loadAllAlarmData();
-		loadMonitorDeviations();
-		startAutoRefresh();
-		startDeviationAutoRefresh();
-
-		return () => {
-			stopAutoRefresh();
-			stopDeviationAutoRefresh();
-		};
+	onDestroy(() => {
+		stopAutoRefresh();
+		stopDeviationAutoRefresh();
+		cancelDeviationRequest();
 	});
 
 	$effect(() => {
@@ -434,11 +488,33 @@
 			stopAutoRefresh();
 		}
 	});
+
+	$effect(() => {
+		const shouldLoad = active && canViewDeviations;
+		untrack(() => {
+			if (shouldLoad) {
+				const openOverlay = !deviationInitialLoadStarted;
+				deviationInitialLoadStarted = true;
+				loadMonitorDeviations({ openOverlay });
+				startDeviationAutoRefresh();
+			} else {
+				closeDeviationOverlay();
+				if (!canViewDeviations) {
+					unreadDeviationCount = 0;
+					deviationRows = [];
+				}
+			}
+		});
+		return () => {
+			stopDeviationAutoRefresh();
+			cancelDeviationRequest();
+		};
+	});
 </script>
 
 <svelte:window onkeydown={handleDeviationOverlayKeydown} />
 
-{#if showDeviationOverlay && deviationRows.length}
+{#if active && canViewDeviations && showDeviationOverlay && deviationRows.length}
 	<AlarmDeviationOverlay
 		rows={deviationRows}
 		totalItems={deviationPagination.totalItems}
@@ -456,7 +532,9 @@
 		{loadingMonitor}
 		{loadingEvents}
 		{acknowledging}
-		onRefresh={loadAllAlarmData}
+		unreadDeviationCount={canViewDeviations && !showDeviationOverlay ? unreadDeviationCount : 0}
+		onRefresh={refreshAlarmData}
+		onViewDeviations={openDeviationOverlay}
 		onAcknowledgeAll={handleMarkAllRead}
 	/>
 
