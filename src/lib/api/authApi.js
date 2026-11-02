@@ -74,6 +74,7 @@ export function clearAuthStorage() {
 
 export function redirectToLogin() {
 	if (typeof window === 'undefined') return;
+	if (window.__VMS_STORYBOOK__) return;
 
 	clearAuthStorage();
 

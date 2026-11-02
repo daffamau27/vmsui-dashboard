@@ -180,15 +180,32 @@
 	});
 </script>
 
+<Story
+	name="Aktif"
+	asChild
+	parameters={{
+		docs: {
+			description: {
+				story:
+					'Dashboard aktif dengan data dummy: snapshot CCTV, peta posisi, RPM engine, ringkasan kecepatan, prakiraan cuaca/arus, dan konsumsi bahan bakar langsung terisi.'
+			}
+		}
+	}}
+>
+	<div class="app-content" style="height: 100vh; min-height: 100vh;">
+		<VesselDashboardPage active={true} />
+	</div>
+</Story>
+
 <Story name="Nonaktif" args={{ active: false }} />
 
-<Story name="Header">
+<Story name="Header" asChild>
 	<div class="dashboard-content" style="min-height: 100vh;">
 		<VesselDashboardHeader vesselName="MV Nusantara Jaya" />
 	</div>
 </Story>
 
-<Story name="CCTV Monitoring">
+<Story name="CCTV Monitoring" asChild>
 	<div class="dashboard-content" style="min-height: 100vh;">
 		<VesselDashboardCctv
 			items={cctvItems}
@@ -201,14 +218,14 @@
 	</div>
 </Story>
 
-<Story name="CCTV Loading">
+<Story name="CCTV Loading" asChild>
 	<div class="dashboard-content" style="min-height: 100vh;">
 		<VesselDashboardCctv items={[]} main={null} miniItems={[]} loading={true} error="" />
 	</div>
 </Story>
 
-<Story name="Map & Posisi">
-	<div class="dashboard-content" style="min-height: 100vh;">
+<Story name="Map & Posisi" asChild>
+	<div class="app-content dashboard-content" style="min-height: 100vh;">
 		<VesselDashboardMap
 			active={false}
 			canViewMap={true}
@@ -220,31 +237,31 @@
 	</div>
 </Story>
 
-<Story name="Vessel Info">
+<Story name="Vessel Info" asChild>
 	<div class="dashboard-content" style="min-height: 100vh;">
 		<VesselDashboardInfoPanel vesselName="MV Nusantara Jaya" online={true} cards={infoCards} />
 	</div>
 </Story>
 
-<Story name="RPM Overview">
+<Story name="RPM Overview" asChild>
 	<div class="dashboard-content" style="min-height: 100vh;">
 		<VesselDashboardRpmPanel visible={true} cards={rpmCards} />
 	</div>
 </Story>
 
-<Story name="Summary Kecepatan">
+<Story name="Summary Kecepatan" asChild>
 	<div class="dashboard-content" style="min-height: 100vh;">
 		<VesselDashboardSummary cards={summaryCards} />
 	</div>
 </Story>
 
-<Story name="Environment Forecast">
+<Story name="Environment Forecast" asChild>
 	<div class="dashboard-content" style="min-height: 100vh;">
 		<VesselDashboardEnvironment {forecastDays} {weatherCards} {currentCards} />
 	</div>
 </Story>
 
-<Story name="Fuel Summary">
+<Story name="Fuel Summary" asChild>
 	<div class="dashboard-content" style="min-height: 100vh;">
 		<VesselDashboardFuel
 			canViewFuel={true}

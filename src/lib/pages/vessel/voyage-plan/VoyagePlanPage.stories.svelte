@@ -150,6 +150,23 @@
 	});
 </script>
 
+<Story
+	name="Aktif"
+	asChild
+	parameters={{
+		docs: {
+			description: {
+				story:
+					'Voyage plan aktif dengan data dummy: assignment berjalan (5 checkpoint selesai, 3 pending), rute di peta Leaflet, detail assignment, dan riwayat voyage terisi.'
+			}
+		}
+	}}
+>
+	<div class="app-content" style="height: 100vh; min-height: 100vh;">
+		<VoyagePlanPage active={true} />
+	</div>
+</Story>
+
 <Story name="Default" args={{ active: false }} />
 
 <Story

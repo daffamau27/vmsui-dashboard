@@ -1,4 +1,39 @@
 import '../src/lib/styles/layout.css';
+import { setSelectedVessel } from '../src/lib/stores/selectedVessel.svelte.js';
+import {
+	dailyReportEngineCurves,
+	dailyReportPayload,
+	dailyReportVessel
+} from './dummy-data/dailyReportMock.js';
+import {
+	buildFleetLiveDetailMock,
+	fleetAssetsMock,
+	fleetVesselsMock
+} from './dummy-data/fleetViewMock.js';
+import {
+	fuelManagementDataMock,
+	fuelManagementHistoryMock
+} from './dummy-data/fuelManagementMock.js';
+import {
+	buildCctvSnapshotsMock,
+	buildTraceDataMock,
+	buildTraceMarksMock
+} from './dummy-data/traceMock.js';
+import {
+	vesselDashboardCctvLatestMock,
+	vesselDashboardDataMock
+} from './dummy-data/vesselDashboardMock.js';
+import {
+	buildVoyageHistoryDetailMock,
+	vesselLatestStatusMock,
+	voyageActionSuccessMock,
+	voyageActiveAssignmentMock,
+	voyageHistoryMock
+} from './dummy-data/voyagePlanMock.js';
+
+window.__VMS_STORYBOOK__ = true;
+
+setSelectedVessel(dailyReportVessel);
 
 const realFetch = window.fetch.bind(window);
 
@@ -464,6 +499,8 @@ const adminMock = {
 	}
 };
 
+window.localStorage?.setItem('vms-map-source', 'default');
+
 window.fetch = (input, init) => {
 	const url = typeof input === 'string' ? input : input.url;
 
@@ -486,6 +523,9 @@ window.fetch = (input, init) => {
 				{ vesselId: 103, vesselName: 'MV Bahari Indah' }
 			]
 		});
+	if (/\/fleet\/vessels\/\d+(\?|$)/.test(url))
+		return jsonResponse({ data: buildFleetLiveDetailMock(url) });
+	if (/\/fleet\/vessels(\?|$)/.test(url)) return jsonResponse({ data: fleetVesselsMock });
 	if (url.includes('/users/my-assets'))
 		return jsonResponse({
 			data: [
@@ -503,7 +543,7 @@ window.fetch = (input, init) => {
 				createdAt: '2025-01-15T08:00:00Z',
 				permissionAccess: { mode: 'all' },
 				vesselAccess: { mode: 'assigned' },
-				assetAccess: { mode: 'assigned' }
+				assetAccess: { mode: 'all' }
 			}
 		});
 	if (url.includes('/data-logs/available-columns'))
@@ -550,10 +590,38 @@ window.fetch = (input, init) => {
 	if (url.includes('/vessels/available-features'))
 		return jsonResponse({ data: adminMock.vesselFeatures });
 	if (/\/vessels(\?|$)/.test(url)) return jsonResponse({ data: adminMock.vessels });
-	if (/\/companies(\?|$)/.test(url)) return jsonResponse({ data: adminMock.companies });
-	if (/\/assets(\?|$)/.test(url)) return jsonResponse({ data: adminMock.assets });
+	if (url.includes('/engine-curves/vessels/102'))
+		return jsonResponse({ data: dailyReportEngineCurves });
 	if (url.includes('/engine-curves/vessels/'))
 		return jsonResponse({ data: adminMock.engineCurveDetail });
+	if (url.includes('/daily-reports/data')) return jsonResponse(dailyReportPayload);
+	if (url.includes('/fuel-management/data')) return jsonResponse(fuelManagementDataMock);
+	if (url.includes('/fuel-management/history')) return jsonResponse(fuelManagementHistoryMock);
+	if (url.includes('/trace/vessels/') && url.includes('/mark-records'))
+		return jsonResponse(buildTraceMarksMock(url));
+	if (url.includes('/trace/vessels/')) return jsonResponse(buildTraceDataMock(url));
+	if (url.includes('/cctv/vessels/') && url.includes('/snapshots/latest'))
+		return jsonResponse(vesselDashboardCctvLatestMock);
+	if (url.includes('/cctv/vessels/') && url.includes('/snapshots'))
+		return jsonResponse(buildCctvSnapshotsMock(url));
+	if (url.includes('/dashboard/vessels/')) return jsonResponse({ data: vesselDashboardDataMock });
+	if (url.includes('/voyage-plans/') && url.includes('/active/checkpoints/'))
+		return jsonResponse(voyageActionSuccessMock);
+	if (url.includes('/voyage-plans/') && url.includes('/active/end'))
+		return jsonResponse(voyageActionSuccessMock);
+	if (url.includes('/voyage-plans/') && /\/active(\?|$)/.test(url))
+		return String(init?.method || 'GET').toUpperCase() === 'GET'
+			? jsonResponse({ data: voyageActiveAssignmentMock })
+			: jsonResponse(voyageActionSuccessMock);
+	if (url.includes('/voyage-plans/') && /\/history\/\d+(\?|$)/.test(url))
+		return jsonResponse(buildVoyageHistoryDetailMock(url));
+	if (url.includes('/voyage-plans/') && url.includes('/history'))
+		return jsonResponse(voyageHistoryMock);
+	if (url.includes('/vessels/') && url.includes('/latest-status'))
+		return jsonResponse(vesselLatestStatusMock);
+	if (/\/vessels\/102(\?|$)/.test(url)) return jsonResponse({ data: dailyReportVessel });
+	if (/\/companies(\?|$)/.test(url)) return jsonResponse({ data: adminMock.companies });
+	if (/\/assets(\?|$)/.test(url)) return jsonResponse({ data: fleetAssetsMock });
 	if (/\/engine-curves(\?|$)/.test(url)) return jsonResponse({ data: adminMock.engineCurves });
 	if (url.includes('/cctv/vessels/')) return jsonResponse({ data: adminMock.cctvConfig });
 	if (url.includes('/reporting/vessels/') && url.includes('/assignable-users'))

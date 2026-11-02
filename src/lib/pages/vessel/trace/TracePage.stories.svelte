@@ -120,14 +120,35 @@
 			}
 		},
 		argTypes: {
-			active: { control: 'boolean', description: 'Mengaktifkan pemuatan data trace.' }
+			active: { control: 'boolean', description: 'Mengaktifkan pemuatan data trace.' },
+			autoLoad: {
+				control: 'boolean',
+				description: 'Memuat trace otomatis (preset Today) saat komponen dipasang.'
+			}
 		}
 	});
 </script>
 
+<Story
+	name="Aktif"
+	asChild
+	parameters={{
+		docs: {
+			description: {
+				story:
+					'Komponen aktif dengan data dummy: trace preset Today otomatis dimuat sehingga playback, peta, telemetri/RPM, dan snapshot CCTV langsung terisi tanpa overlay "Waiting for date range".'
+			}
+		}
+	}}
+>
+	<div class="app-content" style="height: 100vh; min-height: 100vh;">
+		<TracePage active={true} autoLoad={true} />
+	</div>
+</Story>
+
 <Story name="Nonaktif" args={{ active: false }} />
 
-<Story name="Header">
+<Story name="Header" asChild>
 	<div class="trace-root page-content" style="min-height: 100vh;">
 		<section class="trace-viewport">
 			<TraceHeader
@@ -150,7 +171,7 @@
 	</div>
 </Story>
 
-<Story name="CCTV Monitoring">
+<Story name="CCTV Monitoring" asChild>
 	<div class="trace-root page-content" style="min-height: 100vh;">
 		<section class="trace-viewport">
 			<section class="main-monitor-grid">
@@ -170,12 +191,12 @@
 	</div>
 </Story>
 
-<Story name="Map & Posisi">
-	<div class="trace-root page-content" style="min-height: 100vh;">
+<Story name="Map & Posisi" asChild>
+	<div class="app-content trace-root page-content" style="min-height: 100vh;">
 		<section class="trace-viewport">
 			<section class="main-monitor-grid">
 				<TraceMap
-					active={false}
+					active={true}
 					{vesselInfo}
 					{tracePoints}
 					activeTraceIndex={0}
@@ -188,7 +209,7 @@
 	</div>
 </Story>
 
-<Story name="Playback Timeline">
+<Story name="Playback Timeline" asChild>
 	<div class="trace-root page-content" style="min-height: 100vh;">
 		<section class="trace-viewport">
 			<section class="bottom-panel">
@@ -225,7 +246,7 @@
 	</div>
 </Story>
 
-<Story name="Telemetry & RPM">
+<Story name="Telemetry & RPM" asChild>
 	<div class="trace-root page-content" style="min-height: 100vh;">
 		<section class="trace-viewport">
 			<section class="bottom-panel">

@@ -143,20 +143,37 @@
 			}
 		},
 		argTypes: {
-			active: { control: 'boolean', description: 'Mengaktifkan pemuatan data bahan bakar.' }
+			active: { control: 'boolean', description: 'Mengaktifkan pemuatan data bahan bakar.' },
+			autoLoad: {
+				control: 'boolean',
+				description: 'Memuat riwayat bahan bakar otomatis saat komponen dipasang.'
+			}
 		}
 	});
 </script>
 
+<Story
+	name="Aktif"
+	args={{ active: true, autoLoad: true }}
+	parameters={{
+		docs: {
+			description: {
+				story:
+					'Komponen aktif dengan data dummy: dashboard dan riwayat bahan bakar otomatis dimuat sehingga ringkasan, tabel per engine, dan history langsung terisi tanpa overlay "Waiting for date".'
+			}
+		}
+	}}
+/>
+
 <Story name="Nonaktif" args={{ active: false }} />
 
-<Story name="Header">
+<Story name="Header" asChild>
 	<div class="fuel-management-page" style="min-height: 100vh;">
 		<FuelManagementHeader vesselName="MV Nusantara Jaya" latestRob="18,420.0 L" loading={false} />
 	</div>
 </Story>
 
-<Story name="Toast">
+<Story name="Toast" asChild>
 	<div class="fuel-management-page" style="min-height: 100vh;">
 		<FuelManagementToast
 			showNoVessel={true}
@@ -169,19 +186,19 @@
 	</div>
 </Story>
 
-<Story name="Summary">
+<Story name="Summary" asChild>
 	<div class="fuel-management-page" style="min-height: 100vh;">
 		<FuelManagementSummary loading={false} cards={summaryCards} />
 	</div>
 </Story>
 
-<Story name="Tabel Per Engine">
+<Story name="Tabel Per Engine" asChild>
 	<div class="fuel-management-page" style="min-height: 100vh;">
 		<FuelManagementTables loading={false} cards={tableCards} />
 	</div>
 </Story>
 
-<Story name="Fuel History">
+<Story name="Fuel History" asChild>
 	<div class="fuel-management-page" style="min-height: 100vh;">
 		<FuelManagementHistory
 			startDate="2026-09-23"
@@ -204,7 +221,7 @@
 	</div>
 </Story>
 
-<Story name="History Menunggu Tanggal">
+<Story name="History Menunggu Tanggal" asChild>
 	<div class="fuel-management-page" style="min-height: 100vh;">
 		<FuelManagementHistory
 			startDate=""

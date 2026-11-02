@@ -2244,7 +2244,7 @@
 <section class="dashboard-content">
 	<VesselDashboardHeader vesselName={vesselInfo.vesselName} />
 
-	{#if loading || currentUserLoading}
+	{#if !active || loading || currentUserLoading}
 		<LoadingSkeleton label="Loading vessel dashboard data" variant="vessel-dashboard" />
 	{:else if error}
 		<div class="status-box error-box">
@@ -2254,7 +2254,7 @@
 		<div class="status-box error-box">
 			{currentUserError}
 		</div>
-	{:else if !canAccessDashboard}
+	{:else if currentUser && !canAccessDashboard}
 		<div class="status-box error-box">
 			The user does not have the access_dashboard or access_daily_report permission.
 		</div>
