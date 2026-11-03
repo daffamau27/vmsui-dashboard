@@ -144,7 +144,7 @@
 		docs: {
 			description: {
 				story:
-					'Header laporan dengan filter bulan, rentang tanggal (kalender), timezone, serta tombol Load Data dan Export Excel.'
+					'Header laporan dengan filter bulan, rentang tanggal (kalender), timezone, serta tombol Load Data, Export Excel, dan Export PDF.'
 			}
 		}
 	}}
@@ -161,6 +161,7 @@
 			rangeLimitText="Available until day 23 because the selected month is current month."
 			onLoad={() => {}}
 			onExport={() => {}}
+			onExportPdf={() => {}}
 			onRangeChange={() => {}}
 		/>
 	</div>

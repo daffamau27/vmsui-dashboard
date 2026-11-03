@@ -163,7 +163,7 @@
 		docs: {
 			description: {
 				story:
-					'Header laporan dengan filter Start, End, timezone, tombol Load Data dan Export Excel.'
+					'Header laporan dengan filter Start, End, timezone, tombol Load Data, Export Excel, dan Export PDF (access_daily_report).'
 			}
 		}
 	}}
@@ -178,6 +178,8 @@
 			autoTimezoneLabel="UTC+07:00"
 			onLoad={() => {}}
 			onExport={() => {}}
+			canExportPdf={true}
+			onExportPdf={() => {}}
 			onFilterChange={() => {}}
 		/>
 	</div>

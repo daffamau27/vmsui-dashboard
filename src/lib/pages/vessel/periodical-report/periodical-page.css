@@ -103,7 +103,7 @@
 	.filter-card {
 		width: 100%;
 		display: grid;
-		grid-template-columns: minmax(165px, 1fr) minmax(165px, 1fr) minmax(175px, 1fr) auto;
+		grid-template-columns: minmax(165px, 1fr) minmax(165px, 1fr) minmax(175px, 1fr);
 		align-items: end;
 		gap: 10px;
 	}
@@ -113,8 +113,7 @@
 			minmax(150px, 1fr)
 			minmax(150px, 1fr)
 			minmax(150px, 0.9fr)
-			minmax(130px, 0.75fr)
-			auto;
+			minmax(130px, 0.75fr);
 	}
 
 	.filter-card label {
@@ -174,9 +173,10 @@
 	}
 
 	.filter-actions {
+		grid-column: 1 / -1;
 		display: flex;
 		gap: 8px;
-		flex-wrap: nowrap;
+		flex-wrap: wrap;
 		justify-content: flex-end;
 	}
 
@@ -199,6 +199,10 @@
 	.export-btn {
 		background: #16a34a;
 		color: #ffffff;
+	}
+
+	.export-btn.pdf {
+		background: #dc2626;
 	}
 
 	.primary-btn:hover:not(:disabled),
