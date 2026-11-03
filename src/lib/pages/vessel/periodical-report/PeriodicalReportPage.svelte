@@ -3,7 +3,8 @@
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
 	import {
 		getPeriodicalReportData,
-		getPeriodicalReportExcelUrl
+		getPeriodicalReportExcelUrl,
+		getPeriodicalReportPdfUrl
 	} from '$lib/api/periodicalReportApi.js';
 	import { apiRequest, downloadApiFile } from '$lib/api/authApi.js';
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
@@ -28,7 +29,9 @@
 	import './periodical-page.css';
 
 	let loading = $state(false);
-	let exporting = $state(false);
+	let exportFormat = $state('');
+	let exporting = $derived(exportFormat === 'excel');
+	let exportingPdf = $derived(exportFormat === 'pdf');
 	let error = $state('');
 	let reportData = $state(null);
 
@@ -44,6 +47,7 @@
 
 	let { active = false } = $props();
 	let shouldShowDateRangeOverlay = $derived(!hasLoadedDateRange || !startDateTime || !endDateTime);
+	let canExportPdf = $derived(hasPermission('access_daily_report'));
 
 	async function loadCurrentUser() {
 		if (currentUser || currentUserLoading) return currentUser;
@@ -658,7 +662,15 @@
 		}
 	}
 
-	async function handleExportExcel() {
+	async function handleExportReport(format) {
+		if (exportFormat) return;
+		const isPdf = format === 'pdf';
+		const formatLabel = isPdf ? 'PDF' : 'Excel';
+		if (isPdf && !canExportPdf) {
+			error = 'You do not have permission to export the periodical report to PDF.';
+			return;
+		}
+
 		if (!$selectedVesselId) {
 			error = 'No vessel has been selected.';
 			return;
@@ -669,11 +681,23 @@
 			return;
 		}
 
-		exporting = true;
+		const startTimestamp = new Date(startDateTime).getTime();
+		const endTimestamp = new Date(endDateTime).getTime();
+		if (
+			!Number.isFinite(startTimestamp) ||
+			!Number.isFinite(endTimestamp) ||
+			endTimestamp <= startTimestamp
+		) {
+			error = 'Choose a valid date-time range with End after Start.';
+			return;
+		}
+
+		exportFormat = format;
 		error = '';
 
 		try {
-			const url = getPeriodicalReportExcelUrl({
+			const getExportUrl = isPdf ? getPeriodicalReportPdfUrl : getPeriodicalReportExcelUrl;
+			const url = getExportUrl({
 				vesselId: $selectedVesselId,
 				start: toApiDateTime(startDateTime),
 				end: toApiDateTime(endDateTime),
@@ -690,13 +714,13 @@
 
 			await downloadApiFile(
 				url,
-				`Periodical_Report_${safeVesselName}_${safeStart}_${safeEnd}.xlsx`
+				`Periodical_Report_${safeVesselName}_${safeStart}_${safeEnd}.${isPdf ? 'pdf' : 'xlsx'}`
 			);
 		} catch (err) {
-			console.error('[PERIODICAL_EXPORT_ERROR]', err);
-			error = err?.message || 'Failed to export the periodical report to Excel.';
+			console.error(`[PERIODICAL_EXPORT_${formatLabel.toUpperCase()}_ERROR]`, err);
+			error = err?.message || `Failed to export the periodical report to ${formatLabel}.`;
 		} finally {
-			exporting = false;
+			exportFormat = '';
 		}
 	}
 
@@ -729,9 +753,12 @@
 		{autoTimezoneLabel}
 		{loading}
 		{exporting}
-		exportDisabled={shouldShowDateRangeOverlay}
+		{exportingPdf}
+		{canExportPdf}
+		exportDisabled={loading || !$selectedVesselId || shouldShowDateRangeOverlay}
 		onLoad={loadPeriodicalReport}
-		onExport={handleExportExcel}
+		onExport={() => handleExportReport('excel')}
+		onExportPdf={() => handleExportReport('pdf')}
 		onFilterChange={markDateFilterDirty}
 	/>
 

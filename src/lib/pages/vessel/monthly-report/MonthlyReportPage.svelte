@@ -4,7 +4,8 @@
 	import {
 		getMonthlyReportAvailableColumns,
 		getMonthlyReportData,
-		getMonthlyReportExcelUrl
+		getMonthlyReportExcelUrl,
+		getMonthlyReportPdfUrl
 	} from '$lib/api/monthlyReportApi.js';
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import { downloadApiFile, apiRequest } from '$lib/api/authApi.js';
@@ -23,7 +24,9 @@
 	import './monthly-report-page.css';
 
 	let loading = $state(false);
-	let exporting = $state(false);
+	let exportFormat = $state('');
+	let exporting = $derived(exportFormat === 'excel');
+	let exportingPdf = $derived(exportFormat === 'pdf');
 	let error = $state('');
 	let reportData = $state(null);
 
@@ -1579,7 +1582,9 @@
 		}
 	}
 
-	async function handleExportExcel() {
+	async function handleExportReport(format) {
+		if (exportFormat) return;
+
 		if (!$selectedVesselId) {
 			error = 'No vessel has been selected.';
 			return;
@@ -1594,8 +1599,10 @@
 		startDate = rangeValidation.startDate;
 		endDate = rangeValidation.endDate;
 
-		exporting = true;
+		exportFormat = format;
 		error = '';
+		const isPdf = format === 'pdf';
+		const formatLabel = isPdf ? 'PDF' : 'Excel';
 
 		try {
 			if (
@@ -1605,7 +1612,8 @@
 				await loadAvailableMonthlyColumns($selectedVesselId, reportMonth);
 			}
 
-			const url = getMonthlyReportExcelUrl({
+			const getExportUrl = isPdf ? getMonthlyReportPdfUrl : getMonthlyReportExcelUrl;
+			const url = getExportUrl({
 				vesselId: $selectedVesselId,
 				month: reportMonth,
 				startDate: rangeValidation.startDate,
@@ -1621,13 +1629,13 @@
 
 			await downloadApiFile(
 				url,
-				`Monthly_Report_${safeVesselName}_${reportMonth}_${rangeValidation.startDate}-${rangeValidation.endDate}.xlsx`
+				`Monthly_Report_${safeVesselName}_${reportMonth}_${rangeValidation.startDate}-${rangeValidation.endDate}.${isPdf ? 'pdf' : 'xlsx'}`
 			);
 		} catch (err) {
-			console.error('[MONTHLY_EXPORT_EXCEL_ERROR]', err);
-			error = err?.message || 'Failed to export monthly report to Excel.';
+			console.error(`[MONTHLY_EXPORT_${formatLabel.toUpperCase()}_ERROR]`, err);
+			error = err?.message || `Failed to export monthly report to ${formatLabel}.`;
 		} finally {
-			exporting = false;
+			exportFormat = '';
 		}
 	}
 
@@ -1689,15 +1697,20 @@
 		{autoTimezoneLabel}
 		{loading}
 		{exporting}
+		{exportingPdf}
 		loadDisabled={loading ||
 			availableMonthlyColumnsLoading ||
 			!reportMonth ||
 			!startDate ||
 			!endDate}
-		exportDisabled={availableMonthlyColumnsLoading || shouldShowDateRangeOverlay}
+		exportDisabled={loading ||
+			!$selectedVesselId ||
+			availableMonthlyColumnsLoading ||
+			shouldShowDateRangeOverlay}
 		rangeLimitText={monthlyRangeLimitText}
 		onLoad={loadMonthlyReport}
-		onExport={handleExportExcel}
+		onExport={() => handleExportReport('excel')}
+		onExportPdf={() => handleExportReport('pdf')}
 		onRangeChange={() => (hasLoadedDateRange = false)}
 	/>
 

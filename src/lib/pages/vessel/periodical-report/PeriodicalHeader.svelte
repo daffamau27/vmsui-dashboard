@@ -11,9 +11,12 @@
 		autoTimezoneLabel = 'UTC+07:00',
 		loading = false,
 		exporting = false,
+		exportingPdf = false,
+		canExportPdf = false,
 		exportDisabled = false,
 		onLoad,
 		onExport,
+		onExportPdf,
 		onFilterChange
 	} = $props();
 </script>
@@ -89,10 +92,21 @@
 					type="button"
 					class="export-btn"
 					onclick={() => onExport?.()}
-					disabled={exporting || exportDisabled}
+					disabled={exporting || exportingPdf || exportDisabled}
 				>
 					{exporting ? 'Exporting...' : 'Export Excel'}
 				</button>
+
+				{#if canExportPdf}
+					<button
+						type="button"
+						class="export-btn pdf"
+						onclick={() => onExportPdf?.()}
+						disabled={exporting || exportingPdf || exportDisabled}
+					>
+						{exportingPdf ? 'Exporting PDF...' : 'Export PDF'}
+					</button>
+				{/if}
 			</div>
 		</div>
 	</div>

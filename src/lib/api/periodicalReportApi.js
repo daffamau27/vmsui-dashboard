@@ -63,3 +63,11 @@ export function getPeriodicalReportExcelUrl({
 
   return `/periodical-reports/export-excel?${query}`;
 }
+
+export function getPeriodicalReportPdfUrl(params) {
+  if (!params?.vesselId) throw new Error("vesselId required.");
+  if (!params.start || !params.end) throw new Error("Start and End are required.");
+
+  const query = buildPeriodicalQuery(params);
+  return `/periodical-reports/export-pdf?${query}`;
+}

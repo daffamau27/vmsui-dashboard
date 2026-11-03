@@ -14,6 +14,7 @@
 		vesselName = '-',
 		loading = false,
 		exporting = false,
+		exportingPdf = false,
 		loadDisabled = false,
 		exportDisabled = false,
 		autoTimezoneLabel = '',
@@ -25,6 +26,7 @@
 		timezoneOffset = $bindable('+07:00'),
 		onLoad,
 		onExport,
+		onExportPdf,
 		onRangeChange
 	} = $props();
 
@@ -244,9 +246,18 @@
 					type="button"
 					class="export-btn"
 					onclick={() => onExport?.()}
-					disabled={exportDisabled || exporting}
+					disabled={exportDisabled || exporting || exportingPdf}
 				>
 					{exporting ? 'Exporting...' : 'Export Excel'}
+				</button>
+
+				<button
+					type="button"
+					class="export-btn pdf"
+					onclick={() => onExportPdf?.()}
+					disabled={exportDisabled || exporting || exportingPdf}
+				>
+					{exportingPdf ? 'Exporting PDF...' : 'Export PDF'}
 				</button>
 			</div>
 

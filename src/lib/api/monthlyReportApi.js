@@ -55,7 +55,7 @@ export async function getMonthlyReportAvailableColumns({ vesselId, month = "" })
   return response?.data || response;
 }
 
-export function getMonthlyReportExcelUrl({
+function getMonthlyReportExportUrl(format, {
   vesselId,
   month,
   startDate = "01",
@@ -77,5 +77,13 @@ export function getMonthlyReportExcelUrl({
     columns
   });
 
-  return `/monthly-reports/export-excel?${query}`;
+  return `/monthly-reports/export-${format}?${query}`;
+}
+
+export function getMonthlyReportExcelUrl(params) {
+  return getMonthlyReportExportUrl("excel", params);
+}
+
+export function getMonthlyReportPdfUrl(params) {
+  return getMonthlyReportExportUrl("pdf", params);
 }
