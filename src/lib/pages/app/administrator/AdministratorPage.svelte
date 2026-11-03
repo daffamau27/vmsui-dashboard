@@ -1063,6 +1063,12 @@
 		}
 	}
 
+	function buildAutoReportContent() {
+		return {
+			sections: [...new Set((autoReportForm.reportSections || []).map(String).filter(Boolean))]
+		};
+	}
+
 	function buildAutoReportPayload() {
 		const timezoneMode = autoReportForm.timezoneMode || 'auto';
 		const payload = {
@@ -1073,9 +1079,7 @@
 				cc: normalizeEmailList(autoReportForm.ccEmails),
 				bcc: normalizeEmailList(autoReportForm.bccEmails)
 			},
-			reportContent: {
-				sections: [...new Set((autoReportForm.reportSections || []).map(String).filter(Boolean))]
-			},
+			reportContent: buildAutoReportContent(),
 			timezoneMode
 		};
 
@@ -1095,6 +1099,7 @@
 				cc: normalizeEmailList(autoReportForm.ccEmails),
 				bcc: normalizeEmailList(autoReportForm.bccEmails)
 			},
+			reportContent: buildAutoReportContent(),
 			schedule: {
 				startDate: autoReportForm.periodicalStartDate,
 				intervalDays: Number(autoReportForm.periodicalIntervalDays || 0),
@@ -3422,10 +3427,6 @@
 		};
 	}
 
-	function hasReportContentSection(key) {
-		return (autoReportForm.reportSections || []).includes(key);
-	}
-
 	function toggleReportContentSection(key) {
 		if (!key) return;
 
@@ -4926,7 +4927,7 @@
 											</h3>
 											<p>
 												{reportingMode === 'periodical'
-													? 'Configure periodical schedule, recipients, timezone, and auto-report status.'
+													? 'Configure periodical schedule, report content, recipients, timezone, and auto-report status.'
 													: 'Configure recipients, send time, timezone, and auto-report status.'}
 											</p>
 										</div>
@@ -4992,13 +4993,13 @@
 										{/if}
 									</div>
 
-									{#if reportingMode === 'daily'}
+									{#if reportingMode === 'daily' || reportingMode === 'periodical'}
 										<div class="report-content-card">
 											<div class="report-content-head">
 												<div>
 													<h4>Report Content per Vessel</h4>
 													<p>
-														Choose which daily report sections are included for
+														Choose which {reportingMode} report sections are included for
 														{getVesselDisplayName(selectedReportingVessel)}.
 													</p>
 												</div>
@@ -5041,16 +5042,16 @@
 												<div class="empty-box">No report content section found.</div>
 											{:else}
 												<div class="report-content-list">
-													{#each visibleReportContentPermissions as permission}
+													{#each visibleReportContentPermissions as permission (permission.key)}
 														<label
-															class:report-content-item-checked={hasReportContentSection(
+															class:report-content-item-checked={autoReportForm.reportSections.includes(
 																permission.key
 															)}
 															class="report-content-item"
 														>
 															<input
 																type="checkbox"
-																checked={hasReportContentSection(permission.key)}
+																checked={autoReportForm.reportSections.includes(permission.key)}
 																on:change={() => toggleReportContentSection(permission.key)}
 															/>
 															<span class="report-content-checkmark" aria-hidden="true"></span>
