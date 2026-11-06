@@ -586,12 +586,6 @@
 		const vessel = $selectedVesselInfo || {};
 
 		return (
-			normalizeUtcLabel(payload?.timezone) ||
-			normalizeUtcLabel(payload?.timezoneOffset) ||
-			normalizeUtcLabel(payload?.timezone_offset) ||
-			normalizeUtcLabel(payload?.utc) ||
-			normalizeUtcLabel(payload?.utcOffset) ||
-			normalizeUtcLabel(payload?.utc_offset) ||
 			normalizeUtcLabel(vessel?.timezone) ||
 			normalizeUtcLabel(vessel?.timeZone) ||
 			normalizeUtcLabel(vessel?.timezoneOffset) ||
@@ -602,6 +596,12 @@
 			normalizeUtcLabel(vessel?.raw?.timezone) ||
 			normalizeUtcLabel(vessel?.raw?.timezoneOffset) ||
 			normalizeUtcLabel(vessel?.raw?.utcOffset) ||
+			normalizeUtcLabel(payload?.timezone) ||
+			normalizeUtcLabel(payload?.timezoneOffset) ||
+			normalizeUtcLabel(payload?.timezone_offset) ||
+			normalizeUtcLabel(payload?.utc) ||
+			normalizeUtcLabel(payload?.utcOffset) ||
+			normalizeUtcLabel(payload?.utc_offset) ||
 			(typeof window !== 'undefined'
 				? formatTimezoneOffsetFromMinutes(new Date().getTimezoneOffset())
 				: 'UTC+07:00')

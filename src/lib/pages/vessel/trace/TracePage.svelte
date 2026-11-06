@@ -79,10 +79,9 @@
 		getAutoTimezoneLabelFromSources($selectedVesselInfo, traceData, traceData?.data)
 	);
 	let displayTimezone = $derived(
-		getTraceTimezone(
-			traceData,
-			loadedTimezone || (timezoneMode === 'manual' ? timezoneOffset : autoTimezoneLabel)
-		)
+		timezoneMode === 'manual'
+			? timezoneOffset
+			: autoTimezoneLabel || loadedTimezone || getTraceTimezone(traceData)
 	);
 
 	let cctvItems = $state([]);
