@@ -3096,7 +3096,7 @@
 
 	let normalizedReport = $derived(reportData?.data || reportData || {});
 	let autoTimezoneLabel = $derived(
-		getAutoTimezoneLabelFromSources(normalizedReport, reportData, $selectedVesselInfo)
+		getAutoTimezoneLabelFromSources($selectedVesselInfo, normalizedReport, reportData)
 	);
 
 	let rawRuntimeRows = $derived(
