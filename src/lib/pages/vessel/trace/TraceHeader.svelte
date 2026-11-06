@@ -1,6 +1,11 @@
 <script>
 	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import {
+		clampDateTimeLocalValue,
+		getNowDateTimeLocalValue,
+		getTimezoneOffsetMinutes
+	} from '$lib/utils/dateTimeInputBounds.js';
 
 	let {
 		vesselName = '-',
@@ -18,6 +23,42 @@
 		onDateTimeInput,
 		onTimezoneChange
 	} = $props();
+
+	let clockTick = $state(0);
+
+	$effect(() => {
+		const timer = setInterval(() => {
+			clockTick += 1;
+		}, 30000);
+
+		return () => clearInterval(timer);
+	});
+
+	// The vessel's UTC offset drives the clock shown in the inputs, so the upper bound
+	// matches what the user sees (and what the presets write) instead of the browser clock.
+	let clockOffsetMinutes = $derived(
+		getTimezoneOffsetMinutes(timezoneMode === 'manual' ? timezoneOffset : autoTimezoneLabel)
+	);
+
+	// Keep the upper bound in sync with the clock and with the currently selected range,
+	// so a freshly applied "Today" preset never exceeds `max`.
+	let nowMax = $derived.by(() => {
+		void clockTick;
+		void startDateTime;
+		void endDateTime;
+
+		return getNowDateTimeLocalValue(clockOffsetMinutes);
+	});
+
+	function handleDateTimeInput() {
+		const clampedStart = clampDateTimeLocalValue(startDateTime, nowMax);
+		const clampedEnd = clampDateTimeLocalValue(endDateTime, nowMax);
+
+		if (clampedStart !== startDateTime) startDateTime = clampedStart;
+		if (clampedEnd !== endDateTime) endDateTime = clampedEnd;
+
+		onDateTimeInput?.();
+	}
 </script>
 
 <section class="trace-header-card">
@@ -37,7 +78,8 @@
 					type="datetime-local"
 					use:fourDigitDateYear
 					bind:value={startDateTime}
-					oninput={() => onDateTimeInput?.()}
+					max={nowMax}
+					oninput={handleDateTimeInput}
 				/>
 			</label>
 
@@ -47,7 +89,8 @@
 					type="datetime-local"
 					use:fourDigitDateYear
 					bind:value={endDateTime}
-					oninput={() => onDateTimeInput?.()}
+					max={nowMax}
+					oninput={handleDateTimeInput}
 				/>
 			</label>
 

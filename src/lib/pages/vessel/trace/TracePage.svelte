@@ -22,6 +22,11 @@
 		parseTraceDateTimeMs
 	} from '$lib/utils/traceDateTime.js';
 	import {
+		getTimezoneOffsetMinutes,
+		getNowDateTimeLocalValue,
+		getStartOfDayDateTimeLocalValue
+	} from '$lib/utils/dateTimeInputBounds.js';
+	import {
 		TRACE_CCTV_PAGE_SIZE,
 		summarizeCctvPage,
 		getCctvPagesToLoad,
@@ -71,7 +76,7 @@
 	let hasLoadedDateRange = $state(false);
 	let shouldShowDateRangeOverlay = $derived(!hasLoadedDateRange || !startDateTime || !endDateTime);
 	let autoTimezoneLabel = $derived(
-		getAutoTimezoneLabelFromSources(traceData, traceData?.data, $selectedVesselInfo)
+		getAutoTimezoneLabelFromSources($selectedVesselInfo, traceData, traceData?.data)
 	);
 	let displayTimezone = $derived(
 		getTraceTimezone(
@@ -170,33 +175,38 @@
 
 	function applyTimePreset(presetId) {
 		const now = new Date();
-		let start = null;
-		let end = null;
+		const offsetMinutes = getTimezoneOffsetMinutes(
+			timezoneMode === 'manual' ? timezoneOffset : autoTimezoneLabel
+		);
+		let start = '';
+		let end = '';
 
 		if (presetId === 'today') {
-			start = startOfLocalDay(now);
-			end = startOfLocalDay(addLocalDays(now, 1));
+			// "Today" follows the vessel's UTC offset (from /users/my-vessels): 00:00 vessel
+			// time up to the vessel's current wall-clock time.
+			start = getStartOfDayDateTimeLocalValue(offsetMinutes, now);
+			end = getNowDateTimeLocalValue(offsetMinutes);
 		} else if (presetId === 'yesterday') {
 			const yesterday = addLocalDays(now, -1);
-			start = startOfLocalDay(yesterday);
-			end = startOfLocalDay(now);
+			start = toDatetimeLocalValue(startOfLocalDay(yesterday));
+			end = toDatetimeLocalValue(startOfLocalDay(now));
 		} else if (presetId === 'two-days-before') {
 			const twoDaysBefore = addLocalDays(now, -2);
-			start = startOfLocalDay(twoDaysBefore);
-			end = startOfLocalDay(addLocalDays(now, -1));
+			start = toDatetimeLocalValue(startOfLocalDay(twoDaysBefore));
+			end = toDatetimeLocalValue(startOfLocalDay(addLocalDays(now, -1)));
 		} else if (presetId === 'one-week') {
-			end = startOfLocalDay(now);
-			start = startOfLocalDay(addLocalDays(now, -7));
+			start = toDatetimeLocalValue(startOfLocalDay(addLocalDays(now, -7)));
+			end = toDatetimeLocalValue(startOfLocalDay(now));
 		} else if (presetId === 'two-weeks') {
-			end = startOfLocalDay(now);
-			start = startOfLocalDay(addLocalDays(now, -14));
+			start = toDatetimeLocalValue(startOfLocalDay(addLocalDays(now, -14)));
+			end = toDatetimeLocalValue(startOfLocalDay(now));
 		}
 
 		if (!start || !end) return;
 
 		activeTimePreset = presetId;
-		startDateTime = toDatetimeLocalValue(start);
-		endDateTime = toDatetimeLocalValue(end);
+		startDateTime = start;
+		endDateTime = end;
 		hasLoadedDateRange = false;
 	}
 
