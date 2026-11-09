@@ -199,7 +199,7 @@
 
 	let normalizedData = $derived(reportData?.data || reportData || {});
 	let autoTimezoneLabel = $derived(
-		getAutoTimezoneLabelFromSources(normalizedData, reportData, $selectedVesselInfo)
+		getAutoTimezoneLabelFromSources($selectedVesselInfo, normalizedData, reportData)
 	);
 
 	let dataReceivedStats = $derived(

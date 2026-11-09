@@ -12,6 +12,11 @@
 	import { downloadApiFile, apiRequest } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { getDataLogRowHighlights, getDataLogTimestamp } from '$lib/utils/dataLogRowHighlights.js';
+	import {
+		getTimezoneOffsetMinutes,
+		getNowDateTimeLocalValue,
+		getStartOfDayDateTimeLocalValue
+	} from '$lib/utils/dateTimeInputBounds.js';
 	import DataLogHeader from './DataLogHeader.svelte';
 	import DataLogOverrideCard from './DataLogOverrideCard.svelte';
 	import DataLogColumnsCard from './DataLogColumnsCard.svelte';
@@ -476,33 +481,38 @@
 
 	function applyTimePreset(presetId) {
 		const now = new Date();
-		let start = null;
-		let end = null;
+		const offsetMinutes = getTimezoneOffsetMinutes(
+			timezoneMode === 'manual' ? timezoneOffset : getAutoTimezoneLabel()
+		);
+		let start = '';
+		let end = '';
 
 		if (presetId === 'today') {
-			start = startOfLocalDay(now);
-			end = startOfLocalDay(addLocalDays(now, 1));
+			// "Today" follows the vessel's UTC offset (from /users/my-vessels): 00:00 vessel
+			// time up to the vessel's current wall-clock time.
+			start = getStartOfDayDateTimeLocalValue(offsetMinutes, now);
+			end = getNowDateTimeLocalValue(offsetMinutes);
 		} else if (presetId === 'yesterday') {
 			const yesterday = addLocalDays(now, -1);
-			start = startOfLocalDay(yesterday);
-			end = startOfLocalDay(now);
+			start = toLocalInputValue(startOfLocalDay(yesterday));
+			end = toLocalInputValue(startOfLocalDay(now));
 		} else if (presetId === 'two-days-before') {
 			const twoDaysBefore = addLocalDays(now, -2);
-			start = startOfLocalDay(twoDaysBefore);
-			end = startOfLocalDay(addLocalDays(now, -1));
+			start = toLocalInputValue(startOfLocalDay(twoDaysBefore));
+			end = toLocalInputValue(startOfLocalDay(addLocalDays(now, -1)));
 		} else if (presetId === 'last-7-days') {
-			end = startOfLocalDay(now);
-			start = startOfLocalDay(addLocalDays(now, -7));
+			start = toLocalInputValue(startOfLocalDay(addLocalDays(now, -7)));
+			end = toLocalInputValue(startOfLocalDay(now));
 		} else if (presetId === 'last-30-days') {
-			end = startOfLocalDay(now);
-			start = startOfLocalDay(addLocalDays(now, -30));
+			start = toLocalInputValue(startOfLocalDay(addLocalDays(now, -30)));
+			end = toLocalInputValue(startOfLocalDay(now));
 		}
 
 		if (!start || !end) return;
 
 		activeTimePreset = presetId;
-		startDateTime = toLocalInputValue(start);
-		endDateTime = toLocalInputValue(end);
+		startDateTime = start;
+		endDateTime = end;
 		markDataLogFiltersDirty();
 	}
 
@@ -576,12 +586,6 @@
 		const vessel = $selectedVesselInfo || {};
 
 		return (
-			normalizeUtcLabel(payload?.timezone) ||
-			normalizeUtcLabel(payload?.timezoneOffset) ||
-			normalizeUtcLabel(payload?.timezone_offset) ||
-			normalizeUtcLabel(payload?.utc) ||
-			normalizeUtcLabel(payload?.utcOffset) ||
-			normalizeUtcLabel(payload?.utc_offset) ||
 			normalizeUtcLabel(vessel?.timezone) ||
 			normalizeUtcLabel(vessel?.timeZone) ||
 			normalizeUtcLabel(vessel?.timezoneOffset) ||
@@ -592,6 +596,12 @@
 			normalizeUtcLabel(vessel?.raw?.timezone) ||
 			normalizeUtcLabel(vessel?.raw?.timezoneOffset) ||
 			normalizeUtcLabel(vessel?.raw?.utcOffset) ||
+			normalizeUtcLabel(payload?.timezone) ||
+			normalizeUtcLabel(payload?.timezoneOffset) ||
+			normalizeUtcLabel(payload?.timezone_offset) ||
+			normalizeUtcLabel(payload?.utc) ||
+			normalizeUtcLabel(payload?.utcOffset) ||
+			normalizeUtcLabel(payload?.utc_offset) ||
 			(typeof window !== 'undefined'
 				? formatTimezoneOffsetFromMinutes(new Date().getTimezoneOffset())
 				: 'UTC+07:00')

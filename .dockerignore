@@ -6,6 +6,15 @@ dist
 .gitignore
 Dockerfile
 docker-compose.yml
+docker-compose.prod.yml
+Jenkinsfile
+JENKINS_SETUP.md
+.github
+.agents
 npm-debug.log
 .env
 .env.local
+artifacts
+storybook-static
+docs
+*.log

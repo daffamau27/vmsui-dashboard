@@ -1,6 +1,11 @@
 <script>
 	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import {
+		clampDateTimeLocalValue,
+		getNowDateTimeLocalValue,
+		getTimezoneOffsetMinutes
+	} from '$lib/utils/dateTimeInputBounds.js';
 	import './data-log-page.css';
 
 	let {
@@ -23,6 +28,48 @@
 		onExport,
 		onPreset
 	} = $props();
+
+	let clockTick = $state(0);
+
+	$effect(() => {
+		const timer = setInterval(() => {
+			clockTick += 1;
+		}, 30000);
+
+		return () => clearInterval(timer);
+	});
+
+	// The vessel's UTC offset drives the clock shown in the inputs, so the upper bound
+	// matches what the user sees (and what the presets write) instead of the browser clock.
+	let clockOffsetMinutes = $derived(
+		getTimezoneOffsetMinutes(timezoneMode === 'manual' ? timezoneOffset : autoTimezoneLabel)
+	);
+
+	// Keep the upper bound in sync with the clock and with the currently selected range,
+	// so a freshly applied "Today" preset never exceeds `max`.
+	let nowMax = $derived.by(() => {
+		void clockTick;
+		void startDateTime;
+		void endDateTime;
+
+		return getNowDateTimeLocalValue(clockOffsetMinutes);
+	});
+
+	function handleStartInput() {
+		const clampedStart = clampDateTimeLocalValue(startDateTime, nowMax);
+
+		if (clampedStart !== startDateTime) startDateTime = clampedStart;
+
+		onStartInput?.();
+	}
+
+	function handleEndInput() {
+		const clampedEnd = clampDateTimeLocalValue(endDateTime, nowMax);
+
+		if (clampedEnd !== endDateTime) endDateTime = clampedEnd;
+
+		onEndInput?.();
+	}
 </script>
 
 <section class="data-log-header-card">
@@ -40,7 +87,8 @@
 					type="datetime-local"
 					use:fourDigitDateYear
 					bind:value={startDateTime}
-					oninput={() => onStartInput?.()}
+					max={nowMax}
+					oninput={handleStartInput}
 				/>
 			</label>
 
@@ -50,7 +98,8 @@
 					type="datetime-local"
 					use:fourDigitDateYear
 					bind:value={endDateTime}
-					oninput={() => onEndInput?.()}
+					max={nowMax}
+					oninput={handleEndInput}
 				/>
 			</label>
 

@@ -630,6 +630,20 @@
 		assetMarkerLayerGroup.clearLayers();
 
 		mapAssets.forEach((asset) => {
+			L.circle([asset.latitude, asset.longitude], {
+				radius: 1000,
+				interactive: false,
+				stroke: true,
+				color: '#f59e0b',
+				weight: 2,
+				opacity: 0.9,
+				fill: true,
+				fillColor: '#f59e0b',
+				fillOpacity: 0.12,
+				dashArray: '8 8',
+				className: 'asset-boundary-circle'
+			}).addTo(assetMarkerLayerGroup);
+
 			L.marker([asset.latitude, asset.longitude], {
 				icon: createAssetMarkerIcon(asset),
 				zIndexOffset: 520
@@ -1158,6 +1172,10 @@
 		display: block;
 		filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.92))
 			drop-shadow(0 6px 10px rgba(15, 23, 42, 0.28));
+	}
+
+	:global(.asset-boundary-circle) {
+		filter: drop-shadow(0 0 7px rgba(245, 158, 11, 0.5));
 	}
 
 	:global(.vessel-map-asset-tooltip) {

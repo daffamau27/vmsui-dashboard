@@ -461,7 +461,7 @@
 		!hasLoadedDateRange || !historyStartDate || !historyEndDate
 	);
 	let autoTimezoneLabel = $derived(
-		getAutoTimezoneLabelFromSources(dashboardData, dashboardData?.data, $selectedVesselInfo)
+		getAutoTimezoneLabelFromSources($selectedVesselInfo, dashboardData, dashboardData?.data)
 	);
 
 	function canViewTableConfig(config) {
