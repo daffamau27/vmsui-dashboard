@@ -436,6 +436,7 @@
 
 	const alarmKeyOptions = [
 		'DEVICE_OFFLINE',
+		'GPS_OFFLINE',
 		'PANEL_OPEN',
 		'LOW_SPEED_HIGH_RPM',
 		'LOW_SPEED_OUTSIDE_BOUNDARY',

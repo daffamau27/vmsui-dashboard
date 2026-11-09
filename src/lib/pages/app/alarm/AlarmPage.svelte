@@ -35,23 +35,41 @@
 	let deviationAcknowledged = $state(false);
 	let deviationAcknowledgeError = $state('');
 	let unreadDeviationCount = $state(0);
-	let canViewDeviations = $derived.by(() => {
+	// null means the user has unrestricted access; an array is the explicit permission list.
+	let permissionKeys = $derived.by(() => {
 		const access = $currentUser?.permissionAccess;
-		if (access?.mode === 'all') return true;
-		if (access?.mode !== 'selected') return false;
+		if (access?.mode === 'all') return null;
+		if (access?.mode !== 'selected') return [];
 
 		const permissions = Array.isArray(access.permissions)
 			? access.permissions
 			: Array.isArray(access.details)
 				? access.details
 				: [];
-		const keys = permissions.map((item) =>
+
+		return permissions.map((item) =>
 			typeof item === 'string'
 				? item
 				: item?.key || item?.permissionKey || item?.name || item?.code || item?.permission
 		);
-		return ['access_alarm', 'view_data_log_data_deviations'].every((key) => keys.includes(key));
 	});
+
+	/**
+	 * @param {string | undefined} permissionKey
+	 * @returns {boolean}
+	 */
+	function hasPermission(permissionKey) {
+		if (!permissionKey) return true;
+
+		const keys = permissionKeys;
+		if (keys === null) return true;
+
+		return keys.includes(permissionKey);
+	}
+
+	let canViewDeviations = $derived(
+		hasPermission('access_alarm') && hasPermission('view_data_log_data_deviations')
+	);
 	let pagination = $state({
 		page: 1,
 		pageSize: 20,
@@ -68,10 +86,25 @@
 	let pageSize = $state(20);
 	let alarmEventsSectionElement = $state(null);
 
-	const alarmTypeOptions = [
+	// Alarm types mapped to the permission required to see them in the filter dropdown.
+	const permissionByAlarmType = new Map([
+		['LOW_SPEED_HIGH_RPM', 'view_high_rpm_low_speed_table'],
+		['LOW_SPEED_OUTSIDE_BOUNDARY', 'view_high_rpm_outside_safety_zone_table'],
+		['VOYAGE_PLAN_DEVIATION', 'access_voyage_plan_fleet'],
+		['JUMPING_DATA', 'view_data_log_data_deviations'],
+		['SPIKE_RPM', 'view_data_log_data_deviations'],
+		['OUTRANGE_RPM', 'view_data_log_data_deviations'],
+		['RPM_BLANK', 'view_data_log_data_deviations']
+	]);
+
+	const baseAlarmTypeOptions = [
 		{
 			value: 'DEVICE_OFFLINE',
 			label: 'Device Offline'
+		},
+		{
+			value: 'GPS_OFFLINE',
+			label: 'GPS Offline'
 		},
 		{
 			value: 'PANEL_OPEN',
@@ -114,6 +147,10 @@
 			label: 'Unaligned RPM Engines'
 		}
 	];
+
+	let alarmTypeOptions = $derived(
+		baseAlarmTypeOptions.filter((option) => hasPermission(permissionByAlarmType.get(option.value)))
+	);
 
 	let refreshTimer = null;
 	let deviationRefreshTimer = null;
