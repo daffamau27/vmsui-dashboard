@@ -1,0 +1,17 @@
+services:
+  frontend:
+    container_name: vms-sveltekit-frontend
+    image: ghcr.io/daffamau27/vmsui-dashboard:${IMAGE_TAG:-staging-latest}
+    ports:
+      - "${PORT:-8082}:8082"
+    environment:
+      - NODE_ENV=production
+      - HOST=0.0.0.0
+      - PORT=8082
+      - API_BASE_URL=${API_BASE_URL:-https://devvmsapi.semar.biz.id/api/v1}
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
