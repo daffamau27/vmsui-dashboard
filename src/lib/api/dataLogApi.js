@@ -26,19 +26,16 @@ export async function getDataLogData({
   if (!start) throw new Error("Start time must be filled in.");
   if (!end) throw new Error("End time must be filled in.");
 
-  const query = buildQuery(
-    {
-      vesselId,
-      start,
-      end,
-      timezoneMode,
-      timezoneOffset: timezoneMode === "manual" ? timezoneOffset : "",
-      columns,
-      page,
-      pageSize
-    },
-    new Set(["columns"])
-  );
+  const query = buildQuery({
+    vesselId,
+    start,
+    end,
+    timezoneMode,
+    timezoneOffset: timezoneMode === "manual" ? timezoneOffset : "",
+    columns,
+    page,
+    pageSize
+  });
 
   const response = await apiRequest(`/data-logs/data?${query}`, {
     method: "GET"
