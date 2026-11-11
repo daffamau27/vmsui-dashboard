@@ -14,6 +14,9 @@
 	let { active = false } = $props();
 
 	let loadingMonitor = $state(false);
+	// Becomes true once the first monitor request settles. Polling refreshes afterwards must not
+	// swap the live cards back to a skeleton, so the section keeps showing the previous data.
+	let monitorLoaded = $state(false);
 	let loadingEvents = $state(false);
 	let acknowledging = $state(false);
 	let error = $state('');
@@ -280,10 +283,12 @@
 						: Array.isArray(response)
 							? response
 							: [];
+			monitorLoaded = true;
 		} catch (err) {
 			console.error('[ALARM_MONITOR_ERROR]', err);
 			error = err?.message || 'Failed to load alarm monitor.';
-			monitorRows = [];
+			// A failed poll must not wipe the cards the user is already looking at.
+			if (!monitorLoaded) monitorRows = [];
 		} finally {
 			loadingMonitor = false;
 		}
@@ -589,7 +594,7 @@
 		eventCount={totalEventCount}
 	/>
 
-	<AlarmMonitorSection rows={monitorRows} loading={loadingMonitor} />
+	<AlarmMonitorSection rows={monitorRows} loading={loadingMonitor && !monitorLoaded} />
 
 	<div bind:this={alarmEventsSectionElement}>
 		<AlarmEventsSection
