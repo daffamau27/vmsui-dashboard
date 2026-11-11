@@ -47,7 +47,7 @@
 	let assets = [];
 	let auditRefreshToken = 0;
 
-	const telegramAiBotUrl = 'https://web.telegram.org/k/#@vmsui_ai_bot';
+	const telegramAiBotUrl = 'https://t.me/vmsui_ai_bot';
 
 	let profileForm = {
 		name: '',
