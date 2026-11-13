@@ -1893,6 +1893,8 @@
 
 	let canViewDailyPathMap = $derived(hasPermission('view_daily_path_map'));
 
+	let canViewCctv = $derived(hasPermission('access_cctv'));
+
 	let canViewEngineRpmStatsTable = $derived(hasPermission('view_engine_rpm_stats_table'));
 
 	let canViewFuelConsumptionTable = $derived(hasPermission('view_fuel_consumption_table'));
@@ -2014,11 +2016,17 @@
 		error = '';
 
 		try {
+			// The very first load runs before `currentUser` is resolved, so CCTV is requested
+			// anyway and the section is hidden later once the permission is known.
+			const shouldLoadCctv = !currentUser || canViewCctv;
+
 			// Wait for the entire refresh, including CCTV, before allowing the next poll.
 			const [dashboardResult] = await Promise.allSettled([
 				getVesselDashboard(targetVesselId),
 				background ? Promise.resolve() : loadDashboardAssets(),
-				loadLatestCctvSnapshots(targetVesselId, requestId, { background }),
+				shouldLoadCctv
+					? loadLatestCctvSnapshots(targetVesselId, requestId, { background })
+					: Promise.resolve([]),
 				loadCurrentUser()
 			]);
 
@@ -2259,15 +2267,17 @@
 			The user does not have the access_dashboard or access_daily_report permission.
 		</div>
 	{:else}
-		<section class="hero-grid">
-			<VesselDashboardCctv
-				items={cctvItems}
-				main={mainDashboardCctv}
-				miniItems={miniDashboardCctvItems}
-				loading={cctvSnapshotsLoading}
-				error={cctvSnapshotsError}
-				onSelect={selectDashboardCctv}
-			/>
+		<section class="hero-grid" class:hero-grid-map-only={!canViewCctv}>
+			{#if canViewCctv}
+				<VesselDashboardCctv
+					items={cctvItems}
+					main={mainDashboardCctv}
+					miniItems={miniDashboardCctvItems}
+					loading={cctvSnapshotsLoading}
+					error={cctvSnapshotsError}
+					onSelect={selectDashboardCctv}
+				/>
+			{/if}
 			<VesselDashboardMap
 				{active}
 				canViewMap={canViewDailyPathMap}

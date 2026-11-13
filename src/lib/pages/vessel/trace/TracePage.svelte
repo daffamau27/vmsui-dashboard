@@ -33,8 +33,34 @@
 		getCctvLookAheadPages
 	} from '$lib/utils/traceCctvBuffer.js';
 	import { createSnapshotImageBuffer } from '$lib/utils/snapshotImageBuffer.js';
+	import { currentUser } from '$lib/stores/authStore.js';
 
 	let { active = false, autoLoad = false } = $props();
+
+	function hasPermissionForUser(user, permissionKey) {
+		if (!permissionKey) return true;
+
+		const permissionAccess = user?.permissionAccess || {};
+		const mode = permissionAccess?.mode;
+
+		if (mode === 'all') return true;
+
+		if (mode === 'selected') {
+			const permissions = Array.isArray(permissionAccess?.permissions)
+				? permissionAccess.permissions
+				: [];
+
+			return permissions.includes(permissionKey);
+		}
+
+		return false;
+	}
+
+	// Unknown user (not resolved yet) must not hide the section, otherwise CCTV would flash
+	// out for users that actually have the permission.
+	let canViewCctv = $derived(
+		!$currentUser || hasPermissionForUser($currentUser, 'access_cctv')
+	);
 
 	onMount(() => {
 		if (!autoLoad) return;
@@ -2093,16 +2119,18 @@
 					timezoneMode,
 					timezoneOffset: timezoneMode === 'manual' ? timezoneOffset : ''
 				}),
-				loadTraceCctvSnapshots({
-					vesselId: $selectedVesselId,
-					startTime: cctvStart,
-					endTime: cctvEnd
-				}).catch((snapshotErr) => {
-					console.error('[VESSEL_TRACE_CCTV_SNAPSHOTS_ERROR]', snapshotErr);
-					cctvSnapshotsError =
-						snapshotErr?.message || 'Failed to load CCTV snapshots for this trace range.';
-					return null;
-				}),
+				canViewCctv
+					? loadTraceCctvSnapshots({
+							vesselId: $selectedVesselId,
+							startTime: cctvStart,
+							endTime: cctvEnd
+						}).catch((snapshotErr) => {
+							console.error('[VESSEL_TRACE_CCTV_SNAPSHOTS_ERROR]', snapshotErr);
+							cctvSnapshotsError =
+								snapshotErr?.message || 'Failed to load CCTV snapshots for this trace range.';
+							return null;
+						})
+					: Promise.resolve(null),
 				getVesselTraceMarkRecords({
 					vesselId: $selectedVesselId,
 					start: traceStart,
@@ -2798,7 +2826,7 @@
 			>
 		</div>
 	{/if}
-	{#if isTraceFullscreen}
+	{#if isTraceFullscreen && canViewCctv}
 		<button
 			type="button"
 			class="trace-fullscreen-cctv-toggle trace-floating-control"
@@ -2864,21 +2892,23 @@
 					/>
 				</section>
 			{:else}
-				<section class="main-monitor-grid">
-					<TraceCctv
-						panelId="trace-floating-cctv"
-						onClose={isTraceFullscreen ? () => setFullscreenCctvOpen(false) : null}
-						mainPanel={traceCctvMainView}
-						miniPanels={traceCctvMiniView}
-						error={cctvSnapshotsError}
-						loadedCount={cctvItems.length}
-						total={cctvSnapshotsTotal}
-						buffering={cctvSnapshotsBuffering}
-						playbackBuffering={cctvPlaybackBuffering}
-						renderTick={playbackRenderTick}
-						loadImage={cctvImageBuffer.load}
-						onSelect={(key) => (selectedCctvPanelKey = key)}
-					/>
+				<section class="main-monitor-grid" class:main-monitor-grid-solo={!canViewCctv}>
+					{#if canViewCctv}
+						<TraceCctv
+							panelId="trace-floating-cctv"
+							onClose={isTraceFullscreen ? () => setFullscreenCctvOpen(false) : null}
+							mainPanel={traceCctvMainView}
+							miniPanels={traceCctvMiniView}
+							error={cctvSnapshotsError}
+							loadedCount={cctvItems.length}
+							total={cctvSnapshotsTotal}
+							buffering={cctvSnapshotsBuffering}
+							playbackBuffering={cctvPlaybackBuffering}
+							renderTick={playbackRenderTick}
+							loadImage={cctvImageBuffer.load}
+							onSelect={(key) => (selectedCctvPanelKey = key)}
+						/>
+					{/if}
 
 					<TraceMap
 						{active}

@@ -31,8 +31,34 @@
 	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 	import { slideScale, panelEnter } from '$lib/utils/modalTransition.js';
 	import { enableFleetPopupTransition } from '$lib/utils/leafletPopupTransition.js';
+	import { currentUser } from '$lib/stores/authStore.js';
 
 	let { active = false } = $props();
+
+	function hasPermissionForUser(user, permissionKey) {
+		if (!permissionKey) return true;
+
+		const permissionAccess = user?.permissionAccess || {};
+		const mode = permissionAccess?.mode;
+
+		if (mode === 'all') return true;
+
+		if (mode === 'selected') {
+			const permissions = Array.isArray(permissionAccess?.permissions)
+				? permissionAccess.permissions
+				: [];
+
+			return permissions.includes(permissionKey);
+		}
+
+		return false;
+	}
+
+	// Unknown user (not resolved yet) must not hide the section, otherwise CCTV would flash
+	// out for users that actually have the permission.
+	let canViewCctv = $derived(
+		!$currentUser || hasPermissionForUser($currentUser, 'access_cctv')
+	);
 
 	const vesselMarkerUrl = '/assets/vessel.png';
 
@@ -2546,8 +2572,9 @@
 	$effect(() => {
 		showDetailPanel;
 		selectedVesselId;
+		canViewCctv;
 
-		if (!showDetailPanel || !selectedVesselId) {
+		if (!showDetailPanel || !selectedVesselId || !canViewCctv) {
 			detailCctvSnapshots = [];
 			detailCctvError = '';
 			detailCctvLoading = false;
@@ -2702,6 +2729,7 @@
 								cctvSnapshots={detailCctvSnapshots}
 								cctvLoading={detailCctvLoading}
 								cctvError={detailCctvError}
+								{canViewCctv}
 								onClose={closeVesselDetail}
 								onDashboard={() => openVesselDashboard(selectedVessel)}
 							/>

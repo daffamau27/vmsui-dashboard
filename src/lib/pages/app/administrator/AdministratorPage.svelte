@@ -341,6 +341,7 @@
 		access_voyage_plan_fleet:
 			'Shows the Voyage Plan Fleet sidebar menu and fleet plan management page.',
 		access_alarm: 'Shows the Alarm sidebar menu and alarm page.',
+		access_cctv: 'Shows the CCTV sections on Vessel Dashboard, Trace, and Fleet View detail panel.',
 		view_voyage_plan_vessel: 'Shows the vessel Voyage Plan menu and active voyage plan map.',
 
 		view_daily_path_map: 'Shows vessel map, route preview, position panels, and daily trip map.',

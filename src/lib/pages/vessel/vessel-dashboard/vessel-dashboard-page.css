@@ -138,6 +138,23 @@ p {
 		margin-top: 14px;
 	}
 
+	/* Without CCTV access the map takes the whole row and gets taller. */
+	@media (min-width: 1101px) {
+		.hero-grid.hero-grid-map-only {
+			grid-template-columns: minmax(0, 1fr);
+			min-height: 560px;
+		}
+
+		.hero-grid.hero-grid-map-only .map-section {
+			min-height: 560px;
+		}
+
+		.hero-grid.hero-grid-map-only .map-box,
+		.hero-grid.hero-grid-map-only .dashboard-leaflet-map {
+			min-height: 470px;
+		}
+	}
+
 	.cctv-section,
 	.map-section {
 		min-width: 0;

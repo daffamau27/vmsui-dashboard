@@ -302,6 +302,19 @@
 		gap: 10px;
 	}
 
+	/* Without CCTV access the map fills the whole grid. */
+	.main-monitor-grid.main-monitor-grid-solo {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	/* With no CCTV to drive the row height, the map card must hold the height itself.
+	   Scoped to wide screens so the 440px/360px map heights below are not overridden. */
+	@media (min-width: 1201px) {
+		.main-monitor-grid.main-monitor-grid-solo .map-card {
+			min-height: 560px;
+		}
+	}
+
 	.monitor-card,
 	.playback-card,
 	.info-card,

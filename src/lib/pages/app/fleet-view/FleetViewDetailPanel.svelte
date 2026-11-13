@@ -18,6 +18,7 @@
 		cctvSnapshots = [],
 		cctvLoading = false,
 		cctvError = '',
+		canViewCctv = true,
 		onClose = () => {},
 		onDashboard = () => {}
 	} = $props();
@@ -384,97 +385,99 @@
 		<span aria-hidden="true">↗</span>
 	</button>
 
-	<section class="detail-section detail-cctv-section">
-		<div class="detail-section-heading">
-			<div>
-				<span class="detail-section-kicker">CCTV</span>
-				<h3>Latest camera snapshot</h3>
-			</div>
-			<strong class="detail-cctv-count">
-				{cctvLoading ? 'Loading...' : `${cctvItems.length} cameras`}
-			</strong>
-		</div>
-
-		{#if cctvLoading}
-			<div class="detail-cctv-layout">
-				<div class="detail-cctv-box detail-cctv-main detail-cctv-skeleton" aria-hidden="true">
-					<span></span>
-					<strong></strong>
-					<small></small>
+	{#if canViewCctv}
+		<section class="detail-section detail-cctv-section">
+			<div class="detail-section-heading">
+				<div>
+					<span class="detail-section-kicker">CCTV</span>
+					<h3>Latest camera snapshot</h3>
 				</div>
-				<div class="detail-cctv-thumb-row" aria-hidden="true">
-					{#each Array(3).keys() as index (index)}
-						<div class="detail-cctv-box detail-cctv-thumb detail-cctv-skeleton">
-							<strong></strong>
-						</div>
-					{/each}
-				</div>
+				<strong class="detail-cctv-count">
+					{cctvLoading ? 'Loading...' : `${cctvItems.length} cameras`}
+				</strong>
 			</div>
-		{:else if !cctvItems.length}
-			<div class="detail-cctv-empty">
-				{cctvError || 'Latest CCTV snapshot is not available for this vessel.'}
-			</div>
-		{:else}
-			<div class="detail-cctv-layout">
-				{#if mainCctv}
-					<div
-						class="detail-cctv-box detail-cctv-main"
-						class:has-snapshot={Boolean(mainCctv.url)}
-						class:offline={!mainCctv.online}
-					>
-						{#if mainCctv.url}
-							<CctvSnapshotImage
-								class="detail-cctv-img"
-								src={mainCctv.url}
-								filePath={mainCctv.location}
-								alt={`${mainCctv.name} latest snapshot`}
-								loading="eager"
-							/>
-						{/if}
 
-						<div class="detail-cctv-content">
-							<strong>{mainCctv.name}</strong>
-							{#if mainCctv.capturedAtText}
-								<span>{mainCctv.capturedAtText}</span>
-							{/if}
-							{#if mainCctv.fileSizeText}
-								<small>{mainCctv.fileSizeText}</small>
-							{/if}
-						</div>
+			{#if cctvLoading}
+				<div class="detail-cctv-layout">
+					<div class="detail-cctv-box detail-cctv-main detail-cctv-skeleton" aria-hidden="true">
+						<span></span>
+						<strong></strong>
+						<small></small>
 					</div>
-				{/if}
-
-				{#if cctvThumbnails.length}
-					<div class="detail-cctv-thumb-row" aria-label="CCTV camera list">
-						{#each cctvThumbnails as cctv (cctv.key)}
-							<button
-								type="button"
-								class="detail-cctv-box detail-cctv-thumb"
-								class:has-snapshot={Boolean(cctv.url)}
-								class:offline={!cctv.online}
-								onclick={() => selectDetailCctv(cctv)}
-								title={`Show ${cctv.name}`}
-							>
-								{#if cctv.url}
-									<CctvSnapshotImage
-										class="detail-cctv-img"
-										src={cctv.url}
-										filePath={cctv.location}
-										alt={`${cctv.name} latest snapshot`}
-										loading="lazy"
-									/>
-								{/if}
-
-								<div class="detail-cctv-content">
-									<strong>{cctv.name}</strong>
-								</div>
-							</button>
+					<div class="detail-cctv-thumb-row" aria-hidden="true">
+						{#each Array(3).keys() as index (index)}
+							<div class="detail-cctv-box detail-cctv-thumb detail-cctv-skeleton">
+								<strong></strong>
+							</div>
 						{/each}
 					</div>
-				{/if}
-			</div>
-		{/if}
-	</section>
+				</div>
+			{:else if !cctvItems.length}
+				<div class="detail-cctv-empty">
+					{cctvError || 'Latest CCTV snapshot is not available for this vessel.'}
+				</div>
+			{:else}
+				<div class="detail-cctv-layout">
+					{#if mainCctv}
+						<div
+							class="detail-cctv-box detail-cctv-main"
+							class:has-snapshot={Boolean(mainCctv.url)}
+							class:offline={!mainCctv.online}
+						>
+							{#if mainCctv.url}
+								<CctvSnapshotImage
+									class="detail-cctv-img"
+									src={mainCctv.url}
+									filePath={mainCctv.location}
+									alt={`${mainCctv.name} latest snapshot`}
+									loading="eager"
+								/>
+							{/if}
+
+							<div class="detail-cctv-content">
+								<strong>{mainCctv.name}</strong>
+								{#if mainCctv.capturedAtText}
+									<span>{mainCctv.capturedAtText}</span>
+								{/if}
+								{#if mainCctv.fileSizeText}
+									<small>{mainCctv.fileSizeText}</small>
+								{/if}
+							</div>
+						</div>
+					{/if}
+
+					{#if cctvThumbnails.length}
+						<div class="detail-cctv-thumb-row" aria-label="CCTV camera list">
+							{#each cctvThumbnails as cctv (cctv.key)}
+								<button
+									type="button"
+									class="detail-cctv-box detail-cctv-thumb"
+									class:has-snapshot={Boolean(cctv.url)}
+									class:offline={!cctv.online}
+									onclick={() => selectDetailCctv(cctv)}
+									title={`Show ${cctv.name}`}
+								>
+									{#if cctv.url}
+										<CctvSnapshotImage
+											class="detail-cctv-img"
+											src={cctv.url}
+											filePath={cctv.location}
+											alt={`${cctv.name} latest snapshot`}
+											loading="lazy"
+										/>
+									{/if}
+
+									<div class="detail-cctv-content">
+										<strong>{cctv.name}</strong>
+									</div>
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			{/if}
+		</section>
+	{/if}
 
 	<section class="detail-section">
 		<div class="detail-section-heading">
