@@ -1623,7 +1623,6 @@ body .app-content .dashboard-content .dashboard-map-popup-row strong {
 .load-required-area {
   position: relative;
   min-height: 430px;
-  margin-top: 12px;
 }
 
 .load-required-area.is-locked > :not(.load-required-overlay) {
