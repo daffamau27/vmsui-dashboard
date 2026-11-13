@@ -1751,7 +1751,11 @@
 		return {
 			assetId: '',
 			assetName: '',
-			assetType: ''
+			assetType: '',
+			companyId: '',
+			latitude: '',
+			longitude: '',
+			coordinatesText: ''
 		};
 	}
 
@@ -1766,11 +1770,17 @@
 		'office',
 		'fso',
 		'anchor',
-		'rig'
+		'rig',
+		'zone'
 	];
 
 	$: hasCustomAssetType =
 		assetForm.assetType.trim() && !assetTypeOptions.includes(assetForm.assetType.trim());
+
+	// Zone assets are sent as a coordinates polygon; every other type uses latitude/longitude.
+	$: isZoneAssetForm = assetForm.assetType.trim().toLowerCase() === 'zone';
+
+	$: assetCompanyOptions = sortByAlpha(companies, getCompanyDisplayName);
 
 	function getAssetType(asset) {
 		return asset?.assetType ?? asset?.asset_type ?? asset?.type ?? '';
@@ -1808,8 +1818,22 @@
 			vesselName: '',
 			companyId: '',
 			fuelConsumptionSource: 'fm',
-			features: []
+			features: /** @type {any[]} */ ([]),
+			engines: /** @type {any[]} */ ([])
 		};
+	}
+
+	/** @param {any[]} engines */
+	function normalizeVesselEngines(engines) {
+		if (!Array.isArray(engines)) return [];
+
+		return engines.map((engine) => ({
+			id: engine?.id,
+			engineKeyThingsboard: engine?.engineKeyThingsboard ?? engine?.engine_key_thingsboard ?? '',
+			engineName: engine?.engineName ?? engine?.engine_name ?? '',
+			isActive: Boolean(engine?.isActive ?? engine?.is_active),
+			deletedAt: engine?.deletedAt ?? engine?.deleted_at ?? null
+		}));
 	}
 
 	let vesselForm = createEmptyVesselForm();
@@ -2196,7 +2220,8 @@
 			if (requestId !== vesselFeaturesRequestId) return;
 			vesselForm = {
 				...vesselForm,
-				features: Array.isArray(vessel?.features) ? [...vessel.features] : []
+				features: Array.isArray(vessel?.features) ? [...vessel.features] : [],
+				engines: normalizeVesselEngines(vessel?.engines)
 			};
 			vesselFeaturesLoaded = true;
 		} catch (error) {
@@ -2215,6 +2240,16 @@
 			features: checked
 				? [...new Set([...vesselForm.features, key])]
 				: vesselForm.features.filter((feature) => feature !== key)
+		};
+	}
+
+	function toggleVesselEngineActive(engineId, checked) {
+		if (vesselSaving || !vesselFeaturesLoaded) return;
+		vesselForm = {
+			...vesselForm,
+			engines: vesselForm.engines.map((engine) =>
+				Number(engine.id) === Number(engineId) ? { ...engine, isActive: checked } : engine
+			)
 		};
 	}
 
@@ -2490,9 +2525,12 @@
 	function openEditVesselForm(vessel, shouldClearAlert = true) {
 		if (!vessel?.id) return;
 
+		const listEngines = normalizeVesselEngines(vessel?.engines);
+
 		vesselFeaturesRequestId += 1;
 		vesselFeaturesLoading = false;
-		vesselFeaturesLoaded = Array.isArray(vessel.features);
+		// Only skip the detail fetch when both features and engines are already on the list row.
+		vesselFeaturesLoaded = Array.isArray(vessel.features) && listEngines.length > 0;
 		vesselFeaturesError = '';
 		vesselMode = 'edit';
 		selectedVessel = vessel;
@@ -2502,7 +2540,8 @@
 			vesselName: vessel?.vesselName || '',
 			companyId: vessel?.companyId ?? '',
 			fuelConsumptionSource: getFuelConsumptionSourceValue(vessel),
-			features: vesselFeaturesLoaded ? [...vessel.features] : []
+			features: vesselFeaturesLoaded ? [...vessel.features] : [],
+			engines: listEngines
 		};
 
 		if (shouldClearAlert) clearAlert();
@@ -2531,7 +2570,14 @@
 			companyId: companyIdText ? Number(companyIdText) : null,
 			fuelConsumptionSource: getFuelConsumptionSourceValue(vesselForm.fuelConsumptionSource),
 			...(vesselMode === 'edit' && vesselFeaturesLoaded
-				? { features: [...new Set(vesselForm.features)] }
+				? {
+						features: [...new Set(vesselForm.features)],
+						engines: vesselForm.engines.map((engine) => ({
+							id: engine.id,
+							engineKeyThingsboard: engine.engineKeyThingsboard || null,
+							isActive: Boolean(engine.isActive)
+						}))
+					}
 				: {})
 		};
 	}
@@ -2679,20 +2725,80 @@
 			assetForm = {
 				assetId: detail?.assetId || '',
 				assetName: detail?.assetName || detail?.thingsboardName || '',
-				assetType: getAssetType(detail)
+				assetType: getAssetType(detail),
+				companyId: String(detail?.companyId ?? detail?.company_id ?? ''),
+				latitude: toFormNumberValue(detail?.latitude),
+				longitude: toFormNumberValue(detail?.longitude),
+				coordinatesText: coordinatesToFormText(detail?.coordinates)
 			};
 		} catch (error) {
 			showAlert('error', error.message || 'Failed to load asset details.');
 		}
 	}
 
-	function validateAssetForm() {
-		if (!assetForm.assetId.trim()) {
-			return 'Asset ID is required.';
-		}
+	function toFormNumberValue(value) {
+		if (value === null || value === undefined || value === '') return '';
 
+		const number = Number(value);
+		return Number.isFinite(number) ? String(number) : '';
+	}
+
+	function parseZoneCoordinates(text) {
+		return String(text || '')
+			.split(/\r?\n/)
+			.map((line) => line.split(','))
+			.filter((parts) => parts.length >= 2)
+			.map((parts) => [Number(parts[0]), Number(parts[1])])
+			.filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng));
+	}
+
+	function coordinatesToFormText(value) {
+		if (!Array.isArray(value)) return '';
+
+		return value
+			.map((pair) => {
+				const lat = Array.isArray(pair) ? pair[0] : (pair?.latitude ?? pair?.lat);
+				const lng = Array.isArray(pair)
+					? pair[1]
+					: (pair?.longitude ?? pair?.lng ?? pair?.lon);
+
+				const latNumber = Number(lat);
+				const lngNumber = Number(lng);
+
+				return Number.isFinite(latNumber) && Number.isFinite(lngNumber)
+					? `${latNumber}, ${lngNumber}`
+					: null;
+			})
+			.filter(Boolean)
+			.join('\n');
+	}
+
+	function validateAssetForm() {
 		if (!assetForm.assetName.trim()) {
 			return 'Asset name is required.';
+		}
+
+		if (isZoneAssetForm) {
+			if (parseZoneCoordinates(assetForm.coordinatesText).length < 3) {
+				return 'A zone needs at least 3 valid coordinates, one "lat, lng" pair per line.';
+			}
+
+			return null;
+		}
+
+		const latitudeText = String(assetForm.latitude ?? '').trim();
+		const longitudeText = String(assetForm.longitude ?? '').trim();
+
+		if (Boolean(latitudeText) !== Boolean(longitudeText)) {
+			return 'Latitude and longitude must be filled together.';
+		}
+
+		if (latitudeText && !Number.isFinite(Number(latitudeText))) {
+			return 'Latitude must be a number.';
+		}
+
+		if (longitudeText && !Number.isFinite(Number(longitudeText))) {
+			return 'Longitude must be a number.';
 		}
 
 		return null;
@@ -2700,11 +2806,20 @@
 
 	function buildAssetPayload() {
 		const assetType = assetForm.assetType.trim();
+		const companyIdText = String(assetForm.companyId ?? '').trim();
+		const latitudeText = String(assetForm.latitude ?? '').trim();
+		const longitudeText = String(assetForm.longitude ?? '').trim();
+		const zonePoints = isZoneAssetForm ? parseZoneCoordinates(assetForm.coordinatesText) : [];
 
+		// Zones are registered as a polygon; other asset types use a single point.
 		return {
-			assetId: assetForm.assetId.trim(),
+			assetId: assetForm.assetId.trim() || null,
 			assetName: assetForm.assetName.trim(),
-			assetType: assetType || null
+			assetType: assetType || null,
+			companyId: companyIdText ? Number(companyIdText) : null,
+			latitude: isZoneAssetForm || !latitudeText ? null : Number(latitudeText),
+			longitude: isZoneAssetForm || !longitudeText ? null : Number(longitudeText),
+			coordinates: isZoneAssetForm && zonePoints.length ? zonePoints : null
 		};
 	}
 
@@ -4171,6 +4286,77 @@
 								</div>
 
 								{#if vesselMode === 'edit'}
+									<section class="vessel-features" aria-labelledby="vessel-engines-title">
+										<div class="vessel-features-heading">
+											<div>
+												<h3 id="vessel-engines-title">Vessel Engines</h3>
+												<p>
+													Toggle each engine active or inactive, then save your changes.
+												</p>
+											</div>
+											{#if vesselFeaturesLoaded}
+												<span class="vessel-features-count"
+													>{vesselForm.engines.filter((engine) => !engine.deletedAt && engine.isActive)
+														.length} active</span
+												>
+											{/if}
+										</div>
+
+										{#if vesselFeaturesLoading}
+											<LoadingSkeleton label="Loading vessel engines" variant="inline" compact />
+										{:else if vesselFeaturesError}
+											<div class="vessel-features-feedback" role="status">
+												<p>{vesselFeaturesError}</p>
+												<button
+													type="button"
+													class="ghost-button small"
+													on:click={loadSelectedVesselFeatures}
+													disabled={vesselSaving}>Retry</button
+												>
+											</div>
+										{:else if !vesselForm.engines.length}
+											<p class="vessel-features-feedback">No engines found for this vessel.</p>
+										{:else}
+											<div class="vessel-feature-list vessel-engine-list">
+												{#each vesselForm.engines as engine (engine.id)}
+													<label
+														class="vessel-feature-option"
+														class:checked={!engine.deletedAt && engine.isActive}
+													>
+														<input
+															type="checkbox"
+															checked={!engine.deletedAt && engine.isActive}
+															on:change={(event) =>
+																toggleVesselEngineActive(engine.id, event.currentTarget.checked)}
+															disabled={vesselSaving ||
+																!vesselFeaturesLoaded ||
+																Boolean(engine.deletedAt)}
+														/>
+														<span class="vessel-feature-copy">
+															<strong
+																>{engine.engineName ||
+																	engine.engineKeyThingsboard ||
+																	`Engine ${engine.id}`}</strong
+															>
+															{#if engine.engineKeyThingsboard}
+																<small class="vessel-feature-module"
+																	>{engine.engineKeyThingsboard}</small
+																>
+															{/if}
+															{#if engine.deletedAt}
+																<small>(deleted)</small>
+															{:else}
+																<small>{engine.isActive ? 'Active' : 'Inactive'}</small>
+															{/if}
+														</span>
+													</label>
+												{/each}
+											</div>
+										{/if}
+									</section>
+								{/if}
+
+								{#if vesselMode === 'edit'}
 									<section class="vessel-features" aria-labelledby="vessel-features-title">
 										<div class="vessel-features-heading">
 											<div>
@@ -4399,12 +4585,56 @@
 											{/each}
 										</select>
 									</label>
+
+									<label>
+										<span>Company</span>
+										<select bind:value={assetForm.companyId}>
+											<option value="">Select company</option>
+											{#each assetCompanyOptions as company}
+												<option value={String(company.id)}>{getCompanyDisplayName(company)}</option>
+											{/each}
+										</select>
+									</label>
+
+									{#if isZoneAssetForm}
+										<label class="coordinates-field">
+											<span>Coordinates</span>
+											<textarea
+												class="coordinates-input"
+												bind:value={assetForm.coordinatesText}
+												rows="4"
+												placeholder={'-3.451204, 114.321556\n-3.46, 114.33\n-3.47, 114.32'}
+											></textarea>
+										</label>
+									{:else}
+										<label>
+											<span>Latitude</span>
+											<input
+												type="number"
+												step="any"
+												bind:value={assetForm.latitude}
+												placeholder="-3.451204"
+											/>
+										</label>
+
+										<label>
+											<span>Longitude</span>
+											<input
+												type="number"
+												step="any"
+												bind:value={assetForm.longitude}
+												placeholder="114.321556"
+											/>
+										</label>
+									{/if}
 								</div>
 
 								<div class="asset-note">
 									<strong>Note:</strong>
-									the asset backend accepts <code>assetId</code>, <code>assetName</code>, and
-									<code>assetType</code>. Make sure <code>assetId</code> matches the Asset ID from ThingsBoard.
+									<code>assetName</code> is required; <code>assetId</code> must match the Asset ID from
+									ThingsBoard when provided. Non-zone assets are sent with <code>latitude</code> /
+									<code>longitude</code>, while zone assets are sent as a <code>coordinates</code> polygon
+									(3+ points). <code>companyId</code> links the asset to a company.
 								</div>
 
 								<div class="editor-footer">

@@ -3554,6 +3554,7 @@
 					{
 						key: 'top-speed',
 						label: 'Top Speed',
+						hint: 'Taken from 24-hour data with speeds above 2 knots.',
 						value:
 							summaryTopSpeed !== null && summaryTopSpeed !== undefined
 								? `${formatNumber(summaryTopSpeed, 2)} knot`
@@ -3562,6 +3563,7 @@
 					{
 						key: 'average-speed',
 						label: 'Average Speed',
+						hint: 'Taken from 24-hour data with speeds above 2 knots.',
 						value:
 							summaryAverageSpeed !== null && summaryAverageSpeed !== undefined
 								? `${formatNumber(summaryAverageSpeed, 2)} knot`
@@ -4016,7 +4018,7 @@
 				/>
 			{/if}
 
-			{#if canViewFuelFod}
+			{#if canViewFuelFod && fodChartGroup}
 				<DailyReportFodChart group={fodChartGroup} chartAction={fodLineChart} />
 			{/if}
 

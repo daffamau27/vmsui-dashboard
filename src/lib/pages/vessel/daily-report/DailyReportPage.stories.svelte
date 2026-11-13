@@ -269,9 +269,24 @@
 	};
 
 	const summaryCards = [
-		{ key: 'operation-hours', label: 'Total Operation Hours', value: '18.5 h' },
-		{ key: 'top-speed', label: 'Top Speed', value: '12.60 knot' },
-		{ key: 'average-speed', label: 'Average Speed', value: '8.20 knot' },
+		{
+			key: 'operation-hours',
+			label: 'Total Operation Hours',
+			hint: 'Taken from the difference between 24 hours (if the day is complete) and when all main engines are off.',
+			value: '18.5 h'
+		},
+		{
+			key: 'top-speed',
+			label: 'Top Speed',
+			hint: 'Taken from 24-hour data with speeds above 2 knots.',
+			value: '12.60 knot'
+		},
+		{
+			key: 'average-speed',
+			label: 'Average Speed',
+			hint: 'Taken from 24-hour data with speeds above 2 knots.',
+			value: '8.20 knot'
+		},
 		{ key: 'ecu-nm', label: 'ECU Fuel per NM', value: '2.30 L/NM' },
 		{ key: 'fms-nm', label: 'FMS Fuel per NM', value: '2.28 L/NM' },
 		{ key: 'ems-internal-nm', label: 'VMS Fuel per NM', value: '2.25 L/NM' },

@@ -7,6 +7,12 @@
 		<article class="summary-card">
 			<span>{card.label}</span>
 			<strong>{card.value}</strong>
+			{#if card.hint}
+				<button type="button" class="card-hint" aria-label={card.hint}>
+					i
+					<span class="card-hint-tooltip" role="tooltip">{card.hint}</span>
+				</button>
+			{/if}
 		</article>
 	{/each}
 </section>

@@ -1321,6 +1321,9 @@ body {
 		display: grid;
 		gap: 8px;
 	}
+	.vessel-feature-list.vessel-engine-list {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
 	.vessel-feature-option {
 		display: flex;
 		align-items: flex-start;
@@ -1357,6 +1360,10 @@ body {
 	}
 	.asset-form-grid {
 		grid-template-columns: 1.35fr 1fr 180px;
+	}
+
+	.asset-form-grid .coordinates-field {
+		grid-column: span 2;
 	}
 	.asset-row-title {
 		display: flex;
@@ -2978,6 +2985,10 @@ body {
 		.asset-form-grid {
 			grid-template-columns: 1fr;
 		}
+
+		.asset-form-grid .coordinates-field {
+			grid-column: auto;
+		}
 		.engine-curve-admin-workspace {
 			grid-template-columns: 1fr;
 		}
@@ -3004,6 +3015,9 @@ body {
 		.access-grid,
 		.form-grid,
 		.permission-filter {
+			grid-template-columns: 1fr;
+		}
+		.vessel-feature-list.vessel-engine-list {
 			grid-template-columns: 1fr;
 		}
 		.admin-tabs {
