@@ -79,6 +79,7 @@
 			permissionMode="all"
 			createdAtLabel="15 January 2025, 03:00 PM"
 			telegramAiBotUrl="https://web.telegram.org/k/#@vmsui_ai_bot"
+			canAccessAiAgent
 		/>
 	</div>
 </Story>

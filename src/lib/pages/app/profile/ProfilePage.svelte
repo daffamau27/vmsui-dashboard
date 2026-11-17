@@ -74,6 +74,26 @@
 		};
 	}
 
+	function hasAiAgentAccess(user) {
+		const access = user?.permissionAccess;
+		if (access?.mode === 'all') return true;
+		if (access?.mode !== 'selected') return false;
+
+		const permissions = Array.isArray(access.permissions)
+			? access.permissions
+			: Array.isArray(access.details)
+				? access.details
+				: [];
+
+		return permissions.some((item) => {
+			const key =
+				typeof item === 'string'
+					? item
+					: item?.key || item?.permissionKey || item?.name || item?.code || item?.permission;
+			return key === 'access_ai_agent';
+		});
+	}
+
 	async function loadProfilePage() {
 		loading = true;
 		clearMessage();
@@ -328,6 +348,7 @@
 				{permissionMode}
 				createdAtLabel={formatDate(currentUser?.createdAt)}
 				{telegramAiBotUrl}
+				canAccessAiAgent={hasAiAgentAccess(currentUser)}
 				onRefresh={loadProfilePage}
 			/>
 

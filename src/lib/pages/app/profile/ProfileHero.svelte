@@ -5,6 +5,7 @@
 		permissionMode = '-',
 		createdAtLabel = '-',
 		telegramAiBotUrl = '',
+		canAccessAiAgent = false,
 		onRefresh
 	} = $props();
 
@@ -43,15 +44,17 @@
 	</div>
 
 	<div class="hero-actions">
-		<a
-			class="telegram-bot-button"
-			href={telegramAiBotUrl}
-			target="_blank"
-			rel="noopener noreferrer"
-			aria-label="Open VMSUI AI Telegram bot"
-		>
-			Open AI Telegram Bot
-		</a>
+		{#if canAccessAiAgent}
+			<a
+				class="telegram-bot-button"
+				href={telegramAiBotUrl}
+				target="_blank"
+				rel="noopener noreferrer"
+				aria-label="Open VMSUI AI Telegram bot"
+			>
+				Open AI Telegram Bot
+			</a>
+		{/if}
 
 		<button class="refresh-button" type="button" onclick={() => onRefresh?.()}>Refresh</button>
 	</div>
