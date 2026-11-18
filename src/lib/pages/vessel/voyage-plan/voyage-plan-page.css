@@ -661,6 +661,15 @@ body {
 		background: var(--color-accent-muted) !important;
 	}
 
+	tfoot td {
+		position: sticky;
+		bottom: 0;
+		background: var(--color-accent-muted);
+		color: var(--text-primary);
+		font-weight: 900;
+		border-bottom: 0;
+	}
+
 	.right {
 		text-align: right;
 	}

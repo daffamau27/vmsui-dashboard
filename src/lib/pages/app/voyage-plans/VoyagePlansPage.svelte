@@ -27,6 +27,7 @@
 		handleCoordinateCopyClick
 	} from '$lib/utils/coordinateClipboard.js';
 	import { matchesSearch, sortByAlpha } from '$lib/utils/alphaSort.js';
+	import { getRouteLegDistancesNm, formatDistanceNm } from '$lib/utils/voyageRouteDistance.js';
 	import 'leaflet/dist/leaflet.css';
 
 	const PAGE_SIZE_OPTIONS = [10, 20, 50];
@@ -1233,6 +1234,8 @@
 	$: selectedAssignPlan = getAssignmentPlan(assignForm.voyagePlanId);
 	$: assignableVessels = getAssignableVessels(assignForm.voyagePlanId);
 	$: routePointNameOptions = buildRoutePointNameOptions(savedRoutePoints);
+	$: selectedPlanLegDistances = getRouteLegDistancesNm(selectedPlan?.planData || []);
+	$: editorLegDistances = getRouteLegDistancesNm(form.planData);
 	$: if (
 		assignForm.vesselId &&
 		assignForm.voyagePlanId &&
@@ -3165,11 +3168,12 @@
 									<th>Name</th>
 									<th>Latitude</th>
 									<th>Longitude</th>
+									<th>Dist (NM)</th>
 									<th>Speed kn</th>
 								</tr>
 							</thead>
 							<tbody>
-								{#each selectedPlan.planData || [] as point}
+								{#each selectedPlan.planData || [] as point, index}
 									<tr>
 										<td>{point.order}</td>
 										<td>{point.name || '-'}</td>
@@ -3189,14 +3193,24 @@
 												compact
 											/>
 										</td>
+										<td>{formatDistanceNm(selectedPlanLegDistances.legs[index])}</td>
 										<td>{point.speed_kn ?? '-'}</td>
 									</tr>
 								{:else}
 									<tr>
-										<td colspan="5" class="empty-cell">No route points yet.</td>
+										<td colspan="6" class="empty-cell">No route points yet.</td>
 									</tr>
 								{/each}
 							</tbody>
+							{#if (selectedPlan.planData || []).length}
+								<tfoot>
+									<tr>
+										<td colspan="4">Total Distance</td>
+										<td>{formatDistanceNm(selectedPlanLegDistances.totalNm)}</td>
+										<td></td>
+									</tr>
+								</tfoot>
+							{/if}
 						</table>
 					</div>
 				{:else}
@@ -3603,6 +3617,7 @@
 										<th>Name</th>
 										<th>Latitude</th>
 										<th>Longitude</th>
+										<th>Dist (NM)</th>
 										<th>Speed</th>
 										<th></th>
 									</tr>
@@ -3736,6 +3751,8 @@
 												</div>
 											</td>
 
+											<td>{formatDistanceNm(editorLegDistances.legs[index])}</td>
+
 											<td>
 												<input
 													type="number"
@@ -3763,6 +3780,15 @@
 										</tr>
 									{/each}
 								</tbody>
+								{#if form.planData.length}
+									<tfoot>
+										<tr>
+											<td colspan="4">Total Distance</td>
+											<td>{formatDistanceNm(editorLegDistances.totalNm)}</td>
+											<td colspan="2"></td>
+										</tr>
+									</tfoot>
+								{/if}
 							</table>
 
 							{#if savedRoutePointsLoading}
@@ -4240,11 +4266,12 @@
 										<th>Name</th>
 										<th>Latitude</th>
 										<th>Longitude</th>
+										<th>Dist (NM)</th>
 										<th>Speed</th>
 									</tr>
 								</thead>
 								<tbody>
-									{#each selectedPlan.planData || [] as point}
+									{#each selectedPlan.planData || [] as point, index}
 										<tr>
 											<td>{point.order}</td>
 											<td>{point.name || '-'}</td>
@@ -4264,14 +4291,24 @@
 													compact
 												/>
 											</td>
+											<td>{formatDistanceNm(selectedPlanLegDistances.legs[index])}</td>
 											<td>{point.speed_kn ?? '-'}</td>
 										</tr>
 									{:else}
 										<tr>
-											<td colspan="5" class="empty-cell">No route points yet.</td>
+											<td colspan="6" class="empty-cell">No route points yet.</td>
 										</tr>
 									{/each}
 								</tbody>
+								{#if (selectedPlan.planData || []).length}
+									<tfoot>
+										<tr>
+											<td colspan="4">Total Distance</td>
+											<td>{formatDistanceNm(selectedPlanLegDistances.totalNm)}</td>
+											<td></td>
+										</tr>
+									</tfoot>
+								{/if}
 							</table>
 						</div>
 					</section>

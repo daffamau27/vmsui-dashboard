@@ -1,7 +1,7 @@
 <script>
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
 
-	let { rows = [], actionLoading = '', onComplete } = $props();
+	let { rows = [], totalDistanceLabel = '-', actionLoading = '', onComplete } = $props();
 </script>
 
 <section class="table-section">
@@ -23,6 +23,7 @@
 						<th>Status</th>
 						<th>Latitude</th>
 						<th>Longitude</th>
+						<th>Distance (NM)</th>
 						<th>Planned Speed</th>
 						<th>Actual Avg Speed</th>
 						<th>Reached At</th>
@@ -52,6 +53,7 @@
 									compact
 								/>
 							</td>
+							<td>{row.distanceLabel}</td>
 							<td>{row.speedLabel}</td>
 							<td>{row.averageSpeedLabel}</td>
 							<td>{row.reachedAtLabel}</td>
@@ -72,6 +74,13 @@
 						</tr>
 					{/each}
 				</tbody>
+				<tfoot>
+					<tr>
+						<td colspan="4">Total Distance</td>
+						<td>{totalDistanceLabel}</td>
+						<td colspan="4"></td>
+					</tr>
+				</tfoot>
 			</table>
 		</div>
 	{:else}

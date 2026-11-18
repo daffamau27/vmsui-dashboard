@@ -14,6 +14,8 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { getFleetAssets } from '$lib/api/fleetApi.js';
 	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
+	import { getRouteLegDistancesNm, formatDistanceNm } from '$lib/utils/voyageRouteDistance.js';
+	import { getVesselTypeIconUrl, getVesselTypeIconScale } from '$lib/utils/vesselIcons.js';
 	import {
 		addMapZonesToLeafletMap,
 		isZoneAsset,
@@ -86,7 +88,8 @@
 	$: canView = permissions.has('view_voyage_plan_vessel');
 	$: currentPlan = selectedAssignment?.voyagePlan || activeAssignment?.voyagePlan || null;
 	$: routePoints = normalizeRoutePoints(currentPlan?.planData || []);
-	$: totalDistanceNm = calculateTotalDistanceNm(routePoints);
+	$: routeLegDistances = getRouteLegDistancesNm(routePoints);
+	$: totalDistanceNm = routeLegDistances.totalNm;
 	$: averageSpeedKn = calculateAverageSpeed(routePoints);
 	$: routePointCount = routePoints.length;
 	$: activeStatusLabel = activeAssignment ? 'Assigned' : 'No Active Plan';
@@ -102,7 +105,7 @@
 		checkpointSummary.pending === 0 &&
 		checkpointSummary.skipped === 0;
 
-	$: routeRows = buildRouteRows(routePoints);
+	$: routeRows = buildRouteRows(routePoints, routeLegDistances.legs);
 	$: detailRows = buildDetailRows(selectedAssignment);
 	$: historyRows = buildHistoryRows(historyItems);
 
@@ -345,6 +348,8 @@
 					latitude,
 					longitude,
 					heading: Number.isFinite(heading) ? heading : 0,
+					type:
+						candidate?.type || /** @type {any} */ ($selectedVesselInfoStore)?.type || '',
 					name:
 						candidate?.vesselName ||
 						candidate?.name ||
@@ -359,19 +364,21 @@
 	}
 
 	function createVesselMarkerIcon(vessel) {
+		const scale = getVesselTypeIconScale(vessel?.type);
+
 		return L.divIcon({
 			className: 'voyage-current-vessel-leaflet-icon',
 			html: `
 				<img
 					class="voyage-current-vessel-marker-icon"
-					src="/assets/vessel.png"
+					src="${getVesselTypeIconUrl(vessel?.type)}"
 					alt="${escapeHtml(vessel?.name || 'Vessel')}"
 					style="transform: rotate(${Number(vessel?.heading || 0)}deg) scaleX(1.16);"
 				/>
 			`,
-			iconSize: [28, 60],
-			iconAnchor: [14, 30],
-			popupAnchor: [0, -32]
+			iconSize: [Math.round(28 * 1.17 * scale), Math.round(60 * 1.17 * scale)],
+			iconAnchor: [Math.round(28 * 1.17 * scale) / 2, Math.round(60 * 1.17 * scale) / 2],
+			popupAnchor: [0, -(Math.round(60 * 1.17 * scale) / 2 + 2)]
 		});
 	}
 
@@ -397,7 +404,7 @@
 				<div class="voyage-current-vessel-popup">
 					<div class="map-popup-hero">
 						<div class="map-popup-icon vessel-popup-icon">
-							<img src="/assets/vessel.png" alt="Vessel icon" />
+							<img src="${getVesselTypeIconUrl(vessel?.type)}" alt="Vessel icon" />
 						</div>
 						<div class="map-popup-heading">
 							<span>Selected Vessel</span>
@@ -1166,17 +1173,6 @@
 		refreshMapRoute(true);
 	}
 
-	function calculateTotalDistanceNm(points = []) {
-		if (!points.length || points.length < 2) return 0;
-		let totalKm = 0;
-
-		for (let index = 1; index < points.length; index += 1) {
-			totalKm += haversineKm(points[index - 1], points[index]);
-		}
-
-		return totalKm / 1.852;
-	}
-
 	function calculateAverageSpeed(points = []) {
 		const speedValues = points
 			.map((point) => point.speed_kn)
@@ -1184,25 +1180,6 @@
 
 		if (!speedValues.length) return null;
 		return speedValues.reduce((sum, value) => sum + value, 0) / speedValues.length;
-	}
-
-	function haversineKm(pointA, pointB) {
-		const earthRadiusKm = 6371;
-		const dLat = toRadians(pointB.latitude - pointA.latitude);
-		const dLon = toRadians(pointB.longitude - pointA.longitude);
-		const lat1 = toRadians(pointA.latitude);
-		const lat2 = toRadians(pointB.latitude);
-
-		const a =
-			Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-			Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-
-		const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-		return earthRadiusKm * c;
-	}
-
-	function toRadians(value) {
-		return (Number(value) * Math.PI) / 180;
 	}
 
 	function formatDate(value) {
@@ -1229,14 +1206,15 @@
 		);
 	}
 
-	function buildRouteRows(points) {
-		return points.map((point) => ({
+	function buildRouteRows(points, legDistances = []) {
+		return points.map((point, index) => ({
 			key: point.order,
 			order: point.order,
 			statusLabel: formatCheckpointStatus(point.status),
 			statusClass: getCheckpointStatusClass(point.status),
 			latitude: point.latitude,
 			longitude: point.longitude,
+			distanceLabel: formatDistanceNm(legDistances[index]),
 			speedLabel: Number.isFinite(point.speed_kn) ? `${point.speed_kn} kn` : '-',
 			averageSpeedLabel: Number.isFinite(point.average_speed)
 				? `${point.average_speed.toFixed(2)} kn`
@@ -1340,6 +1318,7 @@
 
 		<VoyagePlanRouteTable
 			rows={routeRows}
+			totalDistanceLabel={formatNumber(totalDistanceNm, 2, ' NM')}
 			actionLoading={voyageActionLoading}
 			onComplete={completeCheckpointManually}
 		/>
