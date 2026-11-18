@@ -18,6 +18,7 @@
 	import VesselDashboardFuel from './VesselDashboardFuel.svelte';
 	import './vessel-dashboard-page.css';
 	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
+	import { getVesselTypeIconUrl, getVesselTypeIconScale } from '$lib/utils/vesselIcons.js';
 	import {
 		addMapZonesToLeafletMap,
 		isZoneAsset,
@@ -1017,20 +1018,21 @@
 		if (!L) return null;
 
 		const isOnline = vesselInfo.online !== false;
+		const scale = getVesselTypeIconScale(currentVessel?.type);
 
 		return L.divIcon({
 			className: `dashboard-vessel-leaflet-icon ${isOnline ? 'online' : 'offline'}`,
 			html: `
         <img
           class="dashboard-vessel-marker-icon"
-          src="/assets/vessel.png"
+          src="${getVesselTypeIconUrl(/** @type {any} */ (currentVessel)?.type)}"
           alt="${vesselInfo.vesselName || 'Vessel'}"
           style="transform: rotate(${Number(vesselInfo.heading || 0)}deg) scaleX(1.16);"
         />
       `,
-			iconSize: [28, 60],
-			iconAnchor: [14, 30],
-			popupAnchor: [0, -32]
+			iconSize: [Math.round(28 * 1.17 * scale), Math.round(60 * 1.17 * scale)],
+			iconAnchor: [Math.round(28 * 1.17 * scale) / 2, Math.round(60 * 1.17 * scale) / 2],
+			popupAnchor: [0, -(Math.round(60 * 1.17 * scale) / 2 + 2)]
 		});
 	}
 

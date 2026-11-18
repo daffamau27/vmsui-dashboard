@@ -19,6 +19,7 @@
 		speed = '-',
 		lastUpdate = '-',
 		iconUrl = '/assets/vessel.png',
+		iconScale = 1,
 		zoom = 12,
 		tracePoints = [],
 		activeIndex = 0,
@@ -270,6 +271,9 @@
 	function createVesselIcon() {
 		if (!L) return null;
 
+		const width = Math.round(28 * 1.17 * iconScale);
+		const height = Math.round(60 * 1.17 * iconScale);
+
 		return L.divIcon({
 			className: 'vessel-map-leaflet-icon',
 			html: `
@@ -280,9 +284,9 @@
           style="transform: rotate(${getCurrentHeading()}deg) scaleX(1.16);"
         />
       `,
-			iconSize: [28, 60],
-			iconAnchor: [14, 30],
-			popupAnchor: [0, -32]
+			iconSize: [width, height],
+			iconAnchor: [width / 2, height / 2],
+			popupAnchor: [0, -(height / 2 + 2)]
 		});
 	}
 
@@ -731,6 +735,7 @@
 		speed;
 		lastUpdate;
 		iconUrl;
+		iconScale;
 		zoom;
 		tracePoints;
 		activeIndex;

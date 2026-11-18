@@ -70,7 +70,7 @@
 	let saving = false;
 	let actionLoadingId = null;
 
-	let users = [];
+	let users = /** @type {any[]} */ ([]);
 	let modulePermissions = {};
 	let currentUser = null;
 
@@ -1818,10 +1818,13 @@
 			vesselName: '',
 			companyId: '',
 			fuelConsumptionSource: 'fm',
+			type: '',
 			features: /** @type {any[]} */ ([]),
 			engines: /** @type {any[]} */ ([])
 		};
 	}
+
+	const VESSEL_TYPE_OPTIONS = ['AHTS', 'Crewboat', 'Multicat', 'PSV', 'Tugboat', 'Utility Boat', 'MPSV', 'LCT', 'Crude Oil Tanker' ];
 
 	/** @param {any[]} engines */
 	function normalizeVesselEngines(engines) {
@@ -1930,12 +1933,21 @@
 			vesselIdsText: '',
 
 			selectedAssetIds: [],
-			selectedVesselIds: [],
-			selectedPermissions: []
+			selectedVesselIds: /** @type {any[]} */ ([]),
+			selectedPermissions: [],
+
+			// vesselId -> 'YYYY-MM-DD'
+			vesselDateLimits: /** @type {Record<string, string>} */ ({})
 		};
 	}
 
 	let form = createEmptyForm();
+
+	let vesselDateLimitPopup =
+		/** @type {null | { id: number, label: string, value: string, top: number, left: number, flip: boolean }} */ (
+			null
+		);
+	let vesselDateLimitPopupElement = /** @type {HTMLElement | null} */ (null);
 
 	$: isSuperAdmin = currentUser?.permissionAccess?.mode === 'all';
 
@@ -2221,7 +2233,8 @@
 			vesselForm = {
 				...vesselForm,
 				features: Array.isArray(vessel?.features) ? [...vessel.features] : [],
-				engines: normalizeVesselEngines(vessel?.engines)
+				engines: normalizeVesselEngines(vessel?.engines),
+				type: vessel?.type ?? vesselForm.type
 			};
 			vesselFeaturesLoaded = true;
 		} catch (error) {
@@ -2540,6 +2553,7 @@
 			vesselName: vessel?.vesselName || '',
 			companyId: vessel?.companyId ?? '',
 			fuelConsumptionSource: getFuelConsumptionSourceValue(vessel),
+			type: vessel?.type || vessel?.vessel_type || '',
 			features: vesselFeaturesLoaded ? [...vessel.features] : [],
 			engines: listEngines
 		};
@@ -2569,6 +2583,7 @@
 			vesselName: vesselForm.vesselName.trim(),
 			companyId: companyIdText ? Number(companyIdText) : null,
 			fuelConsumptionSource: getFuelConsumptionSourceValue(vesselForm.fuelConsumptionSource),
+			type: vesselForm.type.trim() || null,
 			...(vesselMode === 'edit' && vesselFeaturesLoaded
 				? {
 						features: [...new Set(vesselForm.features)],
@@ -3171,6 +3186,34 @@
 		return [];
 	}
 
+	// vesselAccess.vesselIds entries are [{ id, dateLimit }]; plain numbers still work.
+	/**
+	 * @param {any} access
+	 * @returns {{ id: number, dateLimit: string }[]}
+	 */
+	function extractVesselAccessEntries(access) {
+		const source = /** @type {any[]} */ (
+			Array.isArray(access?.vesselIds)
+				? access.vesselIds
+				: Array.isArray(access?.details)
+					? access.details
+					: []
+		);
+
+		return source
+			.map((item) => {
+				const id = Number(typeof item === 'object' && item ? item.id : item);
+				const rawLimit =
+					typeof item === 'object' && item ? item.dateLimit || item.date_limit || '' : '';
+
+				return {
+					id,
+					dateLimit: rawLimit ? String(rawLimit).slice(0, 10) : ''
+				};
+			})
+			.filter((entry) => entry.id > 0);
+	}
+
 	function formatDate(value) {
 		if (!value) return '-';
 
@@ -3202,13 +3245,109 @@
 			.some((value) => String(value).toLowerCase().includes(keyword));
 	}
 
+	let copyAccessUserId = '';
+	let copyAccessLoading = false;
+	let copyAccessWhat = { permission: true, asset: true, vessel: true };
+	let copyAccessSearch = '';
+	let copyAccessDropdownOpen = false;
+	let copyAccessDropdownElement = /** @type {HTMLElement | null} */ (null);
+
+	$: userCopyOptions = sortByAlpha(
+		users,
+		(user) => user?.name || user?.username || `User ${user?.id}`
+	);
+
+	$: selectedCopyAccessUser =
+		users.find((user) => String(user?.id) === String(copyAccessUserId)) || null;
+
+	$: filteredUserCopyOptions = userCopyOptions.filter((user) => {
+		const keyword = copyAccessSearch.trim().toLowerCase();
+
+		if (!keyword) return true;
+
+		return matchesSearch(keyword, [user?.name, user?.username, user?.email]);
+	});
+
 	function openCreateForm() {
 		mode = 'create';
 		selectedUser = null;
 		form = createEmptyForm();
 		searchUserAssetAccess = '';
 		searchUserVesselAccess = '';
+		copyAccessUserId = '';
+		copyAccessWhat = { permission: true, asset: true, vessel: true };
+		copyAccessSearch = '';
+		copyAccessDropdownOpen = false;
 		clearAlert();
+	}
+
+	async function copyUserAccess() {
+		const sourceId = Number(copyAccessUserId);
+
+		if (!sourceId) {
+			showAlert('error', 'Select a user to copy access from.');
+			return;
+		}
+
+		copyAccessLoading = true;
+		clearAlert();
+
+		try {
+			const detail = unwrapApiData(await getUserDetailApi(sourceId));
+			const assetIds = extractIdsFromAccess(detail?.assetAccess, 'assetIds');
+
+			form = {
+				...form,
+				...(copyAccessWhat.permission
+					? {
+							permissionAccessMode: detail?.permissionAccess?.mode || 'selected',
+							selectedPermissions: normalizePermissionKeys(detail?.permissionAccess)
+						}
+					: {}),
+				...(copyAccessWhat.asset
+					? {
+							assetAccessMode: detail?.assetAccess?.mode || 'all',
+							selectedAssetIds: assetIds,
+							assetIdsText: idsToText(assetIds)
+						}
+					: {}),
+				...(copyAccessWhat.vessel
+					? buildVesselAccessCopyPatch(detail?.vesselAccess)
+					: {})
+			};
+
+			showAlert(
+				'success',
+				`Access copied from ${detail?.name || detail?.username || 'user'}. Review the sections below, then save.`
+			);
+		} catch (error) {
+			showAlert('error', /** @type {any} */ (error).message || 'Failed to copy access.');
+		} finally {
+			copyAccessLoading = false;
+		}
+	}
+
+	/** @param {any} vesselAccess @returns {any} */
+	function buildVesselAccessCopyPatch(vesselAccess) {
+		const vesselEntries = extractVesselAccessEntries(vesselAccess);
+
+		return {
+			vesselAccessMode: vesselAccess?.mode || 'all',
+			selectedVesselIds: vesselEntries.map((entry) => entry.id),
+			vesselIdsText: idsToText(vesselEntries.map((entry) => entry.id)),
+			vesselDateLimits: Object.fromEntries(
+				vesselEntries
+					.filter((entry) => entry.dateLimit)
+					.map((entry) => [entry.id, entry.dateLimit])
+			)
+		};
+	}
+
+	/** @param {any} user */
+	function selectCopyAccessUser(user) {
+		copyAccessUserId = String(user?.id ?? '');
+		copyAccessSearch = '';
+		copyAccessDropdownOpen = false;
 	}
 
 	async function openEditForm(user) {
@@ -3227,7 +3366,8 @@
 			searchUserVesselAccess = '';
 
 			const assetIds = extractIdsFromAccess(detail?.assetAccess, 'assetIds');
-			const vesselIds = extractIdsFromAccess(detail?.vesselAccess, 'vesselIds');
+			const vesselEntries = extractVesselAccessEntries(detail?.vesselAccess);
+			const vesselIds = vesselEntries.map((entry) => entry.id);
 			const permissions = normalizePermissionKeys(detail?.permissionAccess);
 
 			form = {
@@ -3245,7 +3385,13 @@
 
 				selectedAssetIds: assetIds,
 				selectedVesselIds: vesselIds,
-				selectedPermissions: permissions
+				selectedPermissions: permissions,
+
+				vesselDateLimits: Object.fromEntries(
+					vesselEntries
+						.filter((entry) => entry.dateLimit)
+						.map((entry) => [entry.id, entry.dateLimit])
+				)
 			};
 		} catch (error) {
 			showAlert('error', error.message || 'Failed to load user details.');
@@ -3269,7 +3415,10 @@
 			const payload = { mode: form.vesselAccessMode };
 
 			if (form.vesselAccessMode === 'selected') {
-				payload.vesselIds = parseIds(form.vesselIdsText);
+				payload.vesselIds = parseIds(form.vesselIdsText).map((id) => ({
+					id,
+					dateLimit: form.vesselDateLimits[id] || null
+				}));
 			}
 
 			return payload;
@@ -3494,6 +3643,69 @@
 			...form,
 			selectedVesselIds: parseIds(form.vesselIdsText)
 		};
+	}
+
+	/** @param {{ id: number | string, label?: string }} vessel @param {HTMLElement} [button] */
+	function openVesselDateLimitPopup(vessel, button) {
+		if (!vessel?.id || vesselSaving) return;
+
+		copyAccessDropdownOpen = false;
+		copyAccessSearch = '';
+
+		const rect = button?.getBoundingClientRect();
+		const popupWidth = Math.min(400, window.innerWidth - 24);
+		const flip = Boolean(rect && rect.bottom + 300 > window.innerHeight);
+
+		vesselDateLimitPopup = {
+			id: Number(vessel.id),
+			label: vessel.label || `Vessel ${vessel.id}`,
+			value: form.vesselDateLimits[Number(vessel.id)] || '',
+			top: rect ? (flip ? rect.top - 8 : rect.bottom + 8) : 60,
+			left: rect
+				? Math.min(Math.max(rect.right, popupWidth + 24), window.innerWidth - 12)
+				: popupWidth + 24,
+			flip
+		};
+	}
+
+	function closeVesselDateLimitPopup() {
+		vesselDateLimitPopup = null;
+	}
+
+	/** @param {any} event */
+	function handleVesselDateLimitOutsideClick(event) {
+		if (vesselDateLimitPopup && !vesselDateLimitPopupElement?.contains(event.target)) {
+			closeVesselDateLimitPopup();
+		}
+
+		if (copyAccessDropdownOpen && !copyAccessDropdownElement?.contains(event.target)) {
+			copyAccessDropdownOpen = false;
+			copyAccessSearch = '';
+		}
+	}
+
+	function applyVesselDateLimit() {
+		if (!vesselDateLimitPopup) return;
+
+		const { id, value } = vesselDateLimitPopup;
+		const next = { ...form.vesselDateLimits };
+
+		if (value) next[id] = value;
+		else delete next[id];
+
+		form = { ...form, vesselDateLimits: next };
+		vesselDateLimitPopup = null;
+	}
+
+	function clearVesselDateLimit() {
+		if (!vesselDateLimitPopup) return;
+
+		const next = { ...form.vesselDateLimits };
+
+		delete next[vesselDateLimitPopup.id];
+
+		form = { ...form, vesselDateLimits: next };
+		vesselDateLimitPopup = null;
 	}
 
 	function togglePermission(key) {
@@ -3815,6 +4027,141 @@
 								</label>
 							</div>
 
+							{#if mode === 'create'}
+								<section
+									class="access-card copy-access-card"
+									aria-labelledby="copy-access-title"
+								>
+									<div class="access-head">
+										<div>
+											<h3 id="copy-access-title">Copy Access</h3>
+											<p>
+												Copy permission, asset, or vessel access from an existing user
+												before creating this one.
+											</p>
+										</div>
+									</div>
+
+									<div class="copy-access-row">
+										<div class="copy-access-user engine-curve-vessel-picker">
+											<span>From user</span>
+											<div class="engine-curve-vessel-dropdown" bind:this={copyAccessDropdownElement}>
+												<button
+													type="button"
+													class="engine-curve-vessel-selector"
+													class:has-selection={selectedCopyAccessUser}
+													disabled={copyAccessLoading}
+													on:click={(event) => {
+														event.stopPropagation();
+														closeVesselDateLimitPopup();
+														copyAccessDropdownOpen = !copyAccessDropdownOpen;
+													}}
+												>
+													<span class="selector-copy">
+														<strong>
+															{selectedCopyAccessUser
+																? selectedCopyAccessUser.name ||
+																	selectedCopyAccessUser.username ||
+																	`User ${selectedCopyAccessUser.id}`
+																: 'Select user'}
+														</strong>
+													</span>
+													<span class="selector-chevron">v</span>
+												</button>
+
+												{#if copyAccessDropdownOpen}
+													<div class="engine-curve-vessel-menu">
+														<div class="engine-curve-vessel-search-box">
+															<input
+																type="search"
+																placeholder="Search user..."
+																aria-label="Search user"
+																bind:value={copyAccessSearch}
+															/>
+															{#if copyAccessSearch}
+																<button
+																	type="button"
+																	class="engine-curve-vessel-search-clear"
+																	aria-label="Clear user search"
+																	on:click={() => (copyAccessSearch = '')}
+																>
+																</button>
+															{/if}
+														</div>
+
+														{#if filteredUserCopyOptions.length === 0}
+															<div class="engine-curve-vessel-state">No user found.</div>
+														{:else}
+															<div class="engine-curve-vessel-items">
+																{#each filteredUserCopyOptions as user (user.id)}
+																	<button
+																		type="button"
+																		class="engine-curve-vessel-item"
+																		class:active-vessel={String(copyAccessUserId) ===
+																			String(user.id)}
+																		on:click={() => selectCopyAccessUser(user)}
+																	>
+																		<span class="vessel-item-copy">
+																			<strong
+																				>{user.name ||
+																					user.username ||
+																					`User ${user.id}`}</strong
+																			>
+																			<small>{user.username || ''} - ID {user.id}</small>
+																		</span>
+																	</button>
+																{/each}
+															</div>
+														{/if}
+													</div>
+												{/if}
+											</div>
+										</div>
+
+										<label class="copy-access-toggle">
+											<input
+												type="checkbox"
+												bind:checked={copyAccessWhat.permission}
+												disabled={copyAccessLoading}
+											/>
+											<span>Permission</span>
+										</label>
+
+										<label class="copy-access-toggle">
+											<input
+												type="checkbox"
+												bind:checked={copyAccessWhat.asset}
+												disabled={copyAccessLoading}
+											/>
+											<span>Asset</span>
+										</label>
+
+										<label class="copy-access-toggle">
+											<input
+												type="checkbox"
+												bind:checked={copyAccessWhat.vessel}
+												disabled={copyAccessLoading}
+											/>
+											<span>Vessel</span>
+										</label>
+
+										<button
+											type="button"
+											class="primary-button"
+											on:click={copyUserAccess}
+											disabled={copyAccessLoading || !copyAccessUserId}
+										>
+											{copyAccessLoading ? 'Copying...' : 'Copy Access'}
+										</button>
+									</div>
+
+									<small class="field-help">
+										Copying overwrites the matching sections below. Asset IDs you cannot see
+										still get saved but are not shown as chips.
+									</small>
+								</section>
+							{/if}
+
 							<section class="access-grid">
 								<article class="access-card">
 									<div class="access-head">
@@ -3953,15 +4300,38 @@
 																<label class="option-chip">
 																	<input
 																		type="checkbox"
-																		checked={form.selectedVesselIds.includes(vessel.id)}
+																		checked={form.selectedVesselIds.includes(
+																			vessel.id
+																		)}
 																		on:change={() => toggleId('vessel', vessel.id)}
 																	/>
 																	<span>
 																		<strong>{vessel.label}</strong>
 																		<small>
-																			ID {vessel.id}{vessel.sublabel ? ` • ${vessel.sublabel}` : ''}
+																			ID {vessel.id}{vessel.sublabel
+																				? ` • ${vessel.sublabel}`
+																				: ''}
 																		</small>
 																	</span>
+																	{#if form.selectedVesselIds.includes(vessel.id)}
+																		<button
+																			type="button"
+																			class="chip-date-limit"
+																			title="Set access date limit"
+																			on:click={(event) => {
+																				event.preventDefault();
+																				event.stopPropagation();
+																				openVesselDateLimitPopup(
+																					vessel,
+																					event.currentTarget
+																				);
+																			}}
+																		>
+																			📅
+																			{form.vesselDateLimits[vessel.id] ||
+																				'Set limit'}
+																		</button>
+																	{/if}
 																</label>
 															{/each}
 														</div>
@@ -4282,6 +4652,16 @@
 										<small class="field-help"
 											>Saved as <code>fuelConsumptionSource</code> on <code>/vessels</code>.</small
 										>
+									</label>
+
+									<label>
+										<span>Vessel Type</span>
+										<select bind:value={vesselForm.type}>
+											<option value="">Select type...</option>
+											{#each VESSEL_TYPE_OPTIONS as option}
+												<option value={option}>{option}</option>
+											{/each}
+										</select>
 									</label>
 								</div>
 
@@ -6407,4 +6787,44 @@
 			</div>
 		{/key}
 	{/if}
+
+	{#if vesselDateLimitPopup}
+		<div
+			bind:this={vesselDateLimitPopupElement}
+			class="vessel-date-limit-popup"
+			class:above={vesselDateLimitPopup.flip}
+			role="dialog"
+			aria-labelledby="vessel-date-limit-title"
+			style="top: {vesselDateLimitPopup.top}px; left: {vesselDateLimitPopup.left}px;"
+		>
+			<div class="vessel-date-limit-head">
+				<h3 id="vessel-date-limit-title">Access Date Limit</h3>
+				<p>{vesselDateLimitPopup.label}</p>
+			</div>
+
+			<label class="vessel-date-limit-field">
+				<span>Access valid until</span>
+				<input type="date" bind:value={vesselDateLimitPopup.value} />
+			</label>
+
+			<div class="vessel-date-limit-actions">
+				<button type="button" class="ghost-button" on:click={clearVesselDateLimit}>
+					Clear limit
+				</button>
+				<button type="button" class="ghost-button" on:click={closeVesselDateLimitPopup}>
+					Cancel
+				</button>
+				<button type="button" class="primary-button" on:click={applyVesselDateLimit}>
+					Save
+				</button>
+			</div>
+		</div>
+	{/if}
 </section>
+
+<svelte:window
+	on:keydown={(event) => {
+		if (event.key === 'Escape' && vesselDateLimitPopup) closeVesselDateLimitPopup();
+	}}
+	on:click={handleVesselDateLimitOutsideClick}
+/>

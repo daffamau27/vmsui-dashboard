@@ -12,6 +12,7 @@
 	import { downloadApiFile, apiRequest } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { getDataLogRowHighlights, getDataLogTimestamp } from '$lib/utils/dataLogRowHighlights.js';
+	import { orderSpeedBetweenLongitudeAndRpm } from '$lib/utils/dataLogColumnOrder.js';
 	import {
 		getTimezoneOffsetMinutes,
 		getNowDateTimeLocalValue,
@@ -399,19 +400,23 @@
 	let responseColumns = $derived(filterDisplayColumns(getPayloadColumns(normalizedData)));
 
 	let visibleColumns = $derived(
-		apiAvailableColumns.length
-			? apiAvailableColumns
-			: responseColumns.length
-				? responseColumns
-				: filterDisplayColumns(DEFAULT_DATA_LOG_COLUMNS)
+		orderSpeedBetweenLongitudeAndRpm(
+			apiAvailableColumns.length
+				? apiAvailableColumns
+				: responseColumns.length
+					? responseColumns
+					: filterDisplayColumns(DEFAULT_DATA_LOG_COLUMNS)
+		)
 	);
 
 	let displaySelectedColumns = $derived(
-		visibleColumns.filter((column) => selectedColumns.includes(column)).length
-			? visibleColumns.filter((column) => selectedColumns.includes(column))
-			: responseColumns.length
-				? responseColumns.filter((column) => visibleColumns.includes(column))
-				: visibleColumns
+		orderSpeedBetweenLongitudeAndRpm(
+			visibleColumns.filter((column) => selectedColumns.includes(column)).length
+				? visibleColumns.filter((column) => selectedColumns.includes(column))
+				: responseColumns.length
+					? responseColumns.filter((column) => visibleColumns.includes(column))
+					: visibleColumns
+		)
 	);
 
 	function sortRowsNewestFirst(rows = [], timezone = 'UTC+00:00') {

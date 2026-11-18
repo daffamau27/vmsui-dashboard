@@ -12,6 +12,7 @@
 	import './fleet-view-page.css';
 	import { getLatestCctvSnapshots } from '$lib/api/dashboardApi.js';
 	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
+	import { getVesselTypeIconUrl, getVesselTypeIconScale } from '$lib/utils/vesselIcons.js';
 	import {
 		addMapZonesToLeafletMap,
 		isZoneAsset,
@@ -59,8 +60,6 @@
 	let canViewCctv = $derived(
 		!$currentUser || hasPermissionForUser($currentUser, 'access_cctv')
 	);
-
-	const vesselMarkerUrl = '/assets/vessel.png';
 
 	let vesselData = $state([]);
 	let fleetLoading = $state(false);
@@ -814,15 +813,16 @@
 
 	function createVesselIcon(vessel) {
 		const isSelected = String(selectedVesselId) === String(vessel.id);
-		const iconWidth = isSelected ? 28 : 24;
-		const iconHeight = isSelected ? 60 : 52;
+		const scale = getVesselTypeIconScale(vessel.type);
+		const iconWidth = Math.round((isSelected ? 28 : 24) * 1.17 * scale);
+		const iconHeight = Math.round((isSelected ? 60 : 52) * 1.17 * scale);
 
 		return L.divIcon({
 			className: `vessel-leaflet-icon ${vessel.online ? 'online' : 'offline'} ${isSelected ? 'selected' : ''}`,
 			html: `
         <img
           class="fleet-vessel-marker-icon"
-          src="${vesselMarkerUrl}"
+          src="${getVesselTypeIconUrl(vessel.type)}"
           alt="${formatValue(vessel.name)}"
           style="transform: rotate(${Number(vessel.heading || 0)}deg) scaleX(1.16);"
         />

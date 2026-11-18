@@ -342,6 +342,7 @@
 			<span class="detail-eyebrow">Live vessel</span>
 			<h2>{vessel.name}</h2>
 			<p>{vessel.companyName || 'Company information unavailable'}</p>
+			<p>Vessel Type: {vessel.type || '-'}</p>
 		</div>
 
 		<button type="button" class="detail-close-btn" onclick={onClose}>×</button>

@@ -2,6 +2,7 @@
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
 	import VesselMap from '$lib/components/VesselMap.svelte';
 	import { formatNumber } from '$lib/utils/periodicalFormat.js';
+	import { getVesselTypeIconUrl, getVesselTypeIconScale } from '$lib/utils/vesselIcons.js';
 
 	let {
 		active = false,
@@ -56,7 +57,8 @@
 				vesselName={vesselInfo.vesselName}
 				speed={vesselInfo.currentSpeed}
 				lastUpdate={vesselInfo.lastUpdate}
-				iconUrl="/assets/vessel.png"
+				iconUrl={getVesselTypeIconUrl(vesselInfo?.type)}
+				iconScale={getVesselTypeIconScale(vesselInfo?.type)}
 				zoom={12}
 				{tracePoints}
 				activeIndex={activeTraceIndex}

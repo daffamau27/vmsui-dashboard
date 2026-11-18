@@ -1982,6 +1982,7 @@
 
 	let vesselInfo = $derived({
 		vesselName,
+		type: /** @type {any} */ ($selectedVesselInfo)?.type ?? '',
 		latitude: activePoint.latitude,
 		longitude: activePoint.longitude,
 		heading: activePoint.heading,

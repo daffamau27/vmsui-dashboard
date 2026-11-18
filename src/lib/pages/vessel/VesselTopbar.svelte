@@ -270,6 +270,7 @@
 								<span class="vessel-item-copy">
 									<strong>{vessel.vesselName || vessel.name}</strong>
 									<small>{vessel.companyName || vessel.deviceName || 'Vessel monitoring'}</small>
+									<small>Vessel Type: {vessel.type || '-'}</small>
 								</span>
 								{#if Number(selectedVesselId) === Number(vessel.id)}
 									<span class="active-check">✓</span>
