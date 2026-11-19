@@ -2344,15 +2344,7 @@
 		refreshRouteMap();
 	}
 
-	function reorderPoints() {
-		if (editAllowedOnly) return;
-
-		form.planData = form.planData.map((point, rowIndex) => ({ ...point, order: rowIndex + 1 }));
-		refreshRouteMap();
-	}
-
-	function toggleVessel(id) {
-		const value = Number(id);
+	function toggleVessel(id) {		const value = Number(id);
 		if (form.allowedVesselIds.includes(value)) {
 			form.allowedVesselIds = form.allowedVesselIds.filter((item) => item !== value);
 		} else {
@@ -3637,14 +3629,7 @@
 											class:selected-point-row={selectedPointIndex === index}
 											on:click={() => selectPoint(index)}
 										>
-											<td>
-												<input
-													type="number"
-													bind:value={point.order}
-													on:change={reorderPoints}
-													disabled={editAllowedOnly}
-												/>
-											</td>
+											<td>{index + 1}</td>
 
 											<td>
 												<div class="route-point-name-field">

@@ -1104,12 +1104,17 @@ label {
 	}
 
 	tfoot td {
-		position: sticky;
-		bottom: 0;
 		background: var(--color-accent-muted);
 		color: var(--text-primary);
 		font-weight: 900;
 		border-bottom: 0;
+	}
+
+	/* Sticky total row only for the scrollable read-only tables, never over the editor rows. */
+	.route-table-wrap tfoot td,
+	.plan-view-table-wrap tfoot td {
+		position: sticky;
+		bottom: 0;
 	}
 
 	tr.active-row td,
@@ -2730,7 +2735,7 @@ label {
 	width: 100%;
 	height: 100%;
 	max-height: none;
-	overflow-x: hidden;
+	overflow-x: auto;
 	overflow-y: auto;
 	border: 0;
 	border-radius: 0;
@@ -2738,7 +2743,7 @@ label {
 
 .route-editor table {
 	width: 100%;
-	min-width: 0;
+	min-width: 540px;
 	table-layout: fixed;
 }
 
@@ -2748,34 +2753,39 @@ label {
 	padding: 7px 6px;
 }
 
+/* Keep the sticky header above rows that open the point-name dropdown. */
+.route-editor th {
+	z-index: 30;
+}
+
 .route-editor th:nth-child(1),
 .route-editor td:nth-child(1) {
-	width: 48px;
+	width: 25px;
 }
 
 .route-editor th:nth-child(2),
 .route-editor td:nth-child(2) {
-	width: 21%;
+	width: 16%;
 }
 
 .route-editor th:nth-child(3),
 .route-editor td:nth-child(3) {
-	width: 21%;
+	width: 16%;
 }
 
 .route-editor th:nth-child(4),
 .route-editor td:nth-child(4) {
-	width: 21%;
+	width: 16%;
 }
 
 .route-editor th:nth-child(5),
 .route-editor td:nth-child(5) {
-	width: 76px;
+	width: 72px;
 }
 
 .route-editor th:nth-child(6),
 .route-editor td:nth-child(6) {
-	width: 66px;
+	width: 60px;
 }
 
 .route-editor th:nth-child(7),
@@ -2790,6 +2800,18 @@ label {
 	min-height: 30px;
 	padding: 0 6px;
 	font-size: 11px;
+}
+
+/* Number spinners eat the digit space inside the narrow No/Speed columns. */
+.route-editor input[type='number'] {
+	appearance: textfield;
+	-moz-appearance: textfield;
+}
+
+.route-editor input::-webkit-outer-spin-button,
+.route-editor input::-webkit-inner-spin-button {
+	-webkit-appearance: none;
+	margin: 0;
 }
 
 .route-point-name-field {
