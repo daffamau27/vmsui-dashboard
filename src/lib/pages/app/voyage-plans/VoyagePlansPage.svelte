@@ -3158,8 +3158,8 @@
 								<tr>
 									<th>Order</th>
 									<th>Name</th>
-									<th>Latitude</th>
-									<th>Longitude</th>
+									<th>Lat</th>
+									<th>Long</th>
 									<th>Dist (NM)</th>
 									<th>Speed kn</th>
 								</tr>
@@ -3607,8 +3607,8 @@
 									<tr>
 										<th>No</th>
 										<th>Name</th>
-										<th>Latitude</th>
-										<th>Longitude</th>
+										<th>Lat</th>
+										<th>Long</th>
 										<th>Dist (NM)</th>
 										<th>Speed</th>
 										<th></th>
@@ -3704,12 +3704,6 @@
 														}}
 														disabled={editAllowedOnly}
 													/>
-													<CopyableCoordinate
-														value={point.latitude}
-														display=""
-														label="latitude"
-														compact
-													/>
 												</div>
 											</td>
 
@@ -3726,12 +3720,6 @@
 															refreshRouteMap();
 														}}
 														disabled={editAllowedOnly}
-													/>
-													<CopyableCoordinate
-														value={point.longitude}
-														display=""
-														label="longitude"
-														compact
 													/>
 												</div>
 											</td>
