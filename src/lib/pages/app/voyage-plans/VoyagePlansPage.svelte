@@ -124,7 +124,8 @@
 	let assignForm = {
 		voyagePlanId: '',
 		vesselId: '',
-		startDate: toDatetimeLocal(new Date())
+		startDate: toDatetimeLocal(new Date()),
+		type: ''
 	};
 
 	let L;
@@ -1233,6 +1234,13 @@
 	);
 	$: selectedAssignPlan = getAssignmentPlan(assignForm.voyagePlanId);
 	$: assignableVessels = getAssignableVessels(assignForm.voyagePlanId);
+	$: selectedAssignVessel =
+		vessels.find((vessel) => Number(vessel.id) === Number(assignForm.vesselId)) || null;
+	// Matches 'Tugboat', 'Tugboat - Laden', 'Tugboat - Ballast'.
+	$: assignNeedsTugboatType = String(selectedAssignVessel?.type || '')
+		.trim()
+		.toLowerCase()
+		.startsWith('tugboat');
 	$: routePointNameOptions = buildRoutePointNameOptions(savedRoutePoints);
 	$: selectedPlanLegDistances = getRouteLegDistancesNm(selectedPlan?.planData || []);
 	$: editorLegDistances = getRouteLegDistancesNm(form.planData);
@@ -1979,7 +1987,8 @@
 				vessel?.thingsboardName ||
 				vessel?.assetName ||
 				`Vessel ${id}`,
-			deviceId: vessel?.deviceId || vessel?.assetId || ''
+			deviceId: vessel?.deviceId || vessel?.assetId || '',
+			type: vessel?.type || vessel?.vessel_type || ''
 		};
 	}
 
@@ -2180,7 +2189,6 @@
 	}
 
 	async function loadVessels() {
-		if (vessels.length) return;
 		try {
 			const result = await apiFetch('/users/my-vessels');
 			vessels = sortByAlpha(
@@ -2875,7 +2883,8 @@
 				body: JSON.stringify({
 					voyagePlanId: Number(assignForm.voyagePlanId),
 					vesselId: Number(assignForm.vesselId),
-					startDate: new Date(assignForm.startDate).toISOString()
+					startDate: new Date(assignForm.startDate).toISOString(),
+					...(assignNeedsTugboatType ? { type: assignForm.type || null } : {})
 				})
 			});
 			successMessage = result?.message || 'Voyage plan assigned to vessel successfully.';
@@ -3263,6 +3272,20 @@
 									</small>
 								{/if}
 							</label>
+
+							{#if assignNeedsTugboatType}
+								<label class="assign-field full-width">
+									<span>Vessel Type</span>
+									<select bind:value={assignForm.type}>
+										<option value="">None</option>
+										<option value="Laden">Laden</option>
+										<option value="Ballast">Ballast</option>
+									</select>
+									<small class="field-note">
+										Choose Laden, Ballast, or None for a Tugboat.
+									</small>
+								</label>
+							{/if}
 
 							<label class="assign-field">
 								<span>Start Date</span>

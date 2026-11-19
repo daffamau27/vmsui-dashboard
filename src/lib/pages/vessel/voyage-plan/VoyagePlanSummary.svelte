@@ -5,7 +5,8 @@
 		progress = 0,
 		progressLabel = '0.00%',
 		distanceLabel = '0.00 NM',
-		averageSpeedLabel = '-'
+		averageSpeedLabel = '-',
+		voyageType = ''
 	} = $props();
 </script>
 
@@ -14,6 +15,13 @@
 		<span>Status</span>
 		<strong>{statusLabel}</strong>
 	</article>
+
+	{#if voyageType}
+		<article class="summary-card">
+			<span>Voyage Type</span>
+			<strong>{voyageType}</strong>
+		</article>
+	{/if}
 
 	<article class="summary-card">
 		<span>Route Points</span>

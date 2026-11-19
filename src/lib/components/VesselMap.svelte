@@ -20,6 +20,7 @@
 		lastUpdate = '-',
 		iconUrl = '/assets/vessel.png',
 		iconScale = 1,
+		iconLayout = null,
 		zoom = 12,
 		tracePoints = [],
 		activeIndex = 0,
@@ -271,8 +272,14 @@
 	function createVesselIcon() {
 		if (!L) return null;
 
-		const width = Math.round(28 * 1.17 * iconScale);
-		const height = Math.round(60 * 1.17 * iconScale);
+		const width = Math.round(28 * 1.17 * iconScale * (iconLayout?.widthScale ?? 1));
+		const height = iconLayout
+			? Math.round(width * iconLayout.aspect)
+			: Math.round(60 * 1.17 * iconScale);
+		const anchorX = iconLayout ? iconLayout.anchor.x : 0.5;
+		const anchorY = iconLayout ? height * iconLayout.anchor.y : height / 2;
+		const originX = iconLayout ? iconLayout.anchor.x : 0.5;
+		const originY = iconLayout ? iconLayout.anchor.y : 0.5;
 
 		return L.divIcon({
 			className: 'vessel-map-leaflet-icon',
@@ -281,12 +288,12 @@
           class="vessel-map-marker-icon"
           src="${iconUrl}"
           alt="${vesselName}"
-          style="transform: rotate(${getCurrentHeading()}deg) scaleX(1.16);"
+          style="transform: rotate(${getCurrentHeading()}deg) scaleX(1.16); transform-origin: ${(originX * 100).toFixed(2)}% ${(originY * 100).toFixed(2)}%;"
         />
       `,
 			iconSize: [width, height],
-			iconAnchor: [width / 2, height / 2],
-			popupAnchor: [0, -(height / 2 + 2)]
+			iconAnchor: [width * anchorX, anchorY],
+			popupAnchor: [0, -(anchorY + 2)]
 		});
 	}
 
@@ -736,6 +743,7 @@
 		lastUpdate;
 		iconUrl;
 		iconScale;
+		iconLayout;
 		zoom;
 		tracePoints;
 		activeIndex;

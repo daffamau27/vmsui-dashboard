@@ -18,7 +18,7 @@
 	import VesselDashboardFuel from './VesselDashboardFuel.svelte';
 	import './vessel-dashboard-page.css';
 	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
-	import { getVesselTypeIconUrl, getVesselTypeIconScale } from '$lib/utils/vesselIcons.js';
+	import { getVesselTypeIconUrl, getVesselTypeIconScale, getVesselIconLayout } from '$lib/utils/vesselIcons.js';
 	import {
 		addMapZonesToLeafletMap,
 		isZoneAsset,
@@ -1018,7 +1018,14 @@
 		if (!L) return null;
 
 		const isOnline = vesselInfo.online !== false;
-		const scale = getVesselTypeIconScale(currentVessel?.type);
+		const scale = getVesselTypeIconScale(/** @type {any} */ (currentVessel)?.type);
+		const layout = getVesselIconLayout(/** @type {any} */ (currentVessel)?.type);
+		const width = Math.round(28 * 1.17 * scale * (layout?.widthScale ?? 1));
+		const height = layout ? Math.round(width * layout.aspect) : Math.round(60 * 1.17 * scale);
+		const anchorX = layout ? layout.anchor.x : 0.5;
+		const anchorY = layout ? height * layout.anchor.y : height / 2;
+		const originX = layout ? layout.anchor.x : 0.5;
+		const originY = layout ? layout.anchor.y : 0.5;
 
 		return L.divIcon({
 			className: `dashboard-vessel-leaflet-icon ${isOnline ? 'online' : 'offline'}`,
@@ -1027,12 +1034,12 @@
           class="dashboard-vessel-marker-icon"
           src="${getVesselTypeIconUrl(/** @type {any} */ (currentVessel)?.type)}"
           alt="${vesselInfo.vesselName || 'Vessel'}"
-          style="transform: rotate(${Number(vesselInfo.heading || 0)}deg) scaleX(1.16);"
+          style="transform: rotate(${Number(vesselInfo.heading || 0)}deg) scaleX(1.16); transform-origin: ${(originX * 100).toFixed(2)}% ${(originY * 100).toFixed(2)}%;"
         />
       `,
-			iconSize: [Math.round(28 * 1.17 * scale), Math.round(60 * 1.17 * scale)],
-			iconAnchor: [Math.round(28 * 1.17 * scale) / 2, Math.round(60 * 1.17 * scale) / 2],
-			popupAnchor: [0, -(Math.round(60 * 1.17 * scale) / 2 + 2)]
+			iconSize: [width, height],
+			iconAnchor: [width * anchorX, anchorY],
+			popupAnchor: [0, -(anchorY + 2)]
 		});
 	}
 

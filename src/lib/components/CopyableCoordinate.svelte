@@ -1,5 +1,6 @@
 <script>
 	import { copyTextToClipboard, isCopyableCoordinateValue } from '$lib/utils/coordinateClipboard.js';
+	import { Copy, Check, AlertCircle } from 'lucide-svelte';
 
 	let {
 		value = '',
@@ -45,82 +46,159 @@
 	{#if canCopy}
 		<button
 			type="button"
+			class="copyable-coordinate-button"
 			class:is-copied={copied}
 			class:is-error={failed}
-			class="copyable-coordinate-button"
-			aria-label={`Copy ${label}`}
-			title={`Copy ${label}`}
+			aria-label={copied ? 'Copied' : `Copy ${label}`}
+			title={copied ? 'Copied!' : `Copy ${label}`}
 			onclick={copyCoordinate}
 		>
-			{copied ? '✓' : failed ? '!' : '⧉'}
+			{#if copied}
+				<Check size={14} strokeWidth={2.5} />
+			{:else if failed}
+				<AlertCircle size={14} strokeWidth={2.2} />
+			{:else}
+				<Copy size={14} strokeWidth={2} />
+			{/if}
 		</button>
 	{/if}
 </span>
 
 <style>
-	.copyable-coordinate {
-		display: inline-flex;
-		align-items: center;
-		gap: 7px;
-		min-width: 0;
-	}
 
-	.copyable-coordinate-value {
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
+.copyable-coordinate {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+    vertical-align: middle;
+}
 
-	.copyable-coordinate-button {
-		width: 25px;
-		height: 25px;
-		min-width: 25px;
-		display: inline-grid;
-		place-items: center;
-		border: 1px solid rgba(96, 165, 250, 0.34);
-		border-radius: 8px;
-		background: rgba(37, 99, 235, 0.12);
-		color: #93c5fd;
-		font-size: 12px;
-		font-weight: 800;
-		line-height: 1;
-		cursor: pointer;
-		transition:
-			transform 0.16s ease,
-			border-color 0.16s ease,
-			background 0.16s ease,
-			color 0.16s ease;
-	}
+.copyable-coordinate-value {
+    display: inline-block;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    line-height: 1.5;
+    font-variant-numeric: tabular-nums;
+}
 
-	.copyable-coordinate-button:hover {
-		transform: translateY(-1px);
-		border-color: rgba(96, 165, 250, 0.72);
-		background: rgba(37, 99, 235, 0.28);
-		color: #dbeafe;
-	}
+.copyable-coordinate-button :global(svg) {
+    display: block;
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    stroke: currentColor;
+}
 
-	.copyable-coordinate-button.is-copied {
-		border-color: rgba(34, 197, 94, 0.58);
-		background: rgba(34, 197, 94, 0.16);
-		color: #86efac;
-	}
+.copyable-coordinate.compact
+.copyable-coordinate-button :global(svg) {
+    width: 12px;
+    height: 12px;
+}
 
-	.copyable-coordinate-button.is-error {
-		border-color: rgba(248, 113, 113, 0.58);
-		background: rgba(248, 113, 113, 0.16);
-		color: #fecaca;
-	}
+/* Copy button */
+.copyable-coordinate-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 
-	.copyable-coordinate.compact {
-		gap: 5px;
-	}
+    flex: 0 0 24px;
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    min-height: 24px;
 
-	.copyable-coordinate.compact .copyable-coordinate-button {
-		width: 22px;
-		height: 22px;
-		min-width: 22px;
-		border-radius: 7px;
-		font-size: 11px;
-	}
+    padding: 0;
+    margin: 0;
+
+    border: 1px solid var(--color-border, #dbe3ee);
+    border-radius: 6px;
+
+    background: var(--color-elevated, #f1f5f9);
+    color: var(--text-secondary, #64748b);
+
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1;
+
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+
+    transition:
+        background-color 0.18s ease,
+        border-color 0.18s ease,
+        color 0.18s ease,
+        box-shadow 0.18s ease,
+        transform 0.18s ease;
+}
+
+/* Hover */
+.copyable-coordinate-button:hover {
+    background: var(--color-accent-muted, #eff6ff);
+    border-color: #93c5fd;
+    color: #2563eb;
+    transform: translateY(-1px);
+}
+
+/* Click */
+.copyable-coordinate-button:active {
+    transform: translateY(0) scale(0.94);
+}
+
+/* Keyboard accessibility */
+.copyable-coordinate-button:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
+}
+
+/* Copy success */
+.copyable-coordinate-button.is-copied {
+    background: rgba(34, 197, 94, 0.10);
+    border-color: rgba(34, 197, 94, 0.35);
+    color: #16a34a;
+}
+
+/* Copy failed */
+.copyable-coordinate-button.is-error {
+    background: rgba(239, 68, 68, 0.10);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #dc2626;
+}
+
+/* Compact mode */
+.copyable-coordinate.compact {
+    gap: 4px;
+}
+
+.copyable-coordinate.compact .copyable-coordinate-button {
+    flex-basis: 20px;
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    min-height: 20px;
+    border-radius: 5px;
+    font-size: 11px;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    .copyable-coordinate-button {
+        transition: none;
+    }
+
+    .copyable-coordinate-button:hover,
+    .copyable-coordinate-button:active {
+        transform: none;
+    }
+}
 </style>

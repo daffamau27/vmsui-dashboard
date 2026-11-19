@@ -2,7 +2,7 @@
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
 	import VesselMap from '$lib/components/VesselMap.svelte';
 	import { formatNumber } from '$lib/utils/periodicalFormat.js';
-	import { getVesselTypeIconUrl, getVesselTypeIconScale } from '$lib/utils/vesselIcons.js';
+	import { getVesselTypeIconUrl, getVesselTypeIconScale, getVesselIconLayout } from '$lib/utils/vesselIcons.js';
 
 	let {
 		active = false,
@@ -15,6 +15,9 @@
 		isFullscreen = false,
 		onToggleFullscreen = null
 	} = $props();
+
+	// Trace selalu pakai ikon tugboat biasa, apa pun sub-tipe tugboat-nya.
+	const traceIconType = $derived(getVesselIconLayout(vesselInfo?.type) ? 'tugboat' : vesselInfo?.type);
 </script>
 
 <section class="monitor-card map-card">
@@ -57,8 +60,8 @@
 				vesselName={vesselInfo.vesselName}
 				speed={vesselInfo.currentSpeed}
 				lastUpdate={vesselInfo.lastUpdate}
-				iconUrl={getVesselTypeIconUrl(vesselInfo?.type)}
-				iconScale={getVesselTypeIconScale(vesselInfo?.type)}
+				iconUrl={getVesselTypeIconUrl(traceIconType)}
+				iconScale={getVesselTypeIconScale(traceIconType)}
 				zoom={12}
 				{tracePoints}
 				activeIndex={activeTraceIndex}

@@ -12,7 +12,7 @@
 	import './fleet-view-page.css';
 	import { getLatestCctvSnapshots } from '$lib/api/dashboardApi.js';
 	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
-	import { getVesselTypeIconUrl, getVesselTypeIconScale } from '$lib/utils/vesselIcons.js';
+	import { getVesselTypeIconUrl, getVesselTypeIconScale, getVesselIconLayout } from '$lib/utils/vesselIcons.js';
 	import {
 		addMapZonesToLeafletMap,
 		isZoneAsset,
@@ -813,23 +813,35 @@
 
 	function createVesselIcon(vessel) {
 		const isSelected = String(selectedVesselId) === String(vessel.id);
-		const scale = getVesselTypeIconScale(vessel.type);
-		const iconWidth = Math.round((isSelected ? 28 : 24) * 1.17 * scale);
-		const iconHeight = Math.round((isSelected ? 60 : 52) * 1.17 * scale);
+		// Di zoom rendah gambar gabungan tug+tongkang terlalu ramai → pakai tugboat biasa dulu.
+		const isTugVariant = getVesselIconLayout(vessel.type) && fleetMapZoom < 7;
+		const type = isTugVariant ? 'tugboat' : vessel.type;
+		const scale = getVesselTypeIconScale(type);
+		const layout = getVesselIconLayout(type);
+		const iconWidth = Math.round(
+			(isSelected ? 28 : 24) * 2.15 * scale * (layout?.widthScale ?? 1)
+		);
+		const iconHeight = layout
+			? Math.round(iconWidth * layout.aspect)
+			: Math.round((isSelected ? 60 : 52) * 1.17 * scale);
+		const anchorX = layout ? layout.anchor.x : 0.5;
+		const anchorY = layout ? iconHeight * layout.anchor.y : iconHeight / 1;
+		const originX = layout ? layout.anchor.x : 0.5;
+		const originY = layout ? layout.anchor.y : 0.5;
 
 		return L.divIcon({
 			className: `vessel-leaflet-icon ${vessel.online ? 'online' : 'offline'} ${isSelected ? 'selected' : ''}`,
 			html: `
         <img
           class="fleet-vessel-marker-icon"
-          src="${getVesselTypeIconUrl(vessel.type)}"
+          src="${getVesselTypeIconUrl(type)}"
           alt="${formatValue(vessel.name)}"
-          style="transform: rotate(${Number(vessel.heading || 0)}deg) scaleX(1.16);"
+          style="transform: rotate(${Number(vessel.heading || 0)}deg) scaleX(1.16); transform-origin: ${(originX * 100).toFixed(2)}% ${(originY * 100).toFixed(2)}%;"
         />
       `,
 			iconSize: [iconWidth, iconHeight],
-			iconAnchor: [iconWidth / 2, iconHeight / 2],
-			popupAnchor: [0, -(iconHeight / 2 + 2)]
+			iconAnchor: [iconWidth * anchorX, anchorY],
+			popupAnchor: [0, -(anchorY + 2)]
 		});
 	}
 
@@ -861,6 +873,18 @@
 			marker.options.pane = isSelected ? 'selectedVesselPane' : 'vesselPane';
 			marker.setZIndexOffset(isSelected ? 1000 : 600);
 		});
+	}
+
+	let fleetMapZoom = 5; // = zoom awal setView di initFleetMap
+	let vesselIconZoomMode = /** @type {boolean | null} */ (null);
+
+	/** @param {any} event */
+	function handleVesselZoomIconChange(event) {
+		fleetMapZoom = event.target.getZoom();
+		const showTugLayout = fleetMapZoom >= 7;
+		if (showTugLayout === vesselIconZoomMode) return;
+		vesselIconZoomMode = showTugLayout;
+		refreshMarkerSelection();
 	}
 
 	async function scrollSidebarToVessel(id, { behavior = 'smooth' } = {}) {
@@ -2370,6 +2394,7 @@
 
 			map.on('contextmenu', handleMapRightClick);
 			map.on('click', handleMapMeasureClick);
+			map.on('zoomend', handleVesselZoomIconChange);
 			container.addEventListener('click', handleFleetPopupAction, true);
 
 			setTimeout(() => {

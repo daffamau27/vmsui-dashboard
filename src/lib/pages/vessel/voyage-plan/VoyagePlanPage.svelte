@@ -15,7 +15,7 @@
 	import { getFleetAssets } from '$lib/api/fleetApi.js';
 	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
 	import { getRouteLegDistancesNm, formatDistanceNm } from '$lib/utils/voyageRouteDistance.js';
-	import { getVesselTypeIconUrl, getVesselTypeIconScale } from '$lib/utils/vesselIcons.js';
+	import { getVesselTypeIconUrl, getVesselTypeIconScale, getVesselIconLayout } from '$lib/utils/vesselIcons.js';
 	import {
 		addMapZonesToLeafletMap,
 		isZoneAsset,
@@ -54,7 +54,7 @@
 	let syncingVesselFromNavbar = false;
 
 	let activeAssignment = null;
-	let selectedAssignment = null;
+	let selectedAssignment = /** @type {any} */ (null);
 	let historyItems = [];
 	let selectedHistoryId = null;
 
@@ -104,6 +104,7 @@
 		routePointCount > 0 &&
 		checkpointSummary.pending === 0 &&
 		checkpointSummary.skipped === 0;
+	$: assignmentType = selectedAssignment?.type || '';
 
 	$: routeRows = buildRouteRows(routePoints, routeLegDistances.legs);
 	$: detailRows = buildDetailRows(selectedAssignment);
@@ -363,22 +364,39 @@
 		return null;
 	}
 
+	/** @param {any} vessel */
+	function getVoyageVesselIconType(vessel) {
+		const t = String(assignmentType).toLowerCase();
+		if (t.includes('laden')) return 'tugboat-laden';
+		if (t.includes('ballast')) return 'tugboat-ballast';
+		if (t.includes('tugboat')) return 'tugboat';
+		return String(vessel?.type || '');
+	}
+
 	function createVesselMarkerIcon(vessel) {
-		const scale = getVesselTypeIconScale(vessel?.type);
+		const iconType = getVoyageVesselIconType(vessel);
+		const scale = getVesselTypeIconScale(iconType);
+		const layout = getVesselIconLayout(iconType);
+		const width = Math.round(28 * 1.17 * scale * (layout?.widthScale ?? 1));
+		const height = layout ? Math.round(width * layout.aspect) : Math.round(60 * 1.17 * scale);
+		const anchorX = layout ? layout.anchor.x : 0.5;
+		const anchorY = layout ? height * layout.anchor.y : height / 2;
+		const originX = layout ? layout.anchor.x : 0.5;
+		const originY = layout ? layout.anchor.y : 0.5;
 
 		return L.divIcon({
 			className: 'voyage-current-vessel-leaflet-icon',
 			html: `
 				<img
 					class="voyage-current-vessel-marker-icon"
-					src="${getVesselTypeIconUrl(vessel?.type)}"
+					src="${getVesselTypeIconUrl(iconType)}"
 					alt="${escapeHtml(vessel?.name || 'Vessel')}"
-					style="transform: rotate(${Number(vessel?.heading || 0)}deg) scaleX(1.16);"
+					style="transform: rotate(${Number(vessel?.heading || 0)}deg) scaleX(1.16); transform-origin: ${(originX * 100).toFixed(2)}% ${(originY * 100).toFixed(2)}%;"
 				/>
 			`,
-			iconSize: [Math.round(28 * 1.17 * scale), Math.round(60 * 1.17 * scale)],
-			iconAnchor: [Math.round(28 * 1.17 * scale) / 2, Math.round(60 * 1.17 * scale) / 2],
-			popupAnchor: [0, -(Math.round(60 * 1.17 * scale) / 2 + 2)]
+			iconSize: [width, height],
+			iconAnchor: [width * anchorX, anchorY],
+			popupAnchor: [0, -(anchorY + 2)]
 		});
 	}
 
@@ -404,7 +422,7 @@
 				<div class="voyage-current-vessel-popup">
 					<div class="map-popup-hero">
 						<div class="map-popup-icon vessel-popup-icon">
-							<img src="${getVesselTypeIconUrl(vessel?.type)}" alt="Vessel icon" />
+							<img src="${getVesselTypeIconUrl(getVoyageVesselIconType(vessel))}" alt="Vessel icon" />
 						</div>
 						<div class="map-popup-heading">
 							<span>Selected Vessel</span>
@@ -1285,6 +1303,7 @@
 			progressLabel={formatNumber(selectedProgress, 2, '%')}
 			distanceLabel={formatNumber(totalDistanceNm, 2, ' NM')}
 			averageSpeedLabel={averageSpeedKn === null ? '-' : formatNumber(averageSpeedKn, 2, ' kn')}
+			voyageType={assignmentType}
 		/>
 
 		<section class="main-grid">

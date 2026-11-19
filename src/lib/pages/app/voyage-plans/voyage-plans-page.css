@@ -732,6 +732,10 @@
 		margin-top: 7px;
 	}
 
+	.assign-field.full-width {
+		grid-column: 1 / -1;
+	}
+
 	.assign-action {
 		display: flex;
 		align-items: flex-end;
