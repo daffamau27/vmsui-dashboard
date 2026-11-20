@@ -27,6 +27,7 @@
 		renderKey = 0,
 		showTraceLine = false,
 		followActivePoint = false,
+		enableMeasurement = false,
 		isFullscreen = false,
 		onToggleFullscreen = null
 	} = $props();
@@ -71,6 +72,19 @@
 	let assetMarkerLayerGroup = null;
 	let lastDrawnTraceSignature = '';
 	let lastProgressTraceIndex = -1;
+	let measureActive = $state(false);
+	let measureUnit = $state('NM');
+	let measurePoints = $state([]);
+	let measureLayerGroup = null;
+	let measureContextPopup = null;
+
+	const measureUnits = [
+		{ value: 'auto', label: 'Auto' },
+		{ value: 'NM', label: 'NM' },
+		{ value: 'km', label: 'km' },
+		{ value: 'mi', label: 'mi' },
+		{ value: 'm', label: 'm' }
+	];
 
 	const TRACE_SPEED_RANGES = [
 		{ label: '0–1 kn', min: 0, max: 1, color: '#9ca3af' },
@@ -418,6 +432,194 @@
     `;
 	}
 
+	let totalMeasureMeters = $derived(getTotalMeasureDistance(measurePoints));
+
+	function getTotalMeasureDistance(points) {
+		if (!map || !points || points.length < 2) return 0;
+
+		let total = 0;
+
+		for (let index = 1; index < points.length; index += 1) {
+			total += map.distance(points[index - 1], points[index]);
+		}
+
+		return total;
+	}
+
+	function formatMeasureDistance(meters) {
+		const value = Number(meters || 0);
+
+		if (measureUnit === 'NM') return `${(value / 1852).toFixed(2)} NM`;
+		if (measureUnit === 'km') return `${(value / 1000).toFixed(2)} km`;
+		if (measureUnit === 'mi') return `${(value / 1609.344).toFixed(2)} mi`;
+		if (measureUnit === 'm') return `${value.toFixed(0)} m`;
+
+		if (value >= 1852) return `${(value / 1852).toFixed(2)} NM`;
+		if (value >= 1000) return `${(value / 1000).toFixed(2)} km`;
+
+		return `${value.toFixed(0)} m`;
+	}
+
+	function openMeasureStartPopup(latlng) {
+		if (!enableMeasurement || !map || !L || measureActive) return;
+
+		const popupHtml = `
+			<div class="measure-start-popup">
+				<div class="measure-start-top">
+					<div class="measure-icon">↔</div>
+					<div class="measure-title-group">
+						<strong>Measure distance</strong>
+						<span>Click Start, then select points on map</span>
+					</div>
+					<button type="button" class="measure-start-close" aria-label="Close measure popup">×</button>
+				</div>
+				<div class="measure-start-info">
+					<div><span>Mode</span><strong>Manual route</strong></div>
+					<div><span>Default unit</span><strong>${measureUnit}</strong></div>
+				</div>
+				<button type="button" class="measure-start-btn">Start measuring</button>
+			</div>
+		`;
+
+		measureContextPopup = L.popup({
+			closeButton: false,
+			autoPan: true,
+			closeOnClick: false,
+			className: 'measure-context-popup',
+			offset: [0, -8]
+		})
+			.setLatLng(latlng)
+			.setContent(popupHtml)
+			.openOn(map);
+
+		const popup = measureContextPopup;
+		setTimeout(() => {
+			const popupElement = popup?.getElement?.();
+			if (!popupElement || measureContextPopup !== popup) return;
+
+			popupElement.querySelector('.measure-start-btn')?.addEventListener('click', () => {
+				startMeasure(latlng);
+			});
+			popupElement.querySelector('.measure-start-close')?.addEventListener('click', () => {
+				map?.closePopup(popup);
+			});
+		}, 0);
+	}
+
+	function startMeasure(startLatLng) {
+		if (!enableMeasurement || !map || !L) return;
+
+		measureActive = true;
+		measurePoints = [startLatLng];
+
+		if (!measureLayerGroup) {
+			measureLayerGroup = L.layerGroup().addTo(map);
+		}
+
+		map.closePopup(measureContextPopup);
+		map.getContainer().classList.add('is-measuring');
+		drawMeasureLayer();
+	}
+
+	function cancelMeasure() {
+		measureActive = false;
+		measurePoints = [];
+		measureLayerGroup?.clearLayers();
+		map?.getContainer().classList.remove('is-measuring');
+		map?.closePopup(measureContextPopup);
+	}
+
+	function handleMapRightClick(event) {
+		openMeasureStartPopup(event.latlng);
+	}
+
+	function handleMapMeasureClick(event) {
+		if (!measureActive) return;
+
+		measurePoints = [...measurePoints, event.latlng];
+		drawMeasureLayer();
+	}
+
+	function handleMeasureMarkerClick(event) {
+		if (!measureActive) return;
+
+		event.originalEvent?.stopPropagation();
+		map?.closePopup();
+		handleMapMeasureClick(event);
+	}
+
+	function handleMeasureMarkerContextMenu(event) {
+		if (!enableMeasurement) return;
+
+		event.originalEvent?.preventDefault();
+		event.originalEvent?.stopPropagation();
+		openMeasureStartPopup(event.latlng);
+	}
+
+	function bindMeasureMarkerEvents(layer) {
+		if (!enableMeasurement) return;
+
+		layer.on('click', handleMeasureMarkerClick);
+		layer.on('contextmenu', handleMeasureMarkerContextMenu);
+	}
+
+	function drawMeasureLayer() {
+		if (!map || !L || !measureLayerGroup) return;
+
+		measureLayerGroup.clearLayers();
+		if (!measurePoints.length) return;
+
+		measurePoints.forEach((point, index) => {
+			L.circleMarker(point, {
+				radius: index === 0 ? 5 : 4,
+				color: '#3b82f6',
+				weight: 2,
+				fillColor: '#3b82f6',
+				fillOpacity: 0.9,
+				interactive: false
+			}).addTo(measureLayerGroup);
+		});
+
+		if (measurePoints.length < 2) return;
+
+		L.polyline(measurePoints, {
+			color: '#3b82f6',
+			weight: 2,
+			opacity: 0.9,
+			dashArray: '7 6',
+			interactive: false
+		}).addTo(measureLayerGroup);
+
+		for (let index = 1; index < measurePoints.length; index += 1) {
+			const previousPoint = measurePoints[index - 1];
+			const currentPoint = measurePoints[index];
+			const segmentDistance = map.distance(previousPoint, currentPoint);
+			const midPoint = L.latLng(
+				(previousPoint.lat + currentPoint.lat) / 2,
+				(previousPoint.lng + currentPoint.lng) / 2
+			);
+			const labelIcon = L.divIcon({
+				className: 'measure-label-icon',
+				html: `<div class="measure-distance-label">${formatMeasureDistance(segmentDistance)}</div>`,
+				iconSize: [90, 24],
+				iconAnchor: [45, 12]
+			});
+
+			L.marker(midPoint, {
+				icon: labelIcon,
+				interactive: false
+			}).addTo(measureLayerGroup);
+		}
+	}
+
+	$effect(() => {
+		measureUnit;
+
+		if (measureActive && measureLayerGroup && measurePoints.length > 1) {
+			drawMeasureLayer();
+		}
+	});
+
 	async function waitForMapContainer(maxRetry = 20) {
 		for (let i = 0; i < maxRetry; i += 1) {
 			await tick();
@@ -489,19 +691,21 @@
 				opacity: 0.58
 			});
 
-			L.marker(latLngs[0], {
+			const startMarker = L.marker(latLngs[0], {
 				icon: createStartIcon(),
 				zIndexOffset: 800
 			})
 				.bindPopup('Start')
 				.addTo(traceMarkerLayerGroup);
+			bindMeasureMarkerEvents(startMarker);
 
-			L.marker(latLngs[latLngs.length - 1], {
+			const finishMarker = L.marker(latLngs[latLngs.length - 1], {
 				icon: createFinishIcon(),
 				zIndexOffset: 800
 			})
 				.bindPopup('Finish')
 				.addTo(traceMarkerLayerGroup);
+			bindMeasureMarkerEvents(finishMarker);
 
 			const pointStep = Math.max(1, Math.floor(latLngs.length / 80));
 
@@ -579,6 +783,7 @@
 				maxWidth: 260,
 				className: 'vessel-map-popup-wrapper'
 			});
+			bindMeasureMarkerEvents(marker);
 		} else {
 			marker.setLatLng([lat, lng]);
 			marker.setIcon(icon);
@@ -655,7 +860,7 @@
 				className: 'asset-boundary-circle'
 			}).addTo(assetMarkerLayerGroup);
 
-			L.marker([asset.latitude, asset.longitude], {
+			const assetMarker = L.marker([asset.latitude, asset.longitude], {
 				icon: createAssetMarkerIcon(asset),
 				zIndexOffset: 520
 			})
@@ -670,6 +875,7 @@
 					className: 'vessel-map-asset-popup-wrapper'
 				})
 				.addTo(assetMarkerLayerGroup);
+			bindMeasureMarkerEvents(assetMarker);
 		});
 	}
 
@@ -722,6 +928,11 @@
 		addMapTileLayer(L, map);
 		addLeafletZoomAndScale(L, map);
 
+		if (enableMeasurement) {
+			map.on('contextmenu', handleMapRightClick);
+			map.on('click', handleMapMeasureClick);
+		}
+
 		rebuildZoneLayer();
 		ensureTraceLayers();
 		container.addEventListener('click', handleCoordinateCopyClick, true);
@@ -749,6 +960,7 @@
 		activeIndex;
 		showTraceLine;
 		followActivePoint;
+		enableMeasurement;
 
 		if (!map || !L) return;
 
@@ -767,6 +979,7 @@
 
 	onDestroy(() => {
 		isMounted = false;
+		cancelMeasure();
 
 		if (traceBaseLayerGroup) {
 			traceBaseLayerGroup.clearLayers();
@@ -807,7 +1020,12 @@
 			mapContainer.removeEventListener('click', handleCoordinateCopyClick, true);
 		}
 
+		measureLayerGroup?.remove();
+		measureLayerGroup = null;
+
 		if (map) {
+			map.off('contextmenu', handleMapRightClick);
+			map.off('click', handleMapMeasureClick);
 			map.remove();
 			map = null;
 		}
@@ -816,6 +1034,22 @@
 
 <div class="vessel-map-shell">
 	<div class="vessel-map-root" bind:this={mapContainer}></div>
+	{#if enableMeasurement && measureActive}
+		<div class="trace-measure-toolbar" role="group" aria-label="Measurement controls">
+			<div class="measure-total">
+				<span>Measure:</span>
+				<strong>{formatMeasureDistance(totalMeasureMeters)}</strong>
+			</div>
+
+			<select bind:value={measureUnit} class="measure-unit-select" aria-label="Measurement unit">
+				{#each measureUnits as unit (unit.value)}
+					<option value={unit.value}>{unit.label}</option>
+				{/each}
+			</select>
+
+			<button type="button" class="measure-cancel-btn" onclick={cancelMeasure}>Cancel</button>
+		</div>
+	{/if}
 	<div
 		class="vessel-map-legends"
 		class:fullscreen-legends={isFullscreen}
@@ -958,6 +1192,68 @@
 		height: 100%;
 		min-height: 260px;
 		background: var(--color-accent-muted);
+	}
+
+	.trace-measure-toolbar {
+		position: absolute;
+		top: 10px;
+		right: 10px;
+		z-index: 850;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 7px 9px;
+		border: 1px solid rgba(148, 163, 184, 0.3);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.92);
+		color: #e2e8f0;
+		box-shadow: 0 12px 28px rgba(15, 23, 42, 0.28);
+		backdrop-filter: blur(12px);
+		pointer-events: auto;
+	}
+
+	.measure-total {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 0 4px;
+		font-size: 11px;
+		white-space: nowrap;
+	}
+
+	.measure-total span {
+		color: #94a3b8;
+		font-weight: 700;
+	}
+
+	.measure-total strong {
+		color: #f8fafc;
+		font-weight: 850;
+	}
+
+	.measure-unit-select,
+	.measure-cancel-btn {
+		height: 32px;
+		border: 1px solid rgba(148, 163, 184, 0.28);
+		border-radius: 8px;
+		background: rgba(30, 41, 59, 0.92);
+		color: #f8fafc;
+		font-size: 11px;
+		font-weight: 750;
+	}
+
+	.measure-unit-select {
+		min-width: 62px;
+		padding: 0 8px;
+	}
+
+	.measure-cancel-btn {
+		padding: 0 10px;
+		cursor: pointer;
+	}
+
+	.measure-cancel-btn:hover {
+		background: rgba(51, 65, 85, 0.98);
 	}
 
 	.vessel-map-combined-legend {
@@ -1420,5 +1716,173 @@
 
 	:global(.vessel-map-popup-row .coordinate-copy-inline) {
 		justify-content: flex-end;
+	}
+
+	:global(.leaflet-container.is-measuring) {
+		cursor: crosshair !important;
+	}
+
+	:global(.leaflet-popup.measure-context-popup.leaflet-zoom-animated) {
+		border-radius: 12px;
+	}
+
+	:global(.measure-context-popup .leaflet-popup-content-wrapper) {
+		border: 1px solid rgba(96, 165, 250, 0.32);
+		border-radius: 12px;
+		background: rgba(15, 23, 42, 0.96);
+		color: #e2e8f0;
+		box-shadow: 0 18px 36px rgba(15, 23, 42, 0.4);
+		overflow: hidden;
+	}
+
+	:global(.measure-context-popup .leaflet-popup-content) {
+		width: 240px !important;
+		margin: 0;
+	}
+
+	:global(.measure-context-popup .leaflet-popup-tip) {
+		background: rgba(15, 23, 42, 0.96);
+	}
+
+	:global(.measure-start-popup) {
+		display: grid;
+		gap: 10px;
+		padding: 12px;
+	}
+
+	:global(.measure-start-top) {
+		display: grid;
+		grid-template-columns: 36px minmax(0, 1fr) 24px;
+		gap: 10px;
+		align-items: center;
+	}
+
+	:global(.measure-icon) {
+		display: grid;
+		width: 36px;
+		height: 36px;
+		place-items: center;
+		border: 1px solid rgba(96, 165, 250, 0.35);
+		border-radius: 11px;
+		background: rgba(37, 99, 235, 0.2);
+		color: #93c5fd;
+		font-size: 20px;
+		font-weight: 800;
+	}
+
+	:global(.measure-title-group) {
+		display: grid;
+		gap: 3px;
+	}
+
+	:global(.measure-title-group strong) {
+		color: #f8fafc;
+		font-size: 13px;
+		font-weight: 850;
+	}
+
+	:global(.measure-title-group span) {
+		color: #94a3b8;
+		font-size: 10px;
+		font-weight: 650;
+	}
+
+	:global(.measure-start-close) {
+		width: 24px;
+		height: 24px;
+		padding: 0;
+		border: 0;
+		border-radius: 7px;
+		background: transparent;
+		color: #94a3b8;
+		font-size: 19px;
+		line-height: 1;
+		cursor: pointer;
+	}
+
+	:global(.measure-start-close:hover) {
+		background: rgba(148, 163, 184, 0.14);
+		color: #fff;
+	}
+
+	:global(.measure-start-info) {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 8px;
+	}
+
+	:global(.measure-start-info div) {
+		display: grid;
+		gap: 4px;
+		padding: 9px 10px;
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 10px;
+		background: rgba(30, 41, 59, 0.68);
+	}
+
+	:global(.measure-start-info span) {
+		color: #94a3b8;
+		font-size: 9px;
+		font-weight: 750;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+	}
+
+	:global(.measure-start-info strong) {
+		color: #e2e8f0;
+		font-size: 10px;
+		font-weight: 800;
+	}
+
+	:global(.measure-start-btn) {
+		height: 38px;
+		border: 1px solid rgba(96, 165, 250, 0.42);
+		border-radius: 10px;
+		background: linear-gradient(135deg, #2563eb, #1d4ed8);
+		color: #fff;
+		font-size: 11px;
+		font-weight: 850;
+		cursor: pointer;
+	}
+
+	:global(.measure-start-btn:hover) {
+		filter: brightness(1.08);
+	}
+
+	:global(.measure-distance-label) {
+		padding: 4px 7px;
+		border: 1px solid rgba(96, 165, 250, 0.36);
+		border-radius: 999px;
+		background: rgba(15, 23, 42, 0.92);
+		color: #dbeafe;
+		font-size: 10px;
+		font-weight: 850;
+		text-align: center;
+		white-space: nowrap;
+		box-shadow: 0 4px 12px rgba(15, 23, 42, 0.3);
+	}
+
+	@media (max-width: 640px) {
+		.trace-measure-toolbar {
+			top: 50px;
+			max-width: calc(100% - 20px);
+			gap: 5px;
+			padding: 6px;
+		}
+
+		.measure-total {
+			gap: 4px;
+			font-size: 10px;
+		}
+
+		.measure-unit-select,
+		.measure-cancel-btn {
+			height: 30px;
+			font-size: 10px;
+		}
+
+		:global(.measure-context-popup .leaflet-popup-content) {
+			width: min(240px, calc(100vw - 42px)) !important;
+		}
 	}
 </style>

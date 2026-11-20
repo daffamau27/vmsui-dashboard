@@ -19,7 +19,7 @@ const VESSEL_TYPE_ICON_SCALE = { 'crude oil tanker': 1.35 };
 // Anchor dikalibrasi di tugboat-laden.png: 93 px dari kanan, 166 px dari atas (172×782).
 // tugboat-ballast adalah artwork sama diperbesar ×1.10 (189×865) → fraksi sama berlaku.
 /** @type {{ x: number; y: number }} */
-const TUG_ANCHOR = { x: 1/2, y: 1 / 2.7 }; // 93/172, 166/782
+const TUG_ANCHOR = { x: 1/2, y: 1 / 5 }; // 93/172, 166/782
 
 // tugboat-ballast/laden: gambar memuat kapal + tongkang, jadi kotak ikon dibuat
 // setinggi gambar penuh (aspect), kapal diperkecil agar sama lebar dengan tugboat.png,

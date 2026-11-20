@@ -8,7 +8,7 @@
 		vesselOptions = [],
 		alarmTypeOptions = [],
 		pagination = { page: 1, totalItems: 0, totalPages: 1, hasNext: false, hasPrevious: false },
-		selectedVesselId = $bindable(''),
+		selectedVesselIds = $bindable([]),
 		selectedStatus = $bindable(''),
 		selectedAlarmTypes = $bindable([]),
 		pageSize = $bindable(20),
@@ -18,7 +18,49 @@
 		onNext = async () => {}
 	} = $props();
 
+	const filterId = $props.id();
 	let alarmTypeFilterElement = $state(null);
+	let vesselFilterElement = $state(null);
+	let vesselSearchInput = $state(null);
+	let vesselSearch = $state('');
+	let selectedVesselKeys = $derived(selectedVesselIds.map(String));
+	let vesselSearchKeyword = $derived(vesselSearch.trim().toLowerCase());
+	let filteredVesselOptions = $derived(
+		vesselOptions.filter((vessel) =>
+			`${vessel.vesselName || ''} ${vessel.vesselId}`.toLowerCase().includes(vesselSearchKeyword)
+		)
+	);
+	let vesselSelectionLabel = $derived(
+		selectedVesselKeys.length === 1
+			? vesselOptions.find((vessel) => String(vessel.vesselId) === selectedVesselKeys[0])
+					?.vesselName || '1 vessel selected'
+			: selectedVesselKeys.length
+				? `${selectedVesselKeys.length} vessels selected`
+				: 'All Vessels'
+	);
+
+	function toggleVessel(vesselId, checked) {
+		const key = String(vesselId);
+		selectedVesselIds = checked
+			? selectedVesselKeys.includes(key)
+				? selectedVesselIds
+				: [...selectedVesselIds, vesselId]
+			: selectedVesselIds.filter((id) => String(id) !== key);
+	}
+
+	function closeVesselDropdown() {
+		vesselFilterElement?.removeAttribute('open');
+		vesselSearch = '';
+	}
+
+	function handleVesselDropdownToggle(event) {
+		if (event.currentTarget.open) {
+			closeAlarmTypeDropdown();
+			vesselSearchInput?.focus();
+		} else {
+			vesselSearch = '';
+		}
+	}
 
 	function formatDateTime(value) {
 		if (!value && value !== 0) return '-';
@@ -74,13 +116,23 @@
 		alarmTypeFilterElement?.removeAttribute?.('open');
 	}
 
-	function handleAlarmTypeOutsidePointerDown(event) {
-		if (event.target?.closest?.('.alarm-type-filter')) return;
-		closeAlarmTypeDropdown();
+	function handleFilterOutsideClick(event) {
+		if (!alarmTypeFilterElement?.contains(event.target)) closeAlarmTypeDropdown();
+		if (!vesselFilterElement?.contains(event.target)) closeVesselDropdown();
 	}
 
-	function handleAlarmTypeKeydown(event) {
-		if (event.key === 'Escape') closeAlarmTypeDropdown();
+	function handleFilterKeydown(event) {
+		if (event.key !== 'Escape') return;
+		const openFilter = vesselFilterElement?.open
+			? vesselFilterElement
+			: alarmTypeFilterElement?.open
+				? alarmTypeFilterElement
+				: null;
+		if (!openFilter) return;
+		event.preventDefault();
+		closeAlarmTypeDropdown();
+		closeVesselDropdown();
+		openFilter.querySelector('summary')?.focus();
 	}
 
 	function toggleAlarmType(alarmType, checked) {
@@ -96,21 +148,23 @@
 
 	async function handleApplyFilter() {
 		closeAlarmTypeDropdown();
+		closeVesselDropdown();
 		await onApply();
 	}
 
 	async function handleResetFilter() {
 		closeAlarmTypeDropdown();
+		closeVesselDropdown();
 		await onReset();
 	}
 
 	onMount(() => {
-		document.addEventListener('pointerdown', handleAlarmTypeOutsidePointerDown);
-		document.addEventListener('keydown', handleAlarmTypeKeydown);
+		document.addEventListener('click', handleFilterOutsideClick);
+		document.addEventListener('keydown', handleFilterKeydown);
 
 		return () => {
-			document.removeEventListener('pointerdown', handleAlarmTypeOutsidePointerDown);
-			document.removeEventListener('keydown', handleAlarmTypeKeydown);
+			document.removeEventListener('click', handleFilterOutsideClick);
+			document.removeEventListener('keydown', handleFilterKeydown);
 		};
 	});
 </script>
@@ -126,15 +180,73 @@
 	</div>
 
 	<div class="event-filter-card">
-		<label>
-			<span>Vessel</span>
-			<select bind:value={selectedVesselId}>
-				<option value="">All Vessels</option>
-				{#each vesselOptions as vessel (vessel.vesselId)}
-					<option value={vessel.vesselId}>{vessel.vesselName}</option>
-				{/each}
-			</select>
-		</label>
+		<div class="event-dropdown-field">
+			<span id={`${filterId}-vessels-label`}>Vessels</span>
+			<details
+				class="vessel-filter"
+				bind:this={vesselFilterElement}
+				ontoggle={handleVesselDropdownToggle}
+			>
+				<summary aria-labelledby={`${filterId}-vessels-label ${filterId}-vessels-value`}>
+					<span>
+						<strong id={`${filterId}-vessels-value`} title={vesselSelectionLabel}
+							>{vesselSelectionLabel}</strong
+						>
+					</span>
+					<span class="alarm-type-chevron" aria-hidden="true">&#8964;</span>
+				</summary>
+
+				<div class="vessel-dropdown">
+					<div class="alarm-type-dropdown-head">
+						<span>Select vessels</span>
+						<button
+							type="button"
+							onclick={() => (selectedVesselIds = [])}
+							disabled={!selectedVesselKeys.length}>Clear</button
+						>
+					</div>
+					<label class="vessel-search">
+						<span>Search vessel</span>
+						<input
+							type="search"
+							bind:this={vesselSearchInput}
+							bind:value={vesselSearch}
+							placeholder="Search vessel name or ID..."
+							autocomplete="off"
+						/>
+					</label>
+					<div class="vessel-filter-info">
+						<span>{selectedVesselKeys.length} selected</span>
+						<span>{filteredVesselOptions.length} of {vesselOptions.length} vessels</span>
+					</div>
+					<div class="vessel-options" role="group" aria-label="Vessel selection">
+						{#each filteredVesselOptions as vessel (String(vessel.vesselId))}
+							<label class="vessel-option filter-option">
+								<input
+									type="checkbox"
+									value={vessel.vesselId}
+									checked={selectedVesselKeys.includes(String(vessel.vesselId))}
+									onchange={(event) => toggleVessel(vessel.vesselId, event.currentTarget.checked)}
+								/>
+								<span class="vessel-option-tile filter-option-tile">
+									<span class="filter-option-name">{vessel.vesselName}</span>
+									<span class="vessel-option-corner filter-option-corner" aria-hidden="true">
+										<svg viewBox="0 0 16 16" fill="none">
+											<path d="m3 8 3 3 7-7" stroke="currentColor" stroke-width="2" />
+										</svg>
+									</span>
+								</span>
+							</label>
+						{:else}
+							<p class="vessel-search-empty" role="status">
+								{vesselOptions.length ? 'No vessels match your search.' : 'No vessels available.'}
+							</p>
+						{/each}
+					</div>
+					<p class="vessel-filter-hint">No selection includes all vessels.</p>
+				</div>
+			</details>
+		</div>
 
 		<label>
 			<span>Status</span>
@@ -155,42 +267,58 @@
 			</select>
 		</label>
 
-		<details class="alarm-type-filter" bind:this={alarmTypeFilterElement}>
-			<summary>
-				<span>
-					<small>Alarm Type</small>
-					<strong>
-						{selectedAlarmTypes.length
-							? `${selectedAlarmTypes.length} types selected`
-							: 'All types'}
-					</strong>
-				</span>
-				<span class="alarm-type-chevron" aria-hidden="true">&#8964;</span>
-			</summary>
+		<div class="event-dropdown-field">
+			<span id={`${filterId}-alarm-types-label`}>Alarm Type</span>
+			<details
+				class="alarm-type-filter"
+				bind:this={alarmTypeFilterElement}
+				ontoggle={(event) => {
+					if (event.currentTarget.open) closeVesselDropdown();
+				}}
+			>
+				<summary aria-labelledby={`${filterId}-alarm-types-label ${filterId}-alarm-types-value`}>
+					<span>
+						<strong id={`${filterId}-alarm-types-value`}>
+							{selectedAlarmTypes.length
+								? `${selectedAlarmTypes.length} types selected`
+								: 'All types'}
+						</strong>
+					</span>
+					<span class="alarm-type-chevron" aria-hidden="true">&#8964;</span>
+				</summary>
 
-			<div class="alarm-type-dropdown">
-				<div class="alarm-type-dropdown-head">
-					<span>Select alarm types</span>
-					{#if selectedAlarmTypes.length}
-						<button type="button" onclick={() => (selectedAlarmTypes = [])}>Clear</button>
-					{/if}
-				</div>
+				<div class="alarm-type-dropdown">
+					<div class="alarm-type-dropdown-head">
+						<span>Select alarm types</span>
+						{#if selectedAlarmTypes.length}
+							<button type="button" onclick={() => (selectedAlarmTypes = [])}>Clear</button>
+						{/if}
+					</div>
 
-				<div class="alarm-type-checkboxes">
-					{#each alarmTypeOptions as alarmType (alarmType.value)}
-						<label class:checked={selectedAlarmTypes.includes(alarmType.value)}>
-							<input
-								type="checkbox"
-								checked={selectedAlarmTypes.includes(alarmType.value)}
-								onchange={(event) => toggleAlarmType(alarmType.value, event.currentTarget.checked)}
-							/>
-							<span class="alarm-type-checkbox-mark" aria-hidden="true"></span>
-							<span class="alarm-type-checkbox-label">{alarmType.label}</span>
-						</label>
-					{/each}
+					<div class="alarm-type-checkboxes" role="group" aria-label="Alarm type selection">
+						{#each alarmTypeOptions as alarmType (alarmType.value)}
+							<label class="filter-option">
+								<input
+									type="checkbox"
+									value={alarmType.value}
+									checked={selectedAlarmTypes.includes(alarmType.value)}
+									onchange={(event) =>
+										toggleAlarmType(alarmType.value, event.currentTarget.checked)}
+								/>
+								<span class="filter-option-tile">
+									<span class="filter-option-name">{alarmType.label}</span>
+									<span class="filter-option-corner" aria-hidden="true">
+										<svg viewBox="0 0 16 16" fill="none">
+											<path d="m3 8 3 3 7-7" stroke="currentColor" stroke-width="2" />
+										</svg>
+									</span>
+								</span>
+							</label>
+						{/each}
+					</div>
 				</div>
-			</div>
-		</details>
+			</details>
+		</div>
 
 		<div class="filter-actions">
 			<button type="button" class="primary-btn" onclick={handleApplyFilter} disabled={loading}>
@@ -328,12 +456,14 @@
 		border-bottom: 1px solid #e2e8f0;
 	}
 
-	.event-filter-card > label {
+	.event-filter-card > label,
+	.event-dropdown-field {
 		display: grid;
 		gap: 5px;
 	}
 
-	.event-filter-card > label > span {
+	.event-filter-card > label > span,
+	.event-dropdown-field > span {
 		color: var(--text-secondary);
 		font-size: 10px;
 		font-weight: 900;
@@ -365,15 +495,20 @@
 		box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
 	}
 
-	.alarm-type-filter {
-		position: relative;
+	.event-dropdown-field {
 		flex: 1 1 250px;
 		max-width: 340px;
 		min-width: 0;
 		align-self: flex-end;
 	}
 
-	.alarm-type-filter summary {
+	.alarm-type-filter,
+	.vessel-filter {
+		position: relative;
+		min-width: 0;
+	}
+
+	:is(.alarm-type-filter, .vessel-filter) summary {
 		height: 32px;
 		padding: 0 9px;
 		border: 1px solid #cbd5e1;
@@ -388,33 +523,25 @@
 		box-sizing: border-box;
 	}
 
-	.alarm-type-filter summary::-webkit-details-marker {
+	:is(.alarm-type-filter, .vessel-filter) summary::-webkit-details-marker {
 		display: none;
 	}
 
-	.alarm-type-filter summary:focus-visible,
-	.alarm-type-filter[open] summary {
+	:is(.alarm-type-filter, .vessel-filter) summary:focus-visible,
+	:is(.alarm-type-filter, .vessel-filter)[open] summary {
 		border-color: #2563eb;
 		box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
 		outline: none;
 	}
 
-	.alarm-type-filter summary > span:first-child {
+	:is(.alarm-type-filter, .vessel-filter) summary > span:first-child {
 		min-width: 0;
 		display: flex;
 		align-items: center;
 		gap: 7px;
 	}
 
-	.alarm-type-filter summary small {
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 900;
-		text-transform: uppercase;
-		white-space: nowrap;
-	}
-
-	.alarm-type-filter summary strong {
+	:is(.alarm-type-filter, .vessel-filter) summary strong {
 		min-width: 0;
 		color: var(--text-primary);
 		font-size: 11px;
@@ -432,11 +559,12 @@
 		transition: transform 140ms ease;
 	}
 
-	.alarm-type-filter[open] .alarm-type-chevron {
+	:is(.alarm-type-filter, .vessel-filter)[open] .alarm-type-chevron {
 		transform: rotate(180deg);
 	}
 
-	.alarm-type-dropdown {
+	.alarm-type-dropdown,
+	.vessel-dropdown {
 		position: absolute;
 		top: calc(100% + 6px);
 		left: 0;
@@ -477,109 +605,174 @@
 		cursor: pointer;
 	}
 
-	.alarm-type-checkboxes {
-		max-height: 285px;
-		margin-top: 7px;
-		overflow-y: auto;
-		display: grid;
-		gap: 5px;
+	.alarm-type-dropdown-head button:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
 	}
 
-	.alarm-type-checkboxes label {
+	.vessel-dropdown {
+		width: min(420px, calc(100vw - 56px));
+		padding: 12px;
+		box-sizing: border-box;
+	}
+
+	.vessel-search {
+		display: grid;
+		gap: 6px;
+		margin-top: 10px;
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 700;
+	}
+
+	.vessel-search input {
 		width: 100%;
-		min-height: 32px;
-		padding: 6px 8px;
-		border: 1px solid rgba(148, 163, 184, 0.26);
-		border-radius: 8px;
+		min-width: 0;
+		height: 36px;
+		padding: 0 10px;
+		border: 1px solid var(--color-border);
+		border-radius: 6px;
+		background: var(--color-elevated);
+		color: var(--text-primary);
+		font: inherit;
+		box-sizing: border-box;
+		outline: none;
+	}
+
+	.vessel-search input::placeholder {
+		color: var(--text-secondary);
+		font-weight: 400;
+	}
+
+	.vessel-search input:focus-visible {
+		border-color: var(--color-accent);
+		box-shadow: 0 0 0 2px var(--color-accent-muted);
+	}
+
+	.vessel-filter-info {
+		display: flex;
+		justify-content: space-between;
+		gap: 8px;
+		margin: 10px 0 8px;
+		color: var(--text-secondary);
+		font-size: 10px;
+	}
+
+	.vessel-options,
+	.alarm-type-checkboxes {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+		gap: 6px;
+		max-height: min(300px, 45vh);
+		padding: 3px;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+
+	.filter-option {
+		position: relative;
+		display: flex;
+		min-width: 0;
+		cursor: pointer;
+	}
+
+	.filter-option input {
+		position: absolute;
+		inset: 0;
+		z-index: 1;
+		width: 100%;
+		height: 100%;
+		margin: 0;
+		opacity: 0;
+		cursor: pointer;
+	}
+
+	.filter-option-tile {
+		position: relative;
 		display: flex;
 		align-items: center;
-		gap: 7px;
+		justify-content: center;
+		width: 100%;
+		min-width: 0;
+		min-height: 36px;
+		padding: 6px 18px 6px 8px;
+		border: 1px solid rgba(148, 163, 184, 0.35);
+		border-radius: 4px;
 		background: var(--color-elevated);
 		color: var(--text-secondary);
-		cursor: pointer;
 		box-sizing: border-box;
+		overflow: hidden;
 		transition:
 			border-color 140ms ease,
 			background 140ms ease,
 			color 140ms ease;
 	}
 
-	.alarm-type-checkboxes label:hover {
-		border-color: rgba(96, 165, 250, 0.58);
+	.filter-option-name {
+		font-size: 11px;
+		line-height: 1.3;
+		font-weight: 700;
+		text-align: center;
+		overflow-wrap: anywhere;
 	}
 
-	.alarm-type-checkboxes label.checked {
-		border-color: rgba(37, 99, 235, 0.78);
-		background: rgba(37, 99, 235, 0.15);
+	.filter-option:hover .filter-option-tile {
+		border-color: var(--color-accent);
 		color: var(--text-primary);
 	}
 
-	.alarm-type-checkboxes input {
+	.filter-option input:checked + .filter-option-tile {
+		border-color: var(--color-accent);
+		background: var(--color-accent-muted);
+		color: var(--text-accent);
+	}
+
+	.filter-option input:focus-visible + .filter-option-tile {
+		outline: 2px solid var(--text-accent);
+		outline-offset: 1px;
+	}
+
+	.filter-option-corner {
 		position: absolute;
-		width: 1px;
-		height: 1px;
-		margin: -1px;
-		padding: 0;
-		overflow: hidden;
-		clip: rect(0 0 0 0);
-		clip-path: inset(50%);
-		white-space: nowrap;
-	}
-
-	.alarm-type-checkbox-mark {
-		position: relative;
-		width: 16px;
-		height: 16px;
-		min-width: 16px;
-		border: 1px solid #64748b;
-		border-radius: 4px;
-		display: grid;
-		place-items: center;
-		background: #0f172a;
-		box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.42);
-		box-sizing: border-box;
-		transition:
-			border-color 140ms ease,
-			background 140ms ease,
-			box-shadow 140ms ease;
-	}
-
-	.alarm-type-checkbox-mark::after {
-		content: '';
-		width: 4px;
-		height: 8px;
-		margin-top: -2px;
-		border: solid #ffffff;
-		border-width: 0 2px 2px 0;
+		right: 0;
+		bottom: 0;
+		width: 20px;
+		height: 20px;
+		background: var(--color-accent);
+		color: #ffffff;
+		clip-path: polygon(100% 0, 100% 100%, 0 100%);
 		opacity: 0;
-		transform: rotate(45deg) scale(0.65);
-		transition:
-			opacity 120ms ease,
-			transform 120ms ease;
 	}
 
-	.alarm-type-checkboxes input:checked + .alarm-type-checkbox-mark {
-		border-color: #60a5fa;
-		background: #2563eb;
-		box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+	.filter-option-corner svg {
+		position: absolute;
+		right: 1px;
+		bottom: 1px;
+		width: 11px;
+		height: 11px;
 	}
 
-	.alarm-type-checkboxes input:checked + .alarm-type-checkbox-mark::after {
+	.filter-option input:checked + .filter-option-tile .filter-option-corner {
 		opacity: 1;
-		transform: rotate(45deg) scale(1);
 	}
 
-	.alarm-type-checkboxes input:focus-visible + .alarm-type-checkbox-mark {
-		border-color: #93c5fd;
-		box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.32);
+	.vessel-search-empty {
+		grid-column: 1 / -1;
+		margin: 0;
+		padding: 18px 8px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		text-align: center;
 	}
 
-	.alarm-type-checkbox-label {
-		color: inherit;
+	.vessel-filter-hint {
+		margin: 10px 0 0;
+		color: var(--text-secondary);
 		font-size: 10px;
-		line-height: 1.2;
-		font-weight: 800;
-		text-transform: none;
+	}
+
+	.alarm-type-checkboxes {
+		margin-top: 7px;
 	}
 
 	.filter-actions {
@@ -718,13 +911,15 @@
 	}
 
 	@media (max-width: 760px) {
-		.alarm-type-filter {
+		.event-dropdown-field {
 			width: 100%;
 			max-width: none;
+			flex: 0 0 auto;
 			align-self: stretch;
 		}
 
-		.alarm-type-dropdown {
+		.alarm-type-dropdown,
+		.vessel-dropdown {
 			width: 100%;
 			box-sizing: border-box;
 		}

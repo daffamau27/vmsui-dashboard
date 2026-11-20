@@ -29,6 +29,7 @@
 		handleCoordinateCopyClick
 	} from '$lib/utils/coordinateClipboard.js';
 	import { sortByAlpha } from '$lib/utils/alphaSort.js';
+	import { getForecastWeekdayLabel } from '$lib/utils/forecastWeekdayLabel.js';
 
 	let loading = $state(false);
 	let error = $state('');
@@ -662,19 +663,19 @@
 	let environmentForecastDays = $derived([
 		{
 			key: 'today',
-			label: weatherSummary.current?.label || oceanCurrentSummary.current?.label || 'Today',
+			label: getForecastWeekdayLabel(0),
 			weather: weatherSummary.current,
 			current: oceanCurrentSummary.current
 		},
 		{
 			key: 'tomorrow',
-			label: weatherSummary.tomorrow?.label || oceanCurrentSummary.tomorrow?.label || 'Tomorrow',
+			label: getForecastWeekdayLabel(1),
 			weather: weatherSummary.tomorrow,
 			current: oceanCurrentSummary.tomorrow
 		},
 		{
 			key: 'day-after',
-			label: weatherSummary.dayAfter?.label || oceanCurrentSummary.dayAfter?.label || 'Day After',
+			label: getForecastWeekdayLabel(2),
 			weather: weatherSummary.dayAfter,
 			current: oceanCurrentSummary.dayAfter
 		}
@@ -809,15 +810,11 @@
 	]);
 
 	let dashboardCurrentCards = $derived(
-		[
-			{ key: 'current', fallbackLabel: 'Today', current: oceanCurrentSummary.current },
-			{ key: 'tomorrow', fallbackLabel: 'Tomorrow', current: oceanCurrentSummary.tomorrow },
-			{ key: 'day-after', fallbackLabel: 'Day After', current: oceanCurrentSummary.dayAfter }
-		].map((item) => ({
-			key: item.key,
-			label: item.current?.label || item.fallbackLabel,
-			value: item.current ? `${formatNumber(item.current.speed_kph, 1)} kph` : '-',
-			direction: item.current ? formatCurrentDirectionAngle(item.current) : '-'
+		environmentForecastDays.map((day) => ({
+			key: day.key,
+			label: day.label,
+			value: day.current ? `${formatNumber(day.current.speed_kph, 1)} kph` : '-',
+			direction: day.current ? formatCurrentDirectionAngle(day.current) : '-'
 		}))
 	);
 

@@ -42,18 +42,20 @@
 			<LoadingSkeleton label="Loading vessels" variant="all-vessel-vessel-list" rows={6} compact />
 		{:else if filteredDevices.length}
 			{#each filteredDevices as device (device.id)}
-				<label
-					class="vessel-check-card"
-					class:selected-vessel={selectedDeviceIds.includes(device.id)}
-				>
+				<label class="vessel-check-card">
 					<input
 						type="checkbox"
 						checked={selectedDeviceIds.includes(device.id)}
 						onchange={(event) => onToggleSingle?.(device.id, event.currentTarget.checked)}
 					/>
 
-					<span class="vessel-info">
-						<strong>{device.name}</strong>
+					<span class="vessel-check-tile">
+						<span class="vessel-check-name">{device.name}</span>
+						<span class="vessel-check-corner" aria-hidden="true">
+							<svg viewBox="0 0 16 16" fill="none">
+								<path d="m3 8 3 3 7-7" stroke="currentColor" stroke-width="2" />
+							</svg>
+						</span>
 					</span>
 				</label>
 			{/each}

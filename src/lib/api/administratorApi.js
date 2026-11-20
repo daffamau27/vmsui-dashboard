@@ -643,6 +643,30 @@ export async function getGlobalAuditLogsAdminApi({
   return unwrap(response);
 }
 
+export async function getUserLoginActivitiesAdminApi({
+  userId = "",
+  startDate = "",
+  endDate = "",
+  timezoneOffset = "+07:00",
+  page = 1,
+  pageSize = 20
+} = {}) {
+  const params = new URLSearchParams();
+
+  if (userId) params.set("userId", String(userId));
+  if (startDate) params.set("startDate", String(startDate));
+  if (endDate) params.set("endDate", String(endDate));
+  if (timezoneOffset) params.set("timezoneOffset", String(timezoneOffset));
+  params.set("page", String(page || 1));
+  params.set("pageSize", String(pageSize || 20));
+
+  const response = await apiRequest(`/users/login-activity?${params.toString()}`, {
+    method: "GET"
+  });
+
+  return unwrap(response);
+}
+
 export async function exportGlobalAuditLogsCsvAdminApi({
   userId = "",
   startDate = "",

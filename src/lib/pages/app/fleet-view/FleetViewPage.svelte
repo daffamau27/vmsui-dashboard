@@ -814,7 +814,7 @@
 	function createVesselIcon(vessel) {
 		const isSelected = String(selectedVesselId) === String(vessel.id);
 		// Di zoom rendah gambar gabungan tug+tongkang terlalu ramai → pakai tugboat biasa dulu.
-		const isTugVariant = getVesselIconLayout(vessel.type) && fleetMapZoom < 7;
+		const isTugVariant = getVesselIconLayout(vessel.type) && fleetMapZoom < 8;
 		const type = isTugVariant ? 'tugboat' : vessel.type;
 		const scale = getVesselTypeIconScale(type);
 		const layout = getVesselIconLayout(type);
@@ -825,7 +825,7 @@
 			? Math.round(iconWidth * layout.aspect)
 			: Math.round((isSelected ? 60 : 52) * 1.17 * scale);
 		const anchorX = layout ? layout.anchor.x : 0.5;
-		const anchorY = layout ? iconHeight * layout.anchor.y : iconHeight / 1;
+		const anchorY = layout ? iconHeight * layout.anchor.y : iconHeight * 0.5;
 		const originX = layout ? layout.anchor.x : 0.5;
 		const originY = layout ? layout.anchor.y : 0.5;
 
@@ -881,7 +881,7 @@
 	/** @param {any} event */
 	function handleVesselZoomIconChange(event) {
 		fleetMapZoom = event.target.getZoom();
-		const showTugLayout = fleetMapZoom >= 7;
+		const showTugLayout = fleetMapZoom >= 8;
 		if (showTugLayout === vesselIconZoomMode) return;
 		vesselIconZoomMode = showTugLayout;
 		refreshMarkerSelection();
@@ -1249,8 +1249,22 @@
 			});
 
 			marker.on('click', () => {
+				if (measureActive) {
+					// Dalam mode measurement, klik kiri di icon tidak membuka popup
+					// melainkan menambah point pengukuran
+					measurePoints = [...measurePoints, marker.getLatLng()];
+					drawMeasureLayer();
+					return;
+				}
 				closeVesselTooltips();
 				void openVesselPopupFromInteraction(vesselId, { zoom: map?.getZoom?.() ?? 7 });
+			});
+
+			marker.on('contextmenu', (event) => {
+				event.stopPropagation();
+				if (!map || !L) return;
+				// Right-click on icon jadi anchor/titik awal pengukuran
+				openMeasureStartPopup(marker.getLatLng());
 			});
 
 			marker.on('popupclose', () => {

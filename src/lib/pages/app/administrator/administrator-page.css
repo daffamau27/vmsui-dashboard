@@ -2878,10 +2878,17 @@ body {
 		background: var(--color-elevated);
 		padding: 14px;
 	}
+	.user-activity-filter-card {
+		grid-template-columns: repeat(5, minmax(120px, 1fr));
+	}
 	.global-audit-filter-actions {
 		display: flex;
 		align-items: center;
 		gap: 10px;
+	}
+	.user-activity-filter-actions {
+		grid-column: 1 / -1;
+		justify-content: flex-end;
 	}
 	.global-audit-table-card {
 		margin-top: 14px;
@@ -2927,6 +2934,9 @@ body {
 		width: 100%;
 		min-width: 780px;
 		border-collapse: collapse;
+	}
+	.user-activity-table-wrap table {
+		min-width: 1500px;
 	}
 	.global-audit-table-wrap th,
 	.global-audit-table-wrap td {

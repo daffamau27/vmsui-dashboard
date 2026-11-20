@@ -60,6 +60,7 @@
 		deleteCompanyAdminApi,
 		syncAllVesselsAdminApi,
 		getGlobalAuditLogsAdminApi,
+		getUserLoginActivitiesAdminApi,
 		exportGlobalAuditLogsCsvAdminApi
 	} from '$lib/api/administratorApi.js';
 
@@ -85,7 +86,8 @@
 		'reporting',
 		'cctv-config',
 		'alarm',
-		'global-audit-logs'
+		'global-audit-logs',
+		'user-activity'
 	];
 	activeAdminTab = adminTabOrder.includes(initialTab) ? initialTab : 'users';
 	let adminTabDirection = 1;
@@ -194,6 +196,25 @@
 		endDate: ''
 	};
 
+	let userLoginActivities = [];
+	let userLoginActivityLoading = false;
+	let userLoginActivityPagination = {
+		page: 1,
+		pageSize: 20,
+		totalItems: 0,
+		totalPages: 1,
+		hasNext: false,
+		hasPrevious: false
+	};
+	let userLoginActivityFilters = {
+		userId: '',
+		startDate: '',
+		endDate: '',
+		timezoneOffset: '+07:00',
+		page: 1,
+		pageSize: 20
+	};
+
 	async function loadGlobalAuditLogs(page = globalAuditFilters.page) {
 		globalAuditLoading = true;
 
@@ -271,6 +292,68 @@
 		if (!Number.isFinite(targetPage) || targetPage < 1) return;
 
 		loadGlobalAuditLogs(targetPage);
+	}
+
+	async function loadUserLoginActivities(page = userLoginActivityFilters.page) {
+		userLoginActivityLoading = true;
+		clearAlert();
+
+		try {
+			const data = await getUserLoginActivitiesAdminApi({
+				...userLoginActivityFilters,
+				page,
+				pageSize: Number(userLoginActivityFilters.pageSize) || 20
+			});
+
+			userLoginActivities = Array.isArray(data?.items) ? data.items : [];
+			userLoginActivityPagination = data?.pagination || {
+				page,
+				pageSize: Number(userLoginActivityFilters.pageSize) || 20,
+				totalItems: 0,
+				totalPages: 1,
+				hasNext: false,
+				hasPrevious: false
+			};
+			userLoginActivityFilters = {
+				...userLoginActivityFilters,
+				page: userLoginActivityPagination.page || page
+			};
+		} catch (error) {
+			showAlert('error', error.message || 'Failed to load user login activities.');
+		} finally {
+			userLoginActivityLoading = false;
+		}
+	}
+
+	function applyUserLoginActivityFilters() {
+		userLoginActivityFilters = {
+			...userLoginActivityFilters,
+			page: 1
+		};
+
+		loadUserLoginActivities(1);
+	}
+
+	function resetUserLoginActivityFilters() {
+		userLoginActivityFilters = {
+			userId: '',
+			startDate: '',
+			endDate: '',
+			timezoneOffset: '+07:00',
+			page: 1,
+			pageSize: 20
+		};
+
+		loadUserLoginActivities(1);
+	}
+
+	function goToUserLoginActivityPage(page) {
+		const targetPage = Number(page);
+		const totalPages = Number(userLoginActivityPagination.totalPages || 1);
+
+		if (!Number.isFinite(targetPage) || targetPage < 1 || targetPage > totalPages) return;
+
+		loadUserLoginActivities(targetPage);
 	}
 
 	let reportingFilters = {
@@ -954,6 +1037,13 @@
 	function openAlarmTab() {
 		setActiveAdminTab('alarm');
 		loadAlarmVessels();
+	}
+
+	function openUserLoginActivityTab() {
+		if (!isSuperAdmin) return;
+
+		setActiveAdminTab('user-activity');
+		loadUserLoginActivities(userLoginActivityFilters.page);
 	}
 
 	function openCctvConfigTab() {
@@ -2081,6 +2171,8 @@
 			openCctvConfigTab();
 		} else if (initialTab === 'reporting' && reportingVessels.length) {
 			openReportingVessel(reportingVessels[0]);
+		} else if (initialTab === 'user-activity' && currentUser?.permissionAccess?.mode === 'all') {
+			loadUserLoginActivities(1);
 		}
 
 		scheduleAdminTabIndicatorUpdate();
@@ -3889,6 +3981,15 @@
 			>
 				Audit Logs
 			</button>
+			{#if isSuperAdmin}
+				<button
+					type="button"
+					class:active-tab={activeAdminTab === 'user-activity'}
+					on:click={openUserLoginActivityTab}
+				>
+					User Activity
+				</button>
+			{/if}
 		</section>
 
 		{#key activeAdminTab}
@@ -6775,6 +6876,208 @@
 											class="ghost-button small"
 											on:click={() => goToGlobalAuditPage((globalAuditPagination.page || 1) + 1)}
 											disabled={!globalAuditPagination.hasNext || globalAuditLoading}
+										>
+											Next
+										</button>
+									</div>
+								{/if}
+							</div>
+						</section>
+					</section>
+				{:else if activeAdminTab === 'user-activity'}
+					<section class="global-audit-workspace user-activity-workspace">
+						<section class="global-audit-panel">
+							<div class="global-audit-header">
+								<div>
+									<h2>User Login Activity</h2>
+									<p>
+										Review login sessions, device details, network information, and session status.
+									</p>
+								</div>
+
+								<div class="detail-actions">
+									<button
+										type="button"
+										class="ghost-button small"
+										on:click={() => loadUserLoginActivities(userLoginActivityFilters.page)}
+										disabled={userLoginActivityLoading}
+									>
+										Refresh
+									</button>
+								</div>
+							</div>
+
+							<div class="global-audit-filter-card user-activity-filter-card">
+								<label>
+									<span>User ID</span>
+									<input
+										type="number"
+										min="1"
+										bind:value={userLoginActivityFilters.userId}
+										placeholder="All users"
+									/>
+								</label>
+
+								<label>
+									<span>Start Date</span>
+									<input
+										type="date"
+										use:fourDigitDateYear
+										bind:value={userLoginActivityFilters.startDate}
+									/>
+								</label>
+
+								<label>
+									<span>End Date</span>
+									<input
+										type="date"
+										use:fourDigitDateYear
+										bind:value={userLoginActivityFilters.endDate}
+									/>
+								</label>
+
+								<label>
+									<span>Timezone Offset</span>
+									<input
+										type="text"
+										bind:value={userLoginActivityFilters.timezoneOffset}
+										placeholder="+07:00"
+									/>
+								</label>
+
+								<label>
+									<span>Page Size</span>
+									<select bind:value={userLoginActivityFilters.pageSize}>
+										<option value={20}>20</option>
+										<option value={50}>50</option>
+										<option value={100}>100</option>
+									</select>
+								</label>
+
+								<div class="global-audit-filter-actions user-activity-filter-actions">
+									<button
+										type="button"
+										class="ghost-button"
+										on:click={resetUserLoginActivityFilters}
+										disabled={userLoginActivityLoading}
+									>
+										Reset
+									</button>
+
+									<button
+										type="button"
+										class="primary-button"
+										on:click={applyUserLoginActivityFilters}
+										disabled={userLoginActivityLoading}
+									>
+										Apply Filter
+									</button>
+								</div>
+							</div>
+
+							<div class="global-audit-table-card">
+								<div class="global-audit-table-head">
+									<div>
+										<strong>{userLoginActivityPagination.totalItems || 0}</strong>
+										<span>Total activities</span>
+									</div>
+
+									<div>
+										<strong>{userLoginActivityPagination.page || 1}</strong>
+										<span>Page of {userLoginActivityPagination.totalPages || 1}</span>
+									</div>
+								</div>
+
+								{#if userLoginActivityLoading}
+									<LoadingSkeleton
+										label="Loading user login activities"
+										variant="admin-global-audit-table"
+										rows={6}
+										columns={8}
+									/>
+								{:else if userLoginActivities.length === 0}
+									<div class="empty-box">No user login activity found.</div>
+								{:else}
+									<div class="global-audit-table-wrap user-activity-table-wrap">
+										<table>
+											<thead>
+												<tr>
+													<th>Login Time</th>
+													<th>User</th>
+													<th>Refresh Token ID</th>
+													<th>IP Address</th>
+													<th>Device</th>
+													<th>Browser</th>
+													<th>OS</th>
+													<th>Location</th>
+													<th>ISP Provider</th>
+													<th>Session Expiry</th>
+													<th>Session Status</th>
+													<th>Timezone</th>
+												</tr>
+											</thead>
+
+											<tbody>
+												{#each userLoginActivities as activity (activity.id)}
+													<tr>
+														<td>{formatDate(activity.loginTime)}</td>
+														<td>
+															<strong>{activity.name || activity.username || '-'}</strong>
+															<small>
+																{activity.username ? `@${activity.username}` : '-'} · ID {activity.userId ??
+																	'-'}
+															</small>
+														</td>
+														<td>{activity.refreshTokenId ?? '-'}</td>
+														<td>{activity.ipAddress || '-'}</td>
+														<td>{activity.deviceType || '-'}</td>
+														<td>
+															<strong>{activity.browser || '-'}</strong>
+															<small>{activity.browserVersion || '-'}</small>
+														</td>
+														<td>{activity.os || '-'}</td>
+														<td>{activity.location || '-'}</td>
+														<td>{activity.provider || '-'}</td>
+														<td>{formatDate(activity.sessionExpired)}</td>
+														<td>
+															<span
+																class:active-badge={String(activity.statusSession || '').toLowerCase() ===
+																	'active'}
+																class:inactive-badge={String(activity.statusSession || '').toLowerCase() !==
+																	'active'}
+															>
+																{String(activity.statusSession || '-').replace(/_/g, ' ')}
+															</span>
+														</td>
+														<td>{activity.timezone || '-'}</td>
+													</tr>
+												{/each}
+											</tbody>
+										</table>
+									</div>
+
+									<div class="global-audit-pagination">
+										<button
+											type="button"
+											class="ghost-button small"
+											on:click={() =>
+												goToUserLoginActivityPage((userLoginActivityPagination.page || 1) - 1)}
+											disabled={!userLoginActivityPagination.hasPrevious || userLoginActivityLoading}
+										>
+											Previous
+										</button>
+
+										<span>
+											Page {userLoginActivityPagination.page || 1} /
+											{userLoginActivityPagination.totalPages || 1}
+										</span>
+
+										<button
+											type="button"
+											class="ghost-button small"
+											on:click={() =>
+												goToUserLoginActivityPage((userLoginActivityPagination.page || 1) + 1)}
+											disabled={!userLoginActivityPagination.hasNext || userLoginActivityLoading}
 										>
 											Next
 										</button>

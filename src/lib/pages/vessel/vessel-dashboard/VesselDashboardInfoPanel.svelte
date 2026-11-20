@@ -10,11 +10,6 @@
 			<span class="section-kicker">Vessel Status</span>
 			<h2>{vesselName}</h2>
 		</div>
-
-		<div class="online-badge" class:offline-badge={!online}>
-			<span></span>
-			{online ? 'Online' : 'Offline'}
-		</div>
 	</div>
 
 	<div class="vessel-info-grid">

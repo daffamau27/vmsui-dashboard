@@ -68,6 +68,7 @@
 				renderKey={renderTick}
 				showTraceLine={true}
 				followActivePoint={false}
+				enableMeasurement={true}
 				{isFullscreen}
 				{onToggleFullscreen}
 			/>

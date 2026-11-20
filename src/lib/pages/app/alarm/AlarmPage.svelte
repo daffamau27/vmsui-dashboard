@@ -1,7 +1,8 @@
 <script>
 	import { onDestroy, tick, untrack } from 'svelte';
-	import { SvelteURLSearchParams } from 'svelte/reactivity';
+	import { buildAlarmEventsQuery } from '$lib/utils/alarmEventQuery.js';
 	import { apiRequest } from '$lib/api/authApi.js';
+	import { getFleetVessels } from '$lib/api/fleetApi.js';
 	import { currentUser } from '$lib/stores/authStore.js';
 	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 	import AlarmHeader from './AlarmHeader.svelte';
@@ -24,6 +25,7 @@
 
 	let monitorRows = $state([]);
 	let eventRows = $state([]);
+	let vesselDirectoryRows = $state([]);
 	let deviationRows = $state([]);
 	let deviationPagination = $state({
 		page: 1,
@@ -82,7 +84,7 @@
 		hasPrevious: false
 	});
 
-	let selectedVesselId = $state('');
+	let selectedVesselIds = $state([]);
 	let selectedStatus = $state('');
 	let selectedAlarmTypes = $state([]);
 	let page = $state(1);
@@ -108,6 +110,10 @@
 		{
 			value: 'GPS_OFFLINE',
 			label: 'GPS Offline'
+		},
+		{
+			value: 'ABNORMAL_FUEL_CONSUMPTION',
+			label: 'Abnormal Fuel Consumption'
 		},
 		{
 			value: 'PANEL_OPEN',
@@ -173,16 +179,20 @@
 
 	let vesselOptions = $derived(
 		sortByAlpha(
-			[...monitorRows, ...eventRows]
-				.map((row) => ({
-					vesselId: row?.vesselId,
-					vesselName:
-						row?.vesselName ||
-						row?.vessel_name ||
-						row?.assetName ||
-						row?.deviceName ||
-						`Vessel ${row?.vesselId}`
-				}))
+			vesselDirectoryRows
+				.map((row) => {
+					const vesselId = row?.vesselId ?? row?.id;
+
+					return {
+						vesselId,
+						vesselName:
+							row?.vesselName ||
+							row?.name ||
+							row?.vessel_name ||
+							row?.deviceName ||
+							`Vessel ${vesselId}`
+					};
+				})
 				.filter((row) => row.vesselId !== undefined && row.vesselId !== null)
 				.reduce((items, row) => {
 					const exists = items.some((item) => String(item.vesselId) === String(row.vesselId));
@@ -222,7 +232,7 @@
 		selectedAlarmTypes = alarmTypeOptions
 			.map((option) => option.value)
 			.filter((type) => visibleDeviationTypes.has(type));
-		selectedVesselId = '';
+		selectedVesselIds = [];
 		selectedStatus = '';
 		page = 1;
 		closeDeviationOverlay();
@@ -240,27 +250,6 @@
 		if (acknowledged) return;
 
 		deviationAcknowledgeError = error || 'Failed to acknowledge alarms.';
-	}
-
-	function buildAlarmEventsQuery() {
-		const params = new SvelteURLSearchParams();
-
-		if (selectedVesselId) {
-			params.set('vesselId', selectedVesselId);
-		}
-
-		if (selectedStatus) {
-			params.set('status', selectedStatus);
-		}
-
-		if (selectedAlarmTypes.length) {
-			params.set('alarmType', selectedAlarmTypes.join(','));
-		}
-
-		params.set('page', String(page));
-		params.set('pageSize', String(pageSize));
-
-		return params.toString();
 	}
 
 	async function loadAlarmMonitor() {
@@ -370,7 +359,13 @@
 		error = '';
 
 		try {
-			const query = buildAlarmEventsQuery();
+			const query = buildAlarmEventsQuery({
+				vesselIds: selectedVesselIds,
+				status: selectedStatus,
+				alarmTypes: selectedAlarmTypes,
+				page,
+				pageSize
+			});
 
 			const response = await apiRequest(`/alarm/events?${query}`, {
 				method: 'GET'
@@ -419,8 +414,19 @@
 		}
 	}
 
+	async function loadAlarmVesselOptions() {
+		try {
+			const vessels = await getFleetVessels();
+			vesselDirectoryRows = Array.isArray(vessels) ? vessels : [];
+		} catch (err) {
+			console.error('[ALARM_VESSEL_OPTIONS_ERROR]', err);
+			error = err?.message || 'Failed to load alarm vessel options.';
+		}
+	}
+
 	async function loadAllAlarmData() {
 		await Promise.all([loadAlarmMonitor(), loadAlarmEvents()]);
+		await loadAlarmVesselOptions();
 	}
 
 	async function refreshAlarmData() {
@@ -433,7 +439,7 @@
 	}
 
 	async function handleResetFilter() {
-		selectedVesselId = '';
+		selectedVesselIds = [];
 		selectedStatus = '';
 		selectedAlarmTypes = [];
 		page = 1;
@@ -603,7 +609,7 @@
 			{vesselOptions}
 			{alarmTypeOptions}
 			{pagination}
-			bind:selectedVesselId
+			bind:selectedVesselIds
 			bind:selectedStatus
 			bind:selectedAlarmTypes
 			bind:pageSize
