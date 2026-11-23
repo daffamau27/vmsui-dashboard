@@ -40,13 +40,20 @@
 
 			<div class="column-filter-options">
 				{#each columns as option (option.key)}
-					<label class="column-filter-option" class:is-selected={option.selected}>
+					<label class="column-filter-option">
 						<input
 							type="checkbox"
 							checked={option.selected}
 							onchange={() => onToggleColumn?.(option.key)}
 						/>
-						<span>{option.label}</span>
+						<span class="column-filter-option-tile">
+							<span class="column-filter-option-name">{option.label}</span>
+							<span class="column-filter-option-corner" aria-hidden="true">
+								<svg viewBox="0 0 16 16" fill="none">
+									<path d="m3 8 3 3 7-7" stroke="currentColor" stroke-width="2" />
+								</svg>
+							</span>
+						</span>
 					</label>
 				{/each}
 			</div>
@@ -60,16 +67,20 @@
 
 					<div class="column-filter-options">
 						{#each fuelSources as source (source.key)}
-							<label
-								class="column-filter-option fuel-source-option"
-								class:is-selected={source.selected}
-							>
+							<label class="column-filter-option">
 								<input
 									type="checkbox"
 									checked={source.selected}
 									onchange={() => onToggleFuelSource?.(source.key)}
 								/>
-								<span>{source.label}</span>
+								<span class="column-filter-option-tile">
+									<span class="column-filter-option-name">{source.label}</span>
+									<span class="column-filter-option-corner" aria-hidden="true">
+										<svg viewBox="0 0 16 16" fill="none">
+											<path d="m3 8 3 3 7-7" stroke="currentColor" stroke-width="2" />
+										</svg>
+									</span>
+								</span>
 							</label>
 						{/each}
 					</div>

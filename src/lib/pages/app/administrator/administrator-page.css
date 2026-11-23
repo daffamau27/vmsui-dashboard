@@ -2938,6 +2938,36 @@ body {
 	.user-activity-table-wrap table {
 		min-width: 1500px;
 	}
+	.user-activity-actions-cell {
+		width: 92px;
+		text-align: center !important;
+		vertical-align: middle !important;
+	}
+	.user-activity-delete-button {
+		display: inline-grid;
+		width: 32px;
+		height: 32px;
+		place-items: center;
+		border: 1px solid #fecaca;
+		border-radius: 9px;
+		padding: 0;
+		background: var(--color-danger-muted);
+		color: #b91c1c;
+		cursor: pointer;
+		transition:
+			background 160ms ease,
+			color 160ms ease,
+			transform 160ms ease;
+	}
+	.user-activity-delete-button:hover:not(:disabled) {
+		background: #fee2e2;
+		color: #991b1b;
+		transform: translateY(-1px);
+	}
+	.user-activity-delete-button:disabled {
+		cursor: not-allowed;
+		opacity: 0.55;
+	}
 	.global-audit-table-wrap th,
 	.global-audit-table-wrap td {
 		padding: 11px 12px;

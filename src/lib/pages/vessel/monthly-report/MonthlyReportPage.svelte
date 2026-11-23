@@ -11,6 +11,7 @@
 	import { downloadApiFile, apiRequest } from '$lib/api/authApi.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { getAutoTimezoneLabelFromSources } from '$lib/utils/autoTimezoneLabel.js';
+	import { getDailyReportHref, getMonthlyRowReportDate } from '$lib/utils/dailyReportNavigation.js';
 	import {
 		currentMonth,
 		getMonthlyRangeLimitText,
@@ -29,6 +30,7 @@
 	let exportingPdf = $derived(exportFormat === 'pdf');
 	let error = $state('');
 	let reportData = $state(null);
+	let loadedReportContext = $state(null);
 
 	let reportMonth = $state('');
 	let startDate = $state('');
@@ -1492,10 +1494,18 @@
 	let monthlyTableRows = $derived(
 		monthlyRows.map((row, index) => {
 			const isFuture = isFutureMonthlyRow(row);
+			const reportDate = getMonthlyRowReportDate(row, loadedReportContext?.month);
 
 			return {
 				key: `${getDateCell(row)}-${index}`,
 				dateLabel: getDateCell(row),
+				reportDate,
+				dailyReportHref:
+					hasPermission('access_daily_report') &&
+					loadedReportContext &&
+					String(loadedReportContext.vesselId) === String($selectedVesselId)
+						? getDailyReportHref({ ...loadedReportContext, date: reportDate })
+						: '',
 				isFuture,
 				dataReceived: getDataReceived(row),
 				runtimes: monthlyEngines.map((engine) => getRuntime(row, engine.key)),
@@ -1541,6 +1551,12 @@
 
 		loading = true;
 		error = '';
+		const reportContext = {
+			vesselId: $selectedVesselId,
+			month: reportMonth,
+			timezoneMode,
+			timezoneOffset
+		};
 
 		try {
 			if (
@@ -1551,16 +1567,14 @@
 			}
 
 			const result = await getMonthlyReportData({
-				vesselId: $selectedVesselId,
-				month: reportMonth,
+				...reportContext,
 				startDate: rangeValidation.startDate,
 				endDate: rangeValidation.endDate,
-				timezoneMode,
-				timezoneOffset,
 				columns: getSelectedMonthlyApiColumnKeys().join(',')
 			});
 
 			reportData = result;
+			loadedReportContext = reportContext;
 			hasLoadedDateRange = true;
 
 			const payload = result?.data || result || {};
@@ -1760,6 +1774,7 @@
 			/>
 
 			<MonthlyReportTable
+				active={active && !shouldShowDateRangeOverlay}
 				rows={monthlyTableRows}
 				engines={monthlyEngines}
 				fuelSources={visibleMonthlyEngineFuelSources}

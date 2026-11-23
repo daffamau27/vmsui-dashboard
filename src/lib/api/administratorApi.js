@@ -667,6 +667,25 @@ export async function getUserLoginActivitiesAdminApi({
   return unwrap(response);
 }
 
+export async function deleteUserSessionAdminApi(refreshTokenId) {
+  if (
+    refreshTokenId === null ||
+    refreshTokenId === undefined ||
+    String(refreshTokenId).trim() === ""
+  ) {
+    throw new Error("Refresh Token ID tidak valid.");
+  }
+
+  const response = await apiRequest(
+    `/users/sessions/${encodeURIComponent(String(refreshTokenId))}`,
+    {
+      method: "DELETE"
+    }
+  );
+
+  return unwrap(response);
+}
+
 export async function exportGlobalAuditLogsCsvAdminApi({
   userId = "",
   startDate = "",

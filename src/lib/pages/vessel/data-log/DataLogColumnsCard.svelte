@@ -35,13 +35,20 @@
 
 	<div class="column-grid">
 		{#each columns as column (column)}
-			<label class="column-item" class:is-checked={selectedColumns.includes(column)}>
+			<label class="column-item">
 				<input
 					type="checkbox"
 					checked={selectedColumns.includes(column)}
 					onchange={() => onToggle?.(column)}
 				/>
-				<span>{getColumnLabel?.(column, columns)}</span>
+				<span class="column-item-tile">
+					<span class="column-item-name">{getColumnLabel?.(column, columns)}</span>
+					<span class="column-item-corner" aria-hidden="true">
+						<svg viewBox="0 0 16 16" fill="none">
+							<path d="m3 8 3 3 7-7" stroke="currentColor" stroke-width="2" />
+						</svg>
+					</span>
+				</span>
 			</label>
 		{/each}
 	</div>

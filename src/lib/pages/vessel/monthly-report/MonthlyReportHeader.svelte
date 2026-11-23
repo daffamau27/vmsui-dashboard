@@ -31,6 +31,7 @@
 	} = $props();
 
 	let dateRangeDropdownOpen = $state(false);
+	let dateRangeComboElement = $state(null);
 	let hoveredCalendarDay = $state('');
 	let hoveredCalendarKind = $state('');
 	let monthlyDayClickCount = $state(0);
@@ -130,7 +131,15 @@
 	function handleTimezoneChange() {
 		onRangeChange?.();
 	}
+
+	function handleDocumentClick(event) {
+		if (dateRangeDropdownOpen && !dateRangeComboElement?.contains(event.target)) {
+			dateRangeDropdownOpen = false;
+		}
+	}
 </script>
+
+<svelte:window onclick={handleDocumentClick} />
 
 <section class="monthly-header-card">
 	<div class="monthly-header-copy">
@@ -157,7 +166,7 @@
 
 			<label>
 				<span>Date Range</span>
-				<div class="date-range-combo">
+				<div class="date-range-combo" bind:this={dateRangeComboElement}>
 					<button
 						type="button"
 						class="date-range-trigger"

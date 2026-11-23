@@ -1,5 +1,7 @@
 <script>
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy, untrack } from 'svelte';
+	import { page } from '$app/state';
+	import { readDailyReportLink } from '$lib/utils/dailyReportNavigation.js';
 	import { selectedVesselId, selectedVesselInfo } from '$lib/stores/selectedVessel.svelte.js';
 	import { setPageStatus } from '$lib/stores/pageStatusStore.svelte.js';
 	import {
@@ -66,6 +68,8 @@
 	let timezoneMode = $state('auto');
 	let timezoneOffset = $state('+07:00');
 	let hasLoadedDateRange = $state(false);
+	let lastDailyReportLink = '';
+	let dailyReportRequestId = 0;
 	let selectedRpmRuntimeFuelTableKey = $state('');
 
 	let zoomPluginRegistered = false;
@@ -3739,6 +3743,7 @@
 	}
 
 	async function loadDailyReport() {
+		const requestId = ++dailyReportRequestId;
 		if (!$selectedVesselId) {
 			error = 'No vessel has been selected from Fleet View.';
 			reportData = null;
@@ -3765,6 +3770,7 @@
 				getEngineCurvesForVessel($selectedVesselId),
 				mapAssetRows.length ? Promise.resolve(mapAssetRows) : loadMapAssets()
 			]);
+			if (requestId !== dailyReportRequestId) return;
 
 			reportData = result;
 			engineCurveData = curveResult;
@@ -3776,13 +3782,14 @@
 			console.log('[DAILY_REPORT_DATA]', result);
 			console.log('[DAILY_ENGINE_CURVES]', curveResult);
 		} catch (err) {
+			if (requestId !== dailyReportRequestId) return;
 			console.error('[DAILY_REPORT_ERROR]', err);
 			error = err?.message || 'Failed to load daily report.';
 			reportData = null;
 			engineCurveData = null;
 			hasLoadedDateRange = false;
 		} finally {
-			loading = false;
+			if (requestId === dailyReportRequestId) loading = false;
 		}
 	}
 
@@ -3866,9 +3873,33 @@
 	}
 
 	onMount(() => {
-		reportDate = todayDate();
+		const linkedReport = readDailyReportLink(page.url);
+		reportDate = linkedReport?.date || todayDate();
 
-		if (autoLoad) loadDailyReport();
+		if (autoLoad && !linkedReport) loadDailyReport();
+	});
+
+	onDestroy(() => {
+		dailyReportRequestId += 1;
+	});
+
+	$effect(() => {
+		const linkedReport = readDailyReportLink(page.url);
+		if (!active || !linkedReport) {
+			lastDailyReportLink = '';
+			return;
+		}
+		if (String($selectedVesselId) !== linkedReport.vesselId) return;
+		const key = JSON.stringify(linkedReport);
+		if (lastDailyReportLink === key) return;
+		lastDailyReportLink = key;
+		untrack(() => {
+			reportDate = linkedReport.date;
+			timezoneMode = linkedReport.timezoneMode;
+			timezoneOffset = linkedReport.timezoneOffset;
+			hasLoadedDateRange = false;
+			loadDailyReport();
+		});
 	});
 
 	$effect(() => {

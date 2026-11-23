@@ -1,4 +1,5 @@
 <script>
+	import { Trash2 } from 'lucide-svelte';
 	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { onMount, tick } from 'svelte';
 	import { fade, fly } from 'svelte/transition';
@@ -61,6 +62,7 @@
 		syncAllVesselsAdminApi,
 		getGlobalAuditLogsAdminApi,
 		getUserLoginActivitiesAdminApi,
+		deleteUserSessionAdminApi,
 		exportGlobalAuditLogsCsvAdminApi
 	} from '$lib/api/administratorApi.js';
 
@@ -198,6 +200,7 @@
 
 	let userLoginActivities = [];
 	let userLoginActivityLoading = false;
+	let userLoginActivityActionLoadingId = null;
 	let userLoginActivityPagination = {
 		page: 1,
 		pageSize: 20,
@@ -318,10 +321,51 @@
 				...userLoginActivityFilters,
 				page: userLoginActivityPagination.page || page
 			};
+			return true;
 		} catch (error) {
 			showAlert('error', error.message || 'Failed to load user login activities.');
+			return false;
 		} finally {
 			userLoginActivityLoading = false;
+		}
+	}
+
+	async function deleteUserLoginActivitySession(activity) {
+		const refreshTokenId = activity?.refreshTokenId;
+
+		if (
+			refreshTokenId === null ||
+			refreshTokenId === undefined ||
+			String(refreshTokenId).trim() === ""
+		) {
+			showAlert('error', 'Refresh Token ID is missing.');
+			return;
+		}
+
+		if (String(activity?.statusSession || '').toLowerCase() !== 'active') return;
+
+		const displayName =
+			activity.username || activity.name || `user ${activity.userId ?? ''}`.trim();
+		const confirmed = window.confirm(
+			`Delete active session for "${displayName}" (Refresh Token ID ${refreshTokenId})?`
+		);
+
+		if (!confirmed) return;
+
+		userLoginActivityActionLoadingId = String(refreshTokenId);
+		clearAlert();
+
+		try {
+			await deleteUserSessionAdminApi(refreshTokenId);
+			const activitiesReloaded = await loadUserLoginActivities(userLoginActivityFilters.page);
+
+			if (activitiesReloaded) {
+				showAlert('success', 'Session deleted successfully.');
+			}
+		} catch (error) {
+			showAlert('error', error.message || 'Failed to delete session.');
+		} finally {
+			userLoginActivityActionLoadingId = null;
 		}
 	}
 
@@ -7014,6 +7058,7 @@
 													<th>Session Expiry</th>
 													<th>Session Status</th>
 													<th>Timezone</th>
+													<th>Actions</th>
 												</tr>
 											</thead>
 
@@ -7050,6 +7095,20 @@
 															</span>
 														</td>
 														<td>{activity.timezone || '-'}</td>
+														<td class="user-activity-actions-cell">
+															{#if String(activity.statusSession || '').toLowerCase() === 'active' && activity.refreshTokenId !== null && activity.refreshTokenId !== undefined && String(activity.refreshTokenId).trim() !== ''}
+																<button
+																	type="button"
+																	class="user-activity-delete-button"
+																	title="Delete session"
+																	aria-label={`Delete session for ${activity.username || activity.name || activity.userId}`}
+																	on:click={() => deleteUserLoginActivitySession(activity)}
+																	disabled={userLoginActivityLoading || userLoginActivityActionLoadingId !== null}
+																>
+																	<Trash2 size={16} aria-hidden="true" />
+																</button>
+															{/if}
+														</td>
 													</tr>
 												{/each}
 											</tbody>

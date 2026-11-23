@@ -1,5 +1,7 @@
 <script>
-	import { onMount, onDestroy, tick } from 'svelte';
+	import { onMount, onDestroy, tick, untrack } from 'svelte';
+	import { page } from '$app/state';
+	import { readDailyReportLink } from '$lib/utils/dailyReportNavigation.js';
 	import { activeVesselMenu, setActiveVesselMenu } from '$lib/stores/vesselNavigation.svelte.js';
 	import { apiRequest } from '$lib/api/authApi.js';
 	import { updateVesselHireStatusAdminApi as updateVesselHireStatusApi } from '$lib/api/administratorApi.js';
@@ -41,6 +43,7 @@
 	let vessels = $state([]);
 	let vesselLoading = $state(false);
 	let vesselError = $state('');
+	let lastDailyReportLink = '';
 	let hireStatusLoading = $state(false);
 	let hireStatusError = $state('');
 	let hireStatusModalOpen = $state(false);
@@ -1003,7 +1006,7 @@
 				getVesselCompanyName
 			);
 
-			const currentId = $selectedVesselId;
+			const currentId = readDailyReportLink(page.url)?.vesselId || $selectedVesselId;
 
 			if (currentId && vessels.length) {
 				const found = vessels.find((item) => Number(getVesselId(item)) === Number(currentId));
@@ -1023,6 +1026,25 @@
 			vesselLoading = false;
 		}
 	}
+
+	$effect(() => {
+		const linkedReport = readDailyReportLink(page.url);
+		if (!active || !linkedReport) {
+			lastDailyReportLink = '';
+			return;
+		}
+		const key = JSON.stringify(linkedReport);
+		if (vesselLoading || !vessels.length || lastDailyReportLink === key) return;
+		lastDailyReportLink = key;
+		const linkedVessel = vessels.find(
+			(vessel) => String(getVesselId(vessel)) === linkedReport.vesselId
+		);
+		untrack(() => {
+			if (linkedVessel && String($selectedVesselId) !== linkedReport.vesselId) {
+				setSelectedVessel(linkedVessel);
+			}
+		});
+	});
 
 	function openHireStatusModal() {
 		const vesselId = getVesselId(selectedVesselRecord) || $selectedVesselId;

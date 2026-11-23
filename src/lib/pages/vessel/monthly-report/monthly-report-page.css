@@ -640,85 +640,96 @@
 	}
 
 	.column-filter-options {
-		display: flex;
-		align-items: center;
-		flex-wrap: wrap;
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
 		gap: 6px;
 	}
 
 	.column-filter-option {
 		position: relative;
-		display: inline-flex;
-		align-items: center;
-		gap: 7px;
-		min-height: 24px;
-		padding: 4px 7px;
-		border: 1px solid #cbd5e1;
-		background: var(--color-surface);
-		color: var(--text-primary);
-		font-size: 10.5px;
-		font-weight: 800;
+		display: flex;
+		min-width: 0;
 		cursor: pointer;
-		user-select: none;
-		transition:
-			background 0.16s ease,
-			border-color 0.16s ease,
-			color 0.16s ease,
-			box-shadow 0.16s ease;
 	}
 
 	.column-filter-option input {
-		position: relative;
-		appearance: none;
-		width: 14px;
-		height: 14px;
+		position: absolute;
+		inset: 0;
+		z-index: 1;
+		width: 100%;
+		height: 100%;
 		margin: 0;
-		border: 1px solid #64748b;
-		background: rgba(15, 23, 42, 0.28);
-		display: inline-grid;
-		place-items: center;
+		opacity: 0;
+		cursor: pointer;
+	}
+
+	.column-filter-option-tile {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		min-width: 0;
+		min-height: 36px;
+		padding: 6px 18px 6px 8px;
+		border: 1px solid rgba(148, 163, 184, 0.35);
+		border-radius: 4px;
+		background: var(--color-elevated);
+		color: var(--text-secondary);
+		box-sizing: border-box;
+		overflow: hidden;
 		transition:
-			background 0.16s ease,
-			border-color 0.16s ease,
-			box-shadow 0.16s ease;
+			border-color 140ms ease,
+			background 140ms ease,
+			color 140ms ease;
 	}
 
-	.column-filter-option input::after {
-		content: '';
-		width: 7px;
-		height: 4px;
-		border-left: 2px solid #ffffff;
-		border-bottom: 2px solid #ffffff;
-		transform: rotate(-45deg) scale(0);
-		transform-origin: center;
-		transition: transform 0.14s ease;
+	.column-filter-option-name {
+		font-size: 11px;
+		line-height: 1.3;
+		font-weight: 700;
+		text-align: center;
+		overflow-wrap: anywhere;
 	}
 
-	.column-filter-option input:checked {
-		border-color: #60a5fa;
-		background: #2563eb;
-		box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+	.column-filter-option:hover .column-filter-option-tile {
+		border-color: var(--color-accent);
+		color: var(--text-primary);
 	}
 
-	.column-filter-option input:checked::after {
-		transform: rotate(-45deg) scale(1);
+	.column-filter-option input:checked + .column-filter-option-tile {
+		border-color: var(--color-accent);
+		background: var(--color-accent-muted);
+		color: var(--text-accent);
 	}
 
-	.column-filter-option.is-selected {
-		border-color: rgba(96, 165, 250, 0.8);
-		background: rgba(37, 99, 235, 0.22);
-		color: #dbeafe;
-		box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.18);
+	.column-filter-option input:focus-visible + .column-filter-option-tile {
+		outline: 2px solid var(--text-accent);
+		outline-offset: 1px;
 	}
 
-	.fuel-source-option {
-		background: rgba(37, 99, 235, 0.07);
-		border-color: rgba(37, 99, 235, 0.22);
+	.column-filter-option-corner {
+		position: absolute;
+		right: 0;
+		bottom: 0;
+		width: 20px;
+		height: 20px;
+		background: var(--color-accent);
+		color: #ffffff;
+		clip-path: polygon(100% 0, 100% 100%, 0 100%);
+		opacity: 0;
 	}
 
-	.fuel-source-option.is-selected {
-		background: rgba(37, 99, 235, 0.3);
-		border-color: rgba(96, 165, 250, 0.9);
+	.column-filter-option-corner svg {
+		position: absolute;
+		right: 1px;
+		bottom: 1px;
+		width: 11px;
+		height: 11px;
+	}
+
+	.column-filter-option input:checked + .column-filter-option-tile .column-filter-option-corner {
+		opacity: 1;
 	}
 
 	.monthly-table-wrapper {
@@ -771,17 +782,13 @@
 		text-align: center;
 		white-space: nowrap;
 		font-size: 11px;
-		font-weight: 700;
+		font-weight: 500;
 		color: var(--text-primary);
 		background: var(--color-surface);
 	}
 
-	.monthly-report-table tbody tr:nth-child(even) td {
-		background: var(--color-elevated);
-	}
-
 	.monthly-report-table tbody tr:hover td {
-		background: var(--color-elevated);
+		background: rgba(59, 130, 246, 0.22) !important;
 	}
 
 	.monthly-report-table .sticky-col {
@@ -802,13 +809,14 @@
 		box-shadow: 1px 0 0 #d7dee8;
 	}
 
+	/* layout.css forces every td to font-weight 500 with !important. */
 	.monthly-report-table .date-cell {
-		font-weight: 900;
+		font-weight: 700 !important;
 		color: var(--text-primary);
 	}
 
 	.monthly-report-table .total-col {
-		font-weight: 900;
+		font-weight: 900 !important;
 		color: var(--text-primary);
 		background: var(--color-elevated);
 	}
