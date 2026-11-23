@@ -703,7 +703,7 @@
 		};
 	}
 
-	async function loadLatestVesselStatus(vesselId) {
+	async function loadLatestVesselStatus(vesselId, { polling = false } = {}) {
 		const effectiveVesselId = vesselId || $selectedVesselId || getVesselId($selectedVesselInfo);
 
 		console.log('[VESSEL_PAGE][LATEST_STATUS][CALL]', {
@@ -736,7 +736,8 @@
 
 		try {
 			const response = await apiRequest(`/vessels/${effectiveVesselId}/latest-status`, {
-				method: 'GET'
+				method: 'GET',
+				polling
 			});
 
 			console.log('[VESSEL_PAGE][LATEST_STATUS][RESPONSE]', response);
@@ -766,7 +767,7 @@
 		}
 	}
 
-	async function loadTodayDataReceivedStatus(vesselId) {
+	async function loadTodayDataReceivedStatus(vesselId, { polling = false } = {}) {
 		const effectiveVesselId = vesselId || $selectedVesselId || getVesselId($selectedVesselInfo);
 
 		if (!effectiveVesselId) {
@@ -782,7 +783,8 @@
 			const response = await getDailyReportData({
 				vesselId: effectiveVesselId,
 				date,
-				timezoneMode: 'auto'
+				timezoneMode: 'auto',
+				polling
 			});
 
 			if (requestId !== todayDataReceivedRequestId) return;
@@ -831,8 +833,8 @@
 		loadTodayDataReceivedStatus(effectiveVesselId);
 
 		latestStatusInterval = setInterval(() => {
-			loadLatestVesselStatus(effectiveVesselId);
-			loadTodayDataReceivedStatus(effectiveVesselId);
+			loadLatestVesselStatus(effectiveVesselId, { polling: true });
+			loadTodayDataReceivedStatus(effectiveVesselId, { polling: true });
 		}, 30000);
 	}
 

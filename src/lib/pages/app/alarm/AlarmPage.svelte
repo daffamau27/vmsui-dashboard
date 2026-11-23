@@ -252,13 +252,14 @@
 		deviationAcknowledgeError = error || 'Failed to acknowledge alarms.';
 	}
 
-	async function loadAlarmMonitor() {
+	async function loadAlarmMonitor({ polling = false } = {}) {
 		loadingMonitor = true;
 		error = '';
 
 		try {
 			const response = await apiRequest('/alarm/monitor', {
-				method: 'GET'
+				method: 'GET',
+				polling
 			});
 
 			const payload = response?.data || {};
@@ -290,7 +291,7 @@
 		loadingDeviations = false;
 	}
 
-	async function loadMonitorDeviations({ openOverlay = false } = {}) {
+	async function loadMonitorDeviations({ openOverlay = false, polling = false } = {}) {
 		if (!active || !canViewDeviations || loadingDeviations || acknowledging) return;
 
 		const requestVersion = ++deviationRequestVersion;
@@ -301,7 +302,8 @@
 		try {
 			const response = await apiRequest('/alarm/monitor-deviations?page=1&pageSize=20', {
 				method: 'GET',
-				signal: controller.signal
+				signal: controller.signal,
+				polling
 			});
 			if (requestVersion !== deviationRequestVersion || !active || !canViewDeviations) return;
 			const payload = response?.data || {};
@@ -496,7 +498,7 @@
 
 		refreshTimer = setInterval(() => {
 			if (!active) return;
-			loadAlarmMonitor();
+			loadAlarmMonitor({ polling: true });
 		}, 10000);
 	}
 
@@ -511,7 +513,7 @@
 		stopDeviationAutoRefresh();
 
 		deviationRefreshTimer = setInterval(() => {
-			loadMonitorDeviations();
+			loadMonitorDeviations({ polling: true });
 		}, 60000);
 	}
 

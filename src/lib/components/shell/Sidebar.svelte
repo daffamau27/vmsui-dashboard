@@ -75,7 +75,7 @@
 		return alarmMenu ? hasPermission(alarmMenu) : false;
 	}
 
-	async function loadActiveAlarmCount() {
+	async function loadActiveAlarmCount({ polling = false } = {}) {
 		if (!browser) return;
 
 		if (!canAccessAlarmMenu()) {
@@ -85,7 +85,8 @@
 
 		try {
 			const response = await apiRequest('/alarm/monitor', {
-				method: 'GET'
+				method: 'GET',
+				polling
 			});
 
 			const payload = response?.data || {};
@@ -112,10 +113,10 @@
 	function startAlarmBadgeRefresh() {
 		stopAlarmBadgeRefresh();
 
-		loadActiveAlarmCount();
+		loadActiveAlarmCount({ polling: true });
 
 		alarmBadgeTimer = setInterval(() => {
-			loadActiveAlarmCount();
+			loadActiveAlarmCount({ polling: true });
 		}, alarmBadgeRefreshMs);
 	}
 

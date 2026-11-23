@@ -1,18 +1,19 @@
 import { apiRequest } from "$lib/api/authApi.js";
 
-export async function getVesselDashboard(vesselId) {
+export async function getVesselDashboard(vesselId, { polling = false } = {}) {
   if (!vesselId) {
     throw new Error("vesselId required.");
   }
 
   const response = await apiRequest(`/dashboard/vessels/${vesselId}`, {
-    method: "GET"
+    method: "GET",
+    polling
   });
 
   return response?.data || response;
 }
 
-export async function getLatestCctvSnapshots(vesselId, cameraName = "") {
+export async function getLatestCctvSnapshots(vesselId, cameraName = "", { polling = false } = {}) {
   if (!vesselId) {
     throw new Error("vesselId required.");
   }
@@ -27,7 +28,8 @@ export async function getLatestCctvSnapshots(vesselId, cameraName = "") {
   const response = await apiRequest(
     `/cctv/vessels/${vesselId}/snapshots/latest${query ? `?${query}` : ""}`,
     {
-      method: "GET"
+      method: "GET",
+      polling
     }
   );
 

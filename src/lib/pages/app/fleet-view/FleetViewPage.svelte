@@ -2138,7 +2138,7 @@
 		return null;
 	}
 
-	async function loadFleetVessels({ silent = false } = {}) {
+	async function loadFleetVessels({ silent = false, polling = false } = {}) {
 		if (fleetRefreshInProgress) return;
 
 		fleetRefreshInProgress = true;
@@ -2153,7 +2153,7 @@
 		}
 
 		try {
-			const vessels = await getFleetVessels({});
+			const vessels = await getFleetVessels({ polling });
 			const previousVesselMap = new Map(
 				vesselData.map((item) => [String(item.id ?? item.vesselId), item])
 			);
@@ -2356,7 +2356,8 @@
 			if (!isFleetMounted) return;
 
 			loadFleetVessels({
-				silent: true
+				silent: true,
+				polling: true
 			});
 		}, FLEET_REFRESH_INTERVAL_MS);
 	}

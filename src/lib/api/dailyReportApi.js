@@ -16,7 +16,8 @@ export async function getDailyReportData({
   vesselId,
   date,
   timezoneMode = "auto",
-  timezoneOffset = ""
+  timezoneOffset = "",
+  polling = false
 }) {
   if (!vesselId) throw new Error("vesselId is required.");
   if (!date) throw new Error("The report date is mandatory.");
@@ -29,7 +30,8 @@ export async function getDailyReportData({
   });
 
   const response = await apiRequest(`/daily-reports/data?${query}`, {
-    method: "GET"
+    method: "GET",
+    polling
   });
 
   return response?.data || response;

@@ -75,7 +75,7 @@ function normalizeFleetVessel(item) {
   };
 }
 
-export async function getFleetVessels({ status = '' } = {}) {
+export async function getFleetVessels({ status = '', polling = false } = {}) {
 	const params = new URLSearchParams();
 
 	if (status && status !== 'all') params.set('status', status);
@@ -87,7 +87,8 @@ export async function getFleetVessels({ status = '' } = {}) {
 		method: 'GET',
 		headers: {
 			accept: 'application/json'
-		}
+		},
+		polling
 	});
 
 	return sortByAlpha(response?.data ?? [], getVesselSortName, (item) => item?.companyName);

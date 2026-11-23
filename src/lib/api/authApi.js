@@ -102,6 +102,12 @@ export async function apiRequest(path, options = {}) {
 		...(options.headers || {})
 	};
 
+	// Polling requests identify themselves so the backend can distinguish them
+	// from user-initiated activity (e.g. website session idle tracking).
+	if (options.polling) {
+		headers['X-Polling'] = 'true';
+	}
+
 	const isFormData = options.body instanceof FormData;
 
 	if (!isFormData && !headers['Content-Type']) {
@@ -113,6 +119,7 @@ export async function apiRequest(path, options = {}) {
 	}
 
 	const { rawResponse, responseType, ...fetchOptions } = options;
+	delete fetchOptions.polling;
 
 	const response = await fetch(`${apiBaseUrl}${path}`, {
 		...fetchOptions,
@@ -178,6 +185,9 @@ export async function apiRequest(path, options = {}) {
 export async function loginApi({ username, password }) {
 	const response = await apiRequest('/auth/login', {
 		method: 'POST',
+		headers: {
+			'x-source': 'website'
+		},
 		body: JSON.stringify({ username, password })
 	});
 
