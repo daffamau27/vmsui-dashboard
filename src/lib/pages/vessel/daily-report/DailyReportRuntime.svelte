@@ -1,4 +1,6 @@
 <script>
+	import { Clock } from 'lucide-svelte';
+
 	let { rows = [] } = $props();
 
 	function formatNumber(value, digits = 2, fallback = '-') {
@@ -27,9 +29,14 @@
 
 <section class="table-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">Runtime</span>
-			<h2>Engine Running Hour</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-amber" aria-hidden="true">
+				<Clock size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">Runtime</span>
+				<h2>Engine Running Hour</h2>
+			</div>
 		</div>
 		<strong>{rows.length} rows</strong>
 	</div>

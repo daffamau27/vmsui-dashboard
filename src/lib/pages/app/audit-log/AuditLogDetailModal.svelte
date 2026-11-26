@@ -1,6 +1,7 @@
 <script>
 	import { fade } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
+	import { FileText, ScrollText, X } from 'lucide-svelte';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { slideScale } from '$lib/utils/modalTransition.js';
 	import './audit-log-page.css';
@@ -33,12 +34,19 @@
 			out:slideScale={{ intro: false, distance: 480, start: 0.6, fadeAt: 0.3, duration: 280 }}
 		>
 			<div class="detail-header">
-				<div>
-					<span class="section-kicker">Detail</span>
-					<h2>Audit Log Detail</h2>
+				<div class="section-heading">
+					<span class="mini-heading-icon tone-violet" aria-hidden="true">
+						<ScrollText size={14} strokeWidth={2.3} />
+					</span>
+					<div>
+						<span class="section-kicker">Detail</span>
+						<h2>Audit Log Detail</h2>
+					</div>
 				</div>
 
-				<button type="button" class="close-btn" onclick={() => onClose?.()}> × </button>
+				<button type="button" class="close-btn" onclick={() => onClose?.()} aria-label="Close detail">
+					<X size={15} strokeWidth={2.6} />
+				</button>
 			</div>
 
 			<div class="detail-body">
@@ -84,9 +92,14 @@
 
 					<div class="changes-card">
 						<div class="section-header compact">
-							<div>
-								<span class="section-kicker">Changes</span>
-								<h2>Modification Detail</h2>
+							<div class="section-heading">
+								<span class="mini-heading-icon tone-cyan" aria-hidden="true">
+									<FileText size={14} strokeWidth={2.3} />
+								</span>
+								<div>
+									<span class="section-kicker">Changes</span>
+									<h2>Modification Detail</h2>
+								</div>
 							</div>
 
 							<strong>{detail.changes?.length || 0} items</strong>

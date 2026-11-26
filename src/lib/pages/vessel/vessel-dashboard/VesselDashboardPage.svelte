@@ -780,7 +780,8 @@
 				: '-',
 			weatherCondition: day.weather?.condition || '-',
 			currentLabel: day.current ? `${formatNumber(day.current.speed_kph, 1)} kph` : '-',
-			currentDirection: day.current ? formatCurrentDirectionAngle(day.current) : '-'
+			currentDirection: day.current ? formatCurrentDirectionAngle(day.current) : '-',
+			currentDirectionDeg: day.current ? getCurrentDirectionDegrees(day.current) : null
 		}))
 	);
 
@@ -814,7 +815,8 @@
 			key: day.key,
 			label: day.label,
 			value: day.current ? `${formatNumber(day.current.speed_kph, 1)} kph` : '-',
-			direction: day.current ? formatCurrentDirectionAngle(day.current) : '-'
+			direction: day.current ? formatCurrentDirectionAngle(day.current) : '-',
+			directionDeg: day.current ? getCurrentDirectionDegrees(day.current) : null
 		}))
 	);
 
@@ -2256,7 +2258,7 @@
 </script>
 
 <section class="dashboard-content">
-	<VesselDashboardHeader vesselName={vesselInfo.vesselName} />
+	<VesselDashboardHeader vesselName={vesselInfo.vesselName} online={vesselInfo.online} />
 
 	{#if !active || loading || currentUserLoading}
 		<LoadingSkeleton label="Loading vessel dashboard data" variant="vessel-dashboard" />

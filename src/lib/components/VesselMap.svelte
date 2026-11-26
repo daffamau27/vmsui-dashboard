@@ -4,7 +4,7 @@
 	import { getFleetAssets } from '$lib/api/fleetApi.js';
 	import { addMapTileLayer } from '$lib/utils/mapStyle.js';
 	import { addLeafletZoomAndScale } from '$lib/utils/leafletControls.js';
-	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
+	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue, normalizeAssetType } from '$lib/utils/assetIcons.js';
 	import { addMapZonesToLeafletMap, normalizeMapZonesFromAssets } from '$lib/utils/mapZones.js';
 	import {
 		createCopyableCoordinateHtml,
@@ -41,16 +41,13 @@
 	let isMounted = false;
 	let mapZones = $state([]);
 	let mapAssets = $state([]);
-	let showMapLegend = $state(false);
+	let showMapLegend = $state(true);
 	let assetLegendItems = $derived.by(() => {
 		const seenTypes = new Set();
 
 		return mapAssets
 			.map((asset) => {
-				const typeValue = String(getAssetTypeValue(asset) || 'asset')
-					.trim()
-					.toLowerCase();
-				const key = typeValue || 'asset';
+				const key = normalizeAssetType(getAssetTypeValue(asset)) || 'asset';
 
 				if (seenTypes.has(key)) return null;
 				seenTypes.add(key);
@@ -344,9 +341,10 @@
 
 	function createAssetMarkerIcon(asset) {
 		const typeLabel = getAssetTypeLabel(asset);
+		const typeKey = normalizeAssetType(getAssetTypeValue(asset)) || 'asset';
 
 		return L.divIcon({
-			className: 'vessel-map-asset-icon',
+			className: `vessel-map-asset-icon asset-type-${typeKey}`,
 			html: `
         <img
           class="vessel-map-asset-marker"
@@ -1053,21 +1051,16 @@
 	<div
 		class="vessel-map-legends"
 		class:fullscreen-legends={isFullscreen}
-		class:legends-collapsed={!showMapLegend}
 	>
 		{#if showTraceLine || mapZones.length || assetLegendItems.length}
-			<button
-				type="button"
-				class="legend-toggle"
-				aria-expanded={showMapLegend}
-				aria-label={showMapLegend ? 'Hide legend' : 'Show legend'}
-				onclick={() => (showMapLegend = !showMapLegend)}
-			>
-				Legend
-			</button>
-
-			<div class="vessel-map-combined-legend" aria-label="Map legend">
-				{#if showTraceLine}
+			<div class="legend-drawer">
+				<div class="legend-reveal" class:is-hidden={!showMapLegend}>
+					<div
+						class="vessel-map-combined-legend"
+						aria-label="Map legend"
+						aria-hidden={!showMapLegend}
+					>
+					{#if showTraceLine}
 					<div class="legend-group legend-speed-group">
 						<span class="legend-title">Speed</span>
 						<div class="legend-items legend-speed-items">
@@ -1087,8 +1080,8 @@
 							<div class="legend-group">
 								<span class="legend-title">Assets</span>
 								<div class="legend-items asset-items">
-									{#each assetLegendItems as asset}
-										<span>
+									{#each assetLegendItems as asset (asset.key)}
+										<span class="asset-type-{asset.key ?? 'asset'}">
 											<img src={asset.iconUrl} alt="" aria-hidden="true" />
 											{asset.label}
 										</span>
@@ -1115,6 +1108,18 @@
 						{/if}
 					</div>
 				{/if}
+				</div>
+			</div>
+			<button
+				type="button"
+				class="legend-toggle"
+				aria-expanded={showMapLegend}
+				aria-label={showMapLegend ? 'Hide legend' : 'Show legend'}
+				title={showMapLegend ? 'Hide legend' : 'Show legend'}
+				onclick={() => (showMapLegend = !showMapLegend)}
+			>
+				<span class="legend-toggle-icon" aria-hidden="true">{showMapLegend ? '<' : '>'}</span>
+			</button>
 			</div>
 		{/if}
 	</div>
@@ -1142,25 +1147,64 @@
 		pointer-events: none;
 	}
 
-	.legend-toggle {
-		display: none;
+	.legend-drawer {
+		display: flex;
 		align-items: center;
-		height: 30px;
-		padding: 0 10px;
-		border: 1px solid rgba(148, 163, 184, 0.32);
-		border-radius: 9px;
-		background: rgba(15, 23, 42, 0.82);
-		color: #e2e8f0;
-		font-size: 10px;
-		font-weight: 800;
-		white-space: nowrap;
+		min-width: 0;
+		max-width: 100%;
+		pointer-events: none;
+	}
+
+	.legend-toggle {
+		flex: 0 0 auto;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 20px;
+		height: 106px;
+		min-width: 20px;
+		padding: 0;
+		margin-left: 5px;
+		border: 1px solid rgba(96, 165, 250, 0.24);
+		border-left: 0;
+		border-radius: 0 9px 9px 0;
+		background: rgba(15, 23, 42, 0.7);
+		color: #cbd5e1;
 		cursor: pointer;
 		pointer-events: auto;
 		backdrop-filter: blur(10px);
+		transition:
+			background 0.18s ease,
+			color 0.18s ease;
 	}
 
 	.legend-toggle:hover {
-		background: rgba(15, 23, 42, 0.95);
+		background: rgba(30, 41, 59, 0.92);
+		color: #f8fafc;
+	}
+
+	.legend-toggle-icon {
+		font-size: 13px;
+		font-weight: 800;
+		line-height: 1;
+	}
+
+	.legend-reveal {
+		--legend-width: min(420px, calc(100vw - 160px));
+		width: var(--legend-width);
+		max-width: 100%;
+		min-width: 0;
+		overflow: hidden;
+		pointer-events: auto;
+		transition:
+			width 0.28s ease,
+			opacity 0.2s ease;
+	}
+
+	.legend-reveal.is-hidden {
+		width: 0;
+		opacity: 0;
+		pointer-events: none;
 	}
 
 	.fullscreen-legends {
@@ -1259,11 +1303,12 @@
 	.vessel-map-combined-legend {
 		display: grid;
 		gap: 10px;
-		width: min(420px, calc(100vw - 160px));
+		width: var(--legend-width);
 		max-height: 240px;
 		padding: 10px 11px;
 		border: 1px solid rgba(96, 165, 250, 0.24);
-		border-radius: 12px;
+		border-right: 0;
+		border-radius: 12px 0 0 12px;
 		background: rgba(15, 23, 42, 0.7);
 		color: #e2e8f0;
 		box-shadow: 0 12px 26px rgba(15, 23, 42, 0.24);
@@ -1271,6 +1316,19 @@
 		pointer-events: none;
 		overflow: auto;
 		flex-shrink: 0;
+		transform-origin: left center;
+		transition: transform 0.28s ease;
+	}
+
+	.legend-reveal.is-hidden .vessel-map-combined-legend {
+		transform: translateX(-18px);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.legend-reveal,
+		.vessel-map-combined-legend {
+			transition: none;
+		}
 	}
 
 	.legend-speed-group {
@@ -1345,19 +1403,22 @@
 		}
 
 		.legend-toggle {
-			display: inline-flex;
-			height: 26px;
-			padding: 0 8px;
-			border-radius: 7px;
-			font-size: 9px;
+			width: 18px;
+			height: 46px;
+			min-width: 18px;
+			border-radius: 0 7px 7px 0;
 		}
 
-		.legends-collapsed .vessel-map-combined-legend {
-			display: none;
+		.legend-toggle-icon {
+			font-size: 11px;
+		}
+
+		.legend-reveal {
+			--legend-width: min(280px, calc(100vw - 24px));
 		}
 
 		.vessel-map-combined-legend {
-			width: min(280px, calc(100vw - 24px));
+			width: var(--legend-width);
 			max-height: 180px;
 			padding: 8px 9px;
 			gap: 8px;

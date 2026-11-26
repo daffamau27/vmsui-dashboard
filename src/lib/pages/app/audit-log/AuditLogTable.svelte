@@ -1,5 +1,6 @@
 <script>
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { ChevronLeft, ChevronRight, Eye, History } from 'lucide-svelte';
 	import './audit-log-page.css';
 
 	let {
@@ -18,9 +19,14 @@
 
 <section class="table-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">History</span>
-			<h2>{title}</h2>
+		<div class="section-heading">
+			<span class="mini-heading-icon tone-violet" aria-hidden="true">
+				<History size={14} strokeWidth={2.3} />
+			</span>
+			<div>
+				<span class="section-kicker">History</span>
+				<h2>{title}</h2>
+			</div>
 		</div>
 
 		<strong>{pagination.totalItems || 0} records</strong>
@@ -65,7 +71,8 @@
 							</td>
 							<td>
 								<button type="button" class="small-btn" onclick={() => onOpenDetail?.(row.id)}>
-									View
+									<Eye size={12} strokeWidth={2.4} aria-hidden="true" />
+									<span>View</span>
 								</button>
 							</td>
 						</tr>
@@ -81,7 +88,8 @@
 				onclick={() => onPrevious?.()}
 				disabled={!pagination.hasPrevious || loading}
 			>
-				Previous
+				<ChevronLeft size={13} strokeWidth={2.4} aria-hidden="true" />
+				<span>Previous</span>
 			</button>
 
 			<span>Page {pagination.page || 1} of {pagination.totalPages || 1}</span>
@@ -92,7 +100,8 @@
 				onclick={() => onNext?.()}
 				disabled={!pagination.hasNext || loading}
 			>
-				Next
+				<span>Next</span>
+				<ChevronRight size={13} strokeWidth={2.4} aria-hidden="true" />
 			</button>
 		</div>
 	{:else}

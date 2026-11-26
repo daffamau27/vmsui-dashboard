@@ -1,5 +1,6 @@
 <script>
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { Radio } from 'lucide-svelte';
 
 	let { rows = [], loading = false } = $props();
 
@@ -46,9 +47,14 @@
 
 <section class="table-section alarm-monitor-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">Live</span>
-			<h2>Assigned Vessel Alarm Status</h2>
+		<div class="section-heading">
+			<span class="mini-heading-icon tone-red" aria-hidden="true">
+				<Radio size={14} strokeWidth={2.3} />
+			</span>
+			<div>
+				<span class="section-kicker">Live</span>
+				<h2>Assigned Vessel Alarm Status</h2>
+			</div>
 		</div>
 
 		<strong>{rows.length} vessels</strong>
@@ -97,19 +103,43 @@
 		margin-top: 14px;
 		overflow: hidden;
 		background: var(--color-surface);
-		border: 1px solid #d9e2ec;
-		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+		border: 1px solid var(--color-border);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.section-header {
 		min-height: 58px;
 		padding: 12px 14px;
-		border-bottom: 1px solid #e5edf5;
+		border-bottom: 1px solid var(--color-border-subtle);
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
 		background: var(--color-surface);
+	}
+
+	/* Shared heading pattern: icon chip + kicker/title stack. */
+	.section-heading {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		min-width: 0;
+	}
+
+	.mini-heading-icon {
+		flex: none;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 28px;
+		height: 28px;
+		border-radius: 9px;
+	}
+
+	.mini-heading-icon.tone-red {
+		color: #f87171;
+		background: rgba(239, 68, 68, 0.12);
+		border: 1px solid rgba(239, 68, 68, 0.28);
 	}
 
 	.section-kicker {
@@ -118,7 +148,7 @@
 		padding: 4px 9px;
 		border-radius: 999px;
 		background: var(--color-accent-muted);
-		color: #1d4ed8;
+		color: var(--text-accent);
 		font-size: 10px;
 		font-weight: 900;
 		letter-spacing: 0.07em;
@@ -136,10 +166,11 @@
 		padding: 5px 10px;
 		border-radius: 999px;
 		background: var(--color-accent-muted);
-		border: 1px solid #bfdbfe;
-		color: #1d4ed8;
+		border: 1px solid rgba(59, 130, 246, 0.32);
+		color: #93c5fd;
 		font-size: 11px;
 		font-weight: 900;
+		font-variant-numeric: tabular-nums;
 		white-space: nowrap;
 	}
 
@@ -155,11 +186,21 @@
 		position: relative;
 		padding: 14px;
 		background: var(--color-surface);
-		border: 1px solid #d9e2ec;
+		border: 1px solid var(--color-border);
 		border-radius: 12px;
-		box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+		box-shadow: var(--shadow-sm);
 		display: grid;
 		gap: 12px;
+		transition:
+			border-color 0.18s ease,
+			box-shadow 0.18s ease,
+			transform 0.18s ease;
+	}
+
+	.alarm-vessel-card:hover {
+		transform: translateY(-2px);
+		border-color: rgba(248, 113, 113, 0.42);
+		box-shadow: var(--shadow-md);
 	}
 
 	.alarm-vessel-card.new-card {
@@ -206,6 +247,7 @@
 		font-size: 12px;
 		line-height: 1.35;
 		font-weight: 700;
+		font-variant-numeric: tabular-nums;
 		word-break: break-word;
 	}
 
@@ -225,19 +267,19 @@
 
 	.status-active {
 		background: var(--color-danger-muted);
-		border: 1px solid #fecaca;
-		color: #b91c1c;
+		border: 1px solid rgba(239, 68, 68, 0.28);
+		color: #f87171;
 	}
 
 	.status-cleared {
 		background: var(--color-success-muted);
-		border: 1px solid #bbf7d0;
-		color: #047857;
+		border: 1px solid rgba(16, 185, 129, 0.3);
+		color: #34d399;
 	}
 
 	.status-neutral {
 		background: rgba(255, 255, 255, 0.06);
-		border: 1px solid #cbd5e1;
+		border: 1px solid var(--color-border);
 		color: var(--text-secondary);
 	}
 

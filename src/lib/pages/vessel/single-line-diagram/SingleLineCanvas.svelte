@@ -1,6 +1,7 @@
 <script>
 	import { SvelteFlow, ConnectionLineType } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
+	import { RefreshCw } from 'lucide-svelte';
 	import SingleLineFlowControls from '$lib/components/single-line/SingleLineFlowControls.svelte';
 	import SingleLineWireEdge from '$lib/components/single-line/SingleLineWireEdge.svelte';
 	import SingleLineNode from '$lib/components/single-line/SingleLineNode.svelte';
@@ -28,7 +29,8 @@
 <div class="diagram-shell" class:diagram-fullscreen={fullscreen} bind:this={shellElement}>
 	<div class="flow-canvas" aria-label="Single line diagram flow">
 		<button type="button" class="refresh-btn sld-floating-refresh" onclick={() => onRefresh?.()}>
-			Refresh
+			<RefreshCw size={14} strokeWidth={2.4} aria-hidden="true" />
+			<span>Refresh</span>
 		</button>
 		<SvelteFlow
 			id="single-line-diagram-flow"

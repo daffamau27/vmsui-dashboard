@@ -1996,6 +1996,7 @@ body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-r
 		display: flex;
 		flex-direction: column;
 		background: rgba(15, 23, 42, 0.94);
+		border: 1px solid var(--color-border);
 		backdrop-filter: blur(16px) saturate(1.18);
 		transition:
 			opacity 0.18s ease,
@@ -2008,7 +2009,7 @@ body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-r
 	}
 	.sidebar-fixed {
 		flex: 0 0 auto;
-		border-bottom: 1px solid #eef2f7;
+		border-bottom: 1px solid var(--color-border-subtle);
 		z-index: 2;
 	}
 	.sidebar-header {
@@ -2027,10 +2028,11 @@ body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-r
 		width: 28px;
 		height: 28px;
 		border-radius: 9px;
-		background: var(--color-accent-muted);
+		color: #38bdf8;
+		background: rgba(56, 189, 248, 0.14);
+		border: 1px solid rgba(56, 189, 248, 0.28);
 		display: grid;
 		place-items: center;
-		font-size: 13px;
 		flex-shrink: 0;
 	}
 	.sidebar-header h1 {
@@ -2056,19 +2058,28 @@ body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-r
 		height: 23px;
 		padding: 0 7px;
 		border-radius: 999px;
-		border: 1px solid #dbe4ef;
+		border: 1px solid var(--color-border);
 		background: var(--color-surface);
 		color: var(--text-secondary);
 		font-size: 9.5px;
 		font-weight: 800;
+		font-variant-numeric: tabular-nums;
 		display: inline-flex;
 		align-items: center;
 		gap: 5px;
 		cursor: pointer;
+		transition:
+			border-color 0.16s ease,
+			background 0.16s ease,
+			color 0.16s ease;
+	}
+	.stat-chip:hover:not(.active-filter) {
+		border-color: rgba(96, 165, 250, 0.42);
+		color: var(--text-primary);
 	}
 	.stat-chip.active-filter {
-		box-shadow: inset 0 0 0 1px #2563eb;
-		color: #1d4ed8;
+		box-shadow: inset 0 0 0 1px var(--color-accent);
+		color: #93c5fd;
 		background: var(--color-accent-muted);
 	}
 	.chip-dot,
@@ -2103,7 +2114,7 @@ body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-r
 	.search-box input {
 		width: 100%;
 		height: 28px;
-		border: 1px solid #cbd5e1;
+		border: 1px solid var(--color-border);
 		border-radius: 8px;
 		padding: 0 9px;
 		font-size: 10.5px;
@@ -2112,7 +2123,8 @@ body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-r
 		outline: none;
 	}
 	.search-box input:focus {
-		border-color: #60a5fa;
+		border-color: var(--text-accent);
+		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.16);
 		background: var(--color-surface);
 	}
 	.vessel-list {
@@ -2145,10 +2157,16 @@ body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-r
 	.detail-panel-body::-webkit-scrollbar-thumb:hover {
 		background: #94a3b8;
 	}
+	.vessel-list::-webkit-scrollbar-thumb {
+		background: rgba(148, 163, 184, 0.42);
+	}
+	.vessel-list::-webkit-scrollbar-thumb:hover {
+		background: rgba(148, 163, 184, 0.62);
+	}
 	.vessel-card {
 		position: relative;
 		min-height: 0;
-		border: 1px solid #e2e8f0;
+		border: 1px solid var(--color-border);
 		border-radius: 10px;
 		background: var(--color-surface);
 		overflow: hidden;
@@ -2156,11 +2174,13 @@ body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-r
 		transition:
 			border-color 0.15s ease,
 			background 0.15s ease,
-			box-shadow 0.15s ease;
+			box-shadow 0.15s ease,
+			transform 0.15s ease;
 	}
 	.vessel-card:hover {
-		border-color: #bfdbfe;
-		box-shadow: 0 4px 10px rgba(15, 23, 42, 0.06);
+		border-color: rgba(96, 165, 250, 0.42);
+		box-shadow: var(--shadow-md);
+		transform: translateY(-1px);
 	}
 	.vessel-card.selected-card {
 		border-color: #60a5fa;
@@ -2180,15 +2200,16 @@ body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-r
 		box-shadow: 0 0 14px rgba(59, 130, 246, 0.7);
 	}
 	.vessel-card.offline-card {
-		border-color: rgba(71, 85, 105, 0.75);
+		border-color: rgba(30, 41, 59, 0.9);
 		background:
-			linear-gradient(135deg, rgba(15, 23, 42, 0.82), rgba(30, 41, 59, 0.88)), var(--color-elevated);
-		opacity: 0.72;
-		filter: saturate(0.72);
+			linear-gradient(135deg, rgba(2, 6, 23, 0.95), rgba(15, 23, 42, 0.96)),
+			var(--color-elevated);
+		opacity: 0.45;
+		filter: saturate(0.4);
 	}
 	.vessel-card.offline-card:hover {
-		opacity: 0.86;
-		border-color: rgba(148, 163, 184, 0.72);
+		opacity: 0.68;
+		border-color: rgba(148, 163, 184, 0.5);
 	}
 	.vessel-card.selected-card.offline-card {
 		opacity: 1;
@@ -2245,7 +2266,7 @@ body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-r
 		white-space: nowrap;
 	}
 	.vessel-card.offline-card .vessel-name-block h3 {
-		color: rgba(226, 232, 240, 0.78);
+		color: rgba(203, 213, 225, 0.6);
 	}
 	.vessel-name-block p {
 		margin: 3px 0 0;
@@ -2253,6 +2274,7 @@ body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-r
 		font-size: 8.8px;
 		line-height: 1.15;
 		font-weight: 600;
+		font-variant-numeric: tabular-nums;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -2275,11 +2297,11 @@ body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-r
 	.sidebar-close-btn:hover {
 		border-color: rgba(248, 113, 113, 0.36);
 		background: var(--color-danger-muted);
-		color: #dc2626;
+		color: #f87171;
 	}
 	.vessel-card.offline-card .vessel-name-block p,
 	.vessel-card.offline-card .mini-metric span {
-		color: rgba(148, 163, 184, 0.78);
+		color: rgba(148, 163, 184, 0.6);
 	}
 	.vessel-card-tools {
 		display: inline-flex;
@@ -2370,7 +2392,7 @@ body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-r
 		display: grid;
 		place-items: center;
 		flex-shrink: 0;
-		border: 1px solid #e2e8f0;
+		border: 1px solid var(--color-border);
 		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.72);
 	}
 	.location-button::before {
@@ -2384,7 +2406,7 @@ body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-r
 	}
 	.location-button.has-coordinate {
 		background: var(--color-success-muted);
-		border-color: #bbf7d0;
+		border-color: rgba(16, 185, 129, 0.3);
 		box-shadow:
 			inset 0 0 0 1px rgba(255, 255, 255, 0.72),
 			0 0 0 3px rgba(34, 197, 94, 0.08);
@@ -2401,7 +2423,7 @@ body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-r
 	.mini-metric {
 		min-height: 32px;
 		padding: 5px 6px;
-		border: 1px solid #e2e8f0;
+		border: 1px solid var(--color-border);
 		border-radius: 8px;
 		background: var(--color-elevated);
 	}
@@ -3899,7 +3921,7 @@ body .app-content .fleet-page .vessel-detail-panel .ocean-current-card .simple-r
 		}
 		.sidebar-close-btn:hover {
 			background: var(--color-danger-muted);
-			color: #dc2626;
+			color: #f87171;
 		}
 		.fleet-map-panel {
 			height: 100%;

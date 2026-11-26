@@ -1,5 +1,6 @@
 <script>
 	import RpmCard from '$lib/components/RpmCard.svelte';
+	import { Gauge } from 'lucide-svelte';
 
 	let { visible = true, cards = [] } = $props();
 </script>
@@ -7,9 +8,14 @@
 {#if visible}
 	<section class="rpm-panel">
 		<div class="section-header">
-			<div>
-				<span class="section-kicker">Engine Monitoring</span>
-				<h2>RPM Overview</h2>
+			<div class="section-heading">
+				<span class="section-heading-icon tone-amber" aria-hidden="true">
+					<Gauge size={20} strokeWidth={2} />
+				</span>
+				<div>
+					<span class="section-kicker">Engine Monitoring</span>
+					<h2>RPM Overview</h2>
+				</div>
 			</div>
 
 			<strong>{cards.length} engines</strong>

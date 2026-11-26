@@ -1,5 +1,6 @@
 <script>
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { ClipboardList } from 'lucide-svelte';
 
 	let {
 		voyageName = '-',
@@ -15,9 +16,14 @@
 
 <section class="detail-panel">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">Assignment Detail</span>
-			<h2>{voyageName}</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-violet" aria-hidden="true">
+				<ClipboardList size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">Assignment Detail</span>
+				<h2>{voyageName}</h2>
+			</div>
 		</div>
 	</div>
 

@@ -80,9 +80,20 @@
 		min-height: 175px;
 		padding: 8px 10px 10px;
 		background: var(--color-surface);
-		border: 1px solid #d8d8d8;
+		border: 1px solid var(--color-border);
+		border-radius: 10px;
 		overflow: hidden;
-		transition: filter 180ms ease;
+		transition:
+			filter 180ms ease,
+			border-color 0.18s ease,
+			box-shadow 0.18s ease,
+			transform 0.18s ease;
+	}
+
+	.rpm-card:hover {
+		transform: translateY(-2px);
+		border-color: rgba(251, 191, 36, 0.38);
+		box-shadow: 0 10px 22px rgba(15, 23, 42, 0.35);
 	}
 
 	.rpm-card.engine-off {
@@ -90,7 +101,7 @@
 	}
 
 	.rpm-card.disabled {
-		background: #cfcfcf;
+		background: var(--color-elevated);
 	}
 
 	.rpm-header {
@@ -133,11 +144,11 @@
 
 	.online-dot {
 		background: #16b889;
+		box-shadow: 0 0 0 3px rgba(22, 184, 137, 0.18);
 	}
 
 	.offline-dot {
-		background: #aeb8c2;
-		border: 1px solid #fff;
+		background: #64748b;
 	}
 
 	.rpm-value {
@@ -170,7 +181,7 @@
 	}
 
 	.gauge-bg {
-		stroke: #e3e3e3;
+		stroke: rgba(148, 163, 184, 0.22);
 	}
 
 	.gauge-progress {
@@ -178,13 +189,13 @@
 	}
 
 	.needle {
-		stroke: #e3e3e3;
+		stroke: #64748b;
 		stroke-width: 3.2;
 		stroke-linecap: round;
 	}
 
 	.needle-center {
-		fill: #e3e3e3;
+		fill: #64748b;
 	}
 
 	.rpm-stats {
@@ -193,7 +204,7 @@
 		gap: 6px;
 		margin-top: -2px;
 		padding-top: 6px;
-		border-top: 1px solid #eeeeee;
+		border-top: 1px solid var(--color-border-subtle);
 	}
 
 	.stat-item {
@@ -214,6 +225,7 @@
 		font-weight: 800;
 		color: var(--text-primary);
 		line-height: 1.2;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.no-data {

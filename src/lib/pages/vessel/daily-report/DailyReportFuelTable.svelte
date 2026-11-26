@@ -1,4 +1,6 @@
 <script>
+	import { Fuel, Droplet } from 'lucide-svelte';
+
 	let {
 		rows = [],
 		summary = {},
@@ -50,9 +52,14 @@
 
 <section class="table-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">Fuel</span>
-			<h2>Fuel Consumption</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-green" aria-hidden="true">
+				<Fuel size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">Fuel</span>
+				<h2>Fuel Consumption</h2>
+			</div>
 		</div>
 		<strong>{rows.length} rows</strong>
 	</div>
@@ -61,27 +68,52 @@
 		<div class="fod-usage-summary" class:single-fod-layout={hasFodSingleOnly}>
 			{#if hasFodSingleOnly}
 				<article>
-					<span>FOD Single</span>
+					<div class="fod-head">
+						<span class="fod-icon" aria-hidden="true">
+							<Droplet size={13} strokeWidth={2.2} />
+						</span>
+						<span>FOD Single</span>
+					</div>
 					<strong>{formatLiter(fodSingleValue)}</strong>
 				</article>
 
 				<article class="fod-total-card">
-					<span>Total FOD</span>
+					<div class="fod-head">
+						<span class="fod-icon" aria-hidden="true">
+							<Droplet size={13} strokeWidth={2.2} />
+						</span>
+						<span>Total FOD</span>
+					</div>
 					<strong>{formatLiter(fodTotalValue)}</strong>
 				</article>
 			{:else}
 				<article>
-					<span>FOD Port</span>
+					<div class="fod-head">
+						<span class="fod-icon" aria-hidden="true">
+							<Droplet size={13} strokeWidth={2.2} />
+						</span>
+						<span>FOD Port</span>
+					</div>
 					<strong>{formatLiter(fodPortValue)}</strong>
 				</article>
 
 				<article>
-					<span>FOD STBD</span>
+					<div class="fod-head">
+						<span class="fod-icon" aria-hidden="true">
+							<Droplet size={13} strokeWidth={2.2} />
+						</span>
+						<span>FOD STBD</span>
+					</div>
 					<strong>{formatLiter(fodStbdValue)}</strong>
 				</article>
 
 				<article class="fod-total-card">
-					<span>Total FOD</span>
+					<div class="fod-head">
+						<span class="fod-icon" aria-hidden="true">
+							<Droplet size={13} strokeWidth={2.2} />
+						</span>
+						<span>Total FOD</span>
+					</div>
 					<strong>{formatLiter(fodTotalValue)}</strong>
 				</article>
 			{/if}

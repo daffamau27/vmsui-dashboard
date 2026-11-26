@@ -1,4 +1,6 @@
 <script>
+	import { Columns3 } from 'lucide-svelte';
+
 	let {
 		columns = [],
 		fuelSources = [],
@@ -15,9 +17,14 @@
 
 <section class="table-section monthly-column-options-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">Columns</span>
-			<h2>Visible Columns</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-violet" aria-hidden="true">
+				<Columns3 size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">Columns</span>
+				<h2>Visible Columns</h2>
+			</div>
 		</div>
 
 		<div class="section-header-actions">

@@ -1,4 +1,5 @@
 <script>
+	import { TriangleAlert } from 'lucide-svelte';
 	import './data-log-page.css';
 
 	let {
@@ -77,9 +78,14 @@
 
 <section class="deviation-card">
 	<div class="section-header deviation-header">
-		<div>
-			<span class="section-kicker">Deviation</span>
-			<h2>Data Deviation</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-red" aria-hidden="true">
+				<TriangleAlert size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">Deviation</span>
+				<h2>Data Deviation</h2>
+			</div>
 		</div>
 
 		<strong>

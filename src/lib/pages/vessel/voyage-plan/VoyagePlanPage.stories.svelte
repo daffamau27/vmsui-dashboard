@@ -18,6 +18,12 @@
 		}
 	];
 
+	const legendTypes = [
+		{ key: 'buoy', label: 'Buoy', icon: '/assets/buoy.png' },
+		{ key: 'fso', label: 'FSO', icon: '/assets/fso.png' },
+		{ key: 'whp', label: 'WHP', icon: '/assets/whp.png' }
+	];
+
 	const detailRows = [
 		{ key: 'assignment-id', label: 'Assignment ID', value: '#284' },
 		{ key: 'voyage-plan-id', label: 'Voyage Plan ID', value: '#57' },
@@ -225,6 +231,7 @@
 			assetsCount={12}
 			activeAssignment
 			{zones}
+			{legendTypes}
 			onFit={() => {}}
 			onShowActivePlan={() => {}}
 		/>

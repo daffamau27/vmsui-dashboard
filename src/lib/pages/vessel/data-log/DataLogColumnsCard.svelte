@@ -1,4 +1,5 @@
 <script>
+	import { Columns3 } from 'lucide-svelte';
 	import './data-log-page.css';
 
 	let {
@@ -15,9 +16,14 @@
 
 <section class="column-card">
 	<div class="column-header">
-		<div>
-			<span class="section-kicker">Columns</span>
-			<h2>Visible Data Columns</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-violet" aria-hidden="true">
+				<Columns3 size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">Columns</span>
+				<h2>Visible Data Columns</h2>
+			</div>
 		</div>
 
 		<div class="column-actions">

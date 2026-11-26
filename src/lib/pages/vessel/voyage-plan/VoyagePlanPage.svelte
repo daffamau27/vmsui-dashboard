@@ -13,7 +13,7 @@
 	import { addLeafletZoomAndScale } from '$lib/utils/leafletControls.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { getFleetAssets } from '$lib/api/fleetApi.js';
-	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
+	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue, normalizeAssetType } from '$lib/utils/assetIcons.js';
 	import { getRouteLegDistancesNm, formatDistanceNm } from '$lib/utils/voyageRouteDistance.js';
 	import { getVesselTypeIconUrl, getVesselTypeIconScale, getVesselIconLayout } from '$lib/utils/vesselIcons.js';
 	import {
@@ -109,6 +109,7 @@
 	$: routeRows = buildRouteRows(routePoints, routeLegDistances.legs);
 	$: detailRows = buildDetailRows(selectedAssignment);
 	$: historyRows = buildHistoryRows(historyItems);
+	$: assetLegendTypes = buildAssetLegendTypes(assets);
 
 	$: if (
 		canView &&
@@ -207,6 +208,24 @@
 		};
 	}
 
+	function buildAssetLegendTypes(rows = []) {
+		const typeMap = new Map();
+
+		(Array.isArray(rows) ? rows : []).forEach((asset) => {
+			const key = normalizeAssetType(getAssetTypeValue(asset)) || 'asset';
+
+			if (typeMap.has(key)) return;
+
+			typeMap.set(key, {
+				key,
+				label: getAssetTypeLabel(asset),
+				icon: getAssetIconUrl(asset)
+			});
+		});
+
+		return [...typeMap.values()];
+	}
+
 	function renderZoneLayer() {
 		if (!L || !routeMap) return;
 
@@ -225,9 +244,10 @@
 	function createAssetMarkerIcon(asset) {
 		const iconUrl = getAssetIconUrl(asset);
 		const typeLabel = getAssetTypeLabel(asset);
+		const typeKey = normalizeAssetType(getAssetTypeValue(asset)) || 'asset';
 
 		return L.divIcon({
-			className: `asset-leaflet-icon asset-type-${String(typeLabel).toLowerCase()}`,
+			className: `asset-leaflet-icon asset-type-${typeKey}`,
 			html: `
             <img class="asset-type-marker-icon" src="${iconUrl}" alt="${escapeHtml(typeLabel)} asset" title="${escapeHtml(asset.assetName)}" />
           `,
@@ -367,8 +387,12 @@
 	/** @param {any} vessel */
 	function getVoyageVesselIconType(vessel) {
 		const t = String(assignmentType).toLowerCase();
-		if (t.includes('laden')) return 'tugboat-laden';
-		if (t.includes('ballast')) return 'tugboat-ballast';
+		const vesselType = String(vessel?.type || '').trim().toLowerCase();
+		// AHTS memakai ikon laden/ballast versinya sendiri, bukan versi tugboat.
+		if (t.includes('laden')) return vesselType.startsWith('ahts') ? 'ahts-laden' : 'tugboat-laden';
+		if (t.includes('ballast')) {
+			return vesselType.startsWith('ahts') ? 'ahts-ballast' : 'tugboat-ballast';
+		}
 		if (t.includes('tugboat')) return 'tugboat';
 		return String(vessel?.type || '');
 	}
@@ -1319,6 +1343,7 @@
 				{detailLoading}
 				{active}
 				{zones}
+				legendTypes={assetLegendTypes}
 				onFit={fitMap}
 				onShowActivePlan={showActivePlan}
 			/>

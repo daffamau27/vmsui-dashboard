@@ -1,6 +1,7 @@
 <script>
 	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import { FileText } from 'lucide-svelte';
 
 	let {
 		vesselName = '-',
@@ -21,9 +22,16 @@
 
 <section class="daily-header-card">
 	<div class="daily-header-copy">
-		<div class="page-kicker">Daily Report</div>
-		<h1>{vesselName}</h1>
-		<p>Daily vessel operation report, runtime, speed, RPM range, and fuel usage.</p>
+		<div class="section-heading">
+			<span class="section-heading-icon" aria-hidden="true">
+				<FileText size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<div class="page-kicker">Daily Report</div>
+				<h1>{vesselName}</h1>
+				<p>Daily vessel operation report, runtime, speed, RPM range, and fuel usage.</p>
+			</div>
+		</div>
 	</div>
 
 	<div class="daily-header-filters">

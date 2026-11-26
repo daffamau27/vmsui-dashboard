@@ -1,16 +1,42 @@
 <script>
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { ArrowLeftRight, Database, Fuel, Gauge, Scale, Ship } from 'lucide-svelte';
+	import './fuel-management-page.css';
 
 	let { loading = false, cards = [] } = $props();
+
+	/** @type {Array<{ keywords: string[]; icon: typeof Fuel; tone: string }>} */
+	const tableIconRules = [
+		{ keywords: ['maker'], icon: Ship, tone: 'tone-amber' },
+		{ keywords: ['ems', 'system', 'vms'], icon: Gauge, tone: 'tone-cyan' },
+		{ keywords: ['rob'], icon: Database, tone: 'tone-cyan' },
+		{ keywords: ['bunker', 'received'], icon: Fuel, tone: 'tone-green' },
+		{ keywords: ['comparison', 'vs'], icon: ArrowLeftRight, tone: 'tone-violet' }
+	];
+
+	function getTableIcon(/** @type {{ key?: unknown; title?: unknown }} */ card) {
+		const text = `${String(card?.key ?? '')} ${String(card?.title ?? '')}`.toLowerCase();
+		const rule = tableIconRules.find((entry) =>
+			entry.keywords.some((keyword) => text.includes(keyword))
+		);
+		return { icon: rule?.icon ?? Scale, tone: rule?.tone ?? 'tone-blue' };
+	}
 </script>
 
 <section class="table-grid">
 	{#each cards as card (card.key)}
+		{@const tableIcon = getTableIcon(card)}
+		{@const TableIcon = tableIcon.icon}
 		<article class="panel table-panel">
 			<div class="panel-header">
-				<div>
-					<h2>{card.title}</h2>
-					<p>{card.description}</p>
+				<div class="section-heading">
+					<span class="section-heading-icon {tableIcon.tone}" aria-hidden="true">
+						<TableIcon size={19} strokeWidth={2} />
+					</span>
+					<div>
+						<h2>{card.title}</h2>
+						<p>{card.description}</p>
+					</div>
 				</div>
 				{#if card.totalLabel}
 					<span class="badge">Total {card.totalLabel}</span>

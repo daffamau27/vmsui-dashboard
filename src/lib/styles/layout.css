@@ -1,8 +1,8 @@
-@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap");
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap');
 @import 'tailwindcss';
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@import '@fontsource-variable/geist';
 
 @plugin '@tailwindcss/forms';
 @plugin '@tailwindcss/typography';
@@ -10,551 +10,576 @@
 @custom-variant dark (&:is(.dark *));
 
 * {
-  box-sizing: border-box;
+	box-sizing: border-box;
 }
 
 body {
-  margin: 0;
-  font-family: "Plus Jakarta Sans", Arial, Helvetica, sans-serif;
-  background: var(--color-base);
-  color: var(--text-primary);
+	margin: 0;
+	font-family: 'Plus Jakarta Sans', Arial, Helvetica, sans-serif;
+	background: var(--color-base);
+	color: var(--text-primary);
 }
 
 button,
 input,
 select,
 textarea {
-  font-family: inherit;
+	font-family: inherit;
 }
 
 .coordinate-copy-inline,
 .coordinate-copy-value {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	min-width: 0;
 }
 
 .coordinate-copy-button {
-  width: 24px;
-  height: 24px;
-  min-width: 24px;
-  display: inline-grid;
-  place-items: center;
-  border: 1px solid rgba(96, 165, 250, 0.34);
-  border-radius: 8px;
-  background: rgba(37, 99, 235, 0.12);
-  color: #93c5fd;
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1;
-  cursor: pointer;
-  transition:
-    transform 0.16s ease,
-    border-color 0.16s ease,
-    background 0.16s ease,
-    color 0.16s ease;
+	width: 24px;
+	height: 24px;
+	min-width: 24px;
+	display: inline-grid;
+	place-items: center;
+	border: 1px solid rgba(96, 165, 250, 0.34);
+	border-radius: 8px;
+	background: rgba(37, 99, 235, 0.12);
+	color: #93c5fd;
+	font-size: 12px;
+	font-weight: 800;
+	line-height: 1;
+	cursor: pointer;
+	transition:
+		transform 0.16s ease,
+		border-color 0.16s ease,
+		background 0.16s ease,
+		color 0.16s ease;
 }
 
 .coordinate-copy-button:hover {
-  transform: translateY(-1px);
-  border-color: rgba(96, 165, 250, 0.72);
-  background: rgba(37, 99, 235, 0.28);
-  color: #dbeafe;
+	transform: translateY(-1px);
+	border-color: rgba(96, 165, 250, 0.72);
+	background: rgba(37, 99, 235, 0.28);
+	color: #dbeafe;
 }
 
 .coordinate-copy-button.is-copied {
-  border-color: rgba(34, 197, 94, 0.58);
-  background: rgba(34, 197, 94, 0.16);
-  color: #86efac;
+	border-color: rgba(34, 197, 94, 0.58);
+	background: rgba(34, 197, 94, 0.16);
+	color: #86efac;
 }
 
 .coordinate-copy-button.is-error {
-  border-color: rgba(248, 113, 113, 0.58);
-  background: rgba(248, 113, 113, 0.16);
-  color: #fecaca;
+	border-color: rgba(248, 113, 113, 0.58);
+	background: rgba(248, 113, 113, 0.16);
+	color: #fecaca;
 }
 
 a {
-  color: inherit;
+	color: inherit;
 }
 
 .app-shell {
-  width: 100%;
-  min-height: 100vh;
-  display: flex;
-  background: var(--color-base);
+	width: 100%;
+	min-height: 100vh;
+	display: flex;
+	background: var(--color-base);
 }
 
 .main-area {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
 }
 
 @theme inline {
-  --font-heading: var(--font-sans);
-  --font-sans: 'Geist Variable', sans-serif;
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
-  --color-card: var(--card);
-  --color-foreground: var(--foreground);
-  --color-background: var(--background);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+	--font-heading: var(--font-sans);
+	--font-sans: 'Geist Variable', sans-serif;
+	--color-sidebar-ring: var(--sidebar-ring);
+	--color-sidebar-border: var(--sidebar-border);
+	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+	--color-sidebar-accent: var(--sidebar-accent);
+	--color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+	--color-sidebar-primary: var(--sidebar-primary);
+	--color-sidebar-foreground: var(--sidebar-foreground);
+	--color-sidebar: var(--sidebar);
+	--color-chart-5: var(--chart-5);
+	--color-chart-4: var(--chart-4);
+	--color-chart-3: var(--chart-3);
+	--color-chart-2: var(--chart-2);
+	--color-chart-1: var(--chart-1);
+	--color-ring: var(--ring);
+	--color-input: var(--input);
+	--color-border: var(--border);
+	--color-destructive: var(--destructive);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-accent: var(--accent);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-muted: var(--muted);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-secondary: var(--secondary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-primary: var(--primary);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-popover: var(--popover);
+	--color-card-foreground: var(--card-foreground);
+	--color-card: var(--card);
+	--color-foreground: var(--foreground);
+	--color-background: var(--background);
+	--radius-sm: calc(var(--radius) * 0.6);
+	--radius-md: calc(var(--radius) * 0.8);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) * 1.4);
+	--radius-2xl: calc(var(--radius) * 1.8);
+	--radius-3xl: calc(var(--radius) * 2.2);
+	--radius-4xl: calc(var(--radius) * 2.6);
 }
 
 :root {
-  color-scheme: dark;
-  --color-base: #0a0e1a;
-  --color-surface: #111827;
-  --color-elevated: #1c2438;
-  --color-border: #1e2d45;
-  --color-border-subtle: rgba(255, 255, 255, 0.06);
-  --color-accent: #3b82f6;
-  --color-accent-hover: #2563eb;
-  --color-accent-muted: rgba(59, 130, 246, 0.12);
-  --color-accent-glow: rgba(59, 130, 246, 0.25);
-  --color-success: #10b981;
-  --color-success-muted: rgba(16, 185, 129, 0.15);
-  --color-warning: #f59e0b;
-  --color-warning-muted: rgba(245, 158, 11, 0.15);
-  --color-danger: #ef4444;
-  --color-danger-muted: rgba(239, 68, 68, 0.15);
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #475569;
-  --text-accent: #93c5fd;
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.4), 0 0 1px rgba(0,0,0,0.3);
-  --shadow-md: 0 4px 16px rgba(0,0,0,0.5), 0 1px 4px rgba(0,0,0,0.3);
-  --shadow-lg: 0 16px 48px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4);
-  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
-  --duration-fast: 120ms;
-  --duration-base: 200ms;
-  --duration-slow: 280ms;
+	color-scheme: dark;
+	--color-base: #0a0e1a;
+	--color-surface: #111827;
+	--color-elevated: #1c2438;
+	--color-border: #1e2d45;
+	--color-border-subtle: rgba(255, 255, 255, 0.06);
+	--color-accent: #3b82f6;
+	--color-accent-hover: #2563eb;
+	--color-accent-muted: rgba(59, 130, 246, 0.12);
+	--color-accent-glow: rgba(59, 130, 246, 0.25);
+	--color-success: #10b981;
+	--color-success-muted: rgba(16, 185, 129, 0.15);
+	--color-warning: #f59e0b;
+	--color-warning-muted: rgba(245, 158, 11, 0.15);
+	--color-danger: #ef4444;
+	--color-danger-muted: rgba(239, 68, 68, 0.15);
+	--text-primary: #f1f5f9;
+	--text-secondary: #94a3b8;
+	--text-muted: #475569;
+	--text-accent: #93c5fd;
+	--shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 0 1px rgba(0, 0, 0, 0.3);
+	--shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5), 0 1px 4px rgba(0, 0, 0, 0.3);
+	--shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.6), 0 4px 16px rgba(0, 0, 0, 0.4);
+	--ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+	--duration-fast: 120ms;
+	--duration-base: 200ms;
+	--duration-slow: 280ms;
 
-  --background: oklch(0.08 0.04 250);
-  --foreground: oklch(0.95 0.01 240);
-  --card: oklch(0.13 0.03 250);
-  --card-foreground: oklch(0.95 0.01 240);
-  --popover: oklch(0.18 0.04 250);
-  --popover-foreground: oklch(0.95 0.01 240);
-  --primary: oklch(0.58 0.22 264);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.18 0.04 250);
-  --secondary-foreground: oklch(0.95 0.01 240);
-  --muted: oklch(0.18 0.04 250);
-  --muted-foreground: oklch(0.68 0.04 240);
-  --accent: oklch(0.58 0.22 264);
-  --accent-foreground: oklch(0.95 0.01 240);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.22 0.05 240);
-  --input: oklch(1 0 0 / 10%);
-  --ring: oklch(0.58 0.22 264);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.13 0.03 250);
-  --sidebar-foreground: oklch(0.95 0.01 240);
-  --sidebar-primary: oklch(0.58 0.22 264);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.18 0.04 250);
-  --sidebar-accent-foreground: oklch(0.95 0.01 240);
-  --sidebar-border: oklch(0.22 0.05 240);
-  --sidebar-ring: oklch(0.58 0.22 264);
+	--background: oklch(0.08 0.04 250);
+	--foreground: oklch(0.95 0.01 240);
+	--card: oklch(0.13 0.03 250);
+	--card-foreground: oklch(0.95 0.01 240);
+	--popover: oklch(0.18 0.04 250);
+	--popover-foreground: oklch(0.95 0.01 240);
+	--primary: oklch(0.58 0.22 264);
+	--primary-foreground: oklch(0.985 0 0);
+	--secondary: oklch(0.18 0.04 250);
+	--secondary-foreground: oklch(0.95 0.01 240);
+	--muted: oklch(0.18 0.04 250);
+	--muted-foreground: oklch(0.68 0.04 240);
+	--accent: oklch(0.58 0.22 264);
+	--accent-foreground: oklch(0.95 0.01 240);
+	--destructive: oklch(0.577 0.245 27.325);
+	--border: oklch(0.22 0.05 240);
+	--input: oklch(1 0 0 / 10%);
+	--ring: oklch(0.58 0.22 264);
+	--chart-1: oklch(0.87 0 0);
+	--chart-2: oklch(0.556 0 0);
+	--chart-3: oklch(0.439 0 0);
+	--chart-4: oklch(0.371 0 0);
+	--chart-5: oklch(0.269 0 0);
+	--radius: 0.625rem;
+	--sidebar: oklch(0.13 0.03 250);
+	--sidebar-foreground: oklch(0.95 0.01 240);
+	--sidebar-primary: oklch(0.58 0.22 264);
+	--sidebar-primary-foreground: oklch(0.985 0 0);
+	--sidebar-accent: oklch(0.18 0.04 250);
+	--sidebar-accent-foreground: oklch(0.95 0.01 240);
+	--sidebar-border: oklch(0.22 0.05 240);
+	--sidebar-ring: oklch(0.58 0.22 264);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+	--background: oklch(0.145 0 0);
+	--foreground: oklch(0.985 0 0);
+	--card: oklch(0.205 0 0);
+	--card-foreground: oklch(0.985 0 0);
+	--popover: oklch(0.205 0 0);
+	--popover-foreground: oklch(0.985 0 0);
+	--primary: oklch(0.922 0 0);
+	--primary-foreground: oklch(0.205 0 0);
+	--secondary: oklch(0.269 0 0);
+	--secondary-foreground: oklch(0.985 0 0);
+	--muted: oklch(0.269 0 0);
+	--muted-foreground: oklch(0.708 0 0);
+	--accent: oklch(0.269 0 0);
+	--accent-foreground: oklch(0.985 0 0);
+	--destructive: oklch(0.704 0.191 22.216);
+	--border: oklch(1 0 0 / 10%);
+	--input: oklch(1 0 0 / 15%);
+	--ring: oklch(0.556 0 0);
+	--chart-1: oklch(0.87 0 0);
+	--chart-2: oklch(0.556 0 0);
+	--chart-3: oklch(0.439 0 0);
+	--chart-4: oklch(0.371 0 0);
+	--chart-5: oklch(0.269 0 0);
+	--sidebar: oklch(0.205 0 0);
+	--sidebar-foreground: oklch(0.985 0 0);
+	--sidebar-primary: oklch(0.488 0.243 264.376);
+	--sidebar-primary-foreground: oklch(0.985 0 0);
+	--sidebar-accent: oklch(0.269 0 0);
+	--sidebar-accent-foreground: oklch(0.985 0 0);
+	--sidebar-border: oklch(1 0 0 / 10%);
+	--sidebar-ring: oklch(0.556 0 0);
 }
 
 @layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
-  .leaflet-container {
-    @apply !bg-card !font-[inherit];
-  }
-  .leaflet-container a {
-    @apply !text-inherit;
-  }
-  .leaflet-div-icon {
-    @apply !bg-transparent !border-none;
-  }
-  .leaflet-popup-content-wrapper, .leaflet-popup-content {
-    box-sizing: border-box;
-  }
-  .leaflet-popup-content p {
-    margin: 0;
-  }
-  .leaflet-popup {
-    @apply !animate-none;
-  }
-  .leaflet-popup-close-button {
-    @apply ring-offset-background focus:ring-ring bg-secondary rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:outline-hidden;
-  }
-  .leaflet-tooltip, .leaflet-draw-tooltip {
-    @apply !bg-foreground !text-background !animate-none !rounded-md !border-none !p-0 !px-3 !py-1.5 !shadow-none;
-  }
-  .leaflet-tooltip.fleet-vessel-tooltip-wrapper {
-    background: rgba(15, 23, 42, 0.96) !important;
-    color: #f8fafc !important;
-    border: 1px solid rgba(96, 165, 250, 0.38) !important;
-    border-radius: 12px !important;
-    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.34) !important;
-    opacity: 1 !important;
-    padding: 0 !important;
-  }
-  .leaflet-tooltip.fleet-vessel-tooltip-wrapper .fleet-vessel-tooltip strong {
-    color: #ffffff !important;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
-  }
-  .leaflet-tooltip.fleet-vessel-tooltip-wrapper .fleet-vessel-tooltip span {
-    color: #93c5fd !important;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
-  }
-  .leaflet-draw-tooltip:before {
-    @apply bg-foreground !top-1/2 !right-0.5 size-2.5 translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] !border-none;
-  }
-  .leaflet-error-draw-tooltip {
-    @apply !bg-destructive !text-white;
-  }
-  .leaflet-error-draw-tooltip:before {
-    @apply bg-destructive;
-  }
-  .leaflet-draw-tooltip-subtext {
-    @apply !text-background;
-  }
-  .leaflet-popup-tip-container, .leaflet-tooltip-top:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-left:before, .leaflet-tooltip-right:before {
-    @apply hidden;
-  }
-  .leaflet-control-attribution {
-    @apply !bg-muted rounded-md !px-[4px] !py-[2px] text-[10px] !leading-none !text-inherit;
-  }
-  .leaflet-draw-guide-dash {
-    @apply rounded-full;
-  }
-  .leaflet-edit-marker-selected {
-    @apply !border-transparent !bg-transparent;
-  }
-  .marker-cluster div {
-    @apply font-[inherit];
-  }
-  html {
-    @apply font-sans;
-  }
+	* {
+		@apply border-border outline-ring/50;
+	}
+	body {
+		@apply bg-background text-foreground;
+	}
+	.leaflet-container {
+		@apply !bg-card !font-[inherit];
+	}
+	.leaflet-container a {
+		@apply !text-inherit;
+	}
+	.leaflet-div-icon {
+		@apply !border-none !bg-transparent;
+	}
+	.leaflet-popup-content-wrapper,
+	.leaflet-popup-content {
+		box-sizing: border-box;
+	}
+	.leaflet-popup-content p {
+		margin: 0;
+	}
+	.leaflet-popup {
+		@apply !animate-none;
+	}
+	.leaflet-popup-close-button {
+		@apply rounded-xs bg-secondary opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:outline-hidden;
+	}
+	.leaflet-tooltip,
+	.leaflet-draw-tooltip {
+		@apply !animate-none !rounded-md !border-none !bg-foreground !p-0 !px-3 !py-1.5 !text-background !shadow-none;
+	}
+	.leaflet-tooltip.fleet-vessel-tooltip-wrapper {
+		background: rgba(15, 23, 42, 0.96) !important;
+		color: #f8fafc !important;
+		border: 1px solid rgba(96, 165, 250, 0.38) !important;
+		border-radius: 12px !important;
+		box-shadow: 0 14px 30px rgba(15, 23, 42, 0.34) !important;
+		opacity: 1 !important;
+		padding: 0 !important;
+	}
+	.leaflet-tooltip.fleet-vessel-tooltip-wrapper .fleet-vessel-tooltip strong {
+		color: #ffffff !important;
+		text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+	}
+	.leaflet-tooltip.fleet-vessel-tooltip-wrapper .fleet-vessel-tooltip span {
+		color: #93c5fd !important;
+		text-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+	}
+	.leaflet-draw-tooltip:before {
+		@apply !top-1/2 !right-0.5 size-2.5 translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] !border-none bg-foreground;
+	}
+	.leaflet-error-draw-tooltip {
+		@apply !bg-destructive !text-white;
+	}
+	.leaflet-error-draw-tooltip:before {
+		@apply bg-destructive;
+	}
+	.leaflet-draw-tooltip-subtext {
+		@apply !text-background;
+	}
+	.leaflet-popup-tip-container,
+	.leaflet-tooltip-top:before,
+	.leaflet-tooltip-bottom:before,
+	.leaflet-tooltip-left:before,
+	.leaflet-tooltip-right:before {
+		@apply hidden;
+	}
+	.leaflet-control-attribution {
+		@apply rounded-md !bg-muted !px-[4px] !py-[2px] text-[10px] !leading-none !text-inherit;
+	}
+	.leaflet-draw-guide-dash {
+		@apply rounded-full;
+	}
+	.leaflet-edit-marker-selected {
+		@apply !border-transparent !bg-transparent;
+	}
+	.marker-cluster div {
+		@apply font-[inherit];
+	}
+	html {
+		@apply font-sans;
+	}
 }
 
 /* Shared VMS dark-surface treatment for the existing data-heavy pages. */
 :is(
-  .profile-page,
-  .fleet-page,
-  .vessel-page,
-  .avs-page,
-  .alarm-page,
-  .audit-page,
-  .voyage-page,
-  .administrator-page,
-  .data-log-page,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .fuel-management-page,
-  .voyage-vessel-page,
-  .trace-page
+	.profile-page,
+	.fleet-page,
+	.vessel-page,
+	.avs-page,
+	.alarm-page,
+	.audit-page,
+	.voyage-page,
+	.administrator-page,
+	.data-log-page,
+	.daily-page,
+	.monthly-page,
+	.periodical-page,
+	.fuel-management-page,
+	.voyage-vessel-page,
+	.trace-page
 ) {
-  background: var(--color-base) !important;
-  color: var(--text-primary) !important;
+	background: var(--color-base) !important;
+	color: var(--text-primary) !important;
 }
 
 :is(
-  .profile-page,
-  .fleet-page,
-  .vessel-page,
-  .avs-page,
-  .alarm-page,
-  .audit-page,
-  .voyage-page,
-  .administrator-page,
-  .data-log-page,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .fuel-management-page,
-  .voyage-vessel-page,
-  .trace-page
-) :is(
-  [class$="-card"],
-  [class*="-card "],
-  [class$="-panel"],
-  [class*="-panel "],
-  [class$="-section"],
-  [class*="-section "],
-  .panel,
-  .table-wrapper,
-  .table-wrap,
-  .route-table-wrap,
-  .range-table-wrap,
-  .data-log-table-wrapper,
-  .monthly-table-wrapper,
-  .event-table-wrapper,
-  .high-rpm-table-wrapper,
-  .low-speed-table-wrapper
-) {
-  background-color: var(--color-surface) !important;
-  border-color: var(--color-border-subtle) !important;
-  box-shadow: var(--shadow-sm);
+		.profile-page,
+		.fleet-page,
+		.vessel-page,
+		.avs-page,
+		.alarm-page,
+		.audit-page,
+		.voyage-page,
+		.administrator-page,
+		.data-log-page,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.fuel-management-page,
+		.voyage-vessel-page,
+		.trace-page
+	)
+	:is(
+		[class$='-card'],
+		[class*='-card '],
+		[class$='-panel'],
+		[class*='-panel '],
+		[class$='-section'],
+		[class*='-section '],
+		.panel,
+		.table-wrapper,
+		.table-wrap,
+		.route-table-wrap,
+		.range-table-wrap,
+		.data-log-table-wrapper,
+		.monthly-table-wrapper,
+		.event-table-wrapper,
+		.high-rpm-table-wrapper,
+		.low-speed-table-wrapper
+	) {
+	background-color: var(--color-surface) !important;
 }
 
 :is(
-  .profile-page,
-  .fleet-page,
-  .vessel-page,
-  .avs-page,
-  .alarm-page,
-  .audit-page,
-  .voyage-page,
-  .administrator-page,
-  .data-log-page,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .fuel-management-page,
-  .voyage-vessel-page,
-  .trace-page
-) :is(h1, h2, h3, h4, strong, th, .card-title) {
-  color: var(--text-primary) !important;
+		.profile-page,
+		.fleet-page,
+		.vessel-page,
+		.avs-page,
+		.alarm-page,
+		.audit-page,
+		.voyage-page,
+		.administrator-page,
+		.data-log-page,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.fuel-management-page,
+		.voyage-vessel-page,
+		.trace-page
+	)
+	:is(h1, h2, h3, h4, strong, th, .card-title) {
+	color: var(--text-primary) !important;
 }
 
 :is(
-  .profile-page,
-  .fleet-page,
-  .vessel-page,
-  .avs-page,
-  .alarm-page,
-  .audit-page,
-  .voyage-page,
-  .administrator-page,
-  .data-log-page,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .fuel-management-page,
-  .voyage-vessel-page,
-  .trace-page
-) :is(p, small, label, td, .card-subtitle, [class*="subtitle"], [class*="description"], [class*="meta"]) {
-  color: var(--text-secondary) !important;
+		.profile-page,
+		.fleet-page,
+		.vessel-page,
+		.avs-page,
+		.alarm-page,
+		.audit-page,
+		.voyage-page,
+		.administrator-page,
+		.data-log-page,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.fuel-management-page,
+		.voyage-vessel-page,
+		.trace-page
+	)
+	:is(
+		p,
+		small,
+		label,
+		td,
+		.card-subtitle,
+		[class*='subtitle'],
+		[class*='description'],
+		[class*='meta']
+	) {
+	color: var(--text-secondary) !important;
 }
 
 :is(
-  .profile-page,
-  .fleet-page,
-  .vessel-page,
-  .avs-page,
-  .alarm-page,
-  .audit-page,
-  .voyage-page,
-  .administrator-page,
-  .data-log-page,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .fuel-management-page,
-  .voyage-vessel-page,
-  .trace-page
-) :is(input, select, textarea) {
-  background: rgba(255, 255, 255, 0.04) !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
-  color: var(--text-primary) !important;
+		.profile-page,
+		.fleet-page,
+		.vessel-page,
+		.avs-page,
+		.alarm-page,
+		.audit-page,
+		.voyage-page,
+		.administrator-page,
+		.data-log-page,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.fuel-management-page,
+		.voyage-vessel-page,
+		.trace-page
+	)
+	:is(input, select, textarea) {
+	background: rgba(255, 255, 255, 0.04) !important;
+	border-color: rgba(255, 255, 255, 0.1) !important;
+	color: var(--text-primary) !important;
 }
 
 :is(
-  .profile-page,
-  .fleet-page,
-  .vessel-page,
-  .avs-page,
-  .alarm-page,
-  .audit-page,
-  .voyage-page,
-  .administrator-page,
-  .data-log-page,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .fuel-management-page,
-  .voyage-vessel-page,
-  .trace-page
-) :is(input, select, textarea):focus {
-  border-color: var(--color-accent) !important;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
-  outline: none;
+		.profile-page,
+		.fleet-page,
+		.vessel-page,
+		.avs-page,
+		.alarm-page,
+		.audit-page,
+		.voyage-page,
+		.administrator-page,
+		.data-log-page,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.fuel-management-page,
+		.voyage-vessel-page,
+		.trace-page
+	)
+	:is(input, select, textarea):focus {
+	border-color: var(--color-accent) !important;
+	box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
+	outline: none;
 }
 
 :is(
-  .profile-page,
-  .fleet-page,
-  .vessel-page,
-  .avs-page,
-  .alarm-page,
-  .audit-page,
-  .voyage-page,
-  .administrator-page,
-  .data-log-page,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .fuel-management-page,
-  .voyage-vessel-page,
-  .trace-page
-) table {
-  background: var(--color-surface) !important;
-  color: var(--text-secondary) !important;
+		.profile-page,
+		.fleet-page,
+		.vessel-page,
+		.avs-page,
+		.alarm-page,
+		.audit-page,
+		.voyage-page,
+		.administrator-page,
+		.data-log-page,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.fuel-management-page,
+		.voyage-vessel-page,
+		.trace-page
+	)
+	table {
+	background: var(--color-surface) !important;
+	color: var(--text-secondary) !important;
 }
 
 :is(
-  .profile-page,
-  .fleet-page,
-  .vessel-page,
-  .avs-page,
-  .alarm-page,
-  .audit-page,
-  .voyage-page,
-  .administrator-page,
-  .data-log-page,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .fuel-management-page,
-  .voyage-vessel-page,
-  .trace-page
-) :is(thead, th) {
-  background: var(--color-elevated) !important;
-  border-color: var(--color-border) !important;
+		.profile-page,
+		.fleet-page,
+		.vessel-page,
+		.avs-page,
+		.alarm-page,
+		.audit-page,
+		.voyage-page,
+		.administrator-page,
+		.data-log-page,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.fuel-management-page,
+		.voyage-vessel-page,
+		.trace-page
+	)
+	:is(thead, th) {
+	background: var(--color-elevated) !important;
+	border-color: var(--color-border) !important;
 }
 
 :is(
-  .profile-page,
-  .fleet-page,
-  .vessel-page,
-  .avs-page,
-  .alarm-page,
-  .audit-page,
-  .voyage-page,
-  .administrator-page,
-  .data-log-page,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .fuel-management-page,
-  .voyage-vessel-page,
-  .trace-page
-) :is(td, tr) {
-  border-color: var(--color-border-subtle) !important;
+		.profile-page,
+		.fleet-page,
+		.vessel-page,
+		.avs-page,
+		.alarm-page,
+		.audit-page,
+		.voyage-page,
+		.administrator-page,
+		.data-log-page,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.fuel-management-page,
+		.voyage-vessel-page,
+		.trace-page
+	)
+	:is(td, tr) {
+	border-color: var(--color-border-subtle) !important;
 }
 
 :is(
-  .profile-page,
-  .fleet-page,
-  .vessel-page,
-  .avs-page,
-  .alarm-page,
-  .audit-page,
-  .voyage-page,
-  .administrator-page,
-  .data-log-page,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .fuel-management-page,
-  .voyage-vessel-page,
-  .trace-page
-) tbody tr:hover {
-  background: rgba(59, 130, 246, 0.07) !important;
+		.profile-page,
+		.fleet-page,
+		.vessel-page,
+		.avs-page,
+		.alarm-page,
+		.audit-page,
+		.voyage-page,
+		.administrator-page,
+		.data-log-page,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.fuel-management-page,
+		.voyage-vessel-page,
+		.trace-page
+	)
+	tbody
+	tr:hover {
+	background: rgba(59, 130, 246, 0.07) !important;
 }
 
 ::selection {
-  background: rgba(59, 130, 246, 0.38);
-  color: var(--text-primary);
+	background: rgba(59, 130, 246, 0.38);
+	color: var(--text-primary);
 }
 
 * {
-  scrollbar-color: #334155 var(--color-base);
+	scrollbar-color: #334155 var(--color-base);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
 }
 
 /*
@@ -564,887 +589,998 @@ a {
  * component import so the dark design system remains authoritative.
  */
 body .app-shell .app-main .topbar {
-  background: var(--color-surface) !important;
-  border-color: var(--color-border) !important;
-  color: var(--text-primary) !important;
+	background: var(--color-surface) !important;
+	border-color: var(--color-border) !important;
+	color: var(--text-primary) !important;
 }
 
 body .app-shell .app-main .topbar :is(.dropdown-button, .vessel-selector) {
-  background: rgba(255, 255, 255, 0.04) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  color: var(--text-primary) !important;
+	background: rgba(255, 255, 255, 0.04) !important;
+	border: 1px solid rgba(255, 255, 255, 0.1) !important;
+	color: var(--text-primary) !important;
 }
 
 body .app-shell .app-main .topbar .dropdown-button {
-  background: var(--color-accent-muted) !important;
-  border-color: rgba(59, 130, 246, 0.3) !important;
-  color: var(--text-accent) !important;
+	background: var(--color-accent-muted) !important;
+	border-color: rgba(59, 130, 246, 0.3) !important;
+	color: var(--text-accent) !important;
 }
 
 body .app-shell .app-main .topbar :is(.topbar-item, .online-box, .offline-box) {
-  border-color: var(--color-border-subtle) !important;
-  color: var(--text-secondary) !important;
+	border-color: var(--color-border-subtle) !important;
+	color: var(--text-secondary) !important;
 }
 
 body .app-shell .app-main .topbar .online-box {
-  background: var(--color-success-muted) !important;
-  color: #34d399 !important;
+	background: var(--color-success-muted) !important;
+	color: #34d399 !important;
 }
 
 body .app-shell .app-main .topbar :is(.dropdown-menu, .vessel-menu) {
-  background: var(--color-elevated) !important;
-  border-color: var(--color-border-subtle) !important;
+	background: var(--color-elevated) !important;
+	border-color: var(--color-border-subtle) !important;
 }
 
 body .app-shell .app-main .topbar :is(.dropdown-item, .vessel-item) {
-  background: transparent !important;
-  color: var(--text-secondary) !important;
+	background: transparent !important;
+	color: var(--text-secondary) !important;
 }
 
 body .app-shell .app-main .topbar :is(.dropdown-item, .vessel-item):hover,
 body .app-shell .app-main .topbar :is(.active-item, .active-vessel) {
-  background: var(--color-accent-muted) !important;
-  color: var(--text-primary) !important;
+	background: var(--color-accent-muted) !important;
+	color: var(--text-primary) !important;
 }
 
-body .app-content :is(
-  .administrator-page,
-  .fleet-page,
-  .dashboard-content,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .data-log-page,
-  .fuel-management-page,
-  .voyage-vessel-page,
-  .trace-page,
-  .profile-page,
-  .avs-page,
-  .alarm-page,
-  .audit-page,
-  .voyage-page
-) {
-  background: var(--color-base) !important;
-  color: var(--text-primary) !important;
+body
+	.app-content
+	:is(
+		.administrator-page,
+		.fleet-page,
+		.dashboard-content,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.data-log-page,
+		.fuel-management-page,
+		.voyage-vessel-page,
+		.trace-page,
+		.profile-page,
+		.avs-page,
+		.alarm-page,
+		.audit-page,
+		.voyage-page
+	) {
+	background: var(--color-base) !important;
+	color: var(--text-primary) !important;
 }
 
+body
+	.app-content
+	:is(
+		.administrator-page,
+		.fleet-page,
+		.dashboard-content,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.data-log-page,
+		.fuel-management-page,
+		.voyage-vessel-page,
+		.trace-page,
+		.profile-page,
+		.avs-page,
+		.alarm-page,
+		.audit-page,
+		.voyage-page
+	)
+	:is(
+		[class$='-card'],
+		[class*='-card '],
+		[class$='-panel'],
+		[class*='-panel '],
+		[class$='-section'],
+		[class*='-section '],
+		[class$='-workspace'],
+		[class*='-workspace '],
+		.panel,
+		.fleet-sidebar,
+		.admin-tabs,
+		.users-panel,
+		.asset-list,
+		.vessel-list,
+		.engine-curve-list,
+		.permission-list,
+		.reporting-vessel-list,
+		.telegram-list,
+		.audit-log-list,
+		.assignable-user-list,
+		.option-list,
+		.selected-recipient-list,
+		.cctv-box,
+		.empty-box,
+		.muted-box,
+		.raw-box
+	) {
+	background: var(--color-surface) !important;
+	background-image: none !important;
+	border-color: var(--color-border-subtle) !important;
+	color: var(--text-primary) !important;
+	box-shadow: var(--shadow-sm) !important;
+}
+
+/* Pengecualian header halaman:
+   - Kartu header tiap halaman (*-header-card) tampil flat tanpa shadow.
+   - .filter-card yang berada di dalam wrapper *-header-filters hanyalah grid
+     transparan, bukan kartu berdiri sendiri. Kartu filter mandiri
+     (event-filter-card, audit-filter-card, global-audit-filter-card, dst.)
+     tetap memakai tampilan kartu normal. */
 body .app-content :is(
-  .administrator-page,
-  .fleet-page,
-  .dashboard-content,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .data-log-page,
-  .fuel-management-page,
-  .voyage-vessel-page,
-  .trace-page,
-  .profile-page,
-  .avs-page,
-  .alarm-page,
-  .audit-page,
-  .voyage-page
+	.administrator-page,
+	.fleet-page,
+	.dashboard-content,
+	.daily-page,
+	.monthly-page,
+	.periodical-page,
+	.data-log-page,
+	.fuel-management-page,
+	.voyage-vessel-page,
+	.trace-page,
+	.profile-page,
+	.avs-page,
+	.alarm-page,
+	.audit-page,
+	.voyage-page
 ) :is(
-  [class$="-card"],
-  [class*="-card "],
-  [class$="-panel"],
-  [class*="-panel "],
-  [class$="-section"],
-  [class*="-section "],
-  [class$="-workspace"],
-  [class*="-workspace "],
-  .panel,
-  .fleet-sidebar,
-  .admin-tabs,
-  .users-panel,
-  .asset-list,
-  .vessel-list,
-  .engine-curve-list,
-  .permission-list,
-  .reporting-vessel-list,
-  .telegram-list,
-  .audit-log-list,
-  .assignable-user-list,
-  .option-list,
-  .selected-recipient-list,
-  .cctv-box,
-  .empty-box,
-  .muted-box,
-  .raw-box
+	[class$="-header-card"],
+	[class*="-header-card "],
+	[class$="-header-filters"] .filter-card,
+	[class*="-header-filters "] .filter-card
 ) {
-  background: var(--color-surface) !important;
-  background-image: none !important;
-  border-color: var(--color-border-subtle) !important;
-  color: var(--text-primary) !important;
-  box-shadow: var(--shadow-sm) !important;
+	box-shadow: none !important;
+}
+
+body .app-content :is(
+	.administrator-page,
+	.fleet-page,
+	.dashboard-content,
+	.daily-page,
+	.monthly-page,
+	.periodical-page,
+	.data-log-page,
+	.fuel-management-page,
+	.voyage-vessel-page,
+	.trace-page,
+	.profile-page,
+	.avs-page,
+	.alarm-page,
+	.audit-page,
+	.voyage-page
+) :is(
+	[class$="-header-filters"] .filter-card,
+	[class*="-header-filters "] .filter-card
+) {
+	background: transparent !important;
+	background-image: none !important;
 }
 
 body .app-content .voyage-page .voyage-grid.has-assign-panel {
-  background: #0a0e1a !important;
-  background-color: #0a0e1a !important;
-  background-image: none !important;
-  box-shadow: none !important;
+	background: #0a0e1a !important;
+	background-color: #0a0e1a !important;
+	background-image: none !important;
+	box-shadow: none !important;
 }
 
-body .app-content :is(
-  .administrator-page,
-  .fleet-page,
-  .dashboard-content,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .data-log-page,
-  .fuel-management-page,
-  .voyage-vessel-page,
-  .trace-page,
-  .profile-page,
-  .avs-page,
-  .alarm-page,
-  .audit-page,
-  .voyage-page
-) :is(
-  [class$="-header"],
-  [class*="-header "],
-  [class$="-head"],
-  [class*="-head "],
-  .section-header,
-  .column-header,
-  .detail-panel-header,
-  .global-audit-table-head
-) {
-  background: transparent !important;
-  background-image: none !important;
-  border-color: var(--color-border-subtle) !important;
-  color: var(--text-primary) !important;
-  box-shadow: none !important;
+body
+	.app-content
+	:is(
+		.administrator-page,
+		.fleet-page,
+		.dashboard-content,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.data-log-page,
+		.fuel-management-page,
+		.voyage-vessel-page,
+		.trace-page,
+		.profile-page,
+		.avs-page,
+		.alarm-page,
+		.audit-page,
+		.voyage-page
+	)
+	:is(
+		[class$='-header'],
+		[class*='-header '],
+		[class$='-head'],
+		[class*='-head '],
+		.section-header,
+		.column-header,
+		.detail-panel-header,
+		.global-audit-table-head
+	) {
+	background: transparent !important;
+	background-image: none !important;
+	border-color: var(--color-border-subtle) !important;
+	color: var(--text-primary) !important;
+	box-shadow: none !important;
 }
 
 /* Internal headers inherit their card surface. Visual hierarchy comes from
    spacing, typography, and a subtle divider—not a second background color. */
-body .app-content :is(
-  .administrator-page,
-  .fleet-page,
-  .dashboard-content,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .data-log-page,
-  .fuel-management-page,
-  .voyage-vessel-page,
-  .trace-page,
-  .profile-page,
-  .avs-page,
-  .alarm-page,
-  .audit-page,
-  .voyage-page
-) :is(
-  [class$="-header"],
-  [class*="-header "],
-  [class$="-head"],
-  [class*="-head "],
-  .section-header,
-  .column-header,
-  .panel-header,
-  .card-header
-) {
-  border-bottom-color: rgba(255, 255, 255, 0.065) !important;
+body
+	.app-content
+	:is(
+		.administrator-page,
+		.fleet-page,
+		.dashboard-content,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.data-log-page,
+		.fuel-management-page,
+		.voyage-vessel-page,
+		.trace-page,
+		.profile-page,
+		.avs-page,
+		.alarm-page,
+		.audit-page,
+		.voyage-page
+	)
+	:is(
+		[class$='-header'],
+		[class*='-header '],
+		[class$='-head'],
+		[class*='-head '],
+		.section-header,
+		.column-header,
+		.panel-header,
+		.card-header
+	) {
+	border-bottom-color: rgba(255, 255, 255, 0.065) !important;
 }
 
-body .app-content :is(
-  .administrator-page,
-  .fleet-page,
-  .dashboard-content,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .data-log-page
-) :is(
-  .user-row,
-  .asset-row,
-  .vessel-row,
-  .engine-curve-row,
-  .permission-item,
-  .reporting-vessel-row,
-  .telegram-row,
-  .audit-log-row,
-  .assignable-user-row,
-  .company-row,
-  .column-item,
-  .detail-item,
-  .mini-metric,
-  .fuel-metric,
-  .simple-row,
-  .compact-status-row,
-  .header-meta,
-  .ae-value-box
-) {
-  background: var(--color-elevated) !important;
-  background-image: none !important;
-  border-color: var(--color-border-subtle) !important;
-  color: var(--text-primary) !important;
+body
+	.app-content
+	:is(
+		.administrator-page,
+		.fleet-page,
+		.dashboard-content,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.data-log-page
+	)
+	:is(
+		.user-row,
+		.asset-row,
+		.vessel-row,
+		.engine-curve-row,
+		.permission-item,
+		.reporting-vessel-row,
+		.telegram-row,
+		.audit-log-row,
+		.assignable-user-row,
+		.company-row,
+		.column-item,
+		.detail-item,
+		.mini-metric,
+		.fuel-metric,
+		.simple-row,
+		.compact-status-row,
+		.header-meta,
+		.ae-value-box
+	) {
+	background: var(--color-elevated) !important;
+	background-image: none !important;
+	border-color: var(--color-border-subtle) !important;
+	color: var(--text-primary) !important;
 }
 
 body .app-content :is(.user-row, .asset-row, .vessel-row, .engine-curve-row, .company-row):hover {
-  background: rgba(59, 130, 246, 0.1) !important;
-  border-color: rgba(59, 130, 246, 0.28) !important;
+	background: rgba(59, 130, 246, 0.1) !important;
+	border-color: rgba(59, 130, 246, 0.28) !important;
 }
 
-body .app-content :is(
-  .administrator-page,
-  .fleet-page,
-  .dashboard-content,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .data-log-page
-) :is(
-  .access-card,
-  .permission-group,
-  .reporting-section-card,
-  .recipient-picker-card,
-  .trip-route-card,
-  .trip-summary-card,
-  .event-card,
-  .rpm-curve-table-card,
-  .rpm-fuel-chart-card,
-  .high-rpm-card,
-  .low-speed-card,
-  .low-speed-summary-card,
-  .monitoring-card,
-  .compact-info-card,
-  .summary-card,
-  .table-section,
-  .column-card
-) {
-  background: var(--color-surface) !important;
-  background-image: none !important;
-  border-color: var(--color-border) !important;
-  color: var(--text-primary) !important;
+body
+	.app-content
+	:is(
+		.administrator-page,
+		.fleet-page,
+		.dashboard-content,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.data-log-page
+	)
+	:is(
+		.access-card,
+		.permission-group,
+		.reporting-section-card,
+		.recipient-picker-card,
+		.trip-route-card,
+		.trip-summary-card,
+		.event-card,
+		.rpm-curve-table-card,
+		.rpm-fuel-chart-card,
+		.high-rpm-card,
+		.low-speed-card,
+		.low-speed-summary-card,
+		.monitoring-card,
+		.compact-info-card,
+		.summary-card,
+		.table-section,
+		.column-card
+	) {
+	background: var(--color-surface) !important;
+	background-image: none !important;
+	border-color: var(--color-border) !important;
+	color: var(--text-primary) !important;
 }
 
-body .app-content :is(
-  .administrator-page,
-  .fleet-page,
-  .dashboard-content,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .data-log-page
-) :is(
-  input,
-  select,
-  textarea,
-  .search-input,
-  .vessel-select,
-  .reporting-filter-box,
-  .permission-filter
-) {
-  background: rgba(255, 255, 255, 0.04) !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
-  color: var(--text-primary) !important;
+body
+	.app-content
+	:is(
+		.administrator-page,
+		.fleet-page,
+		.dashboard-content,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.data-log-page
+	)
+	:is(
+		input,
+		select,
+		textarea,
+		.search-input,
+		.vessel-select,
+		.reporting-filter-box,
+		.permission-filter
+	) {
+	background: rgba(255, 255, 255, 0.04) !important;
+	border-color: rgba(255, 255, 255, 0.1) !important;
+	color: var(--text-primary) !important;
 }
 
-body .app-content :is(
-  .administrator-page,
-  .fleet-page,
-  .dashboard-content,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .data-log-page
-) :is(
-  .ghost-button,
-  .ghost-btn,
-  .secondary-btn,
-  .text-button,
-  .header-refresh-button,
-  .column-actions button
-) {
-  background: rgba(255, 255, 255, 0.06) !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
-  color: var(--text-primary) !important;
+body
+	.app-content
+	:is(
+		.administrator-page,
+		.fleet-page,
+		.dashboard-content,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.data-log-page
+	)
+	:is(
+		.ghost-button,
+		.ghost-btn,
+		.secondary-btn,
+		.text-button,
+		.header-refresh-button,
+		.column-actions button
+	) {
+	background: rgba(255, 255, 255, 0.06) !important;
+	border-color: rgba(255, 255, 255, 0.1) !important;
+	color: var(--text-primary) !important;
 }
 
-body .app-content :is(
-  .administrator-page,
-  .fleet-page,
-  .dashboard-content,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .data-log-page
-) table :is(th, td),
-body .app-content :is(
-  .administrator-page,
-  .fleet-page,
-  .dashboard-content,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .data-log-page
-) :is(.column-item, .grand-total-row, .total-row) {
-  background: var(--color-surface) !important;
-  border-color: var(--color-border-subtle) !important;
-  color: var(--text-secondary) !important;
+body
+	.app-content
+	:is(
+		.administrator-page,
+		.fleet-page,
+		.dashboard-content,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.data-log-page
+	)
+	table
+	:is(th, td),
+body
+	.app-content
+	:is(
+		.administrator-page,
+		.fleet-page,
+		.dashboard-content,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.data-log-page
+	)
+	:is(.column-item, .grand-total-row, .total-row) {
+	background: var(--color-surface) !important;
+	border-color: var(--color-border-subtle) !important;
+	color: var(--text-secondary) !important;
 }
 
-body .app-content :is(
-  .administrator-page,
-  .fleet-page,
-  .dashboard-content,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .data-log-page
-) table th {
-  background: var(--color-elevated) !important;
-  color: var(--text-primary) !important;
+body
+	.app-content
+	:is(
+		.administrator-page,
+		.fleet-page,
+		.dashboard-content,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.data-log-page
+	)
+	table
+	th {
+	background: var(--color-elevated) !important;
+	color: var(--text-primary) !important;
 }
 
 body .app-content :is(.status-box.error-box, .alert-card.danger-state) {
-  background: var(--color-danger-muted) !important;
-  border-color: rgba(239, 68, 68, 0.28) !important;
-  color: #fca5a5 !important;
+	background: var(--color-danger-muted) !important;
+	border-color: rgba(239, 68, 68, 0.28) !important;
+	color: #fca5a5 !important;
 }
 
 body .app-content :is(.status-box.success-box) {
-  background: var(--color-success-muted) !important;
-  border-color: rgba(16, 185, 129, 0.28) !important;
-  color: #6ee7b7 !important;
+	background: var(--color-success-muted) !important;
+	border-color: rgba(16, 185, 129, 0.28) !important;
+	color: #6ee7b7 !important;
 }
 
 body .app-content :is(.status-box.loading-box, .selected-pill, .option-chip.selected) {
-  background: var(--color-accent-muted) !important;
-  border-color: rgba(59, 130, 246, 0.28) !important;
-  color: var(--text-accent) !important;
+	background: var(--color-accent-muted) !important;
+	border-color: rgba(59, 130, 246, 0.28) !important;
+	color: var(--text-accent) !important;
 }
 
 /* Vessel pages use a sharper, consistent component language. Keep the
    surrounding marine UI dark and structured, but remove rounded corners from
    cards, panels, controls, tables, and form fields inside VesselPage routes. */
-body .app-content :is(
-  .vessel-page,
-  .dashboard-content,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .data-log-page,
-  .fuel-management-page,
-  .voyage-vessel-page,
-  .trace-page,
-  .single-line-page
-) :is(
-  [class$="-card"],
-  [class*="-card "],
-  [class$="-panel"],
-  [class*="-panel "],
-  [class$="-section"],
-  [class*="-section "],
-  [class$="-box"],
-  [class*="-box "],
-  [class$="-item"],
-  [class*="-item "],
-  [class$="-row"],
-  [class*="-row "],
-  [class$="-wrap"],
-  [class*="-wrap "],
-  [class$="-wrapper"],
-  [class*="-wrapper "],
-  [class$="-table"],
-  [class*="-table "],
-  [class$="-control"],
-  [class*="-control "],
-  [class$="-button"],
-  [class*="-button "],
-  [class$="-btn"],
-  [class*="-btn "],
-  [class$="-pill"],
-  [class*="-pill "],
-  [class$="-chip"],
-  [class*="-chip "],
-  .panel,
-  .table-wrapper,
-  .table-wrap,
-  .route-table-wrap,
-  .range-table-wrap,
-  .data-log-table-wrapper,
-  .monthly-table-wrapper,
-  .event-table-wrapper,
-  .high-rpm-table-wrapper,
-  .low-speed-table-wrapper,
-  .leaflet-popup-content-wrapper,
-  .leaflet-popup-tip,
-  button,
-  input,
-  select,
-  textarea,
-  table,
-  th,
-  td
-) {
-  border-radius: 0 !important;
+body
+	.app-content
+	:is(
+		.vessel-page,
+		.dashboard-content,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.data-log-page,
+		.fuel-management-page,
+		.voyage-vessel-page,
+		.trace-page,
+		.single-line-page
+	)
+	:is(
+		[class$='-card'],
+		[class*='-card '],
+		[class$='-panel'],
+		[class*='-panel '],
+		[class$='-section'],
+		[class*='-section '],
+		[class$='-box'],
+		[class*='-box '],
+		[class$='-item'],
+		[class*='-item '],
+		[class$='-row'],
+		[class*='-row '],
+		[class$='-wrap'],
+		[class*='-wrap '],
+		[class$='-wrapper'],
+		[class*='-wrapper '],
+		[class$='-table'],
+		[class*='-table '],
+		[class$='-control'],
+		[class*='-control '],
+		[class$='-button'],
+		[class*='-button '],
+		[class$='-btn'],
+		[class*='-btn '],
+		[class$='-pill'],
+		[class*='-pill '],
+		[class$='-chip'],
+		[class*='-chip '],
+		.panel,
+		.table-wrapper,
+		.table-wrap,
+		.route-table-wrap,
+		.range-table-wrap,
+		.data-log-table-wrapper,
+		.monthly-table-wrapper,
+		.event-table-wrapper,
+		.high-rpm-table-wrapper,
+		.low-speed-table-wrapper,
+		.leaflet-popup-content-wrapper,
+		.leaflet-popup-tip,
+		button,
+		input,
+		select,
+		textarea,
+		table,
+		th,
+		td
+	) {
+	border-radius: 0 !important;
 }
 
 /* Keep Trace fullscreen controls rounded despite the vessel-page corner reset. */
 body .app-content .trace-root button:is(.trace-fullscreen-btn, .trace-fullscreen-exit) {
-  border-radius: 12px !important;
+	border-radius: 12px !important;
+}
+
+/* Keep the Trace map legend collapse tab attached to the legend panel. */
+body .app-content .trace-root button.legend-toggle {
+	border-radius: 0 9px 9px 0 !important;
+}
+
+@media (max-width: 760px) {
+	body .app-content .trace-root button.legend-toggle {
+		border-radius: 0 7px 7px 0 !important;
+	}
 }
 
 /* Dots and vessel/map symbols must stay round/correct because they communicate
    status or heading rather than acting as rectangular UI components. */
-body .app-content :is(
-  .vessel-page,
-  .dashboard-content,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .data-log-page,
-  .fuel-management-page,
-  .voyage-vessel-page,
-  .trace-page,
-  .single-line-page
-) :is(
-  .status-dot,
-  .chip-dot,
-  .legend-dot,
-  .online-dot,
-  .offline-dot,
-  .connection-dot,
-  .gps-dot,
-  .point-marker,
-  .marker-dot,
-  .sld-status-dot,
-  .leaflet-marker-icon
-) {
-  border-radius: 999px !important;
+body
+	.app-content
+	:is(
+		.vessel-page,
+		.dashboard-content,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.data-log-page,
+		.fuel-management-page,
+		.voyage-vessel-page,
+		.trace-page,
+		.single-line-page
+	)
+	:is(
+		.status-dot,
+		.chip-dot,
+		.legend-dot,
+		.online-dot,
+		.offline-dot,
+		.connection-dot,
+		.gps-dot,
+		.point-marker,
+		.marker-dot,
+		.sld-status-dot,
+		.leaflet-marker-icon
+	) {
+	border-radius: 999px !important;
 }
 
-body .app-content :is(
-  .administrator-page,
-  .fleet-page,
-  .dashboard-content,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .data-log-page
-) :is(h1, h2, h3, h4, strong, .user-main, .card-title, .high-rpm-title) {
-  color: var(--text-primary) !important;
+body
+	.app-content
+	:is(
+		.administrator-page,
+		.fleet-page,
+		.dashboard-content,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.data-log-page
+	)
+	:is(h1, h2, h3, h4, strong, .user-main, .card-title, .high-rpm-title) {
+	color: var(--text-primary) !important;
 }
 
-body .app-content :is(
-  .administrator-page,
-  .fleet-page,
-  .dashboard-content,
-  .daily-page,
-  .monthly-page,
-  .periodical-page,
-  .data-log-page
-) :is(p, small, label, td, .user-meta, .field-help, .asset-note, .vessel-note, .engine-curve-note) {
-  color: var(--text-secondary) !important;
+body
+	.app-content
+	:is(
+		.administrator-page,
+		.fleet-page,
+		.dashboard-content,
+		.daily-page,
+		.monthly-page,
+		.periodical-page,
+		.data-log-page
+	)
+	:is(p, small, label, td, .user-meta, .field-help, .asset-note, .vessel-note, .engine-curve-note) {
+	color: var(--text-secondary) !important;
 }
 
 /* Unified full-color OpenStreetMap treatment for every Leaflet instance. */
 body .app-content .leaflet-container {
-  background: #dce7ed !important;
-  border-color: var(--color-border) !important;
-  font-family: inherit !important;
+	background: #dce7ed !important;
+	border-color: var(--color-border) !important;
+	font-family: inherit !important;
 }
 
 body .app-content .leaflet-tile-pane {
-  filter: none !important;
-  opacity: 1 !important;
+	filter: none !important;
+	opacity: 1 !important;
 }
 
-body .app-content :is(
-  .leaflet-control,
-  .map-legend,
-  .dashboard-map-legend,
-  .fleet-popup,
-  .dashboard-map-popup
-) {
-  background: rgba(17, 24, 39, 0.92) !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
-  color: var(--text-primary) !important;
-  backdrop-filter: blur(12px);
+body
+	.app-content
+	:is(.leaflet-control, .map-legend, .dashboard-map-legend, .fleet-popup, .dashboard-map-popup) {
+	background: rgba(17, 24, 39, 0.92) !important;
+	border-color: rgba(255, 255, 255, 0.1) !important;
+	color: var(--text-primary) !important;
+	backdrop-filter: blur(12px);
 }
 
 body .app-content .leaflet-control-attribution {
-  padding: 3px 6px !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  border-radius: 7px 0 0 0 !important;
-  background: rgba(10, 14, 26, 0.8) !important;
-  color: var(--text-muted) !important;
-  font-size: 8px !important;
+	padding: 3px 6px !important;
+	border: 1px solid rgba(255, 255, 255, 0.08) !important;
+	border-radius: 7px 0 0 0 !important;
+	background: rgba(10, 14, 26, 0.8) !important;
+	color: var(--text-muted) !important;
+	font-size: 8px !important;
 }
 
 body .app-content .leaflet-control-attribution a {
-  color: var(--text-secondary) !important;
+	color: var(--text-secondary) !important;
 }
 
 body .app-content .leaflet-bar {
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  border-radius: 10px !important;
-  box-shadow: var(--shadow-md) !important;
+	overflow: hidden;
+	border: 1px solid rgba(255, 255, 255, 0.1) !important;
+	border-radius: 10px !important;
+	box-shadow: var(--shadow-md) !important;
 }
 
 body .app-content .leaflet-bar a {
-  border-color: rgba(255, 255, 255, 0.08) !important;
-  background: rgba(17, 24, 39, 0.94) !important;
-  color: var(--text-primary) !important;
+	border-color: rgba(255, 255, 255, 0.08) !important;
+	background: rgba(17, 24, 39, 0.94) !important;
+	color: var(--text-primary) !important;
 }
 
 body .app-content .leaflet-bar a:hover {
-  background: var(--color-accent-muted) !important;
-  color: var(--text-accent) !important;
+	background: var(--color-accent-muted) !important;
+	color: var(--text-accent) !important;
 }
 
 body .app-content .vms-map-controls .leaflet-top.leaflet-left {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 12px 0 0 12px;
-  pointer-events: none;
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 12px 0 0 12px;
+	pointer-events: none;
 }
 
 body .app-content .vms-map-controls .leaflet-top.leaflet-left .leaflet-control {
-  margin: 0 !important;
-  pointer-events: auto;
+	margin: 0 !important;
+	pointer-events: auto;
 }
 
 body .app-content .vms-map-controls .leaflet-control-zoom {
-  display: grid !important;
-  grid-template-columns: 34px 34px;
-  grid-template-rows: 34px;
-  width: auto;
-  height: 34px;
-  overflow: hidden;
-  border-radius: 12px !important;
-  background: rgba(15, 23, 42, 0.82) !important;
-  backdrop-filter: blur(12px);
+	display: grid !important;
+	grid-template-columns: 34px 34px;
+	grid-template-rows: 34px;
+	width: auto;
+	height: 34px;
+	overflow: hidden;
+	border-radius: 12px !important;
+	background: rgba(15, 23, 42, 0.82) !important;
+	backdrop-filter: blur(12px);
 }
 
 body .app-content .vms-map-controls .leaflet-control-zoom a {
-  width: 34px !important;
-  height: 34px !important;
-  display: grid !important;
-  place-items: center;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  color: #eaf2ff !important;
-  font-size: 19px !important;
-  font-weight: 800 !important;
-  line-height: 1 !important;
-  text-indent: 0;
+	width: 34px !important;
+	height: 34px !important;
+	display: grid !important;
+	place-items: center;
+	border: 0 !important;
+	border-radius: 0 !important;
+	background: transparent !important;
+	color: #eaf2ff !important;
+	font-size: 19px !important;
+	font-weight: 800 !important;
+	line-height: 1 !important;
+	text-indent: 0;
 }
 
 body .app-content .vms-map-controls .leaflet-control-zoom a:first-child {
-  border-right: 1px solid rgba(255, 255, 255, 0.12) !important;
+	border-right: 1px solid rgba(255, 255, 255, 0.12) !important;
 }
 
 body .app-content .vms-map-controls .leaflet-control-zoom a:hover {
-  background: rgba(37, 99, 235, 0.28) !important;
-  color: #ffffff !important;
+	background: rgba(37, 99, 235, 0.28) !important;
+	color: #ffffff !important;
 }
 
 body .app-content .vms-map-controls .leaflet-control-scale {
-  min-height: 34px;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 9px;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
-  border-radius: 12px !important;
-  background: rgba(15, 23, 42, 0.82) !important;
-  box-shadow: var(--shadow-md) !important;
-  backdrop-filter: blur(12px);
+	min-height: 34px;
+	display: inline-flex;
+	align-items: center;
+	padding: 0 9px;
+	border: 1px solid rgba(255, 255, 255, 0.12) !important;
+	border-radius: 12px !important;
+	background: rgba(15, 23, 42, 0.82) !important;
+	box-shadow: var(--shadow-md) !important;
+	backdrop-filter: blur(12px);
 }
 
 body .app-content .vms-map-controls .leaflet-control-scale-line {
-  margin: 0 !important;
-  padding: 0 7px 2px !important;
-  border: 0 !important;
-  border-bottom: 2px solid rgba(147, 197, 253, 0.95) !important;
-  background: transparent !important;
-  color: #eaf2ff !important;
-  font-family: inherit !important;
-  font-size: 10px !important;
-  font-weight: 600 !important;
-  line-height: 1.15 !important;
-  text-shadow: none !important;
+	margin: 0 !important;
+	padding: 0 7px 2px !important;
+	border: 0 !important;
+	border-bottom: 2px solid rgba(147, 197, 253, 0.95) !important;
+	background: transparent !important;
+	color: #eaf2ff !important;
+	font-family: inherit !important;
+	font-size: 10px !important;
+	font-weight: 600 !important;
+	line-height: 1.15 !important;
+	text-shadow: none !important;
 }
 
 body .app-content .vms-map-controls .leaflet-control-scale-line::before {
-  content: "Bar = ";
-  color: #93c5fd;
-  font-weight: 800;
+	content: 'Bar = ';
+	color: #93c5fd;
+	font-weight: 800;
 }
 
 body .app-content .vms-map-controls .vms-scale-control {
-  width: auto;
-  height: 34px;
-  min-height: 34px;
-  min-width: 156px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
-  border-radius: 12px !important;
-  background: rgba(15, 23, 42, 0.82) !important;
-  box-shadow: var(--shadow-md) !important;
-  color: #eaf2ff !important;
-  backdrop-filter: blur(12px);
+	width: auto;
+	height: 34px;
+	min-height: 34px;
+	min-width: 156px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 4px 10px;
+	border: 1px solid rgba(255, 255, 255, 0.12) !important;
+	border-radius: 12px !important;
+	background: rgba(15, 23, 42, 0.82) !important;
+	box-shadow: var(--shadow-md) !important;
+	color: #eaf2ff !important;
+	backdrop-filter: blur(12px);
 }
 
 body .app-content .vms-map-controls .vms-scale-control__ruler {
-  position: relative;
-  width: 132px;
-  min-width: 76px;
-  height: 26px;
-  transition: width 0.16s ease;
+	position: relative;
+	width: 132px;
+	min-width: 76px;
+	height: 26px;
+	transition: width 0.16s ease;
 }
 
 body .app-content .vms-map-controls .vms-scale-control__bar {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  width: 100%;
-  display: block;
-  min-width: 36px;
-  height: 2px;
-  border-radius: 999px;
-  background: rgba(226, 232, 240, 0.92);
-  box-shadow: 0 0 9px rgba(255, 255, 255, 0.18);
-  transform: translateY(-50%);
+	position: absolute;
+	left: 0;
+	top: 50%;
+	width: 100%;
+	display: block;
+	min-width: 36px;
+	height: 2px;
+	border-radius: 999px;
+	background: rgba(226, 232, 240, 0.92);
+	box-shadow: 0 0 9px rgba(255, 255, 255, 0.18);
+	transform: translateY(-50%);
 }
 
 body .app-content .vms-map-controls .vms-scale-control__tick {
-  position: absolute;
-  width: 2px;
-  height: 9px;
-  border-radius: 999px;
-  background: rgba(226, 232, 240, 0.95);
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.16);
-  transition: left 0.16s ease;
+	position: absolute;
+	width: 2px;
+	height: 9px;
+	border-radius: 999px;
+	background: rgba(226, 232, 240, 0.95);
+	box-shadow: 0 0 8px rgba(255, 255, 255, 0.16);
+	transition: left 0.16s ease;
 }
 
 body .app-content .vms-map-controls .vms-scale-control__tick--metric {
-  bottom: 0;
-  transform: translateX(-1px);
+	bottom: 0;
+	transform: translateX(-1px);
 }
 
 body .app-content .vms-map-controls .vms-scale-control__tick--nautical {
-  top: 0;
-  transform: translateX(-1px);
+	top: 0;
+	transform: translateX(-1px);
 }
 
 body .app-content .vms-map-controls .vms-scale-control__label {
-  position: absolute;
-  transform: translateX(-50%);
-  white-space: nowrap;
-  color: #eaf2ff;
-  font-family: inherit;
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 1;
-  min-width: 46px;
-  text-align: center;
-  text-shadow: 0 1px 8px rgba(15, 23, 42, 0.7);
+	position: absolute;
+	transform: translateX(-50%);
+	white-space: nowrap;
+	color: #eaf2ff;
+	font-family: inherit;
+	font-size: 9px;
+	font-weight: 700;
+	line-height: 1;
+	min-width: 46px;
+	text-align: center;
+	text-shadow: 0 1px 8px rgba(15, 23, 42, 0.7);
 }
 
 body .app-content .vms-map-controls .vms-scale-control__label--metric {
-  top: 0;
+	top: 0;
 }
 
 body .app-content .vms-map-controls .vms-scale-control__label--nautical {
-  bottom: 0;
+	bottom: 0;
 }
 
 body .app-content .vms-map-controls .vms-map-source-control {
-  min-height: 34px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 5px 4px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
-  border-radius: 12px !important;
-  background: rgba(15, 23, 42, 0.82) !important;
-  box-shadow: var(--shadow-md) !important;
-  color: #eaf2ff !important;
-  backdrop-filter: blur(12px);
+	min-height: 34px;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 5px 4px 8px;
+	border: 1px solid rgba(255, 255, 255, 0.12) !important;
+	border-radius: 12px !important;
+	background: rgba(15, 23, 42, 0.82) !important;
+	box-shadow: var(--shadow-md) !important;
+	color: #eaf2ff !important;
+	backdrop-filter: blur(12px);
 }
 
 body .app-content .vms-map-controls .vms-map-source-control__label {
-  color: #93c5fd;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+	color: #93c5fd;
+	font-size: 9px;
+	font-weight: 800;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
 }
 
 body .app-content .vms-map-controls .vms-map-source-control__select {
-  display: none;
+	display: none;
 }
 
 body .app-content .vms-map-controls .vms-map-source-control__options {
-  position: relative;
-  display: inline-grid;
-  grid-template-columns: repeat(var(--map-source-count, 2), minmax(58px, 1fr));
-  gap: 2px;
-  padding: 2px;
-  border-radius: 10px;
-  background: rgba(2, 6, 23, 0.28);
-  overflow: hidden;
-  isolation: isolate;
+	position: relative;
+	display: inline-grid;
+	grid-template-columns: repeat(var(--map-source-count, 2), minmax(58px, 1fr));
+	gap: 2px;
+	padding: 2px;
+	border-radius: 10px;
+	background: rgba(2, 6, 23, 0.28);
+	overflow: hidden;
+	isolation: isolate;
 }
 
 body .app-content .vms-map-controls .vms-map-source-control__thumb {
-  position: absolute;
-  top: 2px;
-  bottom: 2px;
-  left: 2px;
-  z-index: 0;
-  width: calc((100% - 4px - (var(--map-source-gap-count, 1) * 2px)) / var(--map-source-count, 2));
-  border-radius: 8px;
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.94), rgba(14, 165, 233, 0.84));
-  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.28);
-  transform: translateX(calc(var(--map-source-index, 0) * (100% + 2px)));
-  transition:
-    transform 0.24s cubic-bezier(0.2, 0.9, 0.2, 1),
-    width 0.2s ease;
-  pointer-events: none;
+	position: absolute;
+	top: 2px;
+	bottom: 2px;
+	left: 2px;
+	z-index: 0;
+	width: calc((100% - 4px - (var(--map-source-gap-count, 1) * 2px)) / var(--map-source-count, 2));
+	border-radius: 8px;
+	background: linear-gradient(135deg, rgba(37, 99, 235, 0.94), rgba(14, 165, 233, 0.84));
+	box-shadow: 0 6px 16px rgba(37, 99, 235, 0.28);
+	transform: translateX(calc(var(--map-source-index, 0) * (100% + 2px)));
+	transition:
+		transform 0.24s cubic-bezier(0.2, 0.9, 0.2, 1),
+		width 0.2s ease;
+	pointer-events: none;
 }
 
 body .app-content .vms-map-controls .vms-map-source-control__button {
-  position: relative;
-  z-index: 1;
-  height: 24px;
-  min-width: 58px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: #aebbd0;
-  font: inherit;
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 1;
-  cursor: pointer;
-  transition:
-    color 0.16s ease,
-    transform 0.16s ease;
+	position: relative;
+	z-index: 1;
+	height: 24px;
+	min-width: 58px;
+	padding: 0 8px;
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
+	color: #aebbd0;
+	font: inherit;
+	font-size: 10px;
+	font-weight: 800;
+	line-height: 1;
+	cursor: pointer;
+	transition:
+		color 0.16s ease,
+		transform 0.16s ease;
 }
 
 body .app-content .vms-map-controls .vms-map-source-control__button:hover {
-  color: #ffffff;
+	color: #ffffff;
 }
 
 body .app-content .vms-map-controls .vms-map-source-control__button.active {
-  color: #ffffff;
+	color: #ffffff;
 }
 
 body .app-content .vms-map-controls .vms-map-source-control__button:active {
-  transform: scale(0.96);
+	transform: scale(0.96);
 }
 
 /* Keep native select menus readable across all dark dashboard pages. */
 body .app-content select {
-  color-scheme: dark;
+	color-scheme: dark;
 }
 
 body .app-content select :is(option, optgroup) {
-  background: #111827;
-  color: #f1f5f9;
+	background: #111827;
+	color: #f1f5f9;
 }
 
 /* Fleet View popup dimensions must win over Leaflet defaults and component
    styles loaded by other route modules. */
 body .app-content .fleet-page .measure-context-popup .leaflet-popup-content {
-  width: 300px !important;
-  max-width: calc(100vw - 42px) !important;
-  margin: 0 !important;
+	width: 300px !important;
+	max-width: calc(100vw - 42px) !important;
+	margin: 0 !important;
 }
 
 body .app-content .fleet-page .measure-context-popup .measure-start-info strong {
-  white-space: nowrap !important;
-  overflow-wrap: normal !important;
-  word-break: normal !important;
+	white-space: nowrap !important;
+	overflow-wrap: normal !important;
+	word-break: normal !important;
 }
 
 body .app-content .fleet-page .measure-toolbar {
-  background: #111827 !important;
-  background-image: none !important;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
-  color: #ffffff !important;
-  box-shadow:
-    0 9px 20px rgba(0, 0, 0, 0.32),
-    0 2px 7px rgba(0, 0, 0, 0.2) !important;
+	background: #111827 !important;
+	background-image: none !important;
+	border: 1px solid rgba(255, 255, 255, 0.12) !important;
+	color: #ffffff !important;
+	box-shadow:
+		0 9px 20px rgba(0, 0, 0, 0.32),
+		0 2px 7px rgba(0, 0, 0, 0.2) !important;
 }
 
 body .app-content .fleet-page .asset-leaflet-popup .fleet-asset-popup-heading > strong {
-  font-size: 11px !important;
-  line-height: 1.2 !important;
+	font-size: 11px !important;
+	line-height: 1.2 !important;
 }
 
-body .app-content .fleet-page .asset-leaflet-popup :is(
-  .fleet-asset-popup-eyebrow,
-  .fleet-asset-popup-badge,
-  .fleet-asset-popup-coordinates span
-) {
-  font-size: 7.5px !important;
+body
+	.app-content
+	.fleet-page
+	.asset-leaflet-popup
+	:is(.fleet-asset-popup-eyebrow, .fleet-asset-popup-badge, .fleet-asset-popup-coordinates span) {
+	font-size: 7.5px !important;
 }
 
 body .app-content .fleet-page .asset-leaflet-popup .fleet-asset-popup-coordinates strong {
-  font-size: 9px !important;
+	font-size: 9px !important;
 }
 
 body .app-content .fleet-page .asset-leaflet-popup .leaflet-popup-content {
-  width: 224px !important;
-  max-width: calc(100vw - 42px) !important;
-  margin: 0 !important;
-  overflow: hidden !important;
+	width: 224px !important;
+	max-width: calc(100vw - 42px) !important;
+	margin: 0 !important;
+	overflow: hidden !important;
 }
 
 body .app-content .fleet-page .fleet-leaflet-popup .leaflet-popup-content {
-  width: 300px !important;
-  max-width: calc(100vw - 42px) !important;
-  margin: 0 !important;
-  overflow: hidden !important;
+	width: 300px !important;
+	max-width: calc(100vw - 42px) !important;
+	margin: 0 !important;
+	overflow: hidden !important;
 }
 
-body .app-content .fleet-page :is(
-  .fleet-asset-popup,
-  .fleet-asset-popup-hero,
-  .fleet-asset-popup-coordinates,
-  .fleet-popup,
-  .fleet-popup-hero,
-  .fleet-popup-metrics,
-  .fleet-popup-meta,
-  .fleet-popup-actions
-) {
-  width: 100% !important;
-  max-width: 100% !important;
-  min-width: 0 !important;
-  box-sizing: border-box !important;
+body
+	.app-content
+	.fleet-page
+	:is(
+		.fleet-asset-popup,
+		.fleet-asset-popup-hero,
+		.fleet-asset-popup-coordinates,
+		.fleet-popup,
+		.fleet-popup-hero,
+		.fleet-popup-metrics,
+		.fleet-popup-meta,
+		.fleet-popup-actions
+	) {
+	width: 100% !important;
+	max-width: 100% !important;
+	min-width: 0 !important;
+	box-sizing: border-box !important;
 }
 
 @media (max-width: 760px) {
-  body .app-content .fleet-page .measure-context-popup .leaflet-popup-content {
-    width: min(280px, calc(100vw - 42px)) !important;
-  }
+	body .app-content .fleet-page .measure-context-popup .leaflet-popup-content {
+		width: min(280px, calc(100vw - 42px)) !important;
+	}
 
-  body .app-content .fleet-page .asset-leaflet-popup .leaflet-popup-content {
-    width: min(224px, calc(100vw - 42px)) !important;
-  }
+	body .app-content .fleet-page .asset-leaflet-popup .leaflet-popup-content {
+		width: min(224px, calc(100vw - 42px)) !important;
+	}
 
-  body .app-content .fleet-page .fleet-leaflet-popup .leaflet-popup-content {
-    width: min(300px, calc(100vw - 42px)) !important;
-  }
+	body .app-content .fleet-page .fleet-leaflet-popup .leaflet-popup-content {
+		width: min(300px, calc(100vw - 42px)) !important;
+	}
 
-  body .app-content .vms-map-controls .leaflet-control-zoom {
-    display: none !important;
-  }
+	body .app-content .vms-map-controls .leaflet-control-zoom {
+		display: none !important;
+	}
 }
 
 /*
@@ -1453,261 +1589,253 @@ body .app-content .fleet-page :is(
  * 1920x1200 keeps the original, slightly denser typography.
  */
 @media (min-width: 1280px) and (max-height: 1080px) {
-  body .app-content :is(input, select, textarea) {
-    font-size: 14px !important;
-  }
+	body .app-content :is(input, select, textarea) {
+		font-size: 14px !important;
+	}
 
-  body .app-content label {
-    font-size: 13px !important;
-  }
+	body .app-content label {
+		font-size: 13px !important;
+	}
 
-  body .app-content small {
-    font-size: 12px !important;
-  }
+	body .app-content small {
+		font-size: 12px !important;
+	}
 
-  body .app-content :is(p, button) {
-    font-size: 14px !important;
-  }
+	body .app-content :is(p, button) {
+		font-size: 14px !important;
+	}
 
-  body .app-content :is(
-    [class*="subtitle"],
-    [class*="description"],
-    [class*="helper"],
-    [class*="note"]
-  ) {
-    font-size: 13px !important;
-    line-height: 1.45 !important;
-  }
+	body
+		.app-content
+		:is([class*='subtitle'], [class*='description'], [class*='helper'], [class*='note']) {
+		font-size: 13px !important;
+		line-height: 1.45 !important;
+	}
 
-  body .app-content :is(
-    [class*="meta"],
-    [class*="label"]
-  ) :is(span, small, p) {
-    font-size: 12px !important;
-    line-height: 1.35 !important;
-  }
+	body .app-content :is([class*='meta'], [class*='label']) :is(span, small, p) {
+		font-size: 12px !important;
+		line-height: 1.35 !important;
+	}
 
-  body .app-content table :is(th, td) {
-    font-size: 14px !important;
-  }
+	body .app-content table :is(th, td) {
+		font-size: 14px !important;
+	}
 
-  body :is(
-    .side-item,
-    .side-label,
-    .main-sidebar-toggle,
-    .logout-btn
-  ) {
-    font-size: 13px !important;
-  }
+	body :is(.side-item, .side-label, .main-sidebar-toggle, .logout-btn) {
+		font-size: 13px !important;
+	}
 
-  body :is(
-    .alarm-count-badge,
-    .sidebar-mobile-header p,
-    .user-mini span
-  ) {
-    font-size: 12px !important;
-  }
+	body :is(.alarm-count-badge, .sidebar-mobile-header p, .user-mini span) {
+		font-size: 12px !important;
+	}
 
-  body .app-content .vessel-shell :is(
-    .arrow,
-    .status-copy small,
-    .vessel-item-copy small
-  ) {
-    font-size: 12px !important;
-  }
+	body .app-content .vessel-shell :is(.arrow, .status-copy small, .vessel-item-copy small) {
+		font-size: 12px !important;
+	}
 
-  body .app-content .vessel-shell :is(
-    .status-copy strong,
-    .dropdown-empty
-  ) {
-    font-size: 13px !important;
-  }
+	body .app-content .vessel-shell :is(.status-copy strong, .dropdown-empty) {
+		font-size: 13px !important;
+	}
 
-  body .app-content .fleet-page {
-    font-size: 13px !important;
-  }
+	body .app-content .fleet-page {
+		font-size: 13px !important;
+	}
 
-  body .app-content .fleet-page :is(
-    .sidebar-header p,
-    .vessel-name-block p,
-    .mini-metric span,
-    .legend-item,
-    .detail-panel-header p,
-    .detail-section h3,
-    .detail-section-kicker,
-    .detail-item span,
-    .voyage-progress-meta span,
-    .empty-voyage,
-    .simple-row,
-    .ocean-current span,
-    .weather-card small,
-    .detail-status-pill,
-    .detail-dashboard-btn,
-    .detail-updated-badge,
-    .detail-hero-metric > small
-  ) {
-    font-size: 12px !important;
-    line-height: 1.35 !important;
-  }
+	body
+		.app-content
+		.fleet-page
+		:is(
+			.sidebar-header p,
+			.vessel-name-block p,
+			.mini-metric span,
+			.legend-item,
+			.detail-panel-header p,
+			.detail-section h3,
+			.detail-section-kicker,
+			.detail-item span,
+			.voyage-progress-meta span,
+			.empty-voyage,
+			.simple-row,
+			.ocean-current span,
+			.weather-card small,
+			.detail-status-pill,
+			.detail-dashboard-btn,
+			.detail-updated-badge,
+			.detail-hero-metric > small
+		) {
+		font-size: 12px !important;
+		line-height: 1.35 !important;
+	}
 
-  body .app-content .fleet-page :is(
-    .stat-chip,
-    .mini-metric strong,
-    .detail-item strong,
-    .ocean-current strong,
-    .voyage-progress-mini-bottom,
-    .asset-toggle-btn,
-    .wind-toggle-btn,
-    .current-toggle-btn,
-    .measure-cancel-btn
-  ) {
-    font-size: 13px !important;
-  }
+	body
+		.app-content
+		.fleet-page
+		:is(
+			.stat-chip,
+			.mini-metric strong,
+			.detail-item strong,
+			.ocean-current strong,
+			.voyage-progress-mini-bottom,
+			.asset-toggle-btn,
+			.wind-toggle-btn,
+			.current-toggle-btn,
+			.measure-cancel-btn
+		) {
+		font-size: 13px !important;
+	}
 
-  body .app-content .fleet-page :is(
-    .fleet-popup-eyebrow,
-    .fleet-popup-status,
-    .fleet-popup-metric > span,
-    .fleet-popup-metric > strong small,
-    .fleet-popup-meta .fleet-popup-row span,
-    .fleet-asset-popup-eyebrow,
-    .fleet-asset-popup-badge,
-    .fleet-asset-popup-coordinates span,
-    .measure-start-info span,
-    .measure-distance-label
-  ) {
-    font-size: 11.5px !important;
-    line-height: 1.3 !important;
-  }
+	body
+		.app-content
+		.fleet-page
+		:is(
+			.fleet-popup-eyebrow,
+			.fleet-popup-status,
+			.fleet-popup-metric > span,
+			.fleet-popup-metric > strong small,
+			.fleet-popup-meta .fleet-popup-row span,
+			.fleet-asset-popup-eyebrow,
+			.fleet-asset-popup-badge,
+			.fleet-asset-popup-coordinates span,
+			.measure-start-info span,
+			.measure-distance-label
+		) {
+		font-size: 11.5px !important;
+		line-height: 1.3 !important;
+	}
 
-  body .app-content .fleet-page :is(
-    .fleet-popup-meta .fleet-popup-row strong,
-    .fleet-asset-popup-coordinates strong,
-    .measure-start-info strong,
-    .measure-start-btn,
-    .fleet-popup-actions .fleet-popup-detail-btn,
-    .fleet-popup-actions .fleet-popup-dashboard-btn
-  ) {
-    font-size: 13px !important;
-  }
+	body
+		.app-content
+		.fleet-page
+		:is(
+			.fleet-popup-meta .fleet-popup-row strong,
+			.fleet-asset-popup-coordinates strong,
+			.measure-start-info strong,
+			.measure-start-btn,
+			.fleet-popup-actions .fleet-popup-detail-btn,
+			.fleet-popup-actions .fleet-popup-dashboard-btn
+		) {
+		font-size: 13px !important;
+	}
 
-  body .app-content .fleet-page .fleet-asset-popup-heading > strong {
-    font-size: 14px !important;
-  }
+	body .app-content .fleet-page .fleet-asset-popup-heading > strong {
+		font-size: 14px !important;
+	}
 
-  body .app-content .dashboard-content :is(
-    .section-kicker,
-    .header-meta span,
-    .cctv-status-text,
-    .dashboard-map-status,
-    .info-label,
-    .environment-grid small,
-    .fod-usage-summary span
-  ) {
-    font-size: 13px !important;
-  }
+	body
+		.app-content
+		.dashboard-content
+		:is(
+			.section-kicker,
+			.header-meta span,
+			.cctv-status-text,
+			.dashboard-map-status,
+			.info-label,
+			.environment-grid small,
+			.fod-usage-summary span
+		) {
+		font-size: 13px !important;
+	}
 
-  body .app-content .dashboard-content :is(
-    .current-toggle-btn,
-    .wind-toggle-btn,
-    .dashboard-map-popup-row span
-  ) {
-    font-size: 12px !important;
-  }
+	body
+		.app-content
+		.dashboard-content
+		:is(.current-toggle-btn, .wind-toggle-btn, .dashboard-map-popup-row span) {
+		font-size: 12px !important;
+	}
 
-body .app-content .dashboard-content .dashboard-map-popup-row strong {
-    font-size: 13px !important;
-  }
+	body .app-content .dashboard-content .dashboard-map-popup-row strong {
+		font-size: 13px !important;
+	}
 }
 
 .load-required-area {
-  position: relative;
-  min-height: 430px;
+	position: relative;
+	min-height: 430px;
 }
 
 .load-required-area.is-locked > :not(.load-required-overlay) {
-  pointer-events: none;
-  user-select: none;
-  filter: blur(1px);
-  opacity: 0.32;
+	pointer-events: none;
+	user-select: none;
+	filter: blur(1px);
+	opacity: 0.32;
 }
 
 .load-required-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 25;
-  display: grid;
-  place-items: start center;
-  padding: clamp(32px, 5vh, 72px) 18px 24px;
-  border: 1px solid rgba(147, 197, 253, 0.16);
-  border-radius: 18px;
-  background:
-    radial-gradient(circle at 50% 12%, rgba(37, 99, 235, 0.18), transparent 34%),
-    linear-gradient(180deg, rgba(10, 14, 26, 0.64), rgba(10, 14, 26, 0.88));
-  backdrop-filter: blur(9px);
-  -webkit-backdrop-filter: blur(9px);
+	position: absolute;
+	inset: 0;
+	z-index: 25;
+	display: grid;
+	place-items: start center;
+	padding: clamp(32px, 5vh, 72px) 18px 24px;
+	border: 1px solid rgba(147, 197, 253, 0.16);
+	border-radius: 18px;
+	background:
+		radial-gradient(circle at 50% 12%, rgba(37, 99, 235, 0.18), transparent 34%),
+		linear-gradient(180deg, rgba(10, 14, 26, 0.64), rgba(10, 14, 26, 0.88));
+	backdrop-filter: blur(9px);
+	-webkit-backdrop-filter: blur(9px);
 }
 
 .load-required-card {
-  width: min(520px, 100%);
-  padding: 28px;
-  border: 1px solid rgba(147, 197, 253, 0.24);
-  border-radius: 22px;
-  background: rgba(15, 23, 42, 0.88);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
-  text-align: center;
+	width: min(520px, 100%);
+	padding: 28px;
+	border: 1px solid rgba(147, 197, 253, 0.24);
+	border-radius: 22px;
+	background: rgba(15, 23, 42, 0.88);
+	box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+	text-align: center;
 }
 
 .load-required-icon {
-  display: inline-grid;
-  width: 46px;
-  height: 46px;
-  margin-bottom: 14px;
-  place-items: center;
-  border: 1px solid rgba(96, 165, 250, 0.38);
-  border-radius: 16px;
-  background: rgba(37, 99, 235, 0.22);
-  color: #bfdbfe;
-  font-size: 24px;
-  font-weight: 800;
+	display: inline-grid;
+	width: 46px;
+	height: 46px;
+	margin-bottom: 14px;
+	place-items: center;
+	border: 1px solid rgba(96, 165, 250, 0.38);
+	border-radius: 16px;
+	background: rgba(37, 99, 235, 0.22);
+	color: #bfdbfe;
+	font-size: 24px;
+	font-weight: 800;
 }
 
 .load-required-card h2 {
-  margin: 6px 0 8px;
-  color: #f8fafc;
-  font-size: clamp(22px, 2vw, 30px);
-  letter-spacing: -0.03em;
+	margin: 6px 0 8px;
+	color: #f8fafc;
+	font-size: clamp(22px, 2vw, 30px);
+	letter-spacing: -0.03em;
 }
 
 .load-required-card p {
-  margin: 0;
-  color: #aab8cc;
-  font-size: 15px;
-  line-height: 1.65;
+	margin: 0;
+	color: #aab8cc;
+	font-size: 15px;
+	line-height: 1.65;
 }
 
 .load-required-card strong {
-  color: #dbeafe;
+	color: #dbeafe;
 }
 
 .trace-load-required-area {
-  min-height: 620px;
+	min-height: 620px;
 }
 
 @media (max-width: 768px) {
-  .load-required-area {
-    min-height: 360px;
-  }
+	.load-required-area {
+		min-height: 360px;
+	}
 
-  .load-required-overlay {
-    padding: 26px 12px 18px;
-    border-radius: 14px;
-  }
+	.load-required-overlay {
+		padding: 26px 12px 18px;
+		border-radius: 14px;
+	}
 
-  .load-required-card {
-    padding: 22px 18px;
-    border-radius: 18px;
-  }
+	.load-required-card {
+		padding: 22px 18px;
+		border-radius: 18px;
+	}
 }
 
 /*
@@ -1717,83 +1845,79 @@ body .app-content .dashboard-content .dashboard-map-popup-row strong {
  * cap most UI text to calmer weights across every screen.
  */
 :root {
-  --font-weight-body: 500;
-  --font-weight-label: 600;
-  --font-weight-action: 600;
-  --font-weight-title: 700;
+	--font-weight-body: 500;
+	--font-weight-label: 600;
+	--font-weight-action: 600;
+	--font-weight-title: 700;
 }
 
 body {
-  font-weight: var(--font-weight-body);
+	font-weight: var(--font-weight-body);
 }
 
 body :is(.app-shell, .login-page, .login-card, .login-footer, .loading-screen) {
-  font-weight: var(--font-weight-body);
+	font-weight: var(--font-weight-body);
 }
 
-body :is(.app-shell, .login-page, .login-card, .login-footer, .loading-screen) :is(
-  p,
-  span,
-  small,
-  td,
-  li,
-  input,
-  select,
-  textarea,
-  option
-) {
-  font-weight: var(--font-weight-body) !important;
+body
+	:is(.app-shell, .login-page, .login-card, .login-footer, .loading-screen)
+	:is(p, span, small, td, li, input, select, textarea, option) {
+	font-weight: var(--font-weight-body) !important;
 }
 
-body :is(.app-shell, .login-page, .login-card, .login-footer, .loading-screen) :is(
-  label,
-  label > span,
-  th,
-  button,
-  button *,
-  [role='button'],
-  [role='button'] *,
-  a[class],
-  a[class] *,
-  [class*='btn'],
-  [class*='btn'] *,
-  [class*='button'],
-  [class*='button'] *,
-  [class*='tab'],
-  [class*='tab'] *,
-  [class*='badge'],
-  [class*='badge'] *,
-  [class*='pill'],
-  [class*='pill'] *,
-  [class*='chip'],
-  [class*='chip'] *,
-  [class*='kicker'],
-  [class*='eyebrow'],
-  [class*='label'],
-  [class*='status']
-) {
-  font-weight: var(--font-weight-label) !important;
+body
+	:is(.app-shell, .login-page, .login-card, .login-footer, .loading-screen)
+	:is(
+		label,
+		label > span,
+		th,
+		button,
+		button *,
+		[role='button'],
+		[role='button'] *,
+		a[class],
+		a[class] *,
+		[class*='btn'],
+		[class*='btn'] *,
+		[class*='button'],
+		[class*='button'] *,
+		[class*='tab'],
+		[class*='tab'] *,
+		[class*='badge'],
+		[class*='badge'] *,
+		[class*='pill'],
+		[class*='pill'] *,
+		[class*='chip'],
+		[class*='chip'] *,
+		[class*='kicker'],
+		[class*='eyebrow'],
+		[class*='label'],
+		[class*='status']
+	) {
+	font-weight: var(--font-weight-label) !important;
 }
 
-body :is(.app-shell, .login-page, .login-card, .login-footer, .loading-screen) :is(
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6,
-  strong,
-  b,
-  [class*='title'],
-  [class*='title'] *,
-  [class*='heading'],
-  [class*='heading'] *,
-  [class*='name'],
-  [class*='name'] *,
-  [class*='value'],
-  [class*='value'] *,
-  [class*='amount'],
-  [class*='amount'] *
-) {
-  font-weight: var(--font-weight-title) !important;
+body
+	:is(.app-shell, .login-page, .login-card, .login-footer, .loading-screen)
+	:is(
+		h1,
+		h2,
+		h3,
+		h4,
+		h5,
+		h6,
+		strong,
+		b,
+		[class*='title'],
+		[class*='title'] *,
+		[class*='heading'],
+		[class*='heading'] *,
+		[class*='name'],
+		[class*='name'] *,
+		[class*='value'],
+		[class*='value'] *,
+		[class*='amount'],
+		[class*='amount'] *
+	) {
+	font-weight: var(--font-weight-title) !important;
 }

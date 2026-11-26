@@ -1,4 +1,6 @@
 <script>
+	import { Gauge } from 'lucide-svelte';
+
 	let { tables = [], timezone = '' } = $props();
 
 	function formatNumber(value, digits = 2, fallback = '-') {
@@ -14,10 +16,15 @@
 
 <section class="table-section hourly-speed-section" aria-labelledby="hourly-speed-title">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">Speed</span>
-			<h2 id="hourly-speed-title">Hourly Average Speed</h2>
-			<p>Average speed per hour (knots)</p>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-cyan" aria-hidden="true">
+				<Gauge size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">Speed</span>
+				<h2 id="hourly-speed-title">Hourly Average Speed</h2>
+				<p>Average speed per hour (knots)</p>
+			</div>
 		</div>
 		{#if timezone}
 			<strong>{timezone}</strong>

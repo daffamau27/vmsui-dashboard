@@ -1,4 +1,6 @@
 <script>
+	import { Ship, X } from 'lucide-svelte';
+
 	let {
 		statusFilter = 'all',
 		onlineCount = 0,
@@ -12,14 +14,24 @@
 
 <div class="sidebar-header">
 	<div class="sidebar-title-wrap">
-		<div class="sidebar-icon">FL</div>
+		<div class="sidebar-icon" aria-hidden="true">
+			<Ship size={15} strokeWidth={2.2} />
+		</div>
 		<div>
 			<h1>Vessels</h1>
 			<p>Fleet monitoring</p>
 		</div>
 	</div>
 
-	<button type="button" class="sidebar-close-btn" onclick={() => onCloseMobile?.()}> A- </button>
+	<button
+		type="button"
+		class="sidebar-close-btn"
+		aria-label="Close vessel list"
+		title="Close"
+		onclick={() => onCloseMobile?.()}
+	>
+		<X size={13} strokeWidth={2.6} />
+	</button>
 </div>
 
 <div class="fleet-stats">

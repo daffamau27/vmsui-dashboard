@@ -1,14 +1,20 @@
 <script>
 	import CctvSnapshotImage from '$lib/components/CctvSnapshotImage.svelte';
+	import { Cctv } from 'lucide-svelte';
 
 	let { items = [], main = null, miniItems = [], loading = false, error = '', onSelect } = $props();
 </script>
 
 <div class="monitoring-card cctv-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">CCTV Monitoring</span>
-			<h2>Latest Camera Snapshot</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon" aria-hidden="true">
+				<Cctv size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">CCTV Monitoring</span>
+				<h2>Latest Camera Snapshot</h2>
+			</div>
 		</div>
 
 		<strong>{loading ? 'Loading...' : `${items.length} cameras`}</strong>

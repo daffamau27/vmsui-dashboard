@@ -1,4 +1,6 @@
 <script>
+	import { ChartLine } from 'lucide-svelte';
+
 	let {
 		groups = [],
 		canViewFuelEcu = false,
@@ -13,9 +15,14 @@
 
 <section class="table-section rpm-fuel-curve-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">Chart</span>
-			<h2>RPM vs Fuel Curve</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-violet" aria-hidden="true">
+				<ChartLine size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">Chart</span>
+				<h2>RPM vs Fuel Curve</h2>
+			</div>
 		</div>
 
 		<strong>{groups.length} engines</strong>

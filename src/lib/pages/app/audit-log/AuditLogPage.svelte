@@ -1,6 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
 	import { apiRequest } from '$lib/api/authApi.js';
+	import { CircleCheck, TriangleAlert } from 'lucide-svelte';
 	import AuditLogExportCard from './AuditLogExportCard.svelte';
 	import AuditLogTable from './AuditLogTable.svelte';
 	import AuditLogDetailModal from './AuditLogDetailModal.svelte';
@@ -367,14 +368,16 @@
 
 <section class="audit-page">
 	{#if error}
-		<div class="status-box error-box">
-			{error}
+		<div class="status-box error-box" role="alert">
+			<TriangleAlert size={14} strokeWidth={2.4} aria-hidden="true" />
+			<span>{error}</span>
 		</div>
 	{/if}
 
 	{#if successMessage}
-		<div class="status-box success-box">
-			{successMessage}
+		<div class="status-box success-box" role="status">
+			<CircleCheck size={14} strokeWidth={2.4} aria-hidden="true" />
+			<span>{successMessage}</span>
 		</div>
 	{/if}
 

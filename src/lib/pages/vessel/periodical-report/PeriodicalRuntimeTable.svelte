@@ -1,12 +1,19 @@
 <script>
+	import { Clock } from 'lucide-svelte';
+
 	let { rows = [], emptyText = 'Engine runtime data is not available yet.' } = $props();
 </script>
 
 <section class="table-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">Runtime</span>
-			<h2>Engine Runtime</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-amber" aria-hidden="true">
+				<Clock size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">Runtime</span>
+				<h2>Engine Runtime</h2>
+			</div>
 		</div>
 
 		<strong>{rows.length} engines</strong>

@@ -121,7 +121,8 @@
 			weatherLabel: '29.4°C',
 			weatherCondition: 'Partly cloudy',
 			currentLabel: '1.8 kph',
-			currentDirection: '118°'
+			currentDirection: '118°',
+			currentDirectionDeg: 118
 		},
 		{
 			key: 'tomorrow',
@@ -129,7 +130,8 @@
 			weatherLabel: '26.1–31.0°C',
 			weatherCondition: 'Light rain',
 			currentLabel: '2.1 kph',
-			currentDirection: '102°'
+			currentDirection: '102°',
+			currentDirectionDeg: 102
 		},
 		{
 			key: 'day-after',
@@ -137,7 +139,8 @@
 			weatherLabel: '25.8–30.4°C',
 			weatherCondition: 'Cloudy',
 			currentLabel: '1.6 kph',
-			currentDirection: '96°'
+			currentDirection: '96°',
+			currentDirectionDeg: 96
 		}
 	];
 
@@ -148,9 +151,9 @@
 	];
 
 	const currentCards = [
-		{ key: 'current', label: 'Today', value: '1.8 kph', direction: '118°' },
-		{ key: 'tomorrow', label: 'Tomorrow', value: '2.1 kph', direction: '102°' },
-		{ key: 'day-after', label: 'Day After', value: '1.6 kph', direction: '96°' }
+		{ key: 'current', label: 'Today', value: '1.8 kph', direction: '118°', directionDeg: 118 },
+		{ key: 'tomorrow', label: 'Tomorrow', value: '2.1 kph', direction: '102°', directionDeg: 102 },
+		{ key: 'day-after', label: 'Day After', value: '1.6 kph', direction: '96°', directionDeg: 96 }
 	];
 
 	const fuelSummary = {
@@ -201,7 +204,13 @@
 
 <Story name="Header" asChild>
 	<div class="dashboard-content" style="min-height: 100vh;">
-		<VesselDashboardHeader vesselName="MV Nusantara Jaya" />
+		<VesselDashboardHeader vesselName="MV Nusantara Jaya" online={true} />
+	</div>
+</Story>
+
+<Story name="Header Offline" asChild>
+	<div class="dashboard-content" style="min-height: 100vh;">
+		<VesselDashboardHeader vesselName="MV Nusantara Jaya" online={false} />
 	</div>
 </Story>
 

@@ -1,5 +1,6 @@
 <script>
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { Anchor } from 'lucide-svelte';
 	import './avs-page.css';
 
 	let {
@@ -16,9 +17,14 @@
 
 <aside class="vessel-panel">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">Vessels</span>
-			<h2>Select Vessel</h2>
+		<div class="section-heading">
+			<span class="mini-heading-icon tone-cyan" aria-hidden="true">
+				<Anchor size={15} strokeWidth={2.2} />
+			</span>
+			<div>
+				<span class="section-kicker">Vessels</span>
+				<h2>Select Vessel</h2>
+			</div>
 		</div>
 
 		<strong>{selectedDeviceIds.length}/{devices.length}</strong>

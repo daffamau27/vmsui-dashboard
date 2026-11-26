@@ -1,5 +1,6 @@
 <script>
 	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
+	import { Download, RotateCcw } from 'lucide-svelte';
 	import './audit-log-page.css';
 
 	let {
@@ -19,11 +20,16 @@
 
 <section class="table-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">Export</span>
-			<h2>
-				{isSuperAdmin && auditScope === 'all' ? 'Export All Audit Logs' : 'Export My Audit Logs'}
-			</h2>
+		<div class="section-heading">
+			<span class="mini-heading-icon tone-blue" aria-hidden="true">
+				<Download size={14} strokeWidth={2.3} />
+			</span>
+			<div>
+				<span class="section-kicker">Export</span>
+				<h2>
+					{isSuperAdmin && auditScope === 'all' ? 'Export All Audit Logs' : 'Export My Audit Logs'}
+				</h2>
+			</div>
 		</div>
 
 		<strong>CSV</strong>
@@ -75,7 +81,8 @@
 
 		<div class="filter-actions">
 			<button type="button" class="primary-btn" onclick={() => onExport?.()} disabled={exporting}>
-				Export
+				<Download size={13} strokeWidth={2.4} aria-hidden="true" />
+				<span>{exporting ? 'Exporting...' : 'Export'}</span>
 			</button>
 
 			<button
@@ -87,7 +94,8 @@
 				}}
 				disabled={exporting}
 			>
-				Reset
+				<RotateCcw size={13} strokeWidth={2.4} aria-hidden="true" />
+				<span>Reset</span>
 			</button>
 		</div>
 	</div>

@@ -1,4 +1,6 @@
 <script>
+	import { TriangleAlert } from 'lucide-svelte';
+
 	let { groups = [], totals = [], grandTotal = 0 } = $props();
 
 	function formatNumber(value, digits = 2, fallback = '-') {
@@ -40,9 +42,14 @@
 
 <section class="table-section low-speed-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">Fuel</span>
-			<h2>High RPM Low Speed</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-red" aria-hidden="true">
+				<TriangleAlert size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">SRITI</span>
+				<h2>High RPM Low Speed</h2>
+			</div>
 		</div>
 
 		<strong>{groups.length} engines</strong>
@@ -120,6 +127,6 @@
 			</article>
 		</div>
 	{:else}
-		<div class="empty-box">High RPM low speed data is not available yet.</div>
+		<div class="empty-box">SRITI data is not available yet.</div>
 	{/if}
 </section>

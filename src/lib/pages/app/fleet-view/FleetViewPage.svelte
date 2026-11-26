@@ -813,9 +813,17 @@
 
 	function createVesselIcon(vessel) {
 		const isSelected = String(selectedVesselId) === String(vessel.id);
-		// Di zoom rendah gambar gabungan tug+tongkang terlalu ramai → pakai tugboat biasa dulu.
-		const isTugVariant = getVesselIconLayout(vessel.type) && fleetMapZoom < 8;
-		const type = isTugVariant ? 'tugboat' : vessel.type;
+		// Di zoom rendah gambar gabungan kapal+tongkang terlalu ramai → pakai ikon dasar dulu.
+		const hasCompositeLayout = Boolean(getVesselIconLayout(vessel.type));
+		const isLowZoomComposite = hasCompositeLayout && fleetMapZoom < 8;
+		const type = isLowZoomComposite
+			? String(vessel.type || '')
+					.trim()
+					.toLowerCase()
+					.startsWith('ahts')
+				? 'ahts'
+				: 'tugboat'
+			: vessel.type;
 		const scale = getVesselTypeIconScale(type);
 		const layout = getVesselIconLayout(type);
 		const iconWidth = Math.round(

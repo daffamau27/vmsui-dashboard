@@ -1,6 +1,7 @@
 <script>
 	import { fade } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
+	import { History, X } from 'lucide-svelte';
 	import { slideScale } from '$lib/utils/modalTransition.js';
 
 	let {
@@ -36,18 +37,25 @@
 			out:slideScale={{ intro: false, distance: 480, start: 0.6, fadeAt: 0.3, duration: 280 }}
 		>
 			<header class="hire-history-header">
-				<div>
-					<span class="page-kicker">Hire History</span>
-					<h2 id="hire-history-title">{vesselLabel}</h2>
-					<p>{pagination.totalItems || 0} record(s) found</p>
+				<div class="section-heading">
+					<span class="mini-heading-icon tone-violet" aria-hidden="true">
+						<History size={14} strokeWidth={2.3} />
+					</span>
+					<div>
+						<span class="page-kicker">Hire History</span>
+						<h2 id="hire-history-title">{vesselLabel}</h2>
+						<p>{pagination.totalItems || 0} record(s) found</p>
+					</div>
 				</div>
 				<button
 					type="button"
 					class="hire-history-close"
 					onclick={() => onClose?.()}
 					disabled={loading}
-					aria-label="Close hire history">×</button
+					aria-label="Close hire history"
 				>
+					<X size={15} strokeWidth={2.6} />
+				</button>
 			</header>
 
 			<div class="hire-history-body">

@@ -1,4 +1,6 @@
 <script>
+	import { KeyRound } from 'lucide-svelte';
+
 	let {
 		oldPassword = $bindable(''),
 		newPassword = $bindable(''),
@@ -10,9 +12,14 @@
 
 <article class="panel password-panel">
 	<div class="panel-header">
-		<div>
-			<h2>Change Password</h2>
-			<p>Use a strong new password that you can remember.</p>
+		<div class="section-heading">
+			<span class="mini-heading-icon tone-amber" aria-hidden="true">
+				<KeyRound size={14} strokeWidth={2.3} />
+			</span>
+			<div>
+				<h2>Change Password</h2>
+				<p>Use a strong new password that you can remember.</p>
+			</div>
 		</div>
 	</div>
 

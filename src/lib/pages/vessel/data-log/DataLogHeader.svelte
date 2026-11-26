@@ -6,6 +6,7 @@
 		getNowDateTimeLocalValue,
 		getTimezoneOffsetMinutes
 	} from '$lib/utils/dateTimeInputBounds.js';
+	import { Database } from 'lucide-svelte';
 	import './data-log-page.css';
 
 	let {
@@ -74,9 +75,18 @@
 
 <section class="data-log-header-card">
 	<div class="data-log-header-copy">
-		<div class="page-kicker">Data Log</div>
-		<h1>{vesselName}</h1>
-		<p>Granular 1-minute telemetry log with position, speed, runtime, RPM, load, and fuel data.</p>
+		<div class="section-heading">
+			<span class="section-heading-icon" aria-hidden="true">
+				<Database size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<div class="page-kicker">Data Log</div>
+				<h1>{vesselName}</h1>
+				<p>
+					Granular 1-minute telemetry log with position, speed, runtime, RPM, load, and fuel data.
+				</p>
+			</div>
+		</div>
 	</div>
 
 	<div class="data-log-header-filters">

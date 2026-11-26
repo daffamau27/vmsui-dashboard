@@ -1,4 +1,6 @@
 <script>
+	import { Activity } from 'lucide-svelte';
+
 	let { statusGroups = [], clutchGroups = [], canViewClutchInChart = false } = $props();
 
 	function isOnStatus(status) {
@@ -63,9 +65,14 @@
 
 <section class="table-section engine-status-chart-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">Chart</span>
-			<h2>Engine Activity Timeline</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-green" aria-hidden="true">
+				<Activity size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">Chart</span>
+				<h2>Engine Activity Timeline</h2>
+			</div>
 		</div>
 
 		<strong>{statusGroups.length} engines</strong>

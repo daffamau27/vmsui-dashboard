@@ -1,4 +1,6 @@
 <script>
+	import { RefreshCw, Send } from 'lucide-svelte';
+
 	let {
 		userName = '-',
 		isSuperAdmin = false,
@@ -24,7 +26,7 @@
 
 <header class="profile-hero">
 	<div class="hero-left">
-		<div class="avatar">
+		<div class="avatar" aria-hidden="true">
 			{getInitials(userName)}
 		</div>
 
@@ -52,10 +54,14 @@
 				rel="noopener noreferrer"
 				aria-label="Open VMSUI AI Telegram bot"
 			>
-				Open AI Telegram Bot
+				<Send size={13} strokeWidth={2.4} aria-hidden="true" />
+				<span>Open AI Telegram Bot</span>
 			</a>
 		{/if}
 
-		<button class="refresh-button" type="button" onclick={() => onRefresh?.()}>Refresh</button>
+		<button class="refresh-button" type="button" onclick={() => onRefresh?.()}>
+			<RefreshCw size={13} strokeWidth={2.4} aria-hidden="true" />
+			<span>Refresh</span>
+		</button>
 	</div>
 </header>

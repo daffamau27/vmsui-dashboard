@@ -1,18 +1,6 @@
 <script>
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-	import { getAssetIconUrl, getAssetTypeLabel } from '$lib/utils/assetIcons.js';
-
-	const ASSET_LEGEND_TYPES = [
-		'anchor',
-		'buoy',
-		'dock',
-		'shipyard',
-		'mess',
-		'office',
-		'fso',
-		'rig',
-		'whp'
-	];
+	import { MapPin } from 'lucide-svelte';
 
 	let {
 		planName = 'No Active Route',
@@ -25,6 +13,7 @@
 		detailLoading = false,
 		active = false,
 		zones = [],
+		legendTypes = [],
 		onFit,
 		onShowActivePlan,
 		mapContainer = $bindable(null)
@@ -34,14 +23,21 @@
 <section class="map-panel">
 	<div class="section-header map-section-header">
 		<div class="map-title">
-			<span class="section-kicker">Route Map</span>
-			<h2>{planName}</h2>
-			<div class="map-meta-line">
-				<span>{routePointCount} route points</span>
-				<span>{assetsLoading ? 'Loading assets...' : `${assetsCount} assets`}</span>
-				{#if assetsError}
-					<span class="asset-error">{assetsError}</span>
-				{/if}
+			<div class="section-heading">
+				<span class="section-heading-icon tone-cyan" aria-hidden="true">
+					<MapPin size={20} strokeWidth={2} />
+				</span>
+				<div>
+					<span class="section-kicker">Route Map</span>
+					<h2>{planName}</h2>
+					<div class="map-meta-line">
+						<span>{routePointCount} route points</span>
+						<span>{assetsLoading ? 'Loading assets...' : `${assetsCount} assets`}</span>
+						{#if assetsError}
+							<span class="asset-error">{assetsError}</span>
+						{/if}
+					</div>
+				</div>
 			</div>
 		</div>
 
@@ -103,19 +99,21 @@
 			</span>
 		</div>
 
-		<div class="legend-group">
-			<span class="legend-title">Assets</span>
-			{#each ASSET_LEGEND_TYPES as assetType (assetType)}
-				<span class="legend-item asset-legend-item">
-					<img
-						class="legend-asset-icon"
-						src={getAssetIconUrl(assetType)}
-						alt={`${getAssetTypeLabel(assetType)} icon`}
-					/>
-					{getAssetTypeLabel(assetType)}
-				</span>
-			{/each}
-		</div>
+		{#if legendTypes.length}
+			<div class="legend-group">
+				<span class="legend-title">Assets</span>
+				{#each legendTypes as assetType (assetType.key ?? assetType.label)}
+					<span class="legend-item asset-legend-item asset-type-{assetType.key ?? 'asset'}">
+						<img
+							class="legend-asset-icon"
+							src={assetType.icon}
+							alt={`${assetType.label} icon`}
+						/>
+						{assetType.label}
+					</span>
+				{/each}
+			</div>
+		{/if}
 
 		{#if zones.length}
 			<div class="legend-group">

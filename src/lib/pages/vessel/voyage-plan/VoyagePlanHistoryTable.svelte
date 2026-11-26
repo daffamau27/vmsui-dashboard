@@ -1,5 +1,6 @@
 <script>
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { History } from 'lucide-svelte';
 
 	let {
 		rows = [],
@@ -15,9 +16,14 @@
 
 <section class="table-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">Assignment History</span>
-			<h2>Voyage Plan History</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-violet" aria-hidden="true">
+				<History size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">Assignment History</span>
+				<h2>Voyage Plan History</h2>
+			</div>
 		</div>
 
 		<strong>{pagination.totalItems || 0} rows</strong>

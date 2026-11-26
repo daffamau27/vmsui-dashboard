@@ -1,12 +1,19 @@
 <script>
+	import { Droplets } from 'lucide-svelte';
+
 	let { group = null, chartAction } = $props();
 </script>
 
 <section class="table-section rpm-fuel-curve-section fod-chart-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">FOD</span>
-			<h2>FOD Fuel Chart</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-cyan" aria-hidden="true">
+				<Droplets size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">FOD</span>
+				<h2>FOD Fuel Chart</h2>
+			</div>
 		</div>
 
 		<strong>{group?.points || 0} points</strong>

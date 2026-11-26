@@ -6,6 +6,7 @@
 		getNowDateTimeLocalValue,
 		getTimezoneOffsetMinutes
 	} from '$lib/utils/dateTimeInputBounds.js';
+	import { History } from 'lucide-svelte';
 
 	let {
 		vesselName = '-',
@@ -63,11 +64,19 @@
 
 <section class="trace-header-card">
 	<div class="trace-header-copy">
-		<div class="page-kicker">Trace Playback</div>
-		<h1>{vesselName}</h1>
-		<p>
-			Replay vessel position, route trail, telemetry, engine RPM, and CCTV snapshots by time range.
-		</p>
+		<div class="section-heading">
+			<span class="section-heading-icon" aria-hidden="true">
+				<History size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<div class="page-kicker">Trace Playback</div>
+				<h1>{vesselName}</h1>
+				<p>
+					Replay vessel position, route trail, telemetry, engine RPM, and CCTV snapshots by time
+					range.
+				</p>
+			</div>
+		</div>
 	</div>
 
 	<div class="trace-header-filters">

@@ -1,4 +1,6 @@
 <script>
+	import { TriangleAlert } from 'lucide-svelte';
+
 	let {
 		rows = [],
 		totalItems = 0,
@@ -80,7 +82,9 @@
 		aria-labelledby="deviation-alert-title"
 	>
 		<header class="deviation-alert-header">
-			<div class="deviation-alert-icon" aria-hidden="true">!</div>
+			<div class="deviation-alert-icon" aria-hidden="true">
+				<TriangleAlert size={21} strokeWidth={2.4} />
+			</div>
 
 			<div class="deviation-alert-title">
 				<span>Unread data deviations</span>
@@ -222,9 +226,6 @@
 		background: #f97316;
 		color: #ffffff;
 		box-shadow: 0 8px 22px rgba(249, 115, 22, 0.28);
-		font-size: 22px;
-		line-height: 1;
-		font-weight: 950;
 	}
 
 	.deviation-alert-title {

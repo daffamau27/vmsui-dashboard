@@ -1,4 +1,6 @@
 <script>
+	import { TriangleAlert } from 'lucide-svelte';
+
 	let { rows = [], groups = [] } = $props();
 
 	function formatNumber(value, digits = 2, fallback = '-') {
@@ -40,9 +42,14 @@
 
 <section class="table-section high-rpm-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">RPM</span>
-			<h2>High RPM Outside Safety Zone</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-red" aria-hidden="true">
+				<TriangleAlert size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">RPM</span>
+				<h2>High RPM Outside Safety Zone</h2>
+			</div>
 		</div>
 
 		<strong>{rows.length} rows</strong>

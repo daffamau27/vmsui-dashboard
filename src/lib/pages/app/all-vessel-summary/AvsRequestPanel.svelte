@@ -1,6 +1,7 @@
 <script>
 	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import { ArrowLeftRight, CalendarClock } from 'lucide-svelte';
 	import './avs-page.css';
 
 	let {
@@ -29,9 +30,14 @@
 
 <section class="table-section summary-request-section">
 	<div class="section-header summary-request-header">
-		<div>
-			<span class="section-kicker">Range & UTC</span>
-			<h2>Summary Request</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-cyan" aria-hidden="true">
+				<CalendarClock size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">Range & UTC</span>
+				<h2>Summary Request</h2>
+			</div>
 		</div>
 
 		<strong>{activeDefaultPresetLabel}</strong>
@@ -41,7 +47,9 @@
 		<div class="request-config-card">
 			<div class="request-config-head">
 				<div class="request-title-block">
-					<div class="request-icon">↔</div>
+					<div class="request-icon" aria-hidden="true">
+						<ArrowLeftRight size={16} strokeWidth={2.2} />
+					</div>
 
 					<div>
 						<h3>Default Request</h3>

@@ -1,4 +1,6 @@
 <script>
+	import { Play, Pause, StepBack, StepForward, Rewind } from 'lucide-svelte';
+
 	let {
 		isPlaying = false,
 		direction = 1,
@@ -38,8 +40,9 @@
 			class="step-btn"
 			onclick={() => onStep?.(-1)}
 			disabled={!eventCount || activeIndex <= 0}
+			aria-label="Previous point"
 		>
-			‹
+			<StepBack size={14} strokeWidth={2.4} />
 		</button>
 
 		<div class="playback-main">
@@ -53,7 +56,13 @@
 				}}
 				disabled={!eventCount}
 			>
-				{isPlaying && direction === -1 ? 'Pause' : 'Reverse'}
+				{#if isPlaying && direction === -1}
+					<Pause size={12} strokeWidth={2.4} />
+					<span>Pause</span>
+				{:else}
+					<Rewind size={12} strokeWidth={2.4} />
+					<span>Reverse</span>
+				{/if}
 			</button>
 
 			<button
@@ -66,7 +75,13 @@
 				}}
 				disabled={!eventCount}
 			>
-				{isPlaying && direction === 1 ? 'Pause' : 'Play'}
+				{#if isPlaying && direction === 1}
+					<Pause size={12} strokeWidth={2.4} />
+					<span>Pause</span>
+				{:else}
+					<Play size={12} strokeWidth={2.4} />
+					<span>Play</span>
+				{/if}
 			</button>
 		</div>
 
@@ -94,8 +109,9 @@
 			class="step-btn"
 			onclick={() => onStep?.(1)}
 			disabled={!eventCount || activeIndex >= eventCount - 1}
+			aria-label="Next point"
 		>
-			›
+			<StepForward size={14} strokeWidth={2.4} />
 		</button>
 	</div>
 

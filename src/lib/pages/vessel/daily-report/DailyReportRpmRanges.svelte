@@ -1,4 +1,6 @@
 <script>
+	import { ChartBar } from 'lucide-svelte';
+
 	let {
 		selectedRpmCurveTable = null,
 		selectedRpmMatrices = [],
@@ -14,9 +16,14 @@
 
 <section class="table-section rpm-curve-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">RPM</span>
-			<h2>RPM Range Runtime & Fuel</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-violet" aria-hidden="true">
+				<ChartBar size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">RPM</span>
+				<h2>RPM Range Runtime &amp; Fuel</h2>
+			</div>
 		</div>
 
 		<div class="rpm-curve-source-control">

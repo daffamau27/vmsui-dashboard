@@ -1,5 +1,5 @@
 <script>
-	import { ArrowRight, ArrowUpRight, CalendarDays, FileText, X } from 'lucide-svelte';
+	import { ArrowRight, ArrowUpRight, CalendarDays, FileText, TableProperties, X } from 'lucide-svelte';
 	import { onMount, tick } from 'svelte';
 	import { resolve } from '$app/paths';
 
@@ -100,9 +100,14 @@
 
 <section class="table-section monthly-main-table">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">Daily Aggregation</span>
-			<h2>Monthly Report by Date</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-cyan" aria-hidden="true">
+				<TableProperties size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">Daily Aggregation</span>
+				<h2>Monthly Report by Date</h2>
+			</div>
 		</div>
 
 		<div class="section-header-actions">
@@ -133,7 +138,7 @@
 						{/if}
 
 						{#if showHighRpm}
-							<th colspan={highRpmColspan}>HIGH RPM LOW SPEED</th>
+							<th colspan={highRpmColspan}>SRITI</th>
 						{/if}
 					</tr>
 

@@ -1,5 +1,6 @@
 <script>
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { TableProperties } from 'lucide-svelte';
 	import './data-log-page.css';
 
 	let {
@@ -48,9 +49,14 @@
 {:else}
 	<section class="table-section">
 		<div class="section-header">
-			<div>
-				<span class="section-kicker">Telemetry</span>
-				<h2>1-Minute Data Log</h2>
+			<div class="section-heading">
+				<span class="section-heading-icon tone-cyan" aria-hidden="true">
+					<TableProperties size={20} strokeWidth={2} />
+				</span>
+				<div>
+					<span class="section-kicker">Telemetry</span>
+					<h2>1-Minute Data Log</h2>
+				</div>
 			</div>
 
 			<strong>

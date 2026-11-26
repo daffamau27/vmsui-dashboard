@@ -1,6 +1,7 @@
 <script>
 	import { fade, scale } from 'svelte/transition';
 	import CctvSnapshotImage from '$lib/components/CctvSnapshotImage.svelte';
+	import { Cctv } from 'lucide-svelte';
 
 	let {
 		panelId = undefined,
@@ -20,11 +21,16 @@
 
 <section id={panelId} class="monitor-card cctv-card">
 	<div class="card-header">
-		<div>
-			<div class="card-title">CCTV Monitoring</div>
-			<div class="card-subtitle" class:cctv-error-text={Boolean(error)}>
-				{error ||
-					`${loadedCount}/${total || loadedCount} snapshot records loaded${playbackBuffering ? ' • preparing playback...' : buffering ? ' • loading next pages...' : ''}`}
+		<div class="card-heading">
+			<span class="mini-heading-icon" aria-hidden="true">
+				<Cctv size={15} strokeWidth={2.2} />
+			</span>
+			<div>
+				<div class="card-title">CCTV Monitoring</div>
+				<div class="card-subtitle" class:cctv-error-text={Boolean(error)}>
+					{error ||
+						`${loadedCount}/${total || loadedCount} snapshot records loaded${playbackBuffering ? ' • preparing playback...' : buffering ? ' • loading next pages...' : ''}`}
+				</div>
 			</div>
 		</div>
 		{#if onClose}

@@ -32,7 +32,12 @@
 	import DailyReportRpmRanges from './DailyReportRpmRanges.svelte';
 	import './daily-report-page.css';
 	import { getFleetAssets } from '$lib/api/fleetApi.js';
-	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
+	import {
+		getAssetIconUrl,
+		getAssetTypeLabel,
+		getAssetTypeValue,
+		normalizeAssetType
+	} from '$lib/utils/assetIcons.js';
 	import {
 		addMapZonesToLeafletMap,
 		isZoneAsset,
@@ -2415,10 +2420,7 @@
 		const typeMap = new Map();
 
 		(Array.isArray(assets) ? assets : []).forEach((asset) => {
-			const key =
-				String(getAssetTypeValue(asset) || 'asset')
-					.trim()
-					.toLowerCase() || 'asset';
+			const key = normalizeAssetType(getAssetTypeValue(asset)) || 'asset';
 
 			if (typeMap.has(key)) return;
 
@@ -2468,9 +2470,10 @@
 			if (!leaflet) return null;
 
 			const typeLabel = getAssetTypeLabel(asset);
+			const typeKey = normalizeAssetType(getAssetTypeValue(asset)) || 'asset';
 
 			return leaflet.divIcon({
-				className: `trip-asset-marker asset-type-${String(typeLabel).toLowerCase()}`,
+				className: `trip-asset-marker asset-type-${typeKey}`,
 				html: `
 					<img
 						src="${getAssetIconUrl(asset)}"

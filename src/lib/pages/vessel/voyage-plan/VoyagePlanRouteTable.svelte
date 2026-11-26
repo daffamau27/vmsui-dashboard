@@ -1,14 +1,20 @@
 <script>
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
+	import { Route } from 'lucide-svelte';
 
 	let { rows = [], totalDistanceLabel = '-', actionLoading = '', onComplete } = $props();
 </script>
 
 <section class="table-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">Route Points</span>
-			<h2>Voyage Route Detail</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-cyan" aria-hidden="true">
+				<Route size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">Route Points</span>
+				<h2>Voyage Route Detail</h2>
+			</div>
 		</div>
 
 		<strong>{rows.length} points</strong>

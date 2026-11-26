@@ -1,5 +1,6 @@
 <script>
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
+	import { Route, MapPin } from 'lucide-svelte';
 
 	let {
 		summary = {},
@@ -20,9 +21,14 @@
 
 <section class="table-section trip-summary-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">Trip</span>
-			<h2>Daily Trip Summary</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-cyan" aria-hidden="true">
+				<Route size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">Trip</span>
+				<h2>Daily Trip Summary</h2>
+			</div>
 		</div>
 
 		<strong>{summary.totalPoints} points</strong>
@@ -59,8 +65,8 @@
 							</span>
 						{/each}
 
-						{#each legendTypes as assetType (assetType.label)}
-							<span class="trip-asset-legend-item">
+						{#each legendTypes as assetType (assetType.key ?? assetType.label)}
+							<span class="trip-asset-legend-item asset-type-{assetType.key ?? 'asset'}">
 								<img src={assetType.icon} alt={`${assetType.label} icon`} />
 								{assetType.label}
 							</span>
@@ -100,6 +106,7 @@
 					<div>
 						<span>Start Coordinate</span>
 						<strong class="coordinate-pair">
+							<MapPin size={12} strokeWidth={2.2} aria-hidden="true" />
 							<CopyableCoordinate
 								value={startCoordinate}
 								display={startCoordinate}
@@ -112,6 +119,7 @@
 					<div>
 						<span>End Coordinate</span>
 						<strong class="coordinate-pair">
+							<MapPin size={12} strokeWidth={2.2} aria-hidden="true" />
 							<CopyableCoordinate
 								value={endCoordinate}
 								display={endCoordinate}

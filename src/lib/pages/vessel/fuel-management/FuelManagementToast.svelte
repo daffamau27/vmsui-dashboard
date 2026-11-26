@@ -1,4 +1,7 @@
 <script>
+	import { CircleCheck, Info, TriangleAlert } from 'lucide-svelte';
+	import './fuel-management-page.css';
+
 	let {
 		showNoVessel = false,
 		errorMessage = '',
@@ -13,6 +16,7 @@
 	<div class="fuel-toast-layer" aria-live="polite">
 		{#if showNoVessel}
 			<div class="fuel-toast warning">
+				<Info class="fuel-toast-icon" size={16} strokeWidth={2.2} aria-hidden="true" />
 				<div>
 					<strong>No vessel selected</strong>
 					<span>Please select a vessel first to display Fuel Management data.</span>
@@ -28,6 +32,7 @@
 
 		{#if errorMessage}
 			<div class="fuel-toast danger">
+				<TriangleAlert class="fuel-toast-icon" size={16} strokeWidth={2.2} aria-hidden="true" />
 				<div>
 					<strong>Action failed</strong>
 					<span>{errorMessage}</span>
@@ -43,8 +48,9 @@
 
 		{#if successMessage}
 			<div class="fuel-toast success">
+				<CircleCheck class="fuel-toast-icon" size={16} strokeWidth={2.2} aria-hidden="true" />
 				<div>
-					<strong>Action success</strong>
+					<strong>Success</strong>
 					<span>{successMessage}</span>
 				</div>
 				<button

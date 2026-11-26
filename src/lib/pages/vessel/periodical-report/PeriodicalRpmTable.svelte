@@ -5,6 +5,7 @@
 		getPeriodicalRpmRuntimePercent
 	} from '$lib/utils/periodicalReport.js';
 	import { formatLiter, formatNumber } from '$lib/utils/periodicalFormat.js';
+	import { ChartBar } from 'lucide-svelte';
 
 	let { tables = [], selectedKey = $bindable(''), show = true } = $props();
 
@@ -104,9 +105,14 @@
 {#if show}
 	<section class="table-section">
 		<div class="section-header">
-			<div>
-				<span class="section-kicker">RPM</span>
-				<h2>RPM Range Runtime &amp; Fuel</h2>
+			<div class="section-heading">
+				<span class="section-heading-icon tone-violet" aria-hidden="true">
+					<ChartBar size={20} strokeWidth={2} />
+				</span>
+				<div>
+					<span class="section-kicker">RPM</span>
+					<h2>RPM Range Runtime &amp; Fuel</h2>
+				</div>
 			</div>
 
 			<div class="rpm-source-control">

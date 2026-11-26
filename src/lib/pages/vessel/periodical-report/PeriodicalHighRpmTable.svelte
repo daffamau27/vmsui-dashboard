@@ -1,13 +1,20 @@
 <script>
+	import { TriangleAlert } from 'lucide-svelte';
+
 	let { show = true, rows = [], total = { durationLabel: '-', fuelLabel: '-' } } = $props();
 </script>
 
 {#if show}
 	<section class="table-section">
 		<div class="section-header">
-			<div>
-				<span class="section-kicker">SRITI</span>
-				<h2>High RPM Low Speed</h2>
+			<div class="section-heading">
+				<span class="section-heading-icon tone-red" aria-hidden="true">
+					<TriangleAlert size={20} strokeWidth={2} />
+				</span>
+				<div>
+					<span class="section-kicker">SRITI</span>
+					<h2>High RPM Low Speed</h2>
+				</div>
 			</div>
 
 			<strong>{rows.length} engines</strong>
@@ -42,7 +49,7 @@
 				</table>
 			</div>
 		{:else}
-			<div class="empty-box">High RPM low speed data is not available yet.</div>
+			<div class="empty-box">SRITI data is not available yet.</div>
 		{/if}
 	</section>
 {/if}

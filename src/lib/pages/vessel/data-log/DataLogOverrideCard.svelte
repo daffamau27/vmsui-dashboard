@@ -1,4 +1,5 @@
 <script>
+	import { FileUp } from 'lucide-svelte';
 	import './data-log-page.css';
 
 	let {
@@ -68,9 +69,14 @@
 
 <section class="override-card">
 	<div class="override-header">
-		<div>
-			<span class="section-kicker">Override</span>
-			<h2>Data Log Override</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-green" aria-hidden="true">
+				<FileUp size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">Override</span>
+				<h2>Data Log Override</h2>
+			</div>
 		</div>
 
 		<div class="override-actions">

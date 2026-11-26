@@ -1,6 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { History } from 'lucide-svelte';
 
 	let {
 		rows = [],
@@ -171,9 +172,14 @@
 
 <section class="table-section alarm-events-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">History</span>
-			<h2>Alarm Events</h2>
+		<div class="section-heading">
+			<span class="mini-heading-icon tone-violet" aria-hidden="true">
+				<History size={14} strokeWidth={2.3} />
+			</span>
+			<div>
+				<span class="section-kicker">History</span>
+				<h2>Alarm Events</h2>
+			</div>
 		</div>
 
 		<strong>{pagination.totalItems || 0} events</strong>
@@ -400,19 +406,43 @@
 		margin-top: 14px;
 		overflow: visible;
 		background: var(--color-surface);
-		border: 1px solid #d9e2ec;
-		box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+		border: 1px solid var(--color-border);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.section-header {
 		min-height: 58px;
 		padding: 12px 14px;
-		border-bottom: 1px solid #e5edf5;
+		border-bottom: 1px solid var(--color-border-subtle);
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
 		background: var(--color-surface);
+	}
+
+	/* Shared heading pattern: icon chip + kicker/title stack. */
+	.section-heading {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		min-width: 0;
+	}
+
+	.mini-heading-icon {
+		flex: none;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 28px;
+		height: 28px;
+		border-radius: 9px;
+	}
+
+	.mini-heading-icon.tone-violet {
+		color: #a78bfa;
+		background: rgba(167, 139, 250, 0.14);
+		border: 1px solid rgba(167, 139, 250, 0.28);
 	}
 
 	.section-kicker {
@@ -421,7 +451,7 @@
 		padding: 4px 9px;
 		border-radius: 999px;
 		background: var(--color-accent-muted);
-		color: #1d4ed8;
+		color: var(--text-accent);
 		font-size: 10px;
 		font-weight: 900;
 		letter-spacing: 0.07em;
@@ -439,8 +469,8 @@
 		padding: 5px 10px;
 		border-radius: 999px;
 		background: var(--color-accent-muted);
-		border: 1px solid #bfdbfe;
-		color: #1d4ed8;
+		border: 1px solid rgba(59, 130, 246, 0.32);
+		color: #93c5fd;
 		font-size: 11px;
 		font-weight: 900;
 		white-space: nowrap;
@@ -453,7 +483,7 @@
 		gap: 10px;
 		flex-wrap: wrap;
 		background: var(--color-elevated);
-		border-bottom: 1px solid #e2e8f0;
+		border-bottom: 1px solid var(--color-border-subtle);
 	}
 
 	.event-filter-card > label,
@@ -473,7 +503,7 @@
 	.event-filter-card > label > select {
 		height: 32px;
 		min-width: 150px;
-		border: 1px solid #cbd5e1;
+		border: 1px solid var(--color-border);
 		background: var(--color-surface);
 		padding: 0 9px;
 		color: var(--text-primary);
@@ -491,8 +521,8 @@
 	}
 
 	.event-filter-card > label > select:focus {
-		border-color: #2563eb;
-		box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+		border-color: var(--text-accent);
+		box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.16);
 	}
 
 	.event-dropdown-field {
@@ -511,7 +541,7 @@
 	:is(.alarm-type-filter, .vessel-filter) summary {
 		height: 32px;
 		padding: 0 9px;
-		border: 1px solid #cbd5e1;
+		border: 1px solid var(--color-border);
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -529,8 +559,8 @@
 
 	:is(.alarm-type-filter, .vessel-filter) summary:focus-visible,
 	:is(.alarm-type-filter, .vessel-filter)[open] summary {
-		border-color: #2563eb;
-		box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+		border-color: var(--text-accent);
+		box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.16);
 		outline: none;
 	}
 
@@ -786,28 +816,38 @@
 		height: 32px;
 		padding: 0 12px;
 		border: none;
+		border-radius: 10px;
 		font-size: 11px;
 		font-weight: 900;
 		cursor: pointer;
 		white-space: nowrap;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 7px;
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease;
 	}
 
 	.primary-btn {
-		background: #2563eb;
+		background: var(--color-accent);
 		color: #ffffff;
 	}
 
 	.secondary-btn {
-		background: rgba(255, 255, 255, 0.06);
+		background: var(--color-elevated);
+		border: 1px solid var(--color-border);
 		color: var(--text-primary);
 	}
 
 	.primary-btn:hover:not(:disabled) {
-		background: #1d4ed8;
+		background: var(--color-accent-hover);
 	}
 
 	.secondary-btn:hover:not(:disabled) {
-		background: #cbd5e1;
+		background: rgba(148, 163, 184, 0.18);
+		border-color: rgba(59, 130, 246, 0.45);
 	}
 
 	.primary-btn:disabled,
@@ -836,7 +876,7 @@
 		letter-spacing: 0.04em;
 		text-align: left;
 		padding: 10px 12px;
-		border-bottom: 1px solid #e2e8f0;
+		border-bottom: 1px solid var(--color-border-subtle);
 		white-space: nowrap;
 	}
 
@@ -844,8 +884,9 @@
 		color: var(--text-primary);
 		font-size: 12px;
 		font-weight: 700;
+		font-variant-numeric: tabular-nums;
 		padding: 10px 12px;
-		border-bottom: 1px solid #eef2f7;
+		border-bottom: 1px solid var(--color-border-subtle);
 		white-space: nowrap;
 	}
 
@@ -869,19 +910,19 @@
 
 	.status-active {
 		background: var(--color-danger-muted);
-		border: 1px solid #fecaca;
-		color: #b91c1c;
+		border: 1px solid rgba(239, 68, 68, 0.28);
+		color: #f87171;
 	}
 
 	.status-cleared {
 		background: var(--color-success-muted);
-		border: 1px solid #bbf7d0;
-		color: #047857;
+		border: 1px solid rgba(16, 185, 129, 0.3);
+		color: #34d399;
 	}
 
 	.status-neutral {
 		background: rgba(255, 255, 255, 0.06);
-		border: 1px solid #cbd5e1;
+		border: 1px solid var(--color-border);
 		color: var(--text-secondary);
 	}
 
@@ -892,13 +933,14 @@
 		align-items: center;
 		gap: 10px;
 		background: var(--color-elevated);
-		border-top: 1px solid #e5edf5;
+		border-top: 1px solid var(--color-border-subtle);
 	}
 
 	.pagination-bar span {
 		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 900;
+		font-variant-numeric: tabular-nums;
 		white-space: nowrap;
 	}
 

@@ -1,4 +1,6 @@
 <script>
+	import { History } from 'lucide-svelte';
+
 	let { groups = [] } = $props();
 
 	function isOnStatus(status) {
@@ -12,9 +14,14 @@
 
 <section class="table-section event-history-section">
 	<div class="section-header">
-		<div>
-			<span class="section-kicker">Status</span>
-			<h2>Engine Event Status History</h2>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-violet" aria-hidden="true">
+				<History size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<span class="section-kicker">Status</span>
+				<h2>Engine Event Status History</h2>
+			</div>
 		</div>
 
 		<strong>{groups.length} engines</strong>

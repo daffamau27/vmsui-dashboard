@@ -5,11 +5,12 @@
 	import { browser } from '$app/environment';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import VoyagePlansHeader from './VoyagePlansHeader.svelte';
+	import { ClipboardList, ListPlus, RefreshCw, Route, UserCheck } from 'lucide-svelte';
 	import './voyage-plans-page.css';
 	import CopyableCoordinate from '$lib/components/CopyableCoordinate.svelte';
 	import { getFleetAssets } from '$lib/api/fleetApi.js';
 	import { activeMenu } from '$lib/stores/appNavigation.svelte.js';
-	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue } from '$lib/utils/assetIcons.js';
+	import { getAssetIconUrl, getAssetTypeLabel, getAssetTypeValue, normalizeAssetType } from '$lib/utils/assetIcons.js';
 	import {
 		addMapZonesToLeafletMap,
 		isZoneAsset,
@@ -31,17 +32,6 @@
 	import 'leaflet/dist/leaflet.css';
 
 	const PAGE_SIZE_OPTIONS = [10, 20, 50];
-	const ASSET_LEGEND_TYPES = [
-		'anchor',
-		'buoy',
-		'dock',
-		'shipyard',
-		'mess',
-		'office',
-		'fso',
-		'rig',
-		'whp'
-	];
 	const mapSourceOptions = Object.values(MAP_SOURCES);
 
 	let loading = false;
@@ -58,6 +48,9 @@
 	let permissions = new Set();
 
 	let movingPointIndex = null;
+
+	let showRouteMapLegend = true;
+	let routeMapLegendContentId = 'route-map-legend-content';
 
 	let pendingMovePoint = {
 		active: false,
@@ -1236,20 +1229,28 @@
 	$: assignableVessels = getAssignableVessels(assignForm.voyagePlanId);
 	$: selectedAssignVessel =
 		vessels.find((vessel) => Number(vessel.id) === Number(assignForm.vesselId)) || null;
-	// Matches 'Tugboat', 'Tugboat - Laden', 'Tugboat - Ballast'.
-	$: assignNeedsTugboatType = String(selectedAssignVessel?.type || '')
-		.trim()
-		.toLowerCase()
-		.startsWith('tugboat');
+	// Matches 'Tugboat', 'Tugboat - Laden', 'Tugboat - Ballast',
+	// 'AHTS', 'AHTS - Laden', 'AHTS - Ballast'.
+	$: assignNeedsSubType = ['tugboat', 'ahts'].some((prefix) =>
+		String(selectedAssignVessel?.type || '')
+			.trim()
+			.toLowerCase()
+			.startsWith(prefix)
+	);
 	$: routePointNameOptions = buildRoutePointNameOptions(savedRoutePoints);
 	$: selectedPlanLegDistances = getRouteLegDistancesNm(selectedPlan?.planData || []);
 	$: editorLegDistances = getRouteLegDistancesNm(form.planData);
+	$: assetLegendTypes = buildAssetLegendTypes(assets);
 	$: if (
 		assignForm.vesselId &&
 		assignForm.voyagePlanId &&
 		!assignableVessels.some((vessel) => Number(vessel.id) === Number(assignForm.vesselId))
 	) {
 		assignForm.vesselId = '';
+	}
+	// Jangan bawa sub-tipe (Laden/Ballast) ke kapal yang tidak memakainya.
+	$: if (!assignNeedsSubType && assignForm.type) {
+		assignForm.type = '';
 	}
 
 	function getEmptyForm() {
@@ -1682,6 +1683,24 @@
 		};
 	}
 
+	function buildAssetLegendTypes(rows = []) {
+		const typeMap = new Map();
+
+		(Array.isArray(rows) ? rows : []).forEach((asset) => {
+			const key = normalizeAssetType(getAssetTypeValue(asset)) || 'asset';
+
+			if (typeMap.has(key)) return;
+
+			typeMap.set(key, {
+				key,
+				label: getAssetTypeLabel(asset),
+				icon: getAssetIconUrl(asset)
+			});
+		});
+
+		return [...typeMap.values()];
+	}
+
 	function renderZoneLayer() {
 		if (!L || !routeMap) return;
 
@@ -1700,9 +1719,10 @@
 	function createAssetMarkerIcon(asset) {
 		const iconUrl = getAssetIconUrl(asset);
 		const typeLabel = getAssetTypeLabel(asset);
+		const typeKey = normalizeAssetType(getAssetTypeValue(asset)) || 'asset';
 
 		return L.divIcon({
-			className: `asset-leaflet-icon asset-type-${String(typeLabel).toLowerCase()}`,
+			className: `asset-leaflet-icon asset-type-${typeKey}`,
 			html: `
 				<img class="asset-type-marker-icon" src="${iconUrl}" alt="${escapeHtml(typeLabel)} asset" title="${escapeHtml(asset.assetName)}" />
 			`,
@@ -2884,7 +2904,7 @@
 					voyagePlanId: Number(assignForm.voyagePlanId),
 					vesselId: Number(assignForm.vesselId),
 					startDate: new Date(assignForm.startDate).toISOString(),
-					...(assignNeedsTugboatType ? { type: assignForm.type || null } : {})
+					...(assignNeedsSubType ? { type: assignForm.type || null } : {})
 				})
 			});
 			successMessage = result?.message || 'Voyage plan assigned to vessel successfully.';
@@ -2944,9 +2964,14 @@
 		<section class:has-assign-panel={canAssign} class="voyage-grid">
 			<section class="panel list-panel">
 				<div class="panel-toolbar">
-					<div>
-						<h2>Plan List</h2>
-						<span>{pagination.totalItems || 0} total plans</span>
+					<div class="section-heading">
+						<span class="section-heading-icon" aria-hidden="true">
+							<Route size={18} strokeWidth={2} />
+						</span>
+						<div>
+							<h2>Plan List</h2>
+							<span>{pagination.totalItems || 0} total plans</span>
+						</div>
 					</div>
 					<input class="search-input" bind:value={search} placeholder="Search plan..." />
 				</div>
@@ -3109,9 +3134,14 @@
 
 			<section class="panel detail-panel">
 				<div class="panel-toolbar">
-					<div>
-						<h2>Plan Detail</h2>
-						<span>{selectedPlan ? selectedPlan.voyageName : 'No selected plan'}</span>
+					<div class="section-heading">
+						<span class="section-heading-icon tone-cyan" aria-hidden="true">
+							<ClipboardList size={18} strokeWidth={2} />
+						</span>
+						<div>
+							<h2>Plan Detail</h2>
+							<span>{selectedPlan ? selectedPlan.voyageName : 'No selected plan'}</span>
+						</div>
 					</div>
 					{#if selectedPlan}
 						<div class="detail-toolbar-actions">
@@ -3221,10 +3251,15 @@
 			{#if canAssign}
 				<section class="panel assign-panel">
 					<div class="panel-toolbar assign-toolbar">
-						<div>
-							<div class="panel-kicker">Assignment</div>
-							<h2>Assign to Vessel</h2>
-							<span>Assign a voyage plan only to vessels allowed by that plan.</span>
+						<div class="section-heading">
+							<span class="section-heading-icon tone-green" aria-hidden="true">
+								<UserCheck size={18} strokeWidth={2} />
+							</span>
+							<div>
+								<div class="panel-kicker">Assignment</div>
+								<h2>Assign to Vessel</h2>
+								<span>Assign a voyage plan only to vessels allowed by that plan.</span>
+							</div>
 						</div>
 					</div>
 
@@ -3273,16 +3308,23 @@
 								{/if}
 							</label>
 
-							{#if assignNeedsTugboatType}
+							{#if assignNeedsSubType}
 								<label class="assign-field full-width">
-									<span>Vessel Type</span>
+									<span>Towing Type</span>
 									<select bind:value={assignForm.type}>
 										<option value="">None</option>
 										<option value="Laden">Laden</option>
 										<option value="Ballast">Ballast</option>
 									</select>
 									<small class="field-note">
-										Choose Laden, Ballast, or None for a Tugboat.
+										Choose Laden, Ballast, or None for a {String(
+											selectedAssignVessel?.type || ''
+										)
+											.trim()
+											.toLowerCase()
+											.startsWith('ahts')
+											? 'AHTS'
+											: 'Tugboat'}.
 									</small>
 								</label>
 							{/if}
@@ -3317,11 +3359,16 @@
 
 		<section class="panel active-assignments-panel">
 			<div class="panel-toolbar assignments-toolbar">
-				<div>
-					<h2>Active Assignments</h2>
-					<span>
-						{activeAssignmentPagination.totalItems || 0} active voyage plan assignment
+				<div class="section-heading">
+					<span class="section-heading-icon tone-violet" aria-hidden="true">
+						<ListPlus size={18} strokeWidth={2} />
 					</span>
+					<div>
+						<h2>Active Assignments</h2>
+						<span>
+							{activeAssignmentPagination.totalItems || 0} active voyage plan assignment
+						</span>
+					</div>
 				</div>
 
 				<button
@@ -3331,7 +3378,8 @@
 						Promise.all([loadActiveAssignments(activeAssignmentPage), loadActivePlanLocks()])}
 					disabled={activeAssignmentsLoading}
 				>
-					{activeAssignmentsLoading ? 'Refreshing...' : 'Refresh'}
+					<RefreshCw size={13} strokeWidth={2.4} aria-hidden="true" />
+					<span>{activeAssignmentsLoading ? 'Refreshing...' : 'Refresh'}</span>
 				</button>
 			</div>
 
@@ -3999,53 +4047,72 @@
 							{/if}
 						</div>
 
-						<div class="route-map-legend" aria-label="Route editor map legend">
-							<div class="legend-group">
-								<span class="legend-title">Route</span>
-								<span class="legend-item">
-									<i class="legend-route-line"></i>
-									Route line
+						<div class="route-map-legend" class:legend-open={showRouteMapLegend} aria-label="Route editor map legend">
+							<button
+								type="button"
+								class="legend-header-toggle"
+								aria-expanded={showRouteMapLegend}
+								aria-controls={routeMapLegendContentId}
+								on:click={() => (showRouteMapLegend = !showRouteMapLegend)}
+							>
+								<span class="legend-title legend-title-inline">Legend</span>
+								<span class="legend-chevron" aria-hidden="true">
+									{showRouteMapLegend ? '▾' : '▸'}
 								</span>
-								<span class="legend-item">
-									<i class="legend-route-dot"></i>
-									Point
-								</span>
-								<span class="legend-item">
-									<i class="legend-route-dot selected"></i>
-									Selected
-								</span>
-								<!-- <span class="legend-item">
-									<i class="legend-route-dot moving"></i>
-									Moving
-								</span> -->
-							</div>
+							</button>
 
-							<div class="legend-group">
-								<span class="legend-title">Assets</span>
-								{#each ASSET_LEGEND_TYPES as assetType}
-									<span class="legend-item asset-legend-item">
-										<img
-											class="legend-asset-icon"
-											src={getAssetIconUrl(assetType)}
-											alt={`${getAssetTypeLabel(assetType)} icon`}
-										/>
-										{getAssetTypeLabel(assetType)}
-									</span>
-								{/each}
-							</div>
-
-							{#if zones.length}
-								<div class="legend-group">
-									<span class="legend-title">Zones</span>
-									{#each zones as zone}
+							{#if showRouteMapLegend}
+								<div class="route-map-legend-body" id={routeMapLegendContentId}>
+									<div class="legend-group">
+										<span class="legend-title">Route</span>
 										<span class="legend-item">
-											<i
-												class="legend-zone-swatch"
-												style={`--zone-color: ${zone.color}; --zone-fill: ${zone.fillColor};`}
-											></i>
-											{zone.name}
+											<i class="legend-route-line"></i>
+											Route line
 										</span>
-									{/each}
+										<span class="legend-item">
+											<i class="legend-route-dot"></i>
+											Point
+										</span>
+										<span class="legend-item">
+											<i class="legend-route-dot selected"></i>
+											Selected
+										</span>
+										<!-- <span class="legend-item">
+											<i class="legend-route-dot moving"></i>
+											Moving
+										</span> -->
+									</div>
+
+									{#if assetLegendTypes.length}
+										<div class="legend-group">
+											<span class="legend-title">Assets</span>
+											{#each assetLegendTypes as assetType (assetType.key)}
+												<span class="legend-item asset-legend-item asset-type-{assetType.key}">
+													<img
+														class="legend-asset-icon"
+														src={assetType.icon}
+														alt={`${assetType.label} icon`}
+													/>
+													{assetType.label}
+												</span>
+											{/each}
+										</div>
+									{/if}
+
+									{#if zones.length}
+										<div class="legend-group">
+											<span class="legend-title">Zones</span>
+											{#each zones as zone}
+												<span class="legend-item">
+													<i
+														class="legend-zone-swatch"
+														style={`--zone-color: ${zone.color}; --zone-fill: ${zone.fillColor};`}
+													></i>
+													{zone.name}
+												</span>
+											{/each}
+										</div>
+									{/if}
 								</div>
 							{/if}
 						</div>

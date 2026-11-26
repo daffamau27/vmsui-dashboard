@@ -2,6 +2,8 @@
 	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import { History } from 'lucide-svelte';
+	import './fuel-management-page.css';
 
 	let {
 		startDate = $bindable(''),
@@ -25,9 +27,14 @@
 
 <section class="panel history-panel">
 	<div class="panel-header">
-		<div>
-			<h2>Fuel History Timeline</h2>
-			<p>ROB transactions, carry over, daily consumption, and deletable bunkering logs.</p>
+		<div class="section-heading">
+			<span class="section-heading-icon tone-violet" aria-hidden="true">
+				<History size={19} strokeWidth={2} />
+			</span>
+			<div>
+				<h2>Fuel History Timeline</h2>
+				<p>ROB transactions, carry over, daily consumption, and deletable bunkering logs.</p>
+			</div>
 		</div>
 
 		<div class="history-toolbar">

@@ -1,6 +1,7 @@
 <script>
 	import { fourDigitDateYear } from '$lib/actions/fourDigitDateYear.js';
 	import { TIMEZONE_MODE_OPTIONS, TIMEZONE_OFFSET_OPTIONS } from '$lib/utils/timezoneOptions.js';
+	import { CalendarClock } from 'lucide-svelte';
 
 	let {
 		vesselName = 'Selected Vessel',
@@ -23,12 +24,19 @@
 
 <section class="periodical-header-card">
 	<div class="periodical-header-copy">
-		<div class="page-kicker">Periodical Report</div>
-		<h1>{vesselName}</h1>
-		<p>
-			Periodical operation report for custom date-time ranges with runtime, fuel consumption, data
-			received, and telemetry summary.
-		</p>
+		<div class="section-heading">
+			<span class="section-heading-icon" aria-hidden="true">
+				<CalendarClock size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<div class="page-kicker">Periodical Report</div>
+				<h1>{vesselName}</h1>
+				<p>
+					Periodical operation report for custom date-time ranges with runtime, fuel consumption,
+					data received, and telemetry summary.
+				</p>
+			</div>
+		</div>
 	</div>
 
 	<div class="periodical-header-filters">

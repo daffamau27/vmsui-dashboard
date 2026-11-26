@@ -1,4 +1,6 @@
 <script>
+	import { MapPin } from 'lucide-svelte';
+
 	let {
 		active = false,
 		canViewMap = true,
@@ -13,9 +15,14 @@
 {#if canViewMap}
 	<div class="monitoring-card map-section">
 		<div class="section-header">
-			<div>
-				<span class="section-kicker">Position</span>
-				<h2>Current Vessel Location</h2>
+			<div class="section-heading">
+				<span class="section-heading-icon tone-cyan" aria-hidden="true">
+					<MapPin size={20} strokeWidth={2} />
+				</span>
+				<div>
+					<span class="section-kicker">Position</span>
+					<h2>Current Vessel Location</h2>
+				</div>
 			</div>
 
 			<strong>{vesselInfo.currentSpeed}</strong>

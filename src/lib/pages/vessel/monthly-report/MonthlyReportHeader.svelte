@@ -9,6 +9,7 @@
 		normalizeMonthlyDay,
 		pad
 	} from '$lib/utils/monthlyReportCalendar.js';
+	import { CalendarRange } from 'lucide-svelte';
 
 	let {
 		vesselName = '-',
@@ -143,12 +144,19 @@
 
 <section class="monthly-header-card">
 	<div class="monthly-header-copy">
-		<div class="page-kicker">Monthly Report</div>
-		<h1>{vesselName}</h1>
-		<p>
-			Monthly operation report by date with runtime, fuel consumption, speed, and high RPM low speed
-			summary.
-		</p>
+		<div class="section-heading">
+			<span class="section-heading-icon" aria-hidden="true">
+				<CalendarRange size={20} strokeWidth={2} />
+			</span>
+			<div>
+				<div class="page-kicker">Monthly Report</div>
+				<h1>{vesselName}</h1>
+				<p>
+					Monthly operation report by date with runtime, fuel consumption, speed, and high RPM low
+					speed summary.
+				</p>
+			</div>
+		</div>
 	</div>
 
 	<div class="monthly-header-filters">

@@ -423,8 +423,8 @@
 			}))
 	);
 
-	let robBunkerCards = $derived([
-		...(robBunker?.fod_port_l !== undefined || robBunker?.fodPortL !== undefined
+	let fodDetailCards = $derived([
+		...(robBunker?.fod_port_l != null || robBunker?.fodPortL != null
 			? [
 					{
 						label: 'FOD Port',
@@ -433,7 +433,7 @@
 					}
 				]
 			: []),
-		...(robBunker?.fod_stbd_l !== undefined || robBunker?.fodStbdL !== undefined
+		...(robBunker?.fod_stbd_l != null || robBunker?.fodStbdL != null
 			? [
 					{
 						label: 'FOD STBD',
@@ -442,7 +442,7 @@
 					}
 				]
 			: []),
-		...(robBunker?.fod_single_l !== undefined || robBunker?.fodSingleL !== undefined
+		...(robBunker?.fod_single_l != null || robBunker?.fodSingleL != null
 			? [
 					{
 						label: 'FOD Single',
@@ -450,12 +450,29 @@
 						total: false
 					}
 				]
-			: []),
-		...(robBunker?.total_fod_l !== undefined || robBunker?.totalFodL !== undefined
+			: [])
+	]);
+
+	let totalFodValue = $derived(
+		robBunker?.total_fod_l ??
+			robBunker?.totalFodL ??
+			(fodDetailCards.length
+				? fodDetailCards.reduce((sum, card) => sum + toFuelNumber(card.value), 0)
+				: undefined)
+	);
+
+	let hasTotalFodValue = $derived(
+		totalFodValue !== undefined && totalFodValue !== null && totalFodValue !== '-'
+	);
+
+	// Kalau FOD-nya cuma satu sumber, cukup tampilkan Total FOD saja.
+	let robBunkerCards = $derived([
+		...(fodDetailCards.length > 1 ? fodDetailCards : []),
+		...(hasTotalFodValue
 			? [
 					{
 						label: 'Total FOD',
-						value: robBunker?.total_fod_l ?? robBunker?.totalFodL,
+						value: totalFodValue,
 						total: true
 					}
 				]
