@@ -129,10 +129,6 @@
 			label: 'Abnormal Fuel Consumption'
 		},
 		{
-			value: 'CCTV_CAMERA_OFFLINE',
-			label: 'CCTV Camera Offline'
-		},
-		{
 			value: 'CAMERA_SCENE_CHANGE',
 			label: 'Camera Scene Change'
 		},
