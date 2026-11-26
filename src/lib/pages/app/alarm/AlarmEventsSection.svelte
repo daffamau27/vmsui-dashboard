@@ -1,7 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-	import { History } from 'lucide-svelte';
+	import { History, Play } from 'lucide-svelte';
 
 	let {
 		rows = [],
@@ -9,6 +9,7 @@
 		vesselOptions = [],
 		alarmTypeOptions = [],
 		pagination = { page: 1, totalItems: 0, totalPages: 1, hasNext: false, hasPrevious: false },
+		canViewRecording = false,
 		selectedVesselIds = $bindable([]),
 		selectedStatus = $bindable(''),
 		selectedAlarmTypes = $bindable([]),
@@ -16,7 +17,8 @@
 		onApply = async () => {},
 		onReset = async () => {},
 		onPrevious = async () => {},
-		onNext = async () => {}
+		onNext = async () => {},
+		onViewRecording = () => {}
 	} = $props();
 
 	const filterId = $props.id();
@@ -111,6 +113,23 @@
 		if (normalized === 'CLEARED') return 'status-cleared';
 
 		return 'status-neutral';
+	}
+
+	// Only CCTV alarm events carry a CCTV motion recordId that can be played back.
+	const RECORDING_ALARM_TYPES = new Set(['CAMERA_SCENE_CHANGE', 'CCTV_CAMERA_OFFLINE']);
+
+	// The whole column belongs to the access_cctv permission: without it the
+	// header and the cells are dropped, so no empty column is left behind.
+	let showRecordingColumn = $derived(Boolean(canViewRecording));
+
+	function hasRecording(row) {
+		if (!showRecordingColumn || !row?.recordId) return false;
+
+		return RECORDING_ALARM_TYPES.has(
+			String(row?.alarmType || '')
+				.trim()
+				.toUpperCase()
+		);
 	}
 
 	function closeAlarmTypeDropdown() {
@@ -355,6 +374,9 @@
 						<th>Event Time</th>
 						<th>Start Time</th>
 						<th>End Time</th>
+						{#if showRecordingColumn}
+							<th>Recording</th>
+						{/if}
 					</tr>
 				</thead>
 
@@ -369,6 +391,23 @@
 							<td>{formatDateTime(row.eventTs)}</td>
 							<td>{formatDateTime(row.startTs)}</td>
 							<td>{row.endTs ? formatDateTime(row.endTs) : '-'}</td>
+							{#if showRecordingColumn}
+								<td>
+									{#if hasRecording(row)}
+										<button
+											type="button"
+											class="recording-btn"
+											onclick={() => onViewRecording(row)}
+											aria-label={`View CCTV recording for ${getVesselName(row)}`}
+										>
+											<Play size={12} strokeWidth={2.6} aria-hidden="true" />
+											<span>View Recording</span>
+										</button>
+									{:else}
+										-
+									{/if}
+								</td>
+							{/if}
 						</tr>
 					{/each}
 				</tbody>
@@ -924,6 +963,44 @@
 		background: rgba(255, 255, 255, 0.06);
 		border: 1px solid var(--color-border);
 		color: var(--text-secondary);
+	}
+
+	.recording-btn {
+		height: 32px;
+		padding: 0 11px;
+		border: 1px solid rgba(96, 165, 250, 0.42);
+		border-radius: 999px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		background: var(--color-accent-muted);
+		color: var(--text-accent);
+		font-size: 11px;
+		font-weight: 900;
+		white-space: nowrap;
+		cursor: pointer;
+		transition:
+			background 0.16s ease,
+			border-color 0.16s ease,
+			color 0.16s ease,
+			transform 0.16s ease;
+	}
+
+	.recording-btn:hover:not(:disabled) {
+		border-color: var(--color-accent);
+		background: var(--color-accent);
+		color: #ffffff;
+		transform: translateY(-1px);
+	}
+
+	.recording-btn:active:not(:disabled) {
+		transform: translateY(0);
+	}
+
+	.recording-btn:focus-visible {
+		outline: 2px solid var(--text-accent);
+		outline-offset: 2px;
 	}
 
 	.pagination-bar {

@@ -1,5 +1,6 @@
 import '../src/lib/styles/layout.css';
 import { setSelectedVessel } from '../src/lib/stores/selectedVessel.svelte.js';
+import { currentUser } from '../src/lib/stores/authStore.js';
 import {
 	dailyReportEngineCurves,
 	dailyReportPayload,
@@ -175,6 +176,29 @@ const alarmMock = {
 			eventTs: 1735682400000,
 			startTs: 1735682400000,
 			endTs: 1735686000000
+		},
+		{
+			id: '6b07e23e4afaa5206b092eac',
+			alarmId: '101_camera_scene_change_mock_1795678200000',
+			vesselId: 101,
+			vesselName: 'MV Nusantara Jaya',
+			alarmType: 'CAMERA_SCENE_CHANGE',
+			status: 'ACTIVE',
+			recordId: '6b07e23e4afaa5206b092eab',
+			eventTs: 1735689000000,
+			startTs: 1735689000000,
+			endTs: null,
+			isRead: false
+		},
+		{
+			vesselId: 102,
+			vesselName: 'MT Samudra Biru',
+			alarmType: 'CCTV_CAMERA_OFFLINE',
+			status: 'ACTIVE',
+			eventTs: 1735684800000,
+			startTs: 1735684800000,
+			endTs: null,
+			isRead: false
 		}
 	]
 };
@@ -501,6 +525,13 @@ const adminMock = {
 
 window.localStorage?.setItem('vms-map-source', 'default');
 
+// Alarm page gates CCTV alarm filters and recording playback on permissionAccess.
+currentUser.set({
+	id: 1,
+	name: 'Storybook User',
+	permissionAccess: { mode: 'all' }
+});
+
 window.fetch = (input, init) => {
 	const url = typeof input === 'string' ? input : input.url;
 
@@ -564,6 +595,23 @@ window.fetch = (input, init) => {
 			data: { items: [], pagination: { page: 1, pageSize: 20, totalItems: 0, totalPages: 1 } }
 		});
 	if (url.includes('/alarm/mark-all-read')) return jsonResponse({ message: 'ok' });
+	if (url.includes('/cctv/motions/')) {
+		const recordId = url.split('/cctv/motions/')[1]?.split('?')[0] || '';
+		return jsonResponse({
+			data: {
+				id: recordId,
+				type: 'SCENE_CHANGE',
+				vesselName: 'MV Nusantara Jaya',
+				cameraName: 'Engine Camera',
+				cameraToken: '7f7e6de41ef262e0f1147191e212d979',
+				startedAt: '26/11/2026 14:30:00 (UTC+7)',
+				endedAt: '26/11/2026 14:30:15 (UTC+7)',
+				durationSeconds: 15,
+				recordingUrl:
+					'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
+			}
+		});
+	}
 	if (url.includes('/alarm/monitor-deviations'))
 		return jsonResponse({
 			data: { monitor: [], pagination: { page: 1, pageSize: 20, totalItems: 0, totalPages: 1 } }

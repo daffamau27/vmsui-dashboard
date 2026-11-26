@@ -4,6 +4,7 @@
 	import AlarmMonitorSection from './AlarmMonitorSection.svelte';
 	import AlarmEventsSection from './AlarmEventsSection.svelte';
 	import AlarmDeviationOverlay from './AlarmDeviationOverlay.svelte';
+	import AlarmRecordingOverlay from './AlarmRecordingOverlay.svelte';
 
 	const monitorRows = [
 		{
@@ -64,6 +65,24 @@
 			eventTs: 1735678800000,
 			startTs: 1735678800000,
 			endTs: 1735680600000
+		},
+		{
+			id: '6b07e23e4afaa5206b092eac',
+			vesselName: 'MV Nusantara Jaya',
+			alarmType: 'CAMERA_SCENE_CHANGE',
+			status: 'ACTIVE',
+			recordId: '6b07e23e4afaa5206b092eab',
+			eventTs: 1735689000000,
+			startTs: 1735689000000,
+			endTs: null
+		},
+		{
+			vesselName: 'MT Samudra Biru',
+			alarmType: 'CCTV_CAMERA_OFFLINE',
+			status: 'ACTIVE',
+			eventTs: 1735684800000,
+			startTs: 1735684800000,
+			endTs: null
 		}
 	];
 
@@ -77,7 +96,9 @@
 		{ value: 'DEVICE_OFFLINE', label: 'Device Offline' },
 		{ value: 'SPIKE_RPM', label: 'Spike RPM' },
 		{ value: 'OUTRANGE_RPM', label: 'Outrange RPM' },
-		{ value: 'RPM_BLANK', label: 'RPM Blank' }
+		{ value: 'RPM_BLANK', label: 'RPM Blank' },
+		{ value: 'CCTV_CAMERA_OFFLINE', label: 'CCTV Camera Offline' },
+		{ value: 'CAMERA_SCENE_CHANGE', label: 'Camera Scene Change' }
 	];
 
 	const deviationRows = [
@@ -126,6 +147,19 @@
 <Story name="Nonaktif" args={{ active: false }} />
 
 <Story
+	name="Aktif"
+	args={{ active: true }}
+	parameters={{
+		docs: {
+			description: {
+				story:
+					'Halaman alarm aktif dengan mock API: monitor, event historis (termasuk CAMERA_SCENE_CHANGE), dan overlay rekaman CCTV.'
+			}
+		}
+	}}
+/>
+
+<Story
 	name="Monitor"
 	asChild
 	parameters={{
@@ -150,6 +184,36 @@
 			description: {
 				story:
 					'Filter dan tabel event alarm dengan pagination. Filter memakai data dummy dan tidak memanggil API.'
+			}
+		}
+	}}
+>
+	<div style="background: var(--color-base); padding: 14px; min-height: 100vh;">
+		<AlarmEventsSection
+			rows={eventRows}
+			{vesselOptions}
+			{alarmTypeOptions}
+			canViewRecording
+			pagination={{
+				page: 1,
+				pageSize: 20,
+				totalItems: 42,
+				totalPages: 3,
+				hasNext: true,
+				hasPrevious: false
+			}}
+		/>
+	</div>
+</Story>
+
+<Story
+	name="Events Tanpa Akses CCTV"
+	asChild
+	parameters={{
+		docs: {
+			description: {
+				story:
+					'Varian tabel event untuk user tanpa permission access_cctv: kolom Recording tidak dirender sama sekali.'
 			}
 		}
 	}}
@@ -184,4 +248,31 @@
 	}}
 >
 	<AlarmDeviationOverlay rows={deviationRows} totalItems={2} />
+</Story>
+
+<Story
+	name="Recording"
+	asChild
+	parameters={{
+		docs: {
+			description: {
+				story:
+					'Overlay pemutar rekaman CCTV untuk event CAMERA_SCENE_CHANGE yang memakai recordId dari daftar alarm events.'
+			}
+		}
+	}}
+>
+	<AlarmRecordingOverlay
+		detail={{
+			id: '6b07e23e4afaa5206b092eab',
+			type: 'SCENE_CHANGE',
+			vesselName: 'MV Nusantara Jaya',
+			cameraName: 'Engine Camera',
+			startedAt: '26/11/2026 14:30:00 (UTC+7)',
+			endedAt: '26/11/2026 14:30:15 (UTC+7)',
+			durationSeconds: 15,
+			recordingUrl:
+				'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
+		}}
+	/>
 </Story>

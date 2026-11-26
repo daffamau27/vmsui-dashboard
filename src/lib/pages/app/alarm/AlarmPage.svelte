@@ -3,6 +3,7 @@
 	import { buildAlarmEventsQuery } from '$lib/utils/alarmEventQuery.js';
 	import { apiRequest } from '$lib/api/authApi.js';
 	import { getFleetVessels } from '$lib/api/fleetApi.js';
+	import { getCctvMotionDetail } from '$lib/api/traceApi.js';
 	import { currentUser } from '$lib/stores/authStore.js';
 	import { sortByAlpha } from '$lib/utils/alphaSort.js';
 	import AlarmHeader from './AlarmHeader.svelte';
@@ -11,6 +12,7 @@
 	import AlarmMonitorSection from './AlarmMonitorSection.svelte';
 	import AlarmEventsSection from './AlarmEventsSection.svelte';
 	import AlarmDeviationOverlay from './AlarmDeviationOverlay.svelte';
+	import AlarmRecordingOverlay from './AlarmRecordingOverlay.svelte';
 
 	let { active = false } = $props();
 
@@ -40,6 +42,13 @@
 	let deviationAcknowledged = $state(false);
 	let deviationAcknowledgeError = $state('');
 	let unreadDeviationCount = $state(0);
+
+	let recordingOpen = $state(false);
+	let recordingLoading = $state(false);
+	let recordingError = $state('');
+	let recordingDetail = $state(null);
+	let recordingRequestId = 0;
+
 	// null means the user has unrestricted access; an array is the explicit permission list.
 	let permissionKeys = $derived.by(() => {
 		const access = $currentUser?.permissionAccess;
@@ -75,6 +84,8 @@
 	let canViewDeviations = $derived(
 		hasPermission('access_alarm') && hasPermission('view_data_log_data_deviations')
 	);
+	let canViewCctvRecordings = $derived(hasPermission('access_cctv'));
+
 	let pagination = $state({
 		page: 1,
 		pageSize: 20,
@@ -99,7 +110,9 @@
 		['JUMPING_DATA', 'view_data_log_data_deviations'],
 		['SPIKE_RPM', 'view_data_log_data_deviations'],
 		['OUTRANGE_RPM', 'view_data_log_data_deviations'],
-		['RPM_BLANK', 'view_data_log_data_deviations']
+		['RPM_BLANK', 'view_data_log_data_deviations'],
+		['CCTV_CAMERA_OFFLINE', 'access_cctv'],
+		['CAMERA_SCENE_CHANGE', 'access_cctv']
 	]);
 
 	const baseAlarmTypeOptions = [
@@ -114,6 +127,14 @@
 		{
 			value: 'ABNORMAL_FUEL_CONSUMPTION',
 			label: 'Abnormal Fuel Consumption'
+		},
+		{
+			value: 'CCTV_CAMERA_OFFLINE',
+			label: 'CCTV Camera Offline'
+		},
+		{
+			value: 'CAMERA_SCENE_CHANGE',
+			label: 'Camera Scene Change'
 		},
 		{
 			value: 'PANEL_OPEN',
@@ -212,8 +233,75 @@
 		showDeviationOverlay = true;
 	}
 
+	function closeRecordingOverlay() {
+		recordingRequestId += 1;
+		recordingOpen = false;
+		recordingLoading = false;
+		recordingError = '';
+		recordingDetail = null;
+	}
+
+	async function handleViewRecording(row) {
+		const recordId = row?.recordId;
+		if (!recordId || !canViewCctvRecordings) return;
+
+		const requestId = ++recordingRequestId;
+		recordingOpen = true;
+		recordingLoading = true;
+		recordingError = '';
+		recordingDetail = {
+			id: recordId,
+			cameraName: row?.cameraName || '',
+			vesselName: row?.vesselName || '',
+			type: row?.alarmType || '',
+			startedAt: row?.startTs,
+			endedAt: row?.endTs,
+			recordingUrl: ''
+		};
+
+		try {
+			const detail = await getCctvMotionDetail({
+				recordId,
+				timezoneMode: 'auto'
+			});
+
+			if (requestId !== recordingRequestId) return;
+
+			recordingDetail = {
+				...recordingDetail,
+				...detail,
+				recordingUrl: detail?.recordingUrl || detail?.recording_url || ''
+			};
+
+			if (!recordingDetail.recordingUrl) {
+				recordingError = 'Video URL is not available for this recording.';
+			}
+		} catch (err) {
+			if (requestId !== recordingRequestId) return;
+
+			console.error('[ALARM_CCTV_RECORDING_ERROR]', err);
+
+			if (Number(err?.status) === 404) {
+				recordingError = 'Recording not found for this alarm event.';
+			} else if (Number(err?.status) === 403) {
+				recordingError = 'You do not have access to CCTV recordings.';
+			} else {
+				recordingError = err?.message || 'Failed to load the CCTV recording.';
+			}
+		} finally {
+			if (requestId === recordingRequestId) {
+				recordingLoading = false;
+			}
+		}
+	}
+
 	function handleDeviationOverlayKeydown(event) {
 		if (event.key !== 'Escape') return;
+
+		if (recordingOpen) {
+			closeRecordingOverlay();
+			return;
+		}
 
 		if (showDeviationOverlay) closeDeviationOverlay();
 	}
@@ -466,6 +554,7 @@
 	async function handleMarkAllRead() {
 		if (acknowledging) return false;
 		cancelDeviationRequest();
+		closeRecordingOverlay();
 		acknowledging = true;
 		error = '';
 		successMessage = '';
@@ -528,6 +617,7 @@
 		stopAutoRefresh();
 		stopDeviationAutoRefresh();
 		cancelDeviationRequest();
+		closeRecordingOverlay();
 	});
 
 	$effect(() => {
@@ -536,6 +626,7 @@
 			startAutoRefresh();
 		} else {
 			stopAutoRefresh();
+			closeRecordingOverlay();
 		}
 	});
 
@@ -577,6 +668,15 @@
 	/>
 {/if}
 
+{#if recordingOpen}
+	<AlarmRecordingOverlay
+		loading={recordingLoading}
+		error={recordingError}
+		detail={recordingDetail}
+		onClose={closeRecordingOverlay}
+	/>
+{/if}
+
 <section class="alarm-page">
 	<AlarmHeader
 		{loadingMonitor}
@@ -615,10 +715,12 @@
 			bind:selectedStatus
 			bind:selectedAlarmTypes
 			bind:pageSize
+			canViewRecording={canViewCctvRecordings}
 			onApply={handleApplyFilter}
 			onReset={handleResetFilter}
 			onPrevious={handlePreviousPage}
 			onNext={handleNextPage}
+			onViewRecording={handleViewRecording}
 		/>
 	</div>
 </section>
